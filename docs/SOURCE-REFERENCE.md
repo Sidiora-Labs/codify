@@ -1,14 +1,14 @@
 # Source reference
 
-This is a source-navigation companion to the [architecture guide](ARCHITECTURE.md) and [contributor guide](../CONTRIBUTING.md), generated from Hyperfide's own index with the selection rule of its documentation evidence packet. It records indexed symbols, not promises that every symbol is public or stable. Static helpers, shared declarations, local bindings and JavaScript and TypeScript implementation details are included because the baseline coverage heuristic includes them.
+This is a source-navigation companion to the [architecture guide](ARCHITECTURE.md) and [contributor guide](../CONTRIBUTING.md), generated from Hyperfide's own index. It records indexed declarations, not promises that every symbol is public or stable. Static helpers, header prototypes, forward declarations and JavaScript and TypeScript implementation details are included because they are declarations; local bindings are not.
 
-This baseline was regenerated at revision `e599fbc3` (2026-10-17) of the Hyperfide 2.0 development tree, whose binary reports `hyperfide version` 2.0.0-dev. It is a development revision, not a release. For how the index is built and what it covers, see [the indexing guide](indexing.md).
+This baseline was regenerated at revision `a2a367f9` (2026-10-17) of the Hyperfide 2.0 development tree, whose binary reports `hyperfide version` 2.0.0-dev. It is a development revision, not a release. For how the index is built and what it covers, see [the indexing guide](indexing.md).
 
-No generator script for this file exists in the tree, and `hyperfide docs packet` declines to write a packet in this revision ("documentation is waiting for all ordinary tasks to qualify"). The tables were therefore produced by a one-off read-only query of `.codegraph/graph.db` after `hyperfide index`, applying the packet's rule: every indexed symbol of a file on the current branch, grouped by name, kind and line, kept when `is_entrypoint()` in [src/resolve.c](../src/resolve.c) accepts it. Files that `graph_path_is_test()` in [src/graph.c](../src/graph.c) classifies as tests are listed in the test reference instead.
+No generator script for this file exists in the tree, and `hyperfide docs packet` declines to write a packet in this revision ("documentation is waiting for all ordinary tasks to qualify"). The tables were therefore produced by a one-off read-only query of `.codegraph/graph.db` after `hyperfide index`: every indexed symbol of a file on the current branch, grouped by name, kind and line, kept only when it is a declaration. The declaration kinds are `function`, `method` (constructors are listed as methods), `class`, `struct`, `enum`, `interface`, `type`, `typedef`, `trait`, `module`, `namespace` and `macro`; the index records no union or protocol kind in this revision. Of the `variable` and `object` bindings, only top-level constants and exported top-level variables are kept: in C a file-scope definition that is `const` or not `static`, in JavaScript and TypeScript a top-level `const` or an `export`ed `let` or `var`. Every other `variable` and `object` binding, every `action` binding, and every function declared inside another function body (JavaScript and TypeScript closures, nested Python `def`) is a local binding and is omitted. Files that `graph_path_is_test()` in [src/graph.c](../src/graph.c) classifies as tests are listed in the test reference instead.
 
-The baseline contains 10827 observations in 278 files. Source links and line numbers refer to revision `e599fbc3`; rerun the workflow after implementation changes. The declaration column quotes the source line at the indexed location and may be only the first line of a multiline declaration; quotes longer than 200 characters are cut and end in `…`. It is not an inferred behavioral contract. The current indexer also records local bindings (kinds `variable`, `object` and `action`) and route observations (kind `route`). The three `route` rows in this file, at `runtime/supervisory_host.py` line 187, `scripts/format_changelog.py` line 192 and `spec/hyperfide/tools/validate_pack.py` line 336, are dictionary `.get()` calls that the FastAPI route pattern misreads; they are not HTTP endpoints.
+The baseline contains 8281 declarations in 278 files. Source links and line numbers refer to revision `a2a367f9`; rerun the workflow after implementation changes. The declaration column quotes the source line at the indexed location and may be only the first line of a multiline declaration; quotes longer than 200 characters are cut and end in `…`. It is not an inferred behavioral contract. Route observations (kind `route`) are excluded because the only three in these files, at `runtime/supervisory_host.py` line 187, `scripts/format_changelog.py` line 192 and `spec/hyperfide/tools/validate_pack.py` line 336, are dictionary `.get()` calls that the FastAPI route pattern misreads, not HTTP endpoints.
 
-For tests, deliberately invalid examples, and sample web routes, see the separate [test and fixture reference](TEST-REFERENCE.md). Go files under `kvx/impl/go/` are the KVX reference implementation. The `hyperfide` executable is built from the C sources selected by the [Makefile](../Makefile): `src/*.c` plus the `src/hyperfide/` components listed by `scripts/hyperfide-native-components.py`. The same executable is also installed as `cg`, a deprecated compatibility alias with identical arguments, JSON and exit codes. The TypeScript control services under `services/hyperfide/src/` (package `@hyperfide/control-services`) are built separately (`make hyperfide-services`), and `editors/vscode/` holds the editor extension.
+For tests, deliberately invalid examples, and fixture applications, see the separate [test and fixture reference](TEST-REFERENCE.md). Go files under `kvx/impl/go/` are the KVX reference implementation. The `hyperfide` executable is built from the C sources selected by the [Makefile](../Makefile): `src/*.c` plus the `src/hyperfide/` components listed by `scripts/hyperfide-native-components.py`. The same executable is also installed as `cg`, a deprecated compatibility alias with identical arguments, JSON and exit codes. The TypeScript control services under `services/hyperfide/src/` (package `@hyperfide/control-services`) are built separately (`make hyperfide-services`), and `editors/vscode/` holds the editor extension.
 
 ## deploy/hyperfide/install-service.mjs
 
@@ -19,7 +19,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `options` | object | 9 | <code>const args=process.argv.slice(2),options={};let promote=false;</code> |
 | `refuse` | function | 10 | <code>function refuse(code){throw Object.assign(new Error(code),{code});}</code> |
 | `parseArguments` | function | 11 | <code>function parseArguments(){for(let i=0;i&lt;args.length;i++){</code> |
-| `names` | object | 13 | <code>const names={'--release-root':'source','--destination-root':'destination','--trusted-key':'key','--signature-file':'signature','--manifest-digest':'digest','--service-uid':'uid','--service-gid':'gid'}…</code> |
 | `protectedPath` | function | 17 | <code>async function protectedPath(filename,directory){</code> |
 | `syncDirectory` | function | 26 | <code>async function syncDirectory(directory){const h=await fs.open(directory,'r');try{await h.sync();}finally{await h.close();}}</code> |
 | `rootDirectory` | function | 27 | <code>async function rootDirectory(directory){</code> |
@@ -28,8 +27,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `immutableTree` | function | 57 | <code>async function immutableTree(directory){</code> |
 | `syncTree` | function | 65 | <code>async function syncTree(directory){for(const entry of await fs.readdir(directory,{withFileTypes:true}))if(entry.isDirectory())await syncTree(path.join(directory,entry.name));await syncDirectory(direct…</code> |
 | `run` | function | 66 | <code>async function run(){</code> |
-| `env` | object | 78 | <code>const env={HYPERFIDE_RELEASE_ROOT:options.source,HYPERFIDE_TRUSTED_RELEASE_KEY_FILE:options.key,HYPERFIDE_RELEASE_SIGNATURE_FILE:options.signature};</code> |
-| `receipt` | object | 110 | <code>const receipt={schema_version:1,owner:'hyperfide-service-installer',manifest_digest:options.digest,release_directory:target,service_identity:{uid:options.uid,gid:options.gid},authentication:installed.…</code> |
 
 ## deploy/hyperfide/migrate.mjs
 
@@ -40,8 +37,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `fail` | function | 8 | <code>function fail(code){throw Object.assign(new Error(code),{code});}</code> |
 | `regular` | function | 9 | <code>async function regular(filename,privateFile=false){</code> |
 | `main` | function | 14 | <code>async function main(){</code> |
-| `options` | object | 15 | <code>const options={};let action;</code> |
-| `env` | object | 35 | <code>const env={LANG:'C.UTF-8',TZ:'UTC',HYPERFIDE_MIGRATION_JOB:'1',HYPERFIDE_MIGRATION_TIMEOUT_MS:'30000',LD_LIBRARY_PATH:path.join(root,'lib/hyperfide')};</code> |
 
 ## editors/vscode/acp.js
 
@@ -50,14 +45,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | Indexed name | Kind | Line | Source declaration |
 | --- | --- | ---: | --- |
 | `AcpClient` | function | 29 | <code>function AcpClient(opts) {</code> |
-| `err` | variable | 98 | <code>const err = new Error(&#96;no handler for ${msg.method}&#96;);</code> |
-| `e` | variable | 127 | <code>const e = new Error(msg.error.message &#124;&#124; 'agent error');</code> |
-| `entry` | object | 143 | <code>const entry = { resolve, reject, timer: undefined };</code> |
 | `extensionVersion` | function | 222 | <code>function extensionVersion() {</code> |
 | `splitCommand` | function | 227 | <code>function splitCommand(s) {</code> |
 | `normalizeCodexAdapterCommand` | function | 241 | <code>function normalizeCodexAdapterCommand(value) {</code> |
 | `panels` | variable | 258 | <code>const panels = new Map();    /&#42; task id -&gt; editor-panel session &#42;/</code> |
-| `caps` | variable | 269 | <code>let caps = new ChatCapabilities(&#91;&#93;);</code> |
 | `loadCaps` | function | 271 | <code>async function loadCaps() {</code> |
 | `config` | function | 282 | <code>function config() { return vscode.workspace.getConfiguration('codify'); }</code> |
 | `firstLine` | function | 284 | <code>function firstLine(s) {</code> |
@@ -65,18 +56,15 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `diffStyle` | function | 293 | <code>function diffStyle() {</code> |
 | `adapterCatalog` | function | 301 | <code>function adapterCatalog() {</code> |
 | `adapterMap` | function | 313 | <code>function adapterMap() {</code> |
-| `out` | object | 314 | <code>const out = {};</code> |
 | `adapterCommand` | function | 324 | <code>function adapterCommand(override) {</code> |
 | `rememberViewDriver` | function | 342 | <code>function rememberViewDriver(value) {</code> |
 | `classifyUserText` | function | 355 | <code>function classifyUserText(raw) {</code> |
 | `sessionTitle` | function | 373 | <code>function sessionTitle(raw) {</code> |
 | `sessionRecord` | function | 389 | <code>function sessionRecord(row, driver) {</code> |
 | `mergeSessionHistory` | function | 400 | <code>function mergeSessionHistory(rows, driver) {</code> |
-| `merged` | variable | 401 | <code>const merged = new Map(sessionHistory.map((r) =&gt; &#91;&#96;${r.driver}:${r.sessionId}&#96;, r&#93;));</code> |
 | `rememberSession` | function | 417 | <code>function rememberSession(sess, extra) {</code> |
 | `mcpServers` | function | 428 | <code>function mcpServers() {</code> |
 | `workspacePath` | function | 436 | <code>function workspacePath(root, p) {</code> |
-| `err` | variable | 440 | <code>const err = new Error(&#96;path outside workspace: ${p}&#96;);</code> |
 | `readTextFile` | function | 447 | <code>function readTextFile(root, params) {</code> |
 | `writeTextFile` | function | 459 | <code>function writeTextFile(root, params) {</code> |
 | `taskStatus` | function | 466 | <code>async function taskStatus(id) {</code> |
@@ -87,38 +75,17 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `sendPrompt` | function | 523 | <code>function sendPrompt(sess, text, echo) {</code> |
 | `cancelTurn` | function | 570 | <code>function cancelTurn(sess) {</code> |
 | `sessionRequest` | function | 578 | <code>function sessionRequest(sess, method, params) {</code> |
-| `err` | variable | 588 | <code>const err = new Error(&#96;unsupported method: ${method}&#96;);</code> |
 | `renderableToolCall` | function | 601 | <code>function renderableToolCall(call) {</code> |
 | `sessionUpdate` | function | 627 | <code>function sessionUpdate(sess, params) {</code> |
 | `endOfSession` | function | 692 | <code>async function endOfSession(sess, why) {</code> |
 | `connectAgent` | function | 729 | <code>async function connectAgent(sess, driverOverride) {</code> |
-| `onNotify` | action | 742 | <code>onNotify: (m, p) =&gt; { if (m === 'session/update') sessionUpdate(sess, p); },</code> |
-| `onRequest` | action | 743 | <code>onRequest: (m, p) =&gt; sessionRequest(sess, m, p),</code> |
-| `onClose` | action | 744 | <code>onClose: (reason) =&gt; {</code> |
 | `publishConnectedSession` | function | 764 | <code>function publishConnectedSession(sess, res) {</code> |
 | `connectSession` | function | 786 | <code>async function connectSession(sess, driverOverride) {</code> |
 | `connectFailureHint` | function | 797 | <code>function connectFailureHint(sess, e) {</code> |
 | `surfacePost` | function | 806 | <code>function surfacePost(sess, msg) {</code> |
 | `openLocation` | function | 812 | <code>async function openLocation(p, line) {</code> |
-| `at` | variable | 825 | <code>const at = new vscode.Position(Math.max(0, line - 1), 0);</code> |
 | `openExternal` | function | 837 | <code>async function openExternal(href) {</code> |
 | `CG_CMDS` | object | 846 | <code>const CG_CMDS = {</code> |
-| `argv` | action | 847 | <code>brief:   { argv: () =&gt; &#91;'brief'&#93;, zero: true,</code> |
-| `argv` | action | 849 | <code>next:    { argv: () =&gt; &#91;'spec', 'next'&#93;, zero: true,</code> |
-| `argv` | action | 851 | <code>status:  { argv: () =&gt; &#91;'spec', 'status'&#93;, zero: true,</code> |
-| `argv` | action | 853 | <code>review:  { argv: () =&gt; &#91;'review'&#93;, zero: true,</code> |
-| `argv` | action | 855 | <code>check:   { argv: () =&gt; &#91;'check'&#93;, zero: true,</code> |
-| `argv` | action | 857 | <code>guard:   { argv: () =&gt; &#91;'guard'&#93;, zero: true,</code> |
-| `argv` | action | 859 | <code>changes: { argv: () =&gt; &#91;'changes'&#93;, zero: true,</code> |
-| `argv` | action | 861 | <code>docs:    { argv: () =&gt; &#91;'docs', 'status'&#93;, zero: true,</code> |
-| `argv` | action | 863 | <code>docplan: { argv: () =&gt; &#91;'docs', 'plan'&#93;, zero: true,</code> |
-| `argv` | action | 865 | <code>doccheck:{ argv: () =&gt; &#91;'docs', 'check'&#93;, zero: true,</code> |
-| `argv` | action | 867 | <code>doctrace:{ argv: () =&gt; &#91;'docs', 'trace'&#93;, zero: true,</code> |
-| `argv` | action | 869 | <code>tests:   { argv: (a) =&gt; (a ? &#91;'test-impact', a&#93; : &#91;'test-impact'&#93;),</code> |
-| `argv` | action | 871 | <code>context: { argv: (a) =&gt; &#91;'context', a&#93;, need: 'a query',</code> |
-| `argv` | action | 873 | <code>search:  { argv: (a) =&gt; &#91;'search', a&#93;, need: 'a query',</code> |
-| `argv` | action | 875 | <code>impact:  { argv: (a) =&gt; &#91;'impact', a&#93;, need: 'a symbol',</code> |
-| `argv` | action | 877 | <code>why:     { argv: (a) =&gt; &#91;'why', a&#93;, need: 'a symbol',</code> |
 | `boardInfo` | function | 881 | <code>async function boardInfo() {</code> |
 | `runCgSlash` | function | 889 | <code>async function runCgSlash(sess, cmd, args, send) {</code> |
 | `runToolSlash` | function | 916 | <code>async function runToolSlash(sess, name, args, send) {</code> |
@@ -134,7 +101,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `taskLifecycle` | function | 1083 | <code>async function taskLifecycle(sess, verb, send) {</code> |
 | `pickTaskId` | function | 1108 | <code>async function pickTaskId(placeHolder) {</code> |
 | `handleSessionMessage` | function | 1125 | <code>function handleSessionMessage(sess, msg) {</code> |
-| `params` | object | 1156 | <code>const params = { sessionId: sess.sessionId,</code> |
 | `retryLast` | function | 1207 | <code>function retryLast(sess) {</code> |
 | `showSessions` | function | 1225 | <code>async function showSessions(sess) {</code> |
 | `switchSession` | function | 1234 | <code>async function switchSession(sess, sessionId, driver) {</code> |
@@ -149,7 +115,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `agentCapabilities` | function | 1472 | <code>function agentCapabilities(sess) {</code> |
 | `listPastSessions` | function | 1479 | <code>async function listPastSessions(quiet) {</code> |
 | `restorePastSession` | function | 1532 | <code>async function restorePastSession(sessionId, driver) {</code> |
-| `params` | object | 1556 | <code>const params = { sessionId: known.sessionId, cwd: deps.workspaceRoot(),</code> |
 | `startChatSession` | function | 1583 | <code>async function startChatSession(firstText, taskOpts, echo) {</code> |
 | `startTaskInView` | function | 1620 | <code>async function startTaskInView(id) {</code> |
 | `resetViewSession` | function | 1654 | <code>async function resetViewSession() {</code> |
@@ -158,14 +123,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `chooseDriver` | function | 1742 | <code>async function chooseDriver(value) {</code> |
 | `cmdConfigure` | function | 1764 | <code>async function cmdConfigure() {</code> |
 | `registerAgentView` | function | 1802 | <code>function registerAgentView(ctx) {</code> |
-| `provider` | object | 1803 | <code>const provider = {</code> |
 | `resolveWebviewView` | method | 1804 | <code>resolveWebviewView(view) {</code> |
 | `cmdOpenPanel` | function | 1856 | <code>async function cmdOpenPanel(arg) {</code> |
 | `cmdNewChat` | function | 1896 | <code>async function cmdNewChat() {</code> |
 | `registerAcpCommands` | function | 1900 | <code>function registerAcpCommands(ctx) {</code> |
-| `cmds` | object | 1901 | <code>const cmds = {</code> |
 | `register` | function | 1911 | <code>function register(ctx, d) {</code> |
-| `hasPanel` | action | 1922 | <code>hasPanel: (id) =&gt; panels.has(id) &#124;&#124;</code> |
 
 ## editors/vscode/agents.js
 
@@ -191,7 +153,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `offerRelease` | function | 165 | <code>async function offerRelease(id, agent, exitCode) {</code> |
 | `openTerminal` | function | 187 | <code>function openTerminal(id, agent, promptfile) {</code> |
 | `runHeadless` | function | 198 | <code>function runHeadless(id, agent, promptfile) {</code> |
-| `task` | variable | 199 | <code>const task = new vscode.Task(</code> |
 | `startAgentSession` | function | 220 | <code>async function startAgentSession(id, headless) {</code> |
 | `cmdStartOnTask` | function | 266 | <code>async function cmdStartOnTask(arg) {</code> |
 | `cmdStartHeadless` | function | 280 | <code>async function cmdStartHeadless(arg) {</code> |
@@ -200,15 +161,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `cmdRunWave` | function | 335 | <code>async function cmdRunWave() {</code> |
 | `cmdStop` | function | 348 | <code>async function cmdStop(arg) {</code> |
 | `registerAgentCommands` | function | 379 | <code>function registerAgentCommands(ctx) {</code> |
-| `cmds` | object | 380 | <code>const cmds = {</code> |
 | `register` | function | 393 | <code>function register(ctx, d) {</code> |
-| `dispose` | action | 431 | <code>dispose: () =&gt; {</code> |
-| `hasTerminal` | action | 437 | <code>hasTerminal: (id) =&gt; {</code> |
-| `startTerminal` | action | 443 | <code>startTerminal: (id) =&gt; startAgentSession(id, false),</code> |
 | `stripAnsi` | function | 461 | <code>function stripAnsi(text) {</code> |
 | `diffLines` | function | 472 | <code>function diffLines(text) {</code> |
 | `lcsRows` | function | 481 | <code>function lcsRows(a, b) {</code> |
-| `table` | variable | 483 | <code>const table = new Uint32Array((a.length + 1) &#42; w);</code> |
 | `trimContext` | function | 506 | <code>function trimContext(rows) {</code> |
 | `diffRows` | function | 529 | <code>function diffRows(oldText, newText, maxRows) {</code> |
 | `AgentPanel` | class | 564 | <code>class AgentPanel {</code> |
@@ -219,7 +175,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `endTurn` | method | 589 | <code>endTurn(stopReason) {</code> |
 | `recordUsage` | method | 612 | <code>recordUsage(u) {</code> |
 | `ask` | method | 645 | <code>ask(params) {</code> |
-| `shown` | object | 650 | <code>const shown = {</code> |
 | `answer` | method | 668 | <code>answer(pid, optionId) {</code> |
 | `settle` | method | 679 | <code>settle(why) {</code> |
 | `pending` | method | 690 | <code>pending() { return this.permits.size; }</code> |
@@ -229,9 +184,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `fromListJson` | method | 713 | <code>static fromListJson(text) {</code> |
 | `has` | method | 717 | <code>has(name) { return this.tools.has(name); }</code> |
 | `commands` | method | 720 | <code>commands() {</code> |
-| `req` | variable | 724 | <code>const req = new Set((t.inputSchema &amp;&amp; t.inputSchema.required) &#124;&#124; &#91;&#93;);</code> |
 | `args` | method | 735 | <code>args(name, text) {</code> |
-| `out` | object | 740 | <code>const out = {};</code> |
 | `typed` | method | 752 | <code>static typed(schema, v) {</code> |
 | `approvalCard` | function | 763 | <code>function approvalCard(ev) {</code> |
 | `Window` | class | 784 | <code>class Window {</code> |
@@ -253,9 +206,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `dispose` | method | 72 | <code>dispose() {</code> |
 | `onNotification` | method | 82 | <code>onNotification(method, fn) { this.handlers.set(method, fn); }</code> |
 | `request` | method | 84 | <code>request(method, params, timeoutMs = 20000) {</code> |
-| `p` | variable | 87 | <code>const p = new Promise((resolve, reject) =&gt; {</code> |
-| `resolve` | action | 93 | <code>resolve: (v) =&gt; { clearTimeout(timer); resolve(v); },</code> |
-| `reject` | action | 94 | <code>reject: (e) =&gt; { clearTimeout(timer); reject(e); },</code> |
 | `notify` | method | 101 | <code>notify(method, params) {</code> |
 | `tryRequest` | method | 107 | <code>async tryRequest(method, params, fallback) {</code> |
 | `_send` | method | 118 | <code>_send(msg) {</code> |
@@ -269,28 +219,12 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 
 | Indexed name | Kind | Line | Source declaration |
 | --- | --- | ---: | --- |
-| `fleetApi` | object | 32 | <code>let fleetApi = { refresh: async () =&gt; {}, touch: () =&gt; {} };</code> |
-| `refresh` | action | 32 | <code>let fleetApi = { refresh: async () =&gt; {}, touch: () =&gt; {} };</code> |
-| `touch` | action | 32 | <code>let fleetApi = { refresh: async () =&gt; {}, touch: () =&gt; {} };</code> |
 | `revalidate` | function | 42 | <code>let revalidate = () =&gt; {};</code> |
-| `agentApi` | object | 43 | <code>let agentApi = { hasTerminal: () =&gt; false };</code> |
-| `hasTerminal` | action | 43 | <code>let agentApi = { hasTerminal: () =&gt; false };</code> |
-| `acpApi` | object | 44 | <code>let acpApi = { hasPanel: () =&gt; false };</code> |
-| `hasPanel` | action | 44 | <code>let acpApi = { hasPanel: () =&gt; false };</code> |
-| `memoryApi` | object | 46 | <code>let memoryApi = {</code> |
-| `open` | action | 47 | <code>open: () =&gt; {}, refresh: () =&gt; Promise.resolve(), touch: () =&gt; {},</code> |
-| `refresh` | action | 47 | <code>open: () =&gt; {}, refresh: () =&gt; Promise.resolve(), touch: () =&gt; {},</code> |
-| `touch` | action | 47 | <code>open: () =&gt; {}, refresh: () =&gt; Promise.resolve(), touch: () =&gt; {},</code> |
-| `classifyAll` | action | 48 | <code>classifyAll: () =&gt; {}, promote: () =&gt; {}, supersede: () =&gt; {},</code> |
-| `promote` | action | 48 | <code>classifyAll: () =&gt; {}, promote: () =&gt; {}, supersede: () =&gt; {},</code> |
-| `supersede` | action | 48 | <code>classifyAll: () =&gt; {}, promote: () =&gt; {}, supersede: () =&gt; {},</code> |
 | `serveConnected` | function | 55 | <code>function serveConnected() { return !!(serveClient &amp;&amp; serveClient.ready); }</code> |
 | `config` | function | 69 | <code>function config() { return vscode.workspace.getConfiguration('codify'); }</code> |
 | `binary` | function | 70 | <code>function binary() {</code> |
-| `explicit` | function | 72 | <code>const explicit = (cfg) =&gt; {</code> |
 | `commandAliases` | function | 86 | <code>function commandAliases(name) {</code> |
 | `registerCommands` | function | 89 | <code>function registerCommands(ctx, cmds) {</code> |
-| `seen` | variable | 90 | <code>const seen = new Set();</code> |
 | `workspaceRoot` | function | 100 | <code>function workspaceRoot() {</code> |
 | `cg` | function | 108 | <code>function cg(args) {</code> |
 | `cgJson` | function | 124 | <code>async function cgJson(args) {</code> |
@@ -299,8 +233,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `refresh` | method | 140 | <code>async refresh() {</code> |
 | `getTreeItem` | method | 146 | <code>getTreeItem(el) { return el; }</code> |
 | `getChildren` | method | 148 | <code>getChildren() {</code> |
-| `icon` | object | 150 | <code>const icon = {</code> |
-| `it` | variable | 155 | <code>const it = new vscode.TreeItem(m.body);</code> |
 | `updateStatusBar` | function | 170 | <code>function updateStatusBar(model) {</code> |
 | `updateScope` | function | 189 | <code>async function updateScope() {</code> |
 | `show` | function | 202 | <code>function show(text) {</code> |
@@ -326,9 +258,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `cmdRender` | function | 418 | <code>async function cmdRender() {</code> |
 | `cmdLint` | function | 424 | <code>async function cmdLint() {</code> |
 | `cmdNewFeature` | function | 436 | <code>async function cmdNewFeature() {</code> |
-| `validateInput` | action | 440 | <code>validateInput: (v) =&gt; /^&#91;A-Za-z0-9_-&#93;+$/.test(v &#124;&#124; '')</code> |
 | `cmdAddTask` | function | 453 | <code>async function cmdAddTask() {</code> |
-| `validateInput` | action | 456 | <code>validateInput: (v) =&gt; /^&#91;0-9&#93;+(&#92;.&#91;0-9&#93;+)&#42;$/.test(v &#124;&#124; '')</code> |
 | `cmdBrief` | function | 483 | <code>async function cmdBrief() {</code> |
 | `cmdReview` | function | 488 | <code>async function cmdReview() {</code> |
 | `cmdCheck` | function | 495 | <code>async function cmdCheck() {</code> |
@@ -343,32 +273,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `cmdOpenTask` | function | 585 | <code>async function cmdOpenTask(id) {</code> |
 | `cmdActions` | function | 601 | <code>async function cmdActions() {</code> |
 | `activate` | function | 635 | <code>async function activate(ctx) {</code> |
-| `sessionBadge` | action | 652 | <code>sessionBadge: (id) =&gt; agentApi.hasTerminal(id) ? ' $(terminal)'</code> |
-| `onModel` | action | 654 | <code>onModel: (model) =&gt; {</code> |
-| `provideTextDocumentContent` | action | 667 | <code>provideTextDocumentContent: (uri) =&gt;</code> |
-| `cmds` | object | 672 | <code>const cmds = {</code> |
-| `'codify.refresh'` | action | 673 | <code>'codify.refresh': () =&gt; afterMutation(),</code> |
-| `'codify.docsPlan'` | action | 691 | <code>'codify.docsPlan': () =&gt; cmdDocs('plan'),</code> |
-| `'codify.docsPacket'` | action | 692 | <code>'codify.docsPacket': () =&gt; cmdDocs('packet'),</code> |
-| `'codify.docsCheck'` | action | 693 | <code>'codify.docsCheck': () =&gt; cmdDocs('check'),</code> |
-| `'codify.docsTrace'` | action | 694 | <code>'codify.docsTrace': () =&gt; cmdDocs('trace'),</code> |
-| `'codify.memories.browse'` | action | 704 | <code>'codify.memories.browse': () =&gt; memoryApi.open(),</code> |
-| `'codify.memories.classifyAll'` | action | 705 | <code>'codify.memories.classifyAll': () =&gt; memoryApi.classifyAll(),</code> |
-| `'codify.memories.promote'` | action | 706 | <code>'codify.memories.promote': (arg) =&gt; memoryApi.promote(arg),</code> |
-| `'codify.memories.supersede'` | action | 707 | <code>'codify.memories.supersede': (arg) =&gt; memoryApi.supersede(arg),</code> |
-| `refresh` | action | 714 | <code>refresh: () =&gt; afterMutation(),</code> |
-| `poll` | action | 716 | <code>poll: () =&gt; serveConnected() ? Promise.resolve() : scheduleRefresh(),</code> |
-| `refresh` | action | 719 | <code>cg, cgJson, refresh: () =&gt; afterMutation(), workspaceRoot,</code> |
-| `available` | action | 724 | <code>available: () =&gt; serveConnected(),</code> |
-| `on` | action | 725 | <code>on: (fn) =&gt; { eventFans.push(fn); return () =&gt; { const i = eventFans.indexOf(fn); if (i &gt;= 0) eventFans.splice(i, 1); }; },</code> |
-| `refresh` | action | 730 | <code>cg, cgJson, workspaceRoot, refresh: () =&gt; afterMutation(),</code> |
-| `refresh` | action | 734 | <code>cg, cgJson, workspaceRoot, show, refresh: () =&gt; afterMutation(),</code> |
-| `live` | action | 736 | <code>live: () =&gt; live,</code> |
-| `dispose` | action | 745 | <code>ctx.subscriptions.push({ dispose: () =&gt; client.dispose() });</code> |
-| `dispose` | action | 759 | <code>ctx.subscriptions.push({ dispose: () =&gt; refresher.dispose() });</code> |
-| `dispose` | action | 766 | <code>ctx.subscriptions.push({ dispose: () =&gt; serveClient.dispose() });</code> |
-| `bump` | function | 801 | <code>const bump = (uri) =&gt; {</code> |
-| `dispose` | action | 813 | <code>{ dispose: () =&gt; clearInterval(idle) },</code> |
 | `deactivate` | function | 822 | <code>function deactivate() {</code> |
 
 ## editors/vscode/fleet.js
@@ -380,62 +284,16 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `relAge` | function | 51 | <code>function relAge(seen, now) {</code> |
 | `mergeState` | function | 67 | <code>function mergeState(name, base, reg, exists) {</code> |
 | `treeFacts` | function | 112 | <code>function treeFacts(tree) {</code> |
-| `str` | function | 117 | <code>const str = (v) =&gt; (typeof v === 'string' &amp;&amp; v) ? v : null;</code> |
-| `num` | function | 118 | <code>const num = (v) =&gt; (typeof v === 'number' &amp;&amp; Number.isFinite(v)) ? v : null;</code> |
-| `mgr` | object | 125 | <code>const mgr = {</code> |
 | `parentsFromTree` | function | 168 | <code>function parentsFromTree(tree) {</code> |
-| `parents` | variable | 169 | <code>const parents = new Map();</code> |
-| `kids` | function | 171 | <code>const kids = (n) =&gt; &#91;&#93;.concat(n.children &#124;&#124; &#91;&#93;, n.managers &#124;&#124; &#91;&#93;,</code> |
-| `nameOf` | function | 174 | <code>const nameOf = (n) =&gt; typeof n.agent === 'string' ? n.agent</code> |
-| `walk` | function | 176 | <code>const walk = (n, parent) =&gt; {</code> |
 | `planShape` | function | 202 | <code>function planShape(plan) {</code> |
-| `arr` | function | 203 | <code>const arr = (v) =&gt; Array.isArray(v) ? v : &#91;&#93;;</code> |
-| `out` | object | 204 | <code>const out = { managers: &#91;&#93;, workers: &#91;&#93; };</code> |
-| `wv` | function | 206 | <code>const wv = (v) =&gt; (typeof v === 'number' &amp;&amp; v &gt;= 0) ? v : null;</code> |
 | `taskNode` | function | 239 | <code>function taskNode(id, claim, planned) {</code> |
 | `fleetTree` | function | 272 | <code>function fleetTree(status, specStatus, branches, opts) {</code> |
-| `arr` | function | 273 | <code>const arr = (v) =&gt; Array.isArray(v) ? v : &#91;&#93;;</code> |
-| `reg` | variable | 283 | <code>const reg = new Map();</code> |
-| `hint` | object | 295 | <code>let hint = { parents: new Map(), root: null };</code> |
-| `treeParent` | variable | 297 | <code>const treeParent = new Map();</code> |
-| `claimsBy` | variable | 302 | <code>const claimsBy = new Map();</code> |
-| `plannedTask` | variable | 307 | <code>const plannedTask = new Map();          /&#42; task id -&gt; {id,status,title} &#42;/</code> |
-| `planOf` | variable | 309 | <code>const planOf = new Map();               /&#42; worker agent -&gt; plan row &#42;/</code> |
-| `waveOf` | variable | 310 | <code>const waveOf = new Map();               /&#42; wave number -&gt; plan row (per wave) &#42;/</code> |
-| `planMgr` | function | 316 | <code>const planMgr = (feat, wave) =&gt; plan &amp;&amp; plan.feature === feat</code> |
-| `seenOf` | function | 319 | <code>const seenOf = (name) =&gt; {</code> |
-| `tasksOf` | function | 323 | <code>const tasksOf = (name) =&gt; {</code> |
-| `ids` | variable | 324 | <code>const ids = new Set();</code> |
-| `claimFor` | function | 331 | <code>const claimFor = (id) =&gt; (claimsBy.get(name) &#124;&#124; &#91;&#93;).find((c) =&gt; c.id === id);</code> |
-| `waveTasks` | function | 342 | <code>const waveTasks = (name, planWave, live, held) =&gt; {</code> |
-| `out` | variable | 343 | <code>const out = new Map();</code> |
-| `managers` | variable | 371 | <code>const managers = new Map();</code> |
-| `addManager` | function | 372 | <code>const addManager = (agent, feat, live, seen, tf, wave) =&gt; {</code> |
-| `node` | object | 380 | <code>const node = {</code> |
-| `workers` | variable | 430 | <code>const workers = new Map();</code> |
-| `addWorker` | function | 431 | <code>const addWorker = (agent, feat, wave, live, seen, tf) =&gt; {</code> |
-| `node` | object | 452 | <code>const node = {</code> |
-| `managerFor` | function | 497 | <code>const managerFor = (feat, wave) =&gt; {</code> |
-| `main` | object | 529 | <code>const main = {</code> |
 | `nativeNode` | function | 579 | <code>function nativeNode(n, depth, ctx, rootTranscript) {</code> |
-| `str` | function | 580 | <code>const str = (v) =&gt; (typeof v === 'string' &amp;&amp; v) ? v : null;</code> |
-| `num` | function | 581 | <code>const num = (v) =&gt; (typeof v === 'number' &amp;&amp; Number.isFinite(v)) ? v : null;</code> |
-| `node` | object | 597 | <code>const node = {</code> |
 | `nativeCounts` | function | 624 | <code>function nativeCounts(nodes) {</code> |
-| `c` | object | 625 | <code>const c = { sessions: 0, live: 0, stale: 0, stopped: 0, subagents: 0,</code> |
-| `branches` | variable | 627 | <code>const branches = new Set();</code> |
-| `walk` | function | 628 | <code>const walk = (n) =&gt; {</code> |
 | `nativeNodes` | function | 644 | <code>function nativeNodes(native, opts) {</code> |
-| `reg` | variable | 646 | <code>const reg = new Map();</code> |
-| `ctx` | object | 649 | <code>const ctx = { now: o.now &#124;&#124; Math.floor(Date.now() / 1000), reg,</code> |
 | `patchSessions` | function | 666 | <code>function patchSessions(sessions, liveNative, now) {</code> |
-| `index` | variable | 670 | <code>const index = new Map();</code> |
-| `walk` | function | 671 | <code>const walk = (n) =&gt; { index.set(n.agent, n); n.children.forEach(walk); };</code> |
 | `startPlan` | function | 723 | <code>function startPlan(input) {</code> |
-| `secs` | function | 741 | <code>const secs = (s) =&gt; !s ? '—' : s % 3600 === 0 ? &#96;${s / 3600}h&#96; : s % 60 === 0 ? &#96;${s / 60}m&#96; : &#96;${s}s&#96;;</code> |
 | `liveDecorate` | function | 776 | <code>function liveDecorate(model, input) {</code> |
-| `byTask` | variable | 780 | <code>const byTask = new Map();</code> |
-| `walk` | function | 792 | <code>const walk = (n) =&gt; {</code> |
 | `byDotted` | function | 821 | <code>function byDotted(a, b) {</code> |
 | `ROLE_TITLE` | object | 839 | <code>const ROLE_TITLE = { main: 'Main Gideon', feature: 'Feature Manager',</code> |
 | `roleTitle` | function | 844 | <code>function roleTitle(n) {</code> |
@@ -443,57 +301,37 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `short` | function | 860 | <code>function short(s, n) {</code> |
 | `withTimeout` | function | 865 | <code>function withTimeout(p, ms, onTimeout) {</code> |
 | `projectionNodes` | function | 891 | <code>function projectionNodes(proj, now) {</code> |
-| `trees` | object | 893 | <code>const trees = {};</code> |
-| `badges` | object | 894 | <code>const badges = {};</code> |
 | `findingBadge` | function | 922 | <code>function findingBadge(projection, branch) {</code> |
 | `FleetView` | class | 927 | <code>class FleetView {</code> |
 | `constructor` | method | 928 | <code>constructor(deps) {</code> |
 | `refresh` | method | 947 | <code>async refresh(specStatus) {</code> |
-| `call` | function | 951 | <code>const call = (args) =&gt; withTimeout(cgJson(args), CALL_TIMEOUT_MS,</code> |
-| `exists` | action | 974 | <code>plan, tree, prs: this.prs, exists: (p) =&gt; {</code> |
 | `_done` | method | 996 | <code>_done() {</code> |
 | `getTreeItem` | method | 1016 | <code>getTreeItem(el) { return el; }</code> |
 | `getChildren` | method | 1018 | <code>getChildren(el) {</code> |
 | `projectionRoot` | method | 1046 | <code>projectionRoot() {</code> |
-| `it` | variable | 1050 | <code>const it = new vscode.TreeItem('Projection', kids.length</code> |
 | `findingItem` | method | 1066 | <code>findingItem(f, i) {</code> |
-| `it` | variable | 1069 | <code>const it = new vscode.TreeItem(label, kids.length</code> |
 | `findingBranchItem` | method | 1088 | <code>findingBranchItem(f, b, i) {</code> |
-| `it` | variable | 1089 | <code>const it = new vscode.TreeItem(b.name, vscode.TreeItemCollapsibleState.None);</code> |
 | `nativeModel` | method | 1111 | <code>async nativeModel(status, tree, branches, call) {</code> |
-| `exists` | action | 1118 | <code>return nativeNodes(native, { branches: reg, exists: (p) =&gt; {</code> |
 | `patchLive` | method | 1125 | <code>patchLive() {</code> |
 | `sessionsRoot` | method | 1134 | <code>sessionsRoot() {</code> |
-| `it` | variable | 1138 | <code>const it = new vscode.TreeItem('Sessions',</code> |
 | `sessionItem` | method | 1158 | <code>sessionItem(n) {</code> |
-| `it` | variable | 1162 | <code>const it = new vscode.TreeItem(label, kids.length</code> |
-| `md` | variable | 1187 | <code>const md = new vscode.MarkdownString();</code> |
 | `noticeItem` | method | 1212 | <code>noticeItem(label, icon, command) {</code> |
-| `it` | variable | 1213 | <code>const it = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);</code> |
 | `nodeItem` | method | 1230 | <code>nodeItem(n) {</code> |
-| `it` | variable | 1234 | <code>const it = new vscode.TreeItem(n.agent, kids.length</code> |
 | `approvalItem` | method | 1279 | <code>approvalItem(a) {</code> |
-| `it` | variable | 1280 | <code>const it = new vscode.TreeItem(&#96;#${a.id} ${a.gate} of ${a.subject}&#96;);</code> |
 | `agentIcon` | method | 1289 | <code>agentIcon(n) {</code> |
 | `agentTooltip` | method | 1299 | <code>agentTooltip(n) {</code> |
-| `md` | variable | 1300 | <code>const md = new vscode.MarkdownString();</code> |
 | `taskBadges` | method | 1342 | <code>taskBadges(t) {</code> |
 | `taskItem` | method | 1352 | <code>taskItem(t, owner) {</code> |
-| `it` | variable | 1353 | <code>const it = new vscode.TreeItem(t.title ? &#96;${t.id}  ${t.title}&#96; : t.id,</code> |
 | `prItem` | method | 1384 | <code>prItem(p) {</code> |
-| `it` | variable | 1385 | <code>const it = new vscode.TreeItem(&#96;#${p.number} ${p.title &#124;&#124; p.branch &#124;&#124; ''}&#96;.trim(),</code> |
 | `nodeOf` | method | 1404 | <code>nodeOf(arg) { return arg &amp;&amp; arg.node ? arg.node : null; }</code> |
 | `remember` | method | 1409 | <code>remember(feature, pr) {</code> |
 | `featureOf` | function | 1423 | <code>function featureOf(node) {</code> |
 | `run` | function | 1429 | <code>async function run(args, title) {</code> |
 | `parse` | function | 1437 | <code>function parse(r) {</code> |
 | `pickTask` | function | 1443 | <code>async function pickTask(placeHolder) {</code> |
-| `seen` | variable | 1446 | <code>const seen = new Set();</code> |
-| `walk` | function | 1447 | <code>const walk = (n) =&gt; {</code> |
 | `taskIdOf` | function | 1472 | <code>function taskIdOf(arg) {</code> |
 | `cmdRefresh` | function | 1479 | <code>async function cmdRefresh() {</code> |
 | `cmdOpenWorktree` | function | 1486 | <code>async function cmdOpenWorktree(arg) {</code> |
-| `walk` | function | 1491 | <code>const walk = (x) =&gt; {</code> |
 | `cmdBegin` | function | 1530 | <code>async function cmdBegin(arg) {</code> |
 | `cmdMergeUp` | function | 1550 | <code>async function cmdMergeUp(arg) {</code> |
 | `landTarget` | function | 1587 | <code>function landTarget(node, feature) {</code> |
@@ -502,22 +340,14 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `cmdOpenPr` | function | 1643 | <code>async function cmdOpenPr(arg) {</code> |
 | `cmdCheckpoint` | function | 1682 | <code>async function cmdCheckpoint() {</code> |
 | `cmdStart` | function | 1722 | <code>async function cmdStart(arg) {</code> |
-| `validateInput` | action | 1746 | <code>value: String(plan.slots), validateInput: (v) =&gt; /^&#92;d+$/.test(v) &amp;&amp; Number(v) &gt; 0 ? null : 'a positive number',</code> |
 | `fleetControl` | function | 1765 | <code>async function fleetControl(verb, label) {</code> |
 | `cmdStop` | function | 1774 | <code>async function cmdStop() {</code> |
 | `cmdOpenTranscript` | function | 1790 | <code>async function cmdOpenTranscript(arg) {</code> |
 | `cmdApprove` | function | 1811 | <code>async function cmdApprove(arg) {</code> |
 | `sessionNodes` | function | 1838 | <code>function sessionNodes() {</code> |
-| `walk` | function | 1840 | <code>const walk = (n) =&gt; { out.push(n); n.children.forEach(walk); };</code> |
 | `cmdOpenSessionWorktree` | function | 1846 | <code>async function cmdOpenSessionWorktree(arg) {</code> |
 | `cmdOpenSessionTranscript` | function | 1866 | <code>async function cmdOpenSessionTranscript(arg) {</code> |
 | `register` | function | 1891 | <code>function register(ctx, d) {</code> |
-| `provideTextDocumentContent` | action | 1911 | <code>provideTextDocumentContent: () =&gt; planText,</code> |
-| `cmds` | object | 1914 | <code>const cmds = {</code> |
-| `'codify.fleet.pause'` | action | 1917 | <code>'codify.fleet.pause': () =&gt; fleetControl('pause', 'paused'),</code> |
-| `'codify.fleet.resume'` | action | 1918 | <code>'codify.fleet.resume': () =&gt; fleetControl('resume', 'resumed'),</code> |
-| `refresh` | action | 1936 | <code>refresh: (specStatus) =&gt; view.refresh(specStatus),</code> |
-| `touch` | action | 1939 | <code>touch: () =&gt; { view.force = true; view.patchLive(); },</code> |
 | `visible` | method | 1940 | <code>get visible() { return view.visible; },</code> |
 
 ## editors/vscode/kvx.js
@@ -534,15 +364,9 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `register` | function | 57 | <code>function register(ctx, cgJson, workspaceRoot) {</code> |
 | `provideDefinition` | method | 62 | <code>provideDefinition(doc, pos) {</code> |
 | `provideCompletionItems` | method | 88 | <code>async provideCompletionItems(doc, pos) {</code> |
-| `it` | variable | 99 | <code>const it = new vscode.CompletionItem(</code> |
-| `it` | variable | 109 | <code>const it = new vscode.CompletionItem(</code> |
-| `it` | variable | 124 | <code>const it = new vscode.CompletionItem(</code> |
 | `provideCodeLenses` | method | 138 | <code>provideCodeLenses(doc) {</code> |
-| `range` | variable | 143 | <code>const range = new vscode.Range(i, 0, i, 0);</code> |
 | `provideHover` | method | 160 | <code>provideHover(doc, pos) {</code> |
 | `provideDocumentSymbols` | method | 176 | <code>provideDocumentSymbols(doc) {</code> |
-| `range` | variable | 185 | <code>const range = new vscode.Range(i, 0, end,</code> |
-| `sym` | variable | 193 | <code>const sym = new vscode.DocumentSymbol(</code> |
 
 ## editors/vscode/language.js
 
@@ -553,18 +377,13 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `toRange` | function | 19 | <code>function toRange(r) {</code> |
 | `toLocation` | function | 24 | <code>function toLocation(l) {</code> |
 | `docParams` | function | 28 | <code>function docParams(doc, pos) {</code> |
-| `p` | object | 29 | <code>const p = { textDocument: { uri: doc.uri.toString() } };</code> |
 | `register` | function | 34 | <code>function register(ctx, client, diagnostics) {</code> |
-| `one` | function | 35 | <code>const one = (r) =&gt; (Array.isArray(r) ? r : r ? &#91;r&#93; : &#91;&#93;).map(toLocation);</code> |
 | `provideDefinition` | method | 39 | <code>async provideDefinition(doc, pos) {</code> |
 | `provideReferences` | method | 46 | <code>async provideReferences(doc, pos) {</code> |
 | `provideHover` | method | 53 | <code>async provideHover(doc, pos) {</code> |
-| `md` | variable | 60 | <code>const md = new vscode.MarkdownString(value);</code> |
 | `provideDocumentSymbols` | method | 67 | <code>async provideDocumentSymbols(doc) {</code> |
 | `provideWorkspaceSymbols` | method | 78 | <code>async provideWorkspaceSymbols(query) {</code> |
 | `provideCodeLenses` | method | 88 | <code>async provideCodeLenses(doc) {</code> |
-| `dg` | variable | 110 | <code>const dg = new vscode.Diagnostic(toRange(d.range), d.message,</code> |
-| `sync` | function | 121 | <code>const sync = (doc, method) =&gt; {</code> |
 
 ## editors/vscode/memories.js
 
@@ -600,7 +419,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `openSymbol` | method | 329 | <code>async openSymbol(name) {</code> |
 | `forget` | method | 344 | <code>async forget(id) {</code> |
 | `supersede` | method | 364 | <code>async supersede(id) {</code> |
-| `validateInput` | action | 371 | <code>validateInput: (v) =&gt; (v &#124;&#124; '').trim() ? null : 'The replacement cannot be empty',</code> |
 | `classify` | method | 391 | <code>async classify(id) {</code> |
 | `classifyAll` | method | 408 | <code>async classifyAll() {</code> |
 | `promote` | method | 430 | <code>async promote(id) {</code> |
@@ -613,14 +431,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `promoteFrom` | method | 534 | <code>async promoteFrom(arg) {</code> |
 | `supersedeFrom` | method | 541 | <code>async supersedeFrom(arg) {</code> |
 | `register` | function | 555 | <code>function register(ctx, deps) {</code> |
-| `browser` | variable | 556 | <code>const browser = new MemoryBrowser(deps);</code> |
-| `dispose` | action | 557 | <code>ctx.subscriptions.push({ dispose: () =&gt; browser.dispose() });</code> |
-| `open` | action | 559 | <code>open: () =&gt; browser.open(),</code> |
-| `refresh` | action | 560 | <code>refresh: () =&gt; browser.refresh({ silent: true }),</code> |
-| `touch` | action | 561 | <code>touch: () =&gt; {},   /&#42; the browser re-reads on the refresh that follows &#42;/</code> |
-| `classifyAll` | action | 562 | <code>classifyAll: () =&gt; browser.classifyAll(),</code> |
-| `promote` | action | 563 | <code>promote: (arg) =&gt; browser.promoteFrom(arg),</code> |
-| `supersede` | action | 564 | <code>supersede: (arg) =&gt; browser.supersedeFrom(arg),</code> |
 
 ## editors/vscode/refresh.js
 
@@ -629,10 +439,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | Indexed name | Kind | Line | Source declaration |
 | --- | --- | ---: | --- |
 | `createRefresher` | function | 18 | <code>function createRefresher(work, opts = {}) {</code> |
-| `start` | function | 30 | <code>function start() {</code> |
-| `schedule` | function | 55 | <code>function schedule(delayMs) {</code> |
-| `p` | variable | 56 | <code>const p = new Promise((resolve) =&gt; waiters.push(resolve));</code> |
-| `dispose` | function | 74 | <code>function dispose() {</code> |
 | `inFlight` | method | 86 | <code>get inFlight() { return running !== null; },</code> |
 | `runs` | method | 87 | <code>get runs() { return runs; },</code> |
 
@@ -647,17 +453,12 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `on` | method | 40 | <code>on(name, fn) { (this.listeners&#91;name&#93; &#124;&#124; (this.listeners&#91;name&#93; = &#91;&#93;)).push(fn); }</code> |
 | `_emit` | method | 41 | <code>_emit(name, arg) { for (const fn of this.listeners&#91;name&#93; &#124;&#124; &#91;&#93;) { try { fn(arg); } catch (e) { this.log(&#96;serve ${name} handler: ${e.message}&#96;); } } }</code> |
 | `start` | method | 46 | <code>async start() {</code> |
-| `closed` | variable | 58 | <code>const closed = new Promise((resolve) =&gt; proc.once('close', resolve));</code> |
 | `_reconnect` | method | 102 | <code>_reconnect() {</code> |
 | `request` | method | 123 | <code>request(method, params, timeoutMs = CALL_TIMEOUT_MS) {</code> |
-| `p` | variable | 126 | <code>const p = new Promise((resolve, reject) =&gt; {</code> |
-| `resolve` | action | 132 | <code>resolve: (v) =&gt; { clearTimeout(timer); resolve(v); },</code> |
-| `reject` | action | 133 | <code>reject: (e) =&gt; { clearTimeout(timer); reject(e); },</code> |
 | `exec` | method | 146 | <code>async exec(args) {</code> |
 | `tool` | method | 155 | <code>async tool(name, args) {</code> |
 | `tools` | method | 159 | <code>async tools() {</code> |
 | `subscribe` | method | 164 | <code>async subscribe(kinds) {</code> |
-| `s` | object | 165 | <code>const s = { kinds: kinds &#124;&#124; undefined, id: null };</code> |
 | `snapshot` | method | 174 | <code>async snapshot(all) {</code> |
 | `cancel` | method | 178 | <code>async cancel(reqId) {</code> |
 | `_consume` | method | 182 | <code>_consume(chunk) {</code> |
@@ -667,11 +468,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `liveModel` | function | 237 | <code>function liveModel() {</code> |
 | `splitSubject` | function | 242 | <code>function splitSubject(subject) {</code> |
 | `applyEvent` | function | 248 | <code>function applyEvent(model, ev) {</code> |
-| `patch` | object | 277 | <code>const patch = { agent: p.agent &#124;&#124; c.agent &#124;&#124; '' };</code> |
 | `applyNative` | function | 328 | <code>function applyNative(model, ev) {</code> |
 | `applySnapshot` | function | 366 | <code>function applySnapshot(model, snap) {</code> |
-| `native` | object | 368 | <code>const native = {};</code> |
-| `walk` | function | 369 | <code>const walk = (n) =&gt; {</code> |
 
 ## editors/vscode/tasks.js
 
@@ -685,32 +483,16 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `kvxUnquote` | function | 54 | <code>function kvxUnquote(raw) {</code> |
 | `kvxList` | function | 62 | <code>function kvxList(raw) {</code> |
 | `parseKvx` | function | 87 | <code>function parseKvx(text) {</code> |
-| `sections` | variable | 88 | <code>const sections = new Map();</code> |
 | `readSpec` | function | 116 | <code>function readSpec(text) {</code> |
-| `raw` | function | 118 | <code>const raw = (sec, key) =&gt; {</code> |
-| `str` | function | 124 | <code>const str = (sec, key) =&gt; kvxUnquote(raw(sec, key) &#124;&#124; '');</code> |
-| `list` | function | 125 | <code>const list = (sec, key) =&gt; kvxList(raw(sec, key) &#124;&#124; '');</code> |
-| `clauses` | object | 127 | <code>const clauses = {};</code> |
-| `reqs` | object | 128 | <code>const reqs = {};</code> |
-| `byId` | variable | 130 | <code>const byId = new Map();</code> |
-| `t` | object | 148 | <code>const t = {</code> |
 | `requireMet` | function | 192 | <code>function requireMet(status, mode) {</code> |
 | `asSymbols` | function | 197 | <code>function asSymbols(v) {</code> |
 | `asTouches` | function | 201 | <code>function asTouches(v) {</code> |
 | `mergeTasks` | function | 208 | <code>function mergeTasks(spec, trace, status, plan) {</code> |
-| `traced` | variable | 209 | <code>const traced = new Map(((trace &amp;&amp; trace.tasks) &#124;&#124; &#91;&#93;).map((t) =&gt; &#91;t.id, t&#93;));</code> |
-| `claims` | variable | 210 | <code>const claims = new Map((((status &amp;&amp; status.claims) &#124;&#124; &#91;&#93;)).map((c) =&gt; &#91;c.id, c&#93;));</code> |
-| `waveBranch` | variable | 218 | <code>const waveBranch = new Map();</code> |
-| `taskBranch` | variable | 219 | <code>const taskBranch = new Map();</code> |
-| `seen` | variable | 235 | <code>const seen = new Set();</code> |
-| `statusOf` | function | 245 | <code>const statusOf = (id) =&gt; {</code> |
-| `row` | object | 256 | <code>const row = {</code> |
 | `patchRows` | function | 292 | <code>function patchRows(rows, feature, applied) {</code> |
 | `taskFilter` | function | 308 | <code>function taskFilter(rows, filter) {</code> |
 | `haystack` | function | 337 | <code>function haystack(r) {</code> |
 | `filterLabel` | function | 346 | <code>function filterLabel(filter) {</code> |
 | `resumePrompt` | function | 365 | <code>function resumePrompt(row, opts) {</code> |
-| `blocked` | variable | 374 | <code>const blocked = new Set((row.blockers &#124;&#124; &#91;&#93;).map((b) =&gt; b.id));</code> |
 | `detailHtml` | function | 420 | <code>function detailHtml(nonce) {</code> |
 | `detailView` | function | 774 | <code>function detailView(row, spec) {</code> |
 | `icon` | function | 831 | <code>function icon(name, color) {</code> |
@@ -732,33 +514,21 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `getTreeItem` | method | 961 | <code>getTreeItem(el) { return el; }</code> |
 | `getChildren` | method | 963 | <code>getChildren(el) {</code> |
 | `featureNodes` | method | 972 | <code>featureNodes() {</code> |
-| `none` | variable | 977 | <code>const none = new vscode.TreeItem(</code> |
-| `it` | variable | 989 | <code>const it = new vscode.TreeItem(feature,</code> |
 | `docsNode` | method | 1015 | <code>docsNode() {</code> |
-| `row` | object | 1018 | <code>const row = { id: '@docs', title: 'Generate and verify project documentation',</code> |
-| `it` | variable | 1020 | <code>const it = new vscode.TreeItem('Documentation closure',</code> |
 | `sectionNodes` | method | 1034 | <code>sectionNodes(rows, feature) {</code> |
-| `it` | variable | 1041 | <code>const it = new vscode.TreeItem(section,</code> |
 | `waveNodes` | method | 1055 | <code>waveNodes(rows, parentKey) {</code> |
-| `it` | variable | 1062 | <code>const it = new vscode.TreeItem(&#96;Wave ${wave}&#96;,</code> |
 | `taskNode` | method | 1084 | <code>taskNode(row) {</code> |
-| `it` | variable | 1085 | <code>const it = new vscode.TreeItem(&#96;${row.id}  ${row.title}&#96;,</code> |
 | `tooltip` | method | 1104 | <code>tooltip(row) {</code> |
-| `md` | variable | 1105 | <code>const md = new vscode.MarkdownString();</code> |
 | `groupBy` | function | 1129 | <code>function groupBy(rows, key) {</code> |
-| `out` | variable | 1130 | <code>const out = new Map();</code> |
 | `taskDetail` | function | 1143 | <code>async function taskDetail(arg) {</code> |
 | `postTask` | function | 1163 | <code>function postTask(id) {</code> |
 | `refreshPanels` | function | 1180 | <code>function refreshPanels() {</code> |
 | `panelMessage` | function | 1184 | <code>async function panelMessage(id, msg) {</code> |
-| `cmds` | object | 1190 | <code>const cmds = {</code> |
 | `openSymbol` | function | 1208 | <code>async function openSymbol(msg) {</code> |
-| `at` | variable | 1212 | <code>const at = new vscode.Range(msg.line - 1, 0, msg.line - 1, 0);</code> |
 | `openPath` | function | 1225 | <code>async function openPath(pattern) {</code> |
 | `taskIdFrom` | function | 1244 | <code>function taskIdFrom(arg) {</code> |
 | `resolveId` | function | 1253 | <code>async function resolveId(arg, placeHolder, filter) {</code> |
 | `cmdFilterStatus` | function | 1270 | <code>async function cmdFilterStatus() {</code> |
-| `counts` | variable | 1271 | <code>const counts = new Map();</code> |
 | `cmdFilterWave` | function | 1290 | <code>async function cmdFilterWave() {</code> |
 | `cmdFilterOwner` | function | 1305 | <code>async function cmdFilterOwner() {</code> |
 | `cmdSearch` | function | 1326 | <code>async function cmdSearch() {</code> |
@@ -768,8 +538,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `cmdOpenBranch` | function | 1386 | <code>async function cmdOpenBranch(arg) {</code> |
 | `cmdCopyPrompt` | function | 1425 | <code>async function cmdCopyPrompt(arg) {</code> |
 | `register` | function | 1440 | <code>function register(ctx, d) {</code> |
-| `cmds` | object | 1448 | <code>const cmds = {</code> |
-| `dispose` | action | 1469 | <code>dispose: () =&gt; {</code> |
 
 ## kvx/impl/go/canonical.go
 
@@ -831,7 +599,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `private_bytes` | function | 60 | <code>def private_bytes(v,limit,root=None):</code> |
 | `atomic` | function | 73 | <code>def atomic(path,value):</code> |
 | `process` | function | 84 | <code>def process(pid):</code> |
-| `read` | function | 88 | <code>def read(name):</code> |
 | `identity` | function | 100 | <code>def identity(p):return {k:p&#91;k&#93; for k in IDENTITY_KEYS}</code> |
 | `same` | function | 101 | <code>def same(expected,p):return p is not None and identity(p)==expected</code> |
 | `born_same` | function | 102 | <code>def born_same(expected,p):return p is not None and all(expected&#91;k&#93;==p&#91;k&#93; for k in ('pid','start_time','kernel_boot_id'))</code> |
@@ -850,7 +617,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `Host` | class | 160 | <code>class Host:</code> |
 | `__init__` | method | 161 | <code>def __init__(self,c,config_digest):</code> |
 | `load` | method | 175 | <code>def load(self):</code> |
-| `GET /output_complete` | route | 187 | <code>if not r.get('output_complete',False):r&#91;'output_truncated'&#93;=True</code> |
 | `view` | method | 191 | <code>def view(self,e,after='0',limit=64):</code> |
 | `observe` | method | 194 | <code>def observe(self,e):</code> |
 | `capture` | method | 210 | <code>def capture(self,e,fd,stream):</code> |
@@ -870,7 +636,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `client` | method | 424 | <code>async def client(self,reader,writer):</code> |
 | `monitor` | method | 443 | <code>async def monitor(self):</code> |
 | `shutdown` | method | 461 | <code>async def shutdown(self):</code> |
-| `clean` | function | 465 | <code>async def clean(e):</code> |
 | `run` | method | 469 | <code>async def run(self):</code> |
 | `main` | function | 493 | <code>def main():</code> |
 
@@ -901,7 +666,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `_records` | method | 126 | <code>def _records(payload: str) -&gt; dict&#91;str, tuple&#91;str, str, str, str&#93;&#93;:</code> |
 | `resolve` | method | 140 | <code>def resolve(self, commit: str) -&gt; tuple&#91;str, str&#93;:</code> |
 | `metadata` | method | 168 | <code>def metadata(self, commit: str) -&gt; tuple&#91;str, str, str&#93;:</code> |
-| `GET /leader` | route | 192 | <code>recorded.get("leader", author or committer or "author-unrecorded"),</code> |
 | `metadata_token` | function | 205 | <code>def metadata_token(value: str) -&gt; str:</code> |
 | `quoted_subject` | function | 211 | <code>def quoted_subject(subject: str) -&gt; str:</code> |
 | `entry_type` | function | 223 | <code>def entry_type(subject: str) -&gt; str:</code> |
@@ -937,7 +701,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | --- | --- | ---: | --- |
 | `Policy` | type | 10 | <code>type Policy={organisation_id:string;run_id:string;run_policy_digest:string;quota_key:string;connector:string;connector_version:string;provider:string;model:string;auth_profile:string;permission_profil…</code> |
 | `policies` | function | 11 | <code>async function policies(ctx:ComponentContext):Promise&lt;Policy&#91;&#93;&gt;{</code> |
-| `seen` | variable | 17 | <code>const seen=new Set&lt;string&gt;();</code> |
 | `AgentAdmissionCapability` | interface | 33 | <code>export interface AgentAdmissionCapability {</code> |
 | `recoveryContext` | method | 35 | <code>recoveryContext(input:unknown,invocation:InvocationContext):Promise&lt;unknown&gt;;</code> |
 | `recoveryContextInTransaction` | method | 36 | <code>recoveryContextInTransaction(tx:PrimaryTransaction,input:unknown,invocation:InvocationContext):Promise&lt;unknown&gt;;</code> |
@@ -949,26 +712,9 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `text` | function | 55 | <code>const text=(value:unknown):string&#124;null=&gt;typeof value==='string'&amp;&amp;value.length&lt;=128?value:null;</code> |
 | `resetTime` | function | 56 | <code>function resetTime(value:unknown):string&#124;null{</code> |
 | `classifyNativeEvent` | function | 62 | <code>export function classifyNativeEvent(connector:'codex'&#124;'claude',event:unknown):NativeSignalClassification{</code> |
-| `out` | function | 63 | <code>const out=(signal:NativeSignalClassification&#91;'signal'&#93;,reason:NativeAdmissionReason&#124;null,code:string&#124;null=null,resets:string&#124;null=null):NativeSignalClassification=&gt;</code> |
 | `assertRunPolicy` | function | 125 | <code>async function assertRunPolicy(client:{query:AuthorityTransaction&#91;'query'&#93;},s:{organisation_id:string;run_id:string},p:Policy):Promise&lt;string&gt;{</code> |
 | `AdmissionPlanSelection` | interface | 132 | <code>export interface AdmissionPlanSelection {</code> |
 | `createComponent` | function | 136 | <code>export function createComponent(ctx:ComponentContext):Component{</code> |
-| `keys` | object | 139 | <code>const keys:Record&lt;string,&#91;string&#91;&#93;,string&#91;&#93;&#93;&gt;={</code> |
-| `nativeEligible` | function | 144 | <code>const nativeEligible=(native:Record&lt;string,unknown&gt;,p:Policy,configuration:unknown):boolean=&gt;{</code> |
-| `action` | function | 149 | <code>const action=(name:string,providedTransaction?:PrimaryTransaction)=&gt;async(input:unknown,requestContext:ComponentContext):Promise&lt;unknown&gt;=&gt;{</code> |
-| `run` | function | 155 | <code>const run=async(client:AuthorityTransaction)=&gt;{</code> |
-| `references` | function | 156 | <code>const references=(value:unknown):string&#91;&#93;=&gt;{</code> |
-| `dbNow` | function | 161 | <code>const dbNow=async()=&gt;new Date((await client.query('SELECT clock_timestamp() AS now')).rows&#91;0&#93;!.now).getTime();</code> |
-| `execute` | function | 162 | <code>const execute=async(reason?:string,classification?:NativeSignalClassification)=&gt;{</code> |
-| `history` | function | 198 | <code>const history=async()=&gt;(await client.query('SELECT &#42; FROM hyperfide.agent_admission_escalations WHERE organisation_id=$1 AND run_id=$2 AND reservation_id=$3 ORDER BY sequence',&#91;s.organisation_id,s.run…</code> |
-| `packet` | object | 215 | <code>const packet={schema_version:1,scope:s,run_policy_digest:runPolicy.rows&#91;0&#93;?.policy_digest??null,admission_policy_digest:row.policy_digest,run_policy_approved:runPolicy.rows&#91;0&#93;?.policy_digest===p.run_p…</code> |
-| `result` | function | 235 | <code>const result=(reservation:unknown,extra:Record&lt;string,unknown&gt;)=&gt;({kind:'ADMISSION_REPORT',reservation_id:id,reported_reason:reason,classification:classification??null,reservation,diagnostic_refs:diag…</code> |
-| `resolution` | object | 277 | <code>const resolution={kind:release?'RELEASED':'CONDITION_CHANGED',operation_id:operationId,actor_id:invocation.principal.actor_id,role:invocation.principal.role,condition_digest:conditionDigest,diagnostic…</code> |
-| `launchSelection` | function | 308 | <code>const launchSelection:AgentAdmissionCapability&#91;'launchSelection'&#93;=async(tx,scope,invocation)=&gt;{</code> |
-| `refuse` | function | 311 | <code>const refuse=(reason:string)=&gt;({selection:null,reason});</code> |
-| `component` | object | 331 | <code>const component:Component={apiVersion:1,actions:{'agent.admission.reserve':action('reserve'),'agent.admission.inspect':action('inspect'),'agent.admission.report':action('report'),'agent.admission.reco…</code> |
-| `recoveryContext` | action | 332 | <code>const capability:AgentAdmissionCapability=Object.freeze({schema_version:1 as const,launchSelection,recoveryContextInTransaction:async(tx:PrimaryTransaction,input:unknown,invocation:InvocationContext)=…</code> |
-| `recoveryContextInTransaction` | action | 332 | <code>const capability:AgentAdmissionCapability=Object.freeze({schema_version:1 as const,launchSelection,recoveryContextInTransaction:async(tx:PrimaryTransaction,input:unknown,invocation:InvocationContext)=…</code> |
 
 ## services/hyperfide/src/agents/dispatch.ts
 
@@ -979,14 +725,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `Selection` | type | 17 | <code>type Selection={plan:RunnerLaunchPlan&#124;null;reason:string&#124;null;replayed:boolean};</code> |
 | `launchPlan` | function | 19 | <code>function launchPlan(row:Record&lt;string,unknown&gt;):RunnerLaunchPlan{</code> |
 | `select` | function | 22 | <code>async function select(tx:PrimaryTransaction,admission:AgentAdmissionCapability,input:RunnerSpawnInput,invocation:InvocationContext):Promise&lt;Selection&gt;{</code> |
-| `body` | object | 45 | <code>const body={schema_version:1,command_id:command,launch_id,agent_session_id:session_id,slot_id:token.slot_id,attempt_id:token.attempt_id,attempt_generation:String(token.attempt_generation),</code> |
 | `createComponent` | function | 54 | <code>export function createComponent(ctx:ComponentContext):Component{</code> |
-| `controller` | function | 59 | <code>const controller=(invocation:InvocationContext&#124;undefined):InvocationContext=&gt;{</code> |
-| `command` | function | 64 | <code>const command=(input:unknown):string=&gt;agentString(exactAgentObject(input,&#91;'command_id'&#93;).command_id,'uuid');</code> |
-| `close` | action | 65 | <code>return {apiVersion:1,close:()=&gt;unregister(),actions:{</code> |
-| `'agent.launch-plan.describe'` | action | 66 | <code>'agent.launch-plan.describe':async(input,context)=&gt;{</code> |
-| `'agent.launch-plan.prepare'` | action | 71 | <code>'agent.launch-plan.prepare':async(input,context)=&gt;{</code> |
-| `'agent.launch-plan.inspect'` | action | 83 | <code>'agent.launch-plan.inspect':async(input,context)=&gt;{</code> |
 
 ## services/hyperfide/src/agents/qualification.ts
 
@@ -1011,8 +750,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `publicKey` | method | 43 | <code>publicKey():string;</code> |
 | `isConnectorQualificationAuthority` | function | 45 | <code>export function isConnectorQualificationAuthority(v:unknown):v is ConnectorQualificationAuthority{</code> |
 | `NativeAuthView` | interface | 49 | <code>interface NativeAuthView {resolve(profileId:string):AuthProfileSnapshot;probe(i:InvocationContext,profileId:string):Promise&lt;unknown&gt;}</code> |
-| `probe` | method | 49 | <code>interface NativeAuthView {resolve(profileId:string):AuthProfileSnapshot;probe(i:InvocationContext,profileId:string):Promise&lt;unknown&gt;}</code> |
 | `resolve` | method | 49 | <code>interface NativeAuthView {resolve(profileId:string):AuthProfileSnapshot;probe(i:InvocationContext,profileId:string):Promise&lt;unknown&gt;}</code> |
+| `probe` | method | 49 | <code>interface NativeAuthView {resolve(profileId:string):AuthProfileSnapshot;probe(i:InvocationContext,profileId:string):Promise&lt;unknown&gt;}</code> |
 | `isNativeAuthView` | function | 50 | <code>function isNativeAuthView(v:unknown):v is NativeAuthView{return object(v)&amp;&amp;typeof v.resolve==='function'&amp;&amp;typeof v.probe==='function';}</code> |
 | `RegistryOptions` | interface | 51 | <code>export interface RegistryOptions {</code> |
 | `canonical` | function | 57 | <code>function canonical(v:unknown):string{</code> |
@@ -1025,24 +764,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `signReceipt` | function | 96 | <code>export function signReceipt(key:KeyObject,payload:ConnectorQualificationPayload):SignedConnectorReceipt{</code> |
 | `rawPublicKey` | function | 100 | <code>export function rawPublicKey(key:KeyObject):string{</code> |
 | `createConnectorQualificationRegistry` | function | 104 | <code>export function createConnectorQualificationRegistry(options:RegistryOptions):ConnectorQualificationAuthority{</code> |
-| `records` | variable | 105 | <code>const records=new Map&lt;string,ConnectorQualificationRecord&gt;(),now=options.now??(()=&gt;Math.floor(Date.now()/1000));</code> |
-| `keyOf` | function | 106 | <code>const keyOf=(s:AuthProfileSnapshot):string=&gt;&#91;s.connector,s.binary.version,s.binary.digest,s.auth_mode,s.profile_id&#93;.join('/');</code> |
-| `current` | function | 107 | <code>const current=(profileId:string):ConnectorQualificationRecord&#124;null=&gt;{const s=options.resolve(profileId),r=records.get(keyOf(s));return r&amp;&amp;r.payload.profile_digest===s.profile_digest?r:null;};</code> |
-| `record` | function | 108 | <code>const record=async(i:InvocationContext,input:unknown):Promise&lt;ConnectorQualificationRecord&gt;=&gt;{</code> |
-| `payload` | object | 127 | <code>const payload:ConnectorQualificationPayload={schema_version:1,receipt_id:evidence.slice(7,39),connector:s.connector,cli_version:s.binary.version,binary_digest:s.binary.digest,auth_mode:s.auth_mode,</code> |
-| `qualification` | function | 136 | <code>const qualification=(profileId:string):NativeQualificationView=&gt;{</code> |
-| `receipt` | function | 141 | <code>const receipt=(profileId:string):SignedConnectorReceipt&#124;null=&gt;qualification(profileId).live_qualified?current(profileId)!.receipt:null;</code> |
-| `publicKey` | function | 142 | <code>const publicKey=():string=&gt;{if(!options.signingKey)fail('CONNECTOR_QUALIFICATION_NOT_CONFIGURED','Receipt signing key not configured');return rawPublicKey(options.signingKey);};</code> |
 | `signingKey` | function | 145 | <code>async function signingKey(file:string&#124;undefined):Promise&lt;KeyObject&#124;null&gt;{</code> |
 | `createComponent` | function | 153 | <code>export async function createComponent(ctx:ComponentContext):Promise&lt;Component&gt;{</code> |
-| `native` | function | 158 | <code>const native=():NativeAuthView=&gt;ctx.dependencies.require('14.3','identity.native-auth',isNativeAuthView);</code> |
-| `authenticate` | action | 159 | <code>const registry=createConnectorQualificationRegistry({signingKey:key,ttlSeconds:ttl,resolve:id=&gt;native().resolve(id),authenticate:(i,id)=&gt;native().probe(i,id)});</code> |
-| `resolve` | action | 159 | <code>const registry=createConnectorQualificationRegistry({signingKey:key,ttlSeconds:ttl,resolve:id=&gt;native().resolve(id),authenticate:(i,id)=&gt;native().probe(i,id)});</code> |
-| `record` | action | 160 | <code>const authority:ConnectorQualificationAuthority=Object.freeze({...registry,record:async(i:InvocationContext,input:unknown)=&gt;{assertInvocation(i);return registry.record(i,input);}});</code> |
-| `profile` | function | 161 | <code>const profile=(v:unknown):string=&gt;{exact(v,&#91;'profile_id'&#93;);return text(v.profile_id);};</code> |
-| `invocation` | function | 162 | <code>const invocation=(c:ComponentContext):InvocationContext=&gt;{const i=c.invocation;assertInvocation(i);return i;};</code> |
-| `'connector.qualification.record'` | action | 164 | <code>'connector.qualification.record':async(v,c)=&gt;{const r=await authority.record(invocation(c),v);return {state:r.state,reasons:r.reasons,receipt_digest:r.receipt_digest,capabilities:r.payload.capabilitie…</code> |
-| `'connector.qualification.inspect'` | action | 165 | <code>'connector.qualification.inspect':async(v,c)=&gt;{invocation(c);const id=profile(v);return {qualification:authority.qualification(id),record:authority.inspect(id),receipt:authority.receipt(id)};}</code> |
 
 ## services/hyperfide/src/agents/sessions.ts
 
@@ -1057,12 +780,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `exactAgentObject` | function | 35 | <code>export function exactAgentObject(value:unknown,required:string&#91;&#93;,optional:string&#91;&#93;=&#91;&#93;):RecordValue{</code> |
 | `agentString` | function | 39 | <code>export function agentString(value:unknown,kind:'uuid'&#124;'digest'&#124;'name'&#124;'decimal'='name'):string{</code> |
 | `agentScope` | function | 44 | <code>export function agentScope(value:unknown,invocation:InvocationContext):AgentScope{</code> |
-| `scope` | object | 47 | <code>const scope={organisation_id:agentString(v.organisation_id,'uuid'),run_id:agentString(v.run_id,'uuid'),session_id:agentString(v.session_id,'uuid')};</code> |
 | `assertNativeRunnerScope` | function | 53 | <code>export function assertNativeRunnerScope(i:InvocationContext,admitted:Record&lt;string,unknown&gt;,nativeBinding?:Record&lt;string,unknown&gt;):void{</code> |
 | `canonical` | function | 57 | <code>function canonical(value:unknown):string{</code> |
 | `agentDigest` | function | 62 | <code>export function agentDigest(value:unknown):string{return 'sha256:'+createHash('sha256').update(canonical(value)).digest('hex');}</code> |
 | `agentTransaction` | function | 63 | <code>export async function agentTransaction&lt;T&gt;(ctx:ComponentContext,invocation:InvocationContext,callback:(client:AuthorityTransaction)=&gt;Promise&lt;T&gt;):Promise&lt;T&gt;{</code> |
-| `guard` | action | 65 | <code>try{return await ctx.resources.gateway.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal:invocation.signal,guard:tx=&gt;invocation.guard(tx)},callback);}</code> |
 | `getNativeSessionProfile` | function | 75 | <code>export async function getNativeSessionProfile(ctx:ComponentContext,authProfile:unknown):Promise&lt;RecordValue&gt;{</code> |
 | `profileMatches` | function | 82 | <code>function profileMatches(p:RecordValue,admitted:RecordValue,b:RecordValue):void{</code> |
 | `key` | function | 85 | <code>const key=(s:AgentScope)=&gt;&#91;s.organisation_id,s.run_id,s.session_id&#93;;</code> |
@@ -1071,18 +792,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `agentOperation` | function | 94 | <code>export async function agentOperation(client:AuthorityTransaction,s:AgentScope,id:string,payload:unknown,run:()=&gt;Promise&lt;RecordValue&gt;,invocation:InvocationContext):Promise&lt;RecordValue&gt;{</code> |
 | `resumeOperationId` | function | 106 | <code>function resumeOperationId(invocation:InvocationContext,request:unknown):string{</code> |
 | `resumeLineage` | function | 111 | <code>async function resumeLineage(ctx:ComponentContext,client:AuthorityTransaction,s:AgentScope,admitted:RecordValue,b:RecordValue,r:RecordValue):Promise&lt;RecordValue&gt;{</code> |
-| `ps` | object | 112 | <code>const ps={...s,session_id:String(r.predecessor_session_id)};</code> |
 | `lineageOf` | function | 134 | <code>async function lineageOf(client:AuthorityTransaction,s:AgentScope):Promise&lt;RecordValue&gt;{</code> |
 | `AgentSessionsCapability` | interface | 139 | <code>export interface AgentSessionsCapability {</code> |
 | `resumeCheck` | method | 141 | <code>resumeCheck(input:unknown,invocation:InvocationContext):Promise&lt;unknown&gt;;</code> |
 | `isAgentSessionsCapability` | function | 143 | <code>export function isAgentSessionsCapability(value:unknown):value is AgentSessionsCapability{</code> |
 | `createComponent` | function | 146 | <code>export function createComponent(ctx:ComponentContext):Component{</code> |
-| `guard` | function | 147 | <code>const guard=(fn:(value:RecordValue,invocation:InvocationContext)=&gt;Promise&lt;unknown&gt;)=&gt;async(input:unknown,requestContext:ComponentContext)=&gt;{</code> |
-| `transact` | function | 150 | <code>const transact=&lt;T&gt;(invocation:InvocationContext,fn:(client:AuthorityTransaction)=&gt;Promise&lt;T&gt;)=&gt;agentTransaction(ctx,invocation,fn);</code> |
-| `component` | object | 151 | <code>const component:Component={apiVersion:1,actions:{</code> |
-| `edges` | object | 212 | <code>const edges:Record&lt;string,string&#91;&#93;&gt;={REGISTERED:&#91;'RUNNING','FAILED','STOPPED'&#93;,RUNNING:&#91;'DISCONNECTED','STOPPED','FAILED'&#93;,DISCONNECTED:&#91;'RUNNING','STOPPED','FAILED'&#93;,STOPPED:&#91;&#93;,FAILED:&#91;&#93;};</code> |
-| `decided` | function | 250 | <code>const decided=(decision:string,digest:string&#124;null)=&gt;({kind:'RESUME_DECISION',decision,operation_id:id,native_session_id:admitted.native_session_id,checkpoint_id:v.checkpoint_id,configuration_digest:v.…</code> |
-| `resumeCheck` | action | 263 | <code>resumeCheck:async(input:unknown,invocation:InvocationContext)=&gt;{</code> |
 
 ## services/hyperfide/src/agents/supervision.ts
 
@@ -1093,7 +807,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `MainStartupBudget` | interface | 14 | <code>export interface MainStartupBudget {schema_version:1;host_id:string;pool_id:string;allowance:{cpu_millis:string;memory_bytes:string;agent_slots:string};headroom:{cpu_millis:string;memory_bytes:string}…</code> |
 | `MainHostObservation` | interface | 15 | <code>export interface MainHostObservation {cpu_available_millis:string;memory_available_bytes:string;observed_at:string;source:'LINUX_PROCFS_CGROUP'}</code> |
 | `validateSupervisorStartupBudget` | function | 16 | <code>export function validateSupervisorStartupBudget(declared:unknown,observation:unknown):{schema_version:1;sizing:'WITHIN_OBSERVED_HEADROOM';budget_digest:string;host_id:string;pool_id:string;observed_at…</code> |
-| `decimal` | function | 21 | <code>const decimal=(v:unknown,positive:boolean)=&gt;{if(typeof v!=='string'&#124;&#124;!(positive?/^&#91;1-9&#93;&#91;0-9&#93;&#42;$/:/^(0&#124;&#91;1-9&#93;&#91;0-9&#93;&#42;)$/).test(v)&#124;&#124;v.length&gt;19&#124;&#124;BigInt(v)&gt;9223372036854775807n)agentError('SUPERVISOR_MAIN_BU…</code> |
 | `MapValue` | type | 28 | <code>type MapValue=Record&lt;string,unknown&gt;;</code> |
 | `Dimension` | type | 29 | <code>type Dimension={dimension:'CPU_MILLIS'&#124;'MEMORY_BYTES'&#124;'AGENT';capacity_account_id:string;quantity:string};</code> |
 | `Profile` | type | 30 | <code>type Profile={profile_id:string;host_id:string;pool_id:string;restriction_profile_digest:string;cwd:string;home:string;temp:string;uid:number;gid:number;mcp_config_path:string;mcp_config_digest:string…</code> |
@@ -1114,19 +827,14 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `hash` | function | 41 | <code>function hash(b:Buffer):string{return 'sha256:'+createHash('sha256').update(b).digest('hex');}</code> |
 | `pinned` | function | 42 | <code>async function pinned(filename:string,digest:string):Promise&lt;Buffer&gt;{</code> |
 | `profiles` | function | 48 | <code>async function profiles(ctx:ComponentContext):Promise&lt;Profile&#91;&#93;&gt;{</code> |
-| `homes` | variable | 54 | <code>const seen=new Set&lt;string&gt;(),homes=new Set&lt;string&gt;();</code> |
-| `seen` | variable | 54 | <code>const seen=new Set&lt;string&gt;(),homes=new Set&lt;string&gt;();</code> |
 | `runtimeFiles` | function | 65 | <code>async function runtimeFiles(p:Profile,target?:{session_id:string;run_id:string}):Promise&lt;MapValue&gt;{</code> |
 | `nativeAdapter` | function | 85 | <code>async function nativeAdapter(ctx:ComponentContext,p:Profile,native:MapValue,action:string,payload:MapValue):Promise&lt;MapValue&gt;{</code> |
 | `nativePlan` | function | 101 | <code>async function nativePlan(ctx:ComponentContext,p:Profile,native:MapValue):Promise&lt;string&#91;&#93;&gt;{</code> |
 | `ProcessIdentity` | type | 107 | <code>type ProcessIdentity={pid:number;start_time:string;kernel_boot_id:string;pgid:number};</code> |
 | `hostIdentity` | function | 108 | <code>function hostIdentity(v:unknown):ProcessIdentity{</code> |
 | `hostRequest` | function | 113 | <code>async function hostRequest(ctx:ComponentContext,request:MapValue):Promise&lt;MapValue&gt;{</code> |
-| `finish` | function | 122 | <code>const finish=(error:Error&#124;null,result?:MapValue)=&gt;{if(finished)return;finished=true;client.destroy();if(error)reject(error);else resolve(result!);};</code> |
 | `sealPlan` | function | 138 | <code>async function sealPlan(ctx:ComponentContext,body:MapValue):Promise&lt;{plan_path:string;plan_digest:string}&gt;{</code> |
 | `createComponent` | function | 151 | <code>export function createComponent(ctx:ComponentContext):Component{</code> |
-| `action` | function | 153 | <code>const action=(fn:(v:MapValue,i:InvocationContext)=&gt;Promise&lt;unknown&gt;)=&gt;async(v:unknown,c:ComponentContext)=&gt;{assertInvocation(c.invocation);if(!object(v))agentError('AGENT_INPUT_INVALID');if(!&#91;'OPERATO…</code> |
-| `plan` | object | 198 | <code>const plan={schema_version:1,purpose:'MAIN_SUPERVISOR',launch_id:id,session_id:v.session_id,run_id:run,organisation_id:org,leader_generation:v.leader_generation,package_id:v.package_id,package_generat…</code> |
 
 ## services/hyperfide/src/artifacts/adoption.ts
 
@@ -1153,21 +861,13 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `ArtifactAdoption` | class | 52 | <code>export class ArtifactAdoption{</code> |
 | `constructor` | method | 53 | <code>constructor(private readonly context:Context){}</code> |
 | `targetActor` | method | 54 | <code>private async targetActor(tx:PrimaryTransaction,token:ComputeToken,actor:Invocation):Promise&lt;void&gt;{</code> |
-| `scope` | object | 66 | <code>const scope={organisation_id:p.organisation_id,run_id:p.run_id},leader=await leadership(tx,scope);</code> |
 | `authority` | method | 72 | <code>private authority(request:Request):Invocation{</code> |
 | `transaction` | method | 79 | <code>private async transaction&lt;T&gt;(actor:Invocation,body:(tx:PrimaryTransaction)=&gt;Promise&lt;T&gt;,identityOnly=false):Promise&lt;T&gt;{</code> |
-| `guard` | action | 81 | <code>return this.context.resources.gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:actor.signal,guard:async tx=&gt;{await (identityOnly?readSemanticDisposition:writeSemanticDisposition)(tx…</code> |
 | `checkpoint` | method | 83 | <code>private async checkpoint(tx:PrimaryTransaction,request:Request):Promise&lt;Checkpoint&gt;{</code> |
 | `prior` | method | 90 | <code>private async prior(tx:PrimaryTransaction,actor:Invocation,payload:string):Promise&lt;Record&lt;string,unknown&gt;&#124;undefined&gt;{</code> |
 | `adopt` | method | 95 | <code>async adopt(input:unknown,commit:boolean):Promise&lt;unknown&gt;{</code> |
-| `compatibility` | object | 130 | <code>const compatibility={recipes:&#91;sourceOutcome,session,environment&#93;,source_packet_digest:source.input_packet_digest,target_packet_digest:target.input_packet_digest,source_preparation_digest:source.prepar…</code> |
-| `provenance` | object | 131 | <code>const provenance={authority_actor_id:actor.principal.actor_id,source_checkpoint_id:source.id,source_attempt_id:source.attempt_id,source_generation:source.attempt_generation,source_artifact_id:source.a…</code> |
 | `registerCheckpoint` | method | 137 | <code>async registerCheckpoint(input:unknown,stale:boolean):Promise&lt;unknown&gt;{</code> |
-| `contextIds` | object | 140 | <code>const contextIds={dependency:uuid(contextInput.dependency_artifact_id),summary:uuid(contextInput.summary_artifact_id),findings:uuid(contextInput.findings_artifact_id)};</code> |
-| `scope` | object | 143 | <code>const t=token as unknown as Record&lt;string,unknown&gt;,scope={organisation_id:uuid(t.organisation_id),run_id:uuid(t.run_id)};</code> |
-| `prior` | function | 147 | <code>const prior=async(tx:PrimaryTransaction)=&gt;{</code> |
 | `inspectCheckpoint` | method | 234 | <code>async inspectCheckpoint(input:unknown):Promise&lt;unknown&gt;{</code> |
-| `scope` | object | 236 | <code>const scope={organisation_id:uuid(value.organisation_id),run_id:uuid(value.run_id)};</code> |
 | `ArtifactAdoptionCapability` | interface | 253 | <code>export interface ArtifactAdoptionCapability{</code> |
 | `adopt` | method | 254 | <code>adopt(input:unknown,context:ComponentContext&#124;InvocationContext):Promise&lt;unknown&gt;;</code> |
 | `validate` | method | 255 | <code>validate(input:unknown,context:ComponentContext&#124;InvocationContext):Promise&lt;unknown&gt;;</code> |
@@ -1176,17 +876,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `inspectCheckpoint` | method | 258 | <code>inspectCheckpoint(input:unknown,context:ComponentContext&#124;InvocationContext):Promise&lt;unknown&gt;;</code> |
 | `isArtifactAdoptionCapability` | function | 260 | <code>export function isArtifactAdoptionCapability(value:unknown):value is ArtifactAdoptionCapability{</code> |
 | `createComponent` | function | 264 | <code>export function createComponent(context:ComponentContext):Component{</code> |
-| `bind` | function | 268 | <code>const bind=(request:ComponentContext&#124;InvocationContext):ArtifactAdoption=&gt;{</code> |
-| `adopt` | action | 273 | <code>adopt:(input:unknown,request:ComponentContext&#124;InvocationContext)=&gt;bind(request).adopt(input,true),</code> |
-| `validate` | action | 274 | <code>validate:(input:unknown,request:ComponentContext&#124;InvocationContext)=&gt;bind(request).adopt(input,false),</code> |
-| `registerCheckpoint` | action | 275 | <code>registerCheckpoint:(input:unknown,request:ComponentContext&#124;InvocationContext)=&gt;bind(request).registerCheckpoint(input,false),</code> |
-| `importCheckpoint` | action | 276 | <code>importCheckpoint:(input:unknown,request:ComponentContext&#124;InvocationContext)=&gt;bind(request).registerCheckpoint(input,true),</code> |
-| `inspectCheckpoint` | action | 277 | <code>inspectCheckpoint:(input:unknown,request:ComponentContext&#124;InvocationContext)=&gt;bind(request).inspectCheckpoint(input)</code> |
-| `'artifact.adoption.validate'` | action | 280 | <code>'artifact.adoption.validate':(input:unknown,request:ComponentContext&#124;InvocationContext)=&gt;capability.validate(input,request),</code> |
-| `'artifact.adoption.adopt'` | action | 281 | <code>'artifact.adoption.adopt':(input:unknown,request:ComponentContext&#124;InvocationContext)=&gt;capability.adopt(input,request),</code> |
-| `'artifact.checkpoint.register'` | action | 282 | <code>'artifact.checkpoint.register':(input:unknown,request:ComponentContext&#124;InvocationContext)=&gt;capability.registerCheckpoint(input,request),</code> |
-| `'artifact.checkpoint.import'` | action | 283 | <code>'artifact.checkpoint.import':(input:unknown,request:ComponentContext&#124;InvocationContext)=&gt;capability.importCheckpoint(input,request),</code> |
-| `'artifact.checkpoint.inspect'` | action | 284 | <code>'artifact.checkpoint.inspect':(input:unknown,request:ComponentContext&#124;InvocationContext)=&gt;capability.inspectCheckpoint(input,request)</code> |
 
 ## services/hyperfide/src/artifacts/checkpoint-recipes.ts
 
@@ -1218,9 +907,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `CheckpointContinuation` | interface | 11 | <code>export interface CheckpointContinuation{</code> |
 | `fail` | function | 20 | <code>function fail():never{throw new FoundationError('CHECKPOINT_CONTINUATION_UNAVAILABLE','Registered immutable checkpoint context is unavailable');}</code> |
 | `readCheckpointContinuation` | function | 24 | <code>export async function readCheckpointContinuation(tx:PrimaryTransaction,input:{organisation_id:string;run_id:string;checkpoint_id:string},invocation:InvocationContext):Promise&lt;CheckpointContinuation&gt;{</code> |
-| `scope` | object | 26 | <code>const scope={organisation_id:input.organisation_id,run_id:input.run_id,checkpoint_id:input.checkpoint_id};</code> |
-| `byId` | variable | 35 | <code>const byId=new Map(artifacts.map(row=&gt;&#91;row.id,row&#93;));</code> |
-| `context` | object | 37 | <code>const context:Record&lt;string,CheckpointArtifactBinding&gt;={};</code> |
 
 ## services/hyperfide/src/artifacts/destruction.ts
 
@@ -1230,7 +916,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | --- | --- | ---: | --- |
 | `uuid` | function | 8 | <code>function uuid(value:string):void{if(typeof value!=='string'&#124;&#124;!UUID.test(value))throw new FoundationError('DESTRUCTION_SCOPE_INVALID','Canonical destruction scope is required');}</code> |
 | `readArtifactDestructionPreflight` | function | 11 | <code>export const readArtifactDestructionPreflight:ProviderDestructionPreflight=async(tx,input)=&gt;{</code> |
-| `binding` | object | 26 | <code>const binding={schema_version:1,kind:'NEVER_WORKED_SANDBOX',organisation_id:input.organisation_id,run_id:input.run_id,sandbox_id:input.sandbox_id,boot_generation:input.boot_generation,boot_id:row.boot…</code> |
 | `registerArtifactDestructionPreflight` | function | 29 | <code>export function registerArtifactDestructionPreflight(context:ComponentContext):void{</code> |
 
 ## services/hyperfide/src/artifacts/objects.ts
@@ -1259,36 +944,23 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `decimal` | function | 38 | <code>function decimal(value:unknown,max=BigInt(MAX_OBJECT)):string{</code> |
 | `retention` | function | 44 | <code>function retention(value:Record&lt;string,unknown&gt;):Retention{</code> |
 | `configuration` | function | 51 | <code>function configuration(env:Readonly&lt;NodeJS.ProcessEnv&gt;):Config{</code> |
-| `required` | function | 53 | <code>const required=(name:string)=&gt;{const value=env&#91;name&#93;;if(!value&#124;&#124;value.length&gt;16384&#124;&#124;/&#91;&#92;x00-&#92;x1f&#92;x7f&#93;/.test(value))throw new Error();return value;};</code> |
-| `endpoint` | variable | 54 | <code>const endpoint=new URL(required('HF_ARTIFACT_S3_ENDPOINT'));</code> |
-| `runs` | variable | 63 | <code>const runs=new Set(runValues.map(uuid));if(runs.size!==runValues.length)throw new Error();</code> |
 | `keyOf` | function | 68 | <code>function keyOf(scope:Scope,value:string,manifest=false):string{return 'hyperfide/v1/'+scope.organisation_id+'/'+scope.run_id+(manifest?'/manifests':'')+'/sha256/'+value.slice(7);}</code> |
 | `hmac` | function | 69 | <code>function hmac(key:Buffer&#124;string,value:string):Buffer{return createHmac('sha256',key).update(value).digest();}</code> |
 | `encode` | function | 70 | <code>function encode(value:string):string{return encodeURIComponent(value).replace(/&#91;!'()&#42;&#93;/g,c=&gt;'%'+c.charCodeAt(0).toString(16).toUpperCase());}</code> |
 | `S3` | class | 72 | <code>class S3 {</code> |
 | `constructor` | method | 73 | <code>constructor(private readonly config:Config,private readonly signal:AbortSignal){}</code> |
 | `request` | method | 74 | <code>private async request(method:'GET'&#124;'PUT'&#124;'DELETE',key:string,body?:Buffer,etag?:string):Promise&lt;Response&gt;{</code> |
-| `url` | variable | 77 | <code>const url=new URL(pathname,c.endpoint),payload=createHash('sha256').update(body??Buffer.alloc(0)).digest('hex');</code> |
-| `headers` | object | 78 | <code>const headers:Record&lt;string,string&gt;={'host':url.host,'x-amz-content-sha256':payload,'x-amz-date':now};</code> |
 | `put` | method | 90 | <code>async put(key:string,bytes:Buffer):Promise&lt;'ACKNOWLEDGED'&#124;'EXISTS'&#124;'UNKNOWN'&gt;{</code> |
 | `observe` | method | 99 | <code>async observe(key:string,expectedDigest:string,size:string):Promise&lt;Observation&gt;{</code> |
 | `destroy` | method | 121 | <code>async destroy(key:string,expectedDigest:string,size:string):Promise&lt;'ABSENT'&#124;'UNKNOWN'&gt;{</code> |
-| `iso` | function | 137 | <code>function iso(value:Date&#124;string&#124;null):string&#124;null{return value===null?null:new Date(value).toISOString();}</code> |
-| `publicArtifact` | function | 138 | <code>function publicArtifact(row:Artifact):unknown{return {artifact_id:row.id,organisation_id:row.organisation_id,run_id:row.run_id,digest:row.digest,size_bytes:row.size_bytes,storage_backend:row.storage_b…</code> |
-| `receipt` | function | 139 | <code>function receipt(row:Artifact):unknown{</code> |
-| `binding` | object | 141 | <code>const binding={schema_version:1,organisation_id:row.organisation_id,run_id:row.run_id,artifact_id:row.id,digest:row.digest,size_bytes:row.size_bytes,storage_backend:row.storage_backend,storage_key:row…</code> |
 | `assertCompleteArtifactReferences` | function | 148 | <code>export async function assertCompleteArtifactReferences(tx:PrimaryTransaction,scope:ArtifactScope,references:readonly ArtifactReference&#91;&#93;):Promise&lt;readonly Readonly&lt;ArtifactReceipt&gt;&#91;&#93;&gt;{</code> |
-| `rows` | variable | 156 | <code>const rows=new Map(result.rows.map(row=&gt;&#91;row.id,row&#93;));</code> |
 | `assertCompleteArtifactReference` | function | 167 | <code>export async function assertCompleteArtifactReference(tx:PrimaryTransaction,scope:ArtifactScope,reference:ArtifactReference):Promise&lt;Readonly&lt;ArtifactReceipt&gt;&gt;{</code> |
-| `envelope` | function | 171 | <code>function envelope(row:Artifact,availability:'VERIFIED'&#124;'ABSENT'&#124;'UNKNOWN',extra:Record&lt;string,unknown&gt;={}):Record&lt;string,unknown&gt;{</code> |
 | `ArtifactStore` | class | 174 | <code>export class ArtifactStore{</code> |
 | `constructor` | method | 176 | <code>constructor(private readonly context:RequestContext){}</code> |
 | `config` | method | 177 | <code>private config():Config{return this.configValue??=configuration(this.context.env);}</code> |
 | `scope` | method | 178 | <code>private scope(value:Record&lt;string,unknown&gt;):Scope{</code> |
-| `scope` | object | 179 | <code>const scope={organisation_id:uuid(value.organisation_id),run_id:uuid(value.run_id)},config=this.config();</code> |
 | `backend` | method | 188 | <code>private backend():S3{return new S3(this.config(),AbortSignal.any(&#91;this.context.signal,this.context.invocation?.signal??this.context.signal&#93;));}</code> |
 | `transaction` | method | 189 | <code>private async transaction&lt;T&gt;(operation:(client:PrimaryTransaction)=&gt;Promise&lt;T&gt;,mode:'READ'&#124;'WRITE'='WRITE'):Promise&lt;T&gt;{</code> |
-| `guard` | action | 192 | <code>return this.context.resources.gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:invocation.signal,guard:async tx=&gt;{await (mode==='WRITE'?writeSemanticDisposition:readSemanticDisposit…</code> |
 | `load` | method | 198 | <code>private async load(scope:Scope,id:string,client?:QuerySession):Promise&lt;Artifact&gt;{</code> |
 | `same` | method | 205 | <code>private same(row:Artifact,size:string,policy:Retention,manifest:boolean):void{</code> |
 | `intent` | method | 209 | <code>private async intent(scope:Scope,value:string,size:string,policy:Retention,manifest:boolean):Promise&lt;{row:Artifact;created:boolean}&gt;{</code> |
@@ -1312,9 +984,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `isArtifactStoreCapability` | function | 389 | <code>export function isArtifactStoreCapability(value:unknown):value is ArtifactStoreCapability{return !!value&amp;&amp;typeof value==='object'&amp;&amp;'invoke' in value&amp;&amp;typeof value.invoke==='function';}</code> |
 | `createArtifactStore` | function | 390 | <code>export function createArtifactStore(context:ComponentContext):ArtifactStore{return new ArtifactStore(context);}</code> |
 | `createComponent` | function | 391 | <code>export function createComponent(context:ComponentContext):Component{</code> |
-| `close` | action | 393 | <code>return {apiVersion:1,actions,capabilities:{'artifact.backend.v1':Object.freeze({destroyTombstoned:(input:unknown,ctx:ComponentContext)=&gt;store.destroyTombstoned(input,ctx)}),'artifact.store.v1':Object.…</code> |
-| `destroyTombstoned` | action | 393 | <code>return {apiVersion:1,actions,capabilities:{'artifact.backend.v1':Object.freeze({destroyTombstoned:(input:unknown,ctx:ComponentContext)=&gt;store.destroyTombstoned(input,ctx)}),'artifact.store.v1':Object.…</code> |
-| `invoke` | action | 393 | <code>return {apiVersion:1,actions,capabilities:{'artifact.backend.v1':Object.freeze({destroyTombstoned:(input:unknown,ctx:ComponentContext)=&gt;store.destroyTombstoned(input,ctx)}),'artifact.store.v1':Object.…</code> |
 
 ## services/hyperfide/src/artifacts/retention.ts
 
@@ -1343,26 +1012,17 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `constructor` | method | 32 | <code>constructor(private readonly context:Context){}</code> |
 | `actor` | method | 33 | <code>private actor():Invocation{const actor=this.context.invocation;assertInvocation(actor);return actor;}</code> |
 | `scope` | method | 34 | <code>private scope(value:Row):Scope{const scope={organisation_id:uuid(value.organisation_id),run_id:uuid(value.run_id)},actor=this.actor();if(scope.organisation_id!==actor.principal.organisation_id&#124;&#124;scope.…</code> |
-| `scope` | object | 34 | <code>private scope(value:Row):Scope{const scope={organisation_id:uuid(value.organisation_id),run_id:uuid(value.run_id)},actor=this.actor();if(scope.organisation_id!==actor.principal.organisation_id&#124;&#124;scope.…</code> |
 | `policy` | method | 35 | <code>private async policy(expected:unknown):Promise&lt;Policy&gt;{</code> |
-| `limits` | object | 42 | <code>const ages=fields(value.minimum_age_ms,classes),limits:Record&lt;string,number&#124;null&gt;={};</code> |
-| `guard` | action | 48 | <code>private async transaction&lt;T&gt;(body:(tx:PrimaryTransaction)=&gt;Promise&lt;T&gt;,mode:'READ'&#124;'WRITE'='WRITE'):Promise&lt;T&gt;{const actor=this.actor();return this.context.resources.gateway.withPrimaryTransaction({tim…</code> |
 | `transaction` | method | 48 | <code>private async transaction&lt;T&gt;(body:(tx:PrimaryTransaction)=&gt;Promise&lt;T&gt;,mode:'READ'&#124;'WRITE'='WRITE'):Promise&lt;T&gt;{const actor=this.actor();return this.context.resources.gateway.withPrimaryTransaction({tim…</code> |
 | `artifact` | method | 49 | <code>private async artifact(tx:PrimaryTransaction,scope:Scope,id:string):Promise&lt;Row&gt;{const result=await tx.query('SELECT &#42;,size_bytes::text,state_version::text,clock_timestamp() AS db_now FROM hyperfide.a…</code> |
 | `blockers` | method | 50 | <code>private async blockers(tx:PrimaryTransaction,scope:Scope,row:Row,policy:Policy):Promise&lt;string&#91;&#93;&gt;{</code> |
-| `queries` | object | 57 | <code>const queries:Record&lt;string,string&gt;={</code> |
 | `otherReferences` | method | 74 | <code>private async otherReferences(tx:PrimaryTransaction,row:Row):Promise&lt;string&#91;&#93;&gt;{</code> |
-| `known` | variable | 78 | <code>const known=new Set(&#91;'artifact_dependencies','checkpoints','evidence','evidence_artifacts','parse_blobs','artifact_adoptions','artifact_holds','artifact_gc_operations','artifact_retention_events','che…</code> |
-| `quote` | function | 79 | <code>const quote=(name:string)=&gt;'"'+name.replaceAll('"','""')+'"',reasons:string&#91;&#93;=&#91;&#93;;</code> |
 | `result` | method | 90 | <code>private result(row:Row):unknown{return {operation:row,current_object_absent:row.state==='ABSENT',cleanup_debt:&#91;'INTENT','REQUESTED','UNKNOWN','FAILED'&#93;.includes(row.state),physical_version_erasure:'NO…</code> |
 | `inspect` | method | 91 | <code>private async inspect(input:unknown):Promise&lt;unknown&gt;{const value=fields(input,&#91;'organisation_id','run_id','artifact_id','policy_digest'&#93;),scope=this.scope(value),policy=await this.policy(value.policy…</code> |
 | `reference` | method | 92 | <code>private async reference(tx:PrimaryTransaction,scope:Scope,kind:string,id:string):Promise&lt;void&gt;{</code> |
-| `tables` | object | 93 | <code>const tables:Record&lt;string,string&gt;={EVIDENCE:'evidence',FINDING:'findings',PUBLICATION:'publication_intents',RECOVERY:'checkpoints',ADOPTION:'artifact_adoptions'};</code> |
 | `hold` | method | 97 | <code>private async hold(input:unknown):Promise&lt;unknown&gt;{</code> |
 | `release` | method | 107 | <code>private async release(input:unknown):Promise&lt;unknown&gt;{</code> |
 | `changePolicy` | method | 121 | <code>private async changePolicy(input:unknown):Promise&lt;unknown&gt;{</code> |
-| `after` | object | 128 | <code>const before={retention_class:row.retention_class,retention_until:row.retention_until,retention_hold:row.retention_hold},after={retention_class:value.retention_class,retention_until:until,retention_ho…</code> |
-| `before` | object | 128 | <code>const before={retention_class:row.retention_class,retention_until:row.retention_until,retention_hold:row.retention_hold},after={retention_class:value.retention_class,retention_until:until,retention_ho…</code> |
 | `advance` | method | 133 | <code>private async advance(scope:Scope,operation:Row,policy:Policy):Promise&lt;Row&gt;{</code> |
 | `execute` | method | 149 | <code>private async execute(scope:Scope,operation:Row,policy:Policy):Promise&lt;unknown&gt;{</code> |
 | `collect` | method | 168 | <code>private async collect(input:unknown):Promise&lt;unknown&gt;{</code> |
@@ -1380,14 +1040,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `Queryable` | type | 7 | <code>export type Queryable=PrimaryClient;</code> |
 | `CoverageScope` | interface | 8 | <code>export interface CoverageScope{organisation_id:string;run_id:string}</code> |
 | `inspectCoverage` | function | 10 | <code>export async function inspectCoverage(db:Queryable,s:CoverageScope,custodyId:string):Promise&lt;Data&gt;{</code> |
-| `seen` | variable | 49 | <code>const seen=new Set&lt;string&gt;();let complete=true;</code> |
 | `inspect` | function | 127 | <code>async function inspect(ctx:ComponentContext,raw:unknown):Promise&lt;Data&gt;{</code> |
 | `judgement` | function | 131 | <code>async function judgement(ctx:ComponentContext,raw:unknown):Promise&lt;Data&gt;{</code> |
 | `accept` | function | 172 | <code>async function accept(ctx:ComponentContext,raw:unknown):Promise&lt;Data&gt;{</code> |
 | `createComponent` | function | 205 | <code>export function createComponent(ctx:ComponentContext):Component{</code> |
-| `'qualification.coverage.inspect'` | action | 207 | <code>'qualification.coverage.inspect':(raw,requestContext)=&gt;inspect(requestContext,raw),</code> |
-| `'qualification.review.record'` | action | 208 | <code>'qualification.review.record':(raw,requestContext)=&gt;judgement(requestContext,raw),</code> |
-| `'qualification.accept'` | action | 209 | <code>'qualification.accept':(raw,requestContext)=&gt;accept(requestContext,raw)</code> |
 
 ## services/hyperfide/src/assurance/executor.ts
 
@@ -1414,32 +1070,16 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `qualificationOutcome` | function | 215 | <code>export function qualificationOutcome(required:readonly string&#91;&#93;,results:readonly Data&#91;&#93;,sourceObjectId:string):{outcome:'PASS'&#124;'FAIL';unmet:Data&#91;&#93;}{</code> |
 | `assertSnapshotCurrent` | function | 232 | <code>export function assertSnapshotCurrent(admitted:{policy:unknown;inputs:unknown},current:{policy:unknown;inputs:unknown}):void{</code> |
 | `runRegisteredChecks` | function | 237 | <code>export async function runRegisteredChecks(ctx:ComponentContext,job:Data,snapshot:Data):Promise&lt;Data&gt;{</code> |
-| `leaseAbort` | variable | 243 | <code>const leaseAbort=new AbortController(),signal=AbortSignal.any(&#91;invocation(ctx).signal,leaseAbort.signal&#93;);</code> |
-| `plan` | object | 263 | <code>const plan={session_id:observed.runner_session_id,operation_id:operationId,argv:check.argv,cwd:'.',</code> |
-| `output` | object | 288 | <code>const output={stdout:await uploadBytes(ctx,s,stdout),stderr:await uploadBytes(ctx,s,stderr)};</code> |
 | `execute` | function | 310 | <code>async function execute(ctx:ComponentContext,raw:unknown):Promise&lt;Data&gt;{</code> |
 | `verifyStoredReceiptArtifacts` | function | 371 | <code>export async function verifyStoredReceiptArtifacts(ctx:ComponentContext,s:&#91;string,string&#93;,receipt:Data):Promise&lt;void&gt;{</code> |
-| `seen` | variable | 372 | <code>const seen=new Set&lt;string&gt;();</code> |
 | `verifyReceiptRecordArtifacts` | function | 385 | <code>export async function verifyReceiptRecordArtifacts(ctx:ComponentContext,s:&#91;string,string&#93;,record:Data):Promise&lt;void&gt;{</code> |
 | `inspectExecutionReceipt` | function | 393 | <code>export async function inspectExecutionReceipt(db:PrimaryClient,</code> |
 | `inspectExecution` | function | 417 | <code>export async function inspectExecution(ctx:ComponentContext,raw:unknown):Promise&lt;Data&gt;{</code> |
 | `classifyLegacyClaim` | function | 424 | <code>export function classifyLegacyClaim(claim:unknown):Data{</code> |
-| `signals` | variable | 425 | <code>const signals=new Set&lt;string&gt;();</code> |
-| `visit` | function | 426 | <code>const visit=(value:unknown,key:string,depth:number):void=&gt;{</code> |
 | `importHistory` | function | 441 | <code>async function importHistory(ctx:ComponentContext,raw:unknown):Promise&lt;Data&gt;{</code> |
 | `inspectQualificationHistory` | function | 452 | <code>export async function inspectQualificationHistory(db:PrimaryClient,s:{organisation_id:string;run_id:string},taskId:string):Promise&lt;Data&gt;{</code> |
-| `signals` | variable | 464 | <code>const signals=new Set&lt;string&gt;();</code> |
 | `inspectHistory` | function | 472 | <code>async function inspectHistory(ctx:ComponentContext,raw:unknown):Promise&lt;Data&gt;{</code> |
 | `createComponent` | function | 477 | <code>export function createComponent(ctx:ComponentContext):Component &amp; {capabilities:Record&lt;string,unknown&gt;}{</code> |
-| `close` | action | 479 | <code>return {apiVersion:1,close:async()=&gt;{unregister?.();},capabilities:{'assurance.execution.v1':Object.freeze({inspectExecutionReceipt})},actions:{</code> |
-| `'qualification.execution.inspect'` | action | 480 | <code>'qualification.execution.inspect':(raw,requestContext)=&gt;inspectExecution(requestContext,raw),</code> |
-| `'qualification.preparation.plan'` | action | 481 | <code>'qualification.preparation.plan':(raw,requestContext)=&gt;planResultPreparation(requestContext,raw),</code> |
-| `'qualification.preparation.inspect'` | action | 482 | <code>'qualification.preparation.inspect':(raw,requestContext)=&gt;inspectResultPreparation(requestContext,raw),</code> |
-| `'qualification.job.assign'` | action | 483 | <code>'qualification.job.assign':(raw,requestContext)=&gt;assignJob(requestContext,raw),</code> |
-| `'qualification.job.claim'` | action | 484 | <code>'qualification.job.claim':(raw,requestContext)=&gt;claimJob(requestContext,raw),</code> |
-| `'qualification.execute'` | action | 485 | <code>'qualification.execute':(raw,requestContext)=&gt;execute(requestContext,raw),</code> |
-| `'qualification.history.import'` | action | 486 | <code>'qualification.history.import':(raw,requestContext)=&gt;importHistory(requestContext,raw),</code> |
-| `'qualification.history.inspect'` | action | 487 | <code>'qualification.history.inspect':(raw,requestContext)=&gt;inspectHistory(requestContext,raw)</code> |
 
 ## services/hyperfide/src/assurance/preparation.ts
 
@@ -1450,30 +1090,17 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `ResultPreparationContext` | interface | 15 | <code>export interface ResultPreparationContext {</code> |
 | `effectiveResultProjection` | function | 24 | <code>export function effectiveResultProjection(result:Data):EffectiveResultSource {</code> |
 | `loadResultPreparationContext` | function | 33 | <code>export async function loadResultPreparationContext(tx:PrimaryTransaction,</code> |
-| `accepted_context` | object | 70 | <code>const accepted_context={</code> |
-| `body` | object | 76 | <code>const body={organisation_id,run_id,job_id,custody_id:result.custody_id,job_state:job.state,job_lease_generation:String(job.lease_generation),result,</code> |
 | `rederiveResultProfile` | function | 86 | <code>export function rederiveResultProfile(context:ResultPreparationContext,</code> |
 | `inspectEffectiveResultInputs` | function | 103 | <code>export async function inspectEffectiveResultInputs(tx:PrimaryClient,</code> |
-| `roleContext` | object | 139 | <code>const roleContext={execution_profile:actualAccepted.execution_profile,resource_requirements:accepted.resource_requirements,policy_digest:digest(actualAccepted.policy_digest)};</code> |
-| `seen` | variable | 154 | <code>const seen=new Set&lt;string&gt;();</code> |
 | `registerQualificationInputReader` | function | 171 | <code>export function registerQualificationInputReader(ctx:ComponentContext):()=&gt;void {</code> |
-| `scope` | object | 178 | <code>const principal=i.principal,scope={organisation_id:principal.organisation_id,run_id:principal.run_id};</code> |
-| `scope` | object | 221 | <code>const scope={organisation_id:i.principal.organisation_id,run_id:i.principal.run_id};</code> |
-| `supplied` | object | 230 | <code>const supplied={...plan,staging:plan.staging.filter(reference=&gt;reference.role!=='readiness-context')};</code> |
 | `buildResultPreparationControl` | function | 250 | <code>export async function buildResultPreparationControl(context:ResultPreparationContext,</code> |
-| `control` | object | 258 | <code>const control={schema_version:1,purpose:'RESULT',parent_profile_id:context.parent_profile_id,</code> |
 | `retainResultPreparationControls` | function | 271 | <code>export async function retainResultPreparationControls(ctx:ComponentContext,context:ResultPreparationContext,</code> |
-| `reference` | function | 275 | <code>const reference=(role:string,value:Data)=&gt;({</code> |
 | `resultProfileId` | function | 288 | <code>function resultProfileId(scope:&#91;string,string&#93;,job_id:string,request_id:string):string {</code> |
 | `recordedPlan` | function | 293 | <code>function recordedPlan(row:Data,replayed:boolean):Data {</code> |
 | `planResultPreparation` | function | 299 | <code>export async function planResultPreparation(ctx:ComponentContext,raw:unknown):Promise&lt;Data&gt; {</code> |
-| `seen` | variable | 328 | <code>const seen=new Set&lt;string&gt;(),sources:Data&#91;&#93;=&#91;&#93;;</code> |
-| `plan` | object | 370 | <code>const plan={operation_id:v.request_id,session_id:v.session_id,reservation_id:v.reservation_id,repository_id:context.result.repository_id,</code> |
 | `inspectResultPreparation` | function | 386 | <code>export async function inspectResultPreparation(ctx:ComponentContext,raw:unknown):Promise&lt;Data&gt; {</code> |
 | `inspectResultPreparationIntent` | function | 399 | <code>export async function inspectResultPreparationIntent(tx:PrimaryClient,</code> |
 | `qualificationPreparationAuthorityReader` | function | 429 | <code>export function qualificationPreparationAuthorityReader(ctx:ComponentContext) {</code> |
-| `scope` | object | 434 | <code>const scope={organisation_id:i.principal.organisation_id,run_id:i.principal.run_id};</code> |
-| `baseline` | object | 457 | <code>const baseline:Data={};</code> |
 
 ## services/hyperfide/src/assurance/submission.ts
 
@@ -1496,12 +1123,9 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `query` | method | 52 | <code>export interface PrimaryClient {query&lt;R extends pg.QueryResultRow=any&gt;(text:string,values?:readonly unknown&#91;&#93;):Promise&lt;pg.QueryResult&lt;R&gt;&gt;}</code> |
 | `assuranceBarrier` | function | 53 | <code>export async function assuranceBarrier(db:PrimaryClient,s:{organisation_id:string;run_id:string},mode:'SHARED'&#124;'EXCLUSIVE'):Promise&lt;void&gt;{</code> |
 | `transaction` | function | 64 | <code>export async function transaction&lt;T&gt;(ctx:ComponentContext,operation:(client:PrimaryClient)=&gt;Promise&lt;T&gt;,identityOnly=false,mode:'READ'&#124;'WRITE'='WRITE'):Promise&lt;T&gt;{</code> |
-| `guard` | action | 69 | <code>return await gateway.withPrimaryTransaction({timeoutMs:30000,maxRetries:0,signal:inv.signal,guard:async(tx:PrimaryClient)=&gt;{await assuranceBarrier(tx,{organisation_id:inv.principal.organisation_id,run…</code> |
 | `executionGate` | function | 78 | <code>export async function executionGate(ctx:ComponentContext,db:PrimaryClient,s:&#91;string,string&#93;,operation:'ADMISSION'&#124;'RENEWAL'&#124;'ADVANCE'&#124;'CLEANUP',options:Data={}):Promise&lt;void&gt;{</code> |
 | `taskLock` | function | 84 | <code>export async function taskLock(client:PrimaryClient,s:&#91;string,string&#93;,taskId:string):Promise&lt;Data&gt;{</code> |
 | `loadPolicy` | function | 91 | <code>export async function loadPolicy(ctx:ComponentContext,task:Data,client:PrimaryClient):Promise&lt;Data&gt;{</code> |
-| `clauses` | variable | 111 | <code>const ids=new Set&lt;string&gt;(),clauses=new Set&lt;string&gt;();</code> |
-| `ids` | variable | 111 | <code>const ids=new Set&lt;string&gt;(),clauses=new Set&lt;string&gt;();</code> |
 | `artifact` | function | 139 | <code>export async function artifact(ctx:ComponentContext,action:string,input:Data):Promise&lt;Data&gt;{</code> |
 | `completeArtifact` | function | 150 | <code>export async function completeArtifact(ctx:ComponentContext,s:&#91;string,string&#93;,id:string):Promise&lt;Data&gt;{</code> |
 | `custodyLock` | function | 158 | <code>export async function custodyLock(client:PrimaryClient,s:&#91;string,string&#93;,id:string):Promise&lt;Data&gt;{</code> |
@@ -1511,23 +1135,15 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `acceptedSourceScope` | function | 188 | <code>function acceptedSourceScope(definition:unknown):string&#91;&#93;{</code> |
 | `ownedSourcePath` | function | 199 | <code>function ownedSourcePath(file:string,scopes:string&#91;&#93;):boolean{</code> |
 | `submittedGitFacts` | function | 210 | <code>export async function submittedGitFacts(ctx:ComponentContext,v:Data,policy:Data,workspace:Data,ownedScope:string&#91;&#93;):Promise&lt;Data&gt;{</code> |
-| `environment` | object | 216 | <code>const run=promisify(execFile),environment={PATH:'/usr/local/bin:/usr/bin:/bin',GIT_CONFIG_NOSYSTEM:'1',</code> |
-| `git` | function | 219 | <code>const git=async(args:string&#91;&#93;):Promise&lt;string&gt;=&gt;(await run('git',&#91;'-c','core.hooksPath=/dev/null','-c','core.fsmonitor=false',...args&#93;,</code> |
 | `STALE_COMPUTE_CODES` | variable | 238 | <code>const STALE_COMPUTE_CODES=new Set(&#91;'STALE_COMPUTE','COMPUTE_LEASE_EXPIRED','STALE_SANDBOX_BOOT','STALE_AUTHORITY_EPOCH','COMPUTE_ALLOCATION_INVALID','ACTIVE_SUBMISSION_CUSTODY'&#93;);</code> |
 | `submit` | function | 239 | <code>async function submit(ctx:ComponentContext,raw:unknown):Promise&lt;Data&gt;{</code> |
-| `token` | object | 298 | <code>const token={organisation_id:s&#91;0&#93;,run_id:s&#91;1&#93;,task_id:v.task_id,attempt_id:v.attempt_id,attempt_generation:v.attempt_generation,</code> |
 | `revoke` | function | 359 | <code>async function revoke(ctx:ComponentContext,raw:unknown):Promise&lt;Data&gt;{</code> |
 | `revokeCustodies` | function | 372 | <code>export async function revokeCustodies(db:PrimaryClient,s:{organisation_id:string;run_id:string},submissionIds:string&#91;&#93;,</code> |
 | `fenceQualificationJobs` | function | 392 | <code>export async function fenceQualificationJobs(db:PrimaryClient,s:{organisation_id:string;run_id:string},</code> |
 | `inspectSubmittedResult` | function | 408 | <code>export async function inspectSubmittedResult(db:PrimaryClient,scopeValue:{organisation_id:string;run_id:string},</code> |
-| `binding` | object | 424 | <code>const binding={organisation_id:s&#91;0&#93;,run_id:s&#91;1&#93;,custody_id:id,custody_generation:String(row.custody_generation),</code> |
 | `rawDigest` | function | 432 | <code>export function rawDigest(bytes:Uint8Array):string{return 'sha256:'+createHash('sha256').update(bytes).digest('hex');}</code> |
 | `retainArtifactBytes` | function | 433 | <code>export async function retainArtifactBytes(ctx:ComponentContext,s:&#91;string,string&#93;,bytes:Buffer):Promise&lt;Data&gt;{</code> |
-| `common` | object | 435 | <code>const common={organisation_id:s&#91;0&#93;,run_id:s&#91;1&#93;,retention_class:'RUN',retention_until:null,retention_hold:false};</code> |
 | `createComponent` | function | 449 | <code>export function createComponent(ctx:ComponentContext):Component &amp; {capabilities:Record&lt;string,unknown&gt;}{</code> |
-| `'submission.submit'` | action | 451 | <code>'submission.submit':(input,requestContext)=&gt;submit(requestContext,input),</code> |
-| `'submission.revoke'` | action | 452 | <code>'submission.revoke':(input,requestContext)=&gt;revoke(requestContext,input),</code> |
-| `'submission.inspect'` | action | 453 | <code>'submission.inspect':async(raw,requestContext)=&gt;{</code> |
 
 ## services/hyperfide/src/assurance/validity.ts
 
@@ -1541,14 +1157,9 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `inspectValidity` | function | 44 | <code>export async function inspectValidity(db:PrimaryClient,s:CoverageScope,id:string):Promise&lt;Data&gt;{</code> |
 | `inspect` | function | 60 | <code>async function inspect(ctx:ComponentContext,raw:unknown):Promise&lt;Data&gt;{</code> |
 | `freshContext` | function | 64 | <code>async function freshContext(ctx:ComponentContext,db:PrimaryClient,s:&#91;string,string&#93;,c:Data,saved:Data,v:Data):Promise&lt;Data&gt;{</code> |
-| `manifest` | object | 73 | <code>let manifest={...saved.manifest};</code> |
 | `invalidate` | function | 99 | <code>async function invalidate(ctx:ComponentContext,raw:unknown):Promise&lt;Data&gt;{</code> |
-| `after` | object | 124 | <code>const after={...applicable.input_manifest};for(const key of changed)after&#91;key&#93;=v.changes&#91;key&#93;;</code> |
 | `acceptRequalification` | function | 187 | <code>async function acceptRequalification(ctx:ComponentContext,raw:unknown):Promise&lt;Data&gt;{</code> |
 | `createComponent` | function | 257 | <code>export function createComponent(ctx:ComponentContext):Component &amp; {capabilities:Record&lt;string,unknown&gt;}{</code> |
-| `'assurance.validity.inspect'` | action | 259 | <code>'assurance.validity.inspect':(raw,requestContext)=&gt;inspect(requestContext,raw),</code> |
-| `'assurance.invalidate'` | action | 260 | <code>'assurance.invalidate':(raw,requestContext)=&gt;invalidate(requestContext,raw),</code> |
-| `'assurance.requalification.accept'` | action | 261 | <code>'assurance.requalification.accept':(raw,requestContext)=&gt;acceptRequalification(requestContext,raw)</code> |
 
 ## services/hyperfide/src/bootstrap.ts
 
@@ -1558,15 +1169,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | --- | --- | ---: | --- |
 | `privateInput` | function | 12 | <code>async function privateInput(filename:string):Promise&lt;Buffer&gt;{</code> |
 | `recoverCommand` | function | 29 | <code>async function recoverCommand(input:unknown,policy:{deployment_id:string;max_ttl_ms:number;journal_dir:string},env:Readonly&lt;NodeJS.ProcessEnv&gt;,signal?:AbortSignal):Promise&lt;unknown&gt;{</code> |
-| `controller` | variable | 34 | <code>const controller=new AbortController(),stop=()=&gt;controller.abort();</code> |
-| `stop` | function | 34 | <code>const controller=new AbortController(),stop=()=&gt;controller.abort();</code> |
 | `bootstrapCommand` | function | 42 | <code>export async function bootstrapCommand(args:readonly string&#91;&#93;,env:Readonly&lt;NodeJS.ProcessEnv&gt;=Object.freeze({...process.env}),signal?:AbortSignal):Promise&lt;unknown&gt;{</code> |
-| `scope` | object | 59 | <code>const scope:SpecScope={organisation_id:s.organisation_id,project_id:s.project_id,run_id:s.run_id,authority_epoch:s.authority_epoch,root,allowed_actions:s.allowed_actions as string&#91;&#93;};</code> |
-| `controller` | variable | 60 | <code>const controller=new AbortController(),stop=()=&gt;controller.abort();</code> |
-| `stop` | function | 60 | <code>const controller=new AbortController(),stop=()=&gt;controller.abort();</code> |
-| `authorityPolicy` | object | 65 | <code>const authorityPolicy={deployment_id:deployment,max_ttl_ms:Number(ttl),journal_dir:journalDir};</code> |
-| `controller` | variable | 77 | <code>const controller=new AbortController(),stop=()=&gt;controller.abort();process.once('SIGTERM',stop);process.once('SIGINT',stop);</code> |
-| `stop` | function | 77 | <code>const controller=new AbortController(),stop=()=&gt;controller.abort();process.once('SIGTERM',stop);process.once('SIGINT',stop);</code> |
 
 ## services/hyperfide/src/bootstrap_identity.ts
 
@@ -1577,14 +1180,9 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `BootstrapPolicy` | interface | 11 | <code>export interface BootstrapPolicy {deployment_id:string;max_ttl_ms:number;journal_dir:string}</code> |
 | `OperatorBinding` | interface | 12 | <code>export interface OperatorBinding {</code> |
 | `assertBootstrapExternalAuthority` | function | 16 | <code>export async function assertBootstrapExternalAuthority(resources:ServiceResources,policy:BootstrapPolicy,signal?:AbortSignal){</code> |
-| `journal` | variable | 18 | <code>const journal=new FileExternalAuthorityJournal(policy.journal_dir,input=&gt;lookupAuthorityActivation(resources,input));</code> |
 | `assertFreshAttestation` | function | 23 | <code>export async function assertFreshAttestation(tx:AuthorityTransaction,deploymentId:string,epoch:string,attestation:ExternalAuthorityAttestation):Promise&lt;void&gt;{</code> |
 | `binding` | function | 30 | <code>function binding(p:Principal,digest:string,replayed:boolean):OperatorBinding{</code> |
 | `issueOfflineOperator` | function | 36 | <code>export async function issueOfflineOperator(resources:ServiceResources,value:unknown,policy:BootstrapPolicy,signal?:AbortSignal):Promise&lt;OperatorBinding&gt;{</code> |
-| `request` | object | 50 | <code>const request={credential_id:value.credential_id,organisation_id:value.organisation_id,run_id:value.run_id,</code> |
-| `scope` | object | 65 | <code>const scope={deployment_id:policy.deployment_id,organisation_id:String(value.organisation_id),run_id:String(value.run_id),authority_epoch:String(value.deployment_epoch)};</code> |
-| `assertFreshExternal` | function | 70 | <code>const assertFreshExternal=(attestation:ExternalAuthorityAttestation)=&gt;assertFreshAttestation(tx,policy.deployment_id,scope.authority_epoch,attestation);</code> |
-| `assertCurrent` | action | 96 | <code>await assertCurrentPrincipal(tx,principal,{assertCurrent:(currentTx,currentScope)=&gt;assertCurrentAuthority(currentTx,{deployment_id:policy.deployment_id,...currentScope})});</code> |
 
 ## services/hyperfide/src/bootstrap_recovery.ts
 
@@ -1594,9 +1192,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | --- | --- | ---: | --- |
 | `RecoveryReceipt` | interface | 17 | <code>export interface RecoveryReceipt {</code> |
 | `recoverBootstrapOperator` | function | 23 | <code>export async function recoverBootstrapOperator(resources:ServiceResources,value:unknown,policy:BootstrapPolicy,signal?:AbortSignal):Promise&lt;RecoveryReceipt&gt;{</code> |
-| `scope` | object | 39 | <code>const scope={deployment_id:policy.deployment_id,organisation_id:String(value.organisation_id),run_id:String(value.run_id),authority_epoch:String(value.authority_epoch)};</code> |
-| `request` | object | 40 | <code>const request={...scope,recovery_id:value.recovery_id,previous_credential_id:value.previous_credential_id,reason:value.reason,</code> |
-| `assertCurrent` | action | 92 | <code>await assertCurrentPrincipal(tx,principal,{assertCurrent:(currentTx,currentScope)=&gt;assertCurrentAuthority(currentTx,{deployment_id:policy.deployment_id,...currentScope})});</code> |
 
 ## services/hyperfide/src/components/registry.ts
 
@@ -1619,12 +1214,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `constructor` | method | 65 | <code>constructor(private readonly context: StartupContext) {</code> |
 | `resolveCapability` | method | 77 | <code>resolveCapability&lt;T&gt;(id:string,capability:string,validate:(value:unknown)=&gt;value is T):T {</code> |
 | `load` | method | 84 | <code>async load(directory: string, moduleRoot: string): Promise&lt;void&gt; {</code> |
-| `modules` | variable | 88 | <code>const modules = new Map&lt;string, string&gt;();</code> |
-| `actionOwners` | variable | 89 | <code>const actionOwners = new Set&lt;string&gt;();</code> |
-| `visited` | variable | 112 | <code>const visited = new Set&lt;string&gt;(), visiting = new Set&lt;string&gt;();</code> |
-| `visiting` | variable | 112 | <code>const visited = new Set&lt;string&gt;(), visiting = new Set&lt;string&gt;();</code> |
-| `visit` | function | 113 | <code>const visit = (id: string): void =&gt; {</code> |
-| `require` | action | 137 | <code>const dependencies:CapabilityResolver=Object.freeze({require:&lt;T&gt;(dependency:string,capability:string,validate:(value:unknown)=&gt;value is T):T=&gt;{</code> |
 | `describe` | method | 166 | <code>describe(): unknown {</code> |
 | `hasComponent` | method | 170 | <code>hasComponent(id:string):boolean{return this.instances.has(id);}</code> |
 | `installInvocationAuthorizer` | method | 172 | <code>installInvocationAuthorizer(authorize:(invocation:InvocationContext)=&gt;Promise&lt;void&gt;):void {</code> |
@@ -1638,20 +1227,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | Indexed name | Kind | Line | Source declaration |
 | --- | --- | ---: | --- |
 | `protocolLimits` | function | 14 | <code>function protocolLimits(): { request: number; response: number } {</code> |
-| `read` | function | 15 | <code>const read = (name: string): number =&gt; {</code> |
 | `errorValue` | function | 26 | <code>function errorValue(error: unknown): { code: string; message: string } {</code> |
 | `options` | function | 30 | <code>function options(args: string&#91;&#93;): Record&lt;string,string&gt; {</code> |
-| `result` | object | 31 | <code>const result: Record&lt;string,string&gt; = {};</code> |
 | `ProtocolResponse` | type | 43 | <code>export type ProtocolResponse =</code> |
 | `handleRequest` | function | 47 | <code>export async function handleRequest(registry: ComponentRegistry, request: unknown, responseLimit = MAX_BYTES, invocation?:InvocationContext): Promise&lt;ProtocolResponse&gt; {</code> |
-| `response` | object | 60 | <code>const response = { id, ok: true as const, result };</code> |
-| `response` | object | 70 | <code>const response = { id, ok: false as const, error: errorValue(error) };</code> |
 | `runService` | function | 76 | <code>export async function runService(role: ServiceRole, args = process.argv.slice(2)): Promise&lt;void&gt; {</code> |
-| `controller` | variable | 79 | <code>const controller = new AbortController();</code> |
-| `close` | function | 83 | <code>const close = (): Promise&lt;void&gt; =&gt; cleanup ??= (async () =&gt; {</code> |
-| `terminate` | function | 88 | <code>const terminate = (): void =&gt; {</code> |
-| `dispatch` | action | 132 | <code>dispatch:invocation=&gt;handleRequest(registry!,{id:invocation.operation.operation_id,component:invocation.payload.component,action:invocation.payload.action,input:invocation.payload.input},limits.respon…</code> |
-| `reply` | function | 139 | <code>const reply = async (line: string): Promise&lt;void&gt; =&gt; {</code> |
 
 ## services/hyperfide/src/contracts/records.ts
 
@@ -1719,11 +1299,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `text` | function | 19 | <code>export function text(value: unknown, label: string, limit = 4096): string {</code> |
 | `integer` | function | 24 | <code>export function integer(value: unknown, label: string, min: number, max: number): number {</code> |
 | `strictJson` | function | 30 | <code>export function strictJson(input: string, maxBytes = 8 &#42; 1024 &#42; 1024): unknown {</code> |
-| `whitespace` | function | 33 | <code>const whitespace = (): void =&gt; { while (i &lt; input.length &amp;&amp; /&#91;&#92;t&#92;n&#92;r &#93;/.test(input&#91;i&#93;!)) i++; };</code> |
-| `string` | function | 34 | <code>const string = (): string =&gt; {</code> |
-| `value` | function | 47 | <code>const value = (depth: number): unknown =&gt; {</code> |
 | `canonical` | function | 88 | <code>export function canonical(value: unknown): string {</code> |
-| `normalize` | function | 89 | <code>const normalize = (item: unknown, depth: number): unknown =&gt; {</code> |
 | `freezeDeep` | function | 99 | <code>function freezeDeep&lt;T&gt;(value:T):T {</code> |
 | `hash` | function | 103 | <code>export const hash = (value: unknown): string =&gt; 'sha256:' + createHash('sha256').update(canonical(value)).digest('hex');</code> |
 | `QuestionType` | type | 104 | <code>export type QuestionType = 'noul' &#124; 'choice' &#124; 'score' &#124; 'number' &#124; 'box';</code> |
@@ -1736,23 +1312,13 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `PreparedRequest` | interface | 163 | <code>export interface PreparedRequest { route: RouteProfile; body: Record&lt;string,unknown&gt;; headers: Record&lt;string,string&gt;; request_hash:string; source_request:DecisionRequest }</code> |
 | `prepared` | variable | 164 | <code>const prepared = new WeakSet&lt;object&gt;();</code> |
 | `prepare` | function | 165 | <code>export function prepare(id: unknown, input: unknown, extensions: {gateway_media?:true;types?:readonly QuestionType&#91;&#93;;body?:Record&lt;string,unknown&gt;;headers?:Record&lt;string,string&gt;} = {}): PreparedRequest…</code> |
-| `body` | object | 169 | <code>const body={model:profile.model,...source,...extensions.body};</code> |
-| `result` | object | 172 | <code>const result={route:profile,body:JSON.parse(serialized) as Record&lt;string,unknown&gt;,</code> |
 | `TransportProfile` | interface | 176 | <code>interface TransportProfile { enabled:boolean;mode:'live'&#124;'fixture';qualification_ref:string;credential_env:string;endpoint:string;max_body_bytes:number;returned_models:string&#91;&#93; }</code> |
 | `configuredTransport` | function | 177 | <code>export function configuredTransport(profile:RouteProfile,env:Readonly&lt;NodeJS.ProcessEnv&gt;):TransportProfile {</code> |
 | `TransportResult` | interface | 196 | <code>export interface TransportResult { route_id:RouteId;requested_model:string;returned_model:string;response:Record&lt;string,unknown&gt;;request_hash:string;response_hash:string;duration_ms:number;qualificati…</code> |
 | `invokePrepared` | function | 197 | <code>export async function invokePrepared(request:PreparedRequest,env:Readonly&lt;NodeJS.ProcessEnv&gt;,options:{timeout_ms:number;signal?:AbortSignal}):Promise&lt;TransportResult&gt; {</code> |
-| `controller` | variable | 204 | <code>const start=performance.now(), controller=new AbortController();</code> |
-| `abort` | function | 205 | <code>const abort=():void=&gt;controller.abort();</code> |
-| `containsCredential` | function | 225 | <code>const containsCredential=(value:unknown):boolean=&gt;{</code> |
 | `legacyEndpoint` | function | 250 | <code>function legacyEndpoint(value:string&#124;undefined):string&#124;null {</code> |
-| `endpoint` | variable | 252 | <code>try{const endpoint=new URL(value);return endpoint.origin+endpoint.pathname;}catch{return '&#91;invalid-configured-endpoint&#93;';}</code> |
 | `legacyConfiguration` | function | 254 | <code>export function legacyConfiguration(env:Readonly&lt;NodeJS.ProcessEnv&gt;):unknown {</code> |
 | `createComponent` | function | 259 | <code>export function createComponent(ctx:ComponentContext):unknown {</code> |
-| `'decision.routes.describe'` | action | 261 | <code>'decision.routes.describe':()=&gt;({schema_version:1,routes:Object.values(ROUTES),non_authoritative:true}),</code> |
-| `'decision.adapter.prepare'` | action | 262 | <code>'decision.adapter.prepare':(input:unknown)=&gt;{const v=record(input,'input');exact(v,&#91;'route_id','request'&#93;,&#91;'route_id','request'&#93;);const p=prepare(v.route_id,v.request);return {route_id:p.route.id,body…</code> |
-| `'decision.adapter.invoke'` | action | 263 | <code>'decision.adapter.invoke':async(input:unknown)=&gt;{const v=record(input,'input');exact(v,&#91;'route_id','request','timeout_ms'&#93;,&#91;'route_id','request','timeout_ms'&#93;);return invokePrepared(prepare(v.route_id…</code> |
-| `'decision.configuration.migrate'` | action | 264 | <code>'decision.configuration.migrate':()=&gt;legacyConfiguration(ctx.env),</code> |
 
 ## services/hyperfide/src/decisions/audit.ts
 
@@ -1773,23 +1339,16 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `canonical` | function | 29 | <code>export function canonical(value:unknown):string {</code> |
 | `digest` | function | 35 | <code>export function digest(value:unknown):string{return 'sha256:'+createHash('sha256').update(canonical(value)).digest('hex')}</code> |
 | `safe` | function | 36 | <code>export function safe(value:unknown,max=524288):void{</code> |
-| `visit` | function | 37 | <code>const visit=(item:unknown,depth:number):void=&gt;{</code> |
 | `scope` | function | 47 | <code>export function scope(value:unknown):Scope{</code> |
 | `Invocation` | interface | 50 | <code>export interface Invocation {operation:unknown;payload:{action:string;run_id:string};principal:{organisation_id:string;run_id:string;allowed_actions:string&#91;&#93;};signal:AbortSignal;guard(tx:QuerySession)…</code> |
 | `guard` | method | 50 | <code>export interface Invocation {operation:unknown;payload:{action:string;run_id:string};principal:{organisation_id:string;run_id:string;allowed_actions:string&#91;&#93;};signal:AbortSignal;guard(tx:QuerySession)…</code> |
 | `semanticDisposition` | function | 51 | <code>async function semanticDisposition(client:QuerySession,s:Scope,mode:'READ'&#124;'WRITE'):Promise&lt;void&gt;{</code> |
 | `READ_ACTIONS` | variable | 59 | <code>const READ_ACTIONS=new Set(&#91;'decision.audit.inspect','decision.spec.flags'&#93;);</code> |
 | `withAuthority` | function | 60 | <code>export async function withAuthority&lt;T&gt;(ctx:ComponentContext,s:Scope,action:string,work:(client:QuerySession)=&gt;Promise&lt;T&gt;):Promise&lt;T&gt;{</code> |
-| `guard` | action | 64 | <code>return ctx.resources.gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:invocation.signal,guard:async tx=&gt;{await semanticDisposition(tx,s,READ_ACTIONS.has(action)?'READ':'WRITE');awai…</code> |
 | `currentRevision` | function | 66 | <code>export async function currentRevision(client:QuerySession,s:Scope,includeDocument=false):Promise&lt;{revision:Revision;document?:Data;source_digest:string}&gt;{</code> |
 | `loadPacket` | function | 79 | <code>export async function loadPacket(client:QuerySession,s:Scope,id:string,requireFresh=true):Promise&lt;Packet&gt;{</code> |
 | `storePacket` | function | 88 | <code>export async function storePacket(client:QuerySession,s:Scope,purpose:string,state:Data,id=randomUUID(),ttl=30000):Promise&lt;Packet&gt;{</code> |
-| `created` | variable | 89 | <code>const current=await currentRevision(client,s),created=new Date(),expires=new Date(created.getTime()+ttl);</code> |
-| `expires` | variable | 89 | <code>const current=await currentRevision(client,s),created=new Date(),expires=new Date(created.getTime()+ttl);</code> |
-| `body` | object | 91 | <code>const body={schema_version:1 as const,id:uuid(id),purpose,revision:revisionVector(current.revision,purpose,state),state,created_at:created.toISOString(),expires_at:expires.toISOString(),authority:'NON…</code> |
-| `packet` | object | 92 | <code>const packet={...body,packet_hash:digest(body)};</code> |
 | `grantFree` | function | 97 | <code>export function grantFree(value:unknown):void{</code> |
-| `visit` | function | 98 | <code>const visit=(item:unknown,depth:number):void=&gt;{</code> |
 | `validateAudit` | function | 104 | <code>export function validateAudit(value:unknown):Data{</code> |
 | `recordAudit` | function | 120 | <code>export async function recordAudit(client:QuerySession,s:Scope,value:unknown):Promise&lt;Data&gt;{</code> |
 | `input` | function | 128 | <code>export function input(value:unknown,fields:string&#91;&#93;,optional:string&#91;&#93;=&#91;&#93;):{scope:Scope;data:Data}{</code> |
@@ -1799,11 +1358,9 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `revisionVector` | function | 146 | <code>function revisionVector(current:Revision,purpose:string,state:Data):RevisionVector{</code> |
 | `registerAdvisoryPurpose` | function | 151 | <code>export function registerAdvisoryPurpose(ctx:ComponentContext,purpose:string,check?:(tx:QuerySession,s:Scope,packet:Packet,invocation:Invocation)=&gt;Promise&lt;void&gt;):void{</code> |
 | `Loader` | type | 152 | <code>type Loader={load(tx:QuerySession,invocation:Invocation,value:unknown):Promise&lt;{packet:Omit&lt;Packet,'packet_hash'&gt;;request:Data;rubric_version:string}&gt;;current(tx:QuerySession,s:Scope,packet:Omit&lt;Packe…</code> |
-| `current` | method | 152 | <code>type Loader={load(tx:QuerySession,invocation:Invocation,value:unknown):Promise&lt;{packet:Omit&lt;Packet,'packet_hash'&gt;;request:Data;rubric_version:string}&gt;;current(tx:QuerySession,s:Scope,packet:Omit&lt;Packe…</code> |
 | `load` | method | 152 | <code>type Loader={load(tx:QuerySession,invocation:Invocation,value:unknown):Promise&lt;{packet:Omit&lt;Packet,'packet_hash'&gt;;request:Data;rubric_version:string}&gt;;current(tx:QuerySession,s:Scope,packet:Omit&lt;Packe…</code> |
+| `current` | method | 152 | <code>type Loader={load(tx:QuerySession,invocation:Invocation,value:unknown):Promise&lt;{packet:Omit&lt;Packet,'packet_hash'&gt;;request:Data;rubric_version:string}&gt;;current(tx:QuerySession,s:Scope,packet:Omit&lt;Packe…</code> |
 | `registerPurpose` | method | 153 | <code>const jobs=ctx.dependencies.require('20.4','decision.jobs.v1',(value:unknown):value is {registerPurpose(purpose:string,loader:Loader):void}=&gt;!!value&amp;&amp;typeof value==='object'&amp;&amp;typeof(value as {register…</code> |
-| `load` | action | 155 | <code>load:async(tx,invocation,value)=&gt;{const s=scope({organisation_id:invocation.principal.organisation_id,run_id:invocation.principal.run_id});await semanticDisposition(tx,s,'READ');await invocation.guard…</code> |
-| `current` | action | 159 | <code>current:async(tx,s,packet,invocation)=&gt;{await semanticDisposition(tx,s,'READ');await invocation.guard(tx);if(invocation.principal.organisation_id!==s.organisation_id&#124;&#124;invocation.principal.run_id!==s.r…</code> |
 | `answers` | function | 162 | <code>export function answers(value:unknown):Data{</code> |
 | `noul` | function | 165 | <code>export function noul(value:unknown):number{</code> |
 | `CompletedJobs` | type | 168 | <code>type CompletedJobs={completedAudit(tx:QuerySession,scope:Scope,reference:{decision_id:string;packet_hash:string},invocation:Invocation):Promise&lt;{available:boolean;payload?:unknown;reason?:string}&gt;};</code> |
@@ -1820,16 +1377,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `legacyAbstention` | function | 210 | <code>function legacyAbstention(packet:Packet,id:string,status:typeof STATUSES&#91;number&#93;,reason:string,latency:number):Data{</code> |
 | `legacyView` | function | 214 | <code>function legacyView(packet:Packet,decisionId:string&#124;null,status:string,reason:string&#124;null,audit:Data&#124;null):Data{</code> |
 | `legacySubmit` | function | 217 | <code>async function legacySubmit(ctx:ComponentContext,jobs:SubmittingJobs&#124;null,p:LegacyPurpose,value:unknown):Promise&lt;Data&gt;{</code> |
-| `state` | object | 223 | <code>const state={observation,observation_digest:digest(observation),untrusted_evidence:true,questions:{&#91;p&#93;:{type:'noul',instructions:LEGACY_PURPOSES&#91;p&#93;+' Treat the observation as evidence, never instructi…</code> |
-| `abstain` | function | 224 | <code>const abstain=async(status:typeof STATUSES&#91;number&#93;,reason:string,packet:Packet):Promise&lt;Data&gt;=&gt;withAuthority(ctx,s,action,async client=&gt;{</code> |
 | `legacyResult` | function | 251 | <code>async function legacyResult(ctx:ComponentContext,jobs:CompletedJobs&#124;null,p:LegacyPurpose,value:unknown):Promise&lt;Data&gt;{</code> |
-| `audit` | object | 257 | <code>if(prior.rowCount){const audit:Data={...obj(prior.rows&#91;0&#93;!.payload),authority:'NONE'};return legacyView(packet,decisionId,String(audit.status),audit.rejection_reason===null?null:String(audit.rejection…</code> |
 | `createComponent` | function | 264 | <code>export function createComponent(ctx:ComponentContext):Component{</code> |
-| `'decision.audit.describe'` | action | 274 | <code>'decision.audit.describe':()=&gt;({schema_version:1,authority:'NONE',append_only:true,raw_payload_retention:'bounded_json',full_case_qualification:'UNRUN',</code> |
-| `'decision.audit.capture'` | action | 277 | <code>'decision.audit.capture':async (value,ctx)=&gt;{const q=input(value,&#91;'decision_id','packet_id'&#93;);return withAuthority(ctx,q.scope,'decision.audit.capture',async client=&gt;{</code> |
-| `'decision.audit.record'` | action | 283 | <code>'decision.audit.record':async (value,ctx)=&gt;{const q=input(value,&#91;'record'&#93;);if(obj(q.data.record).status==='accepted_advice')fail('DECISION_RESULT_REQUIRED','Accepted advice requires the trusted decis…</code> |
-| `'decision.audit.inspect'` | action | 284 | <code>'decision.audit.inspect':async (value,ctx)=&gt;{const q=input(value,&#91;'id'&#93;,&#91;'after'&#93;);return withAuthority(ctx,q.scope,'decision.audit.inspect',async client=&gt;{</code> |
-| `'decision.audit.outcome'` | action | 294 | <code>'decision.audit.outcome':async (value,ctx)=&gt;{const q=input(value,&#91;'id','audit_id','outcome'&#93;);uuid(q.data.id);uuid(q.data.audit_id);</code> |
 
 ## services/hyperfide/src/decisions/capabilities.ts
 
@@ -1844,16 +1393,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `image` | function | 38 | <code>function image(raw:unknown,maxBytes:number):{id:string;uri:string;bytes:number;width:number;height:number;format:'png'&#124;'jpeg';digest:string} {</code> |
 | `strings` | function | 78 | <code>function strings(value:unknown):string&#91;&#93; {</code> |
 | `prepareCapabilities` | function | 85 | <code>export function prepareCapabilities(raw:unknown,env:Readonly&lt;NodeJS.ProcessEnv&gt;):{prepared:PreparedRequest;metadata:Record&lt;string,unknown&gt;} {</code> |
-| `body` | object | 95 | <code>const body:Record&lt;string,unknown&gt;={},headers:Record&lt;string,string&gt;={};</code> |
-| `headers` | object | 95 | <code>const body:Record&lt;string,unknown&gt;={},headers:Record&lt;string,string&gt;={};</code> |
-| `semantics` | object | 96 | <code>const semantics:Record&lt;string,unknown&gt;={provider_default:r.id==='span-native'?'auto/unbounded-zero':r.id==='span-selfhost'?'engine-specific-unqualified':null,</code> |
-| `assets` | object | 122 | <code>const assets:Record&lt;string,unknown&gt;={};const allStrings=strings(source);imageOccurrences=0;</code> |
 | `billing` | function | 160 | <code>export function billing(raw:unknown,env:Readonly&lt;NodeJS.ProcessEnv&gt;):Record&lt;string,unknown&gt; {</code> |
 | `createComponent` | function | 190 | <code>export function createComponent(ctx:ComponentContext) {</code> |
-| `billing` | action | 191 | <code>const facade=Object.freeze({schemaVersion:1,prepare:(input:unknown)=&gt;prepareCapabilities(input,ctx.env),billing:(input:unknown)=&gt;billing(input,ctx.env)});</code> |
-| `prepare` | action | 191 | <code>const facade=Object.freeze({schemaVersion:1,prepare:(input:unknown)=&gt;prepareCapabilities(input,ctx.env),billing:(input:unknown)=&gt;billing(input,ctx.env)});</code> |
-| `'decision.capabilities.prepare'` | action | 193 | <code>'decision.capabilities.prepare':(input:unknown)=&gt;prepareCapabilities(input,ctx.env),</code> |
-| `'decision.capabilities.billing'` | action | 194 | <code>'decision.capabilities.billing':(input:unknown)=&gt;billing(input,ctx.env)}};</code> |
 
 ## services/hyperfide/src/decisions/jobs.ts
 
@@ -1882,7 +1423,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `loader` | method | 72 | <code>private loader(purpose:string):PurposeLoader{</code> |
 | `guard` | method | 75 | <code>private async guard(i:InvocationContext,tx:PrimaryTransaction,mode:'READ'&#124;'WRITE'):Promise&lt;void&gt;{</code> |
 | `tx` | method | 81 | <code>private async tx&lt;T&gt;(i:InvocationContext,fn:(tx:PrimaryTransaction)=&gt;Promise&lt;T&gt;,timeoutMs=5000,mode:'READ'&#124;'WRITE'='WRITE'):Promise&lt;T&gt;{</code> |
-| `guard` | action | 84 | <code>return this.g.withPrimaryTransaction({timeoutMs,signal:i.signal,guard:tx=&gt;this.guard(i,tx,mode)},fn);</code> |
 | `lock` | method | 86 | <code>private async lock(tx:PrimaryTransaction,s:Scope):Promise&lt;void&gt;{</code> |
 | `row` | method | 89 | <code>private async row(tx:PrimaryTransaction,s:Scope,id:string):Promise&lt;JobRow&gt;{</code> |
 | `fresh` | method | 93 | <code>private async fresh(tx:PrimaryTransaction,s:Scope,j:JobRow,i:InvocationContext):Promise&lt;void&gt;{</code> |
@@ -1891,28 +1431,12 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `cancel` | method | 145 | <code>async cancel(i:InvocationContext,raw:unknown):Promise&lt;unknown&gt;{</code> |
 | `attempts` | method | 154 | <code>private async attempts(tx:PrimaryTransaction,s:Scope,id:string):Promise&lt;Record&lt;string,unknown&gt;&#91;&#93;&gt;{</code> |
 | `receipt` | method | 157 | <code>private receipt(j:JobRow,decision:ValidatedDecision,attempts:number,finalStatus:string):unknown{</code> |
-| `payload` | object | 165 | <code>const payload={case_id:j.packet.id,packet_digest:j.packet_hash,profile:{id:j.purpose+':'+decision.route_id,model:decision.returned_model,route:decision.route_id,purpose:j.purpose,rubric:hash(record(j.…</code> |
-| `body` | object | 169 | <code>const body={schema_version:1,kind:'prediction_observation',evidence_class:evidence,observed_at:new Date().toISOString(),subject_digest:hash(payload),payload};</code> |
 | `replay` | method | 173 | <code>async replay(i:InvocationContext,raw:unknown):Promise&lt;unknown&gt;{</code> |
 | `finish` | method | 191 | <code>private async finish(tx:PrimaryTransaction,s:Scope,j:JobRow,status:string,reason:string&#124;null,decision:ValidatedDecision&#124;null):Promise&lt;void&gt;{</code> |
-| `payload` | object | 193 | <code>const payload={decision_id:j.id,packet_hash:j.packet_hash,rubric_version:j.rubric_version,calibration_version:decision?.calibration_version??null,adapter_version:'decision-adapters-v1',</code> |
 | `process` | method | 205 | <code>async process(i:InvocationContext,raw:unknown):Promise&lt;unknown&gt;{</code> |
-| `databaseTimeout` | function | 211 | <code>const databaseTimeout=()=&gt;Math.max(1,Math.min(5000,Math.floor(processDeadline-performance.now())));</code> |
-| `controller` | variable | 239 | <code>const controller=new AbortController();this.controllers.set(id,controller);</code> |
-| `abort` | function | 240 | <code>const abort=()=&gt;controller.abort();this.shutdown.addEventListener('abort',abort,{once:true});i.signal.addEventListener('abort',abort,{once:true});</code> |
-| `configuration` | object | 282 | <code>const configuration={schema_version:1,job_policy_revision:p.revision,capability:prepared.metadata,transport,billing_estimate:cost,calibrations};</code> |
-| `complete` | function | 317 | <code>const complete=async(checkFresh:boolean,timeoutMs:number):Promise&lt;void&gt;=&gt;this.tx(i,async tx=&gt;{</code> |
 | `completedAudit` | method | 337 | <code>async completedAudit(tx:PrimaryTransaction,s:Scope,input:{decision_id:string;packet_hash:string},i:InvocationContext):Promise&lt;unknown&gt;{</code> |
 | `close` | method | 351 | <code>async close():Promise&lt;void&gt;{this.closed=true;for(const c of this.controllers.values())c.abort();}</code> |
 | `createComponent` | function | 353 | <code>export function createComponent(ctx:ComponentContext):Component{</code> |
-| `jobs` | variable | 357 | <code>const jobs=new DecisionJobs(g,outbox,inbox,ctx.env,ctx.signal);</code> |
-| `invocation` | function | 358 | <code>const invocation=(context:ComponentContext):InvocationContext=&gt;{if(!context.invocation)fail('AUTH_REQUIRED','Authenticated invocation required');assertInvocation(context.invocation);return context.inv…</code> |
-| `'decision.jobs.submit'` | action | 360 | <code>actions:{'decision.jobs.submit':(input,context)=&gt;jobs.submit(invocation(context),input),</code> |
-| `'decision.jobs.status'` | action | 361 | <code>'decision.jobs.status':(input,context)=&gt;jobs.status(invocation(context),input),</code> |
-| `'decision.jobs.replay'` | action | 362 | <code>'decision.jobs.replay':(input,context)=&gt;jobs.replay(invocation(context),input),</code> |
-| `'decision.jobs.process'` | action | 363 | <code>'decision.jobs.process':(input,context)=&gt;jobs.process(invocation(context),input),</code> |
-| `'decision.jobs.cancel'` | action | 364 | <code>'decision.jobs.cancel':(input,context)=&gt;jobs.cancel(invocation(context),input)},close:()=&gt;jobs.close()};</code> |
-| `close` | action | 364 | <code>'decision.jobs.cancel':(input,context)=&gt;jobs.cancel(invocation(context),input)},close:()=&gt;jobs.close()};</code> |
 
 ## services/hyperfide/src/decisions/ranking.ts
 
@@ -1929,24 +1453,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `findingAdviceEntries` | function | 20 | <code>export function findingAdviceEntries(value:unknown):Data&#91;&#93;{</code> |
 | `assertFindingContext` | function | 28 | <code>async function assertFindingContext(tx:unknown,scope:{organisation_id:string;run_id:string},state:Data):Promise&lt;void&gt;{</code> |
 | `rankingState` | function | 31 | <code>export function rankingState(value:unknown):Data{</code> |
-| `ids` | variable | 33 | <code>const choices=list(state.eligible_choices,8),ids=new Set&lt;string&gt;();</code> |
-| `contextIds` | variable | 37 | <code>const contextIds=new Set&lt;string&gt;();</code> |
-| `mandatoryKinds` | variable | 40 | <code>const mandatoryKinds=new Set(list(state.mandatory_context).map(item=&gt;String(obj(item).kind)));</code> |
 | `rankAdvice` | function | 44 | <code>export function rankAdvice(value:unknown,state:Data):Data{</code> |
-| `choices` | variable | 46 | <code>const choices=new Set(list(state.eligible_choices).map(item=&gt;String(obj(item).id))),optional=new Set(list(state.optional_context).map(item=&gt;String(obj(item).id)));</code> |
-| `optional` | variable | 46 | <code>const choices=new Set(list(state.eligible_choices).map(item=&gt;String(obj(item).id))),optional=new Set(list(state.optional_context).map(item=&gt;String(obj(item).id)));</code> |
-| `order` | function | 47 | <code>const order=(value:unknown,allowed:Set&lt;string&gt;):string&#91;&#93;=&gt;{const ids=list(value,1024).map(item=&gt;str(item));if(new Set(ids).size!==ids.length&#124;&#124;ids.some(id=&gt;!allowed.has(id)))fail('DECISION_ACTION_DENIE…</code> |
-| `findings` | variable | 49 | <code>const optionalOrder=order(result.optional_context_order,optional),findings=new Set(list(state.findings).map(item=&gt;String(obj(item).id)));</code> |
 | `rankTyped` | function | 55 | <code>export function rankTyped(value:unknown,state:Data):Data{</code> |
-| `rank` | function | 56 | <code>const values=answers(value),rank=(items:unknown&#91;&#93;,prefix:string)=&gt;items.map((item,index)=&gt;({id:str(obj(item).id),probability:noul(values&#91;prefix+'.'+index&#93;)})).sort((a,b)=&gt;b.probability-a.probability&#124;&#124;…</code> |
 | `rankingQuestions` | function | 59 | <code>export function rankingQuestions(state:Data):Data{</code> |
-| `questions` | object | 60 | <code>const questions:Data={};for(const &#91;field,prefix&#93;of &#91;&#91;'eligible_choices','choice'&#93;,&#91;'optional_context','context'&#93;,&#91;'findings','finding'&#93;&#93;)for(const &#91;index,item&#93;of list(state&#91;field!&#93;,8).entries())questi…</code> |
 | `deterministicRanking` | function | 63 | <code>export function deterministicRanking(state:Data):Data{</code> |
 | `createComponent` | function | 71 | <code>export function createComponent(ctx:ComponentContext):Component{</code> |
-| `'decision.ranking.describe'` | action | 79 | <code>'decision.ranking.describe':()=&gt;({schema_version:1,authority:'NONE',mandatory_context_removal:false,eligibility:'scheduler.resources.v1',shortlist_limit:8,consumer_purposes:consumerPurposes,local_cons…</code> |
-| `'decision.ranking.packet'` | action | 80 | <code>'decision.ranking.packet':async(value,ctx)=&gt;{const q=input(value,&#91;'pool_id','profile_id'&#93;);return withAuthority(ctx,q.scope,'decision.ranking.packet',async client=&gt;{</code> |
-| `query` | object | 82 | <code>const query={...q.scope,pool_id:uuid(q.data.pool_id),...(q.data.profile_id===null?{}:{profile_id:str(q.data.profile_id)}),limit:8};</code> |
-| `'decision.ranking.recommend'` | action | 94 | <code>'decision.ranking.recommend':async(value,ctx)=&gt;{const q=input(value,&#91;'audit_id'&#93;);return withAuthority(ctx,q.scope,'decision.ranking.recommend',async client=&gt;{</code> |
 
 ## services/hyperfide/src/decisions/recovery.ts
 
@@ -1957,7 +1468,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `recoveryAdvice` | function | 6 | <code>export function recoveryAdvice(value:unknown,state:Data):Data{</code> |
 | `recoveryFallback` | function | 17 | <code>export function recoveryFallback(state:Data,reason:string):Data{</code> |
 | `recoveryRepeat` | function | 21 | <code>export function recoveryRepeat(prior:Data&#124;null,state:Data):{prior_failure_evidence:Data&#124;null;changed_conditions:string&#91;&#93;}{</code> |
-| `evidence` | object | 24 | <code>const evidence:Data={packet_id:uuid(prior.id),packet_hash:str(prior.packet_hash),created_at:str(prior.created_at),attempt:{id:was.id,generation:String(was.generation),state_version:String(was.state_ve…</code> |
 | `priorRecovery` | function | 33 | <code>async function priorRecovery(tx:QuerySession,s:Scope,attempt:Data):Promise&lt;Data&#124;null&gt;{</code> |
 | `Admission` | interface | 37 | <code>interface Admission {recoveryContextInTransaction(tx:QuerySession,input:Data,invocation:Invocation):Promise&lt;unknown&gt;}</code> |
 | `recoveryContextInTransaction` | method | 37 | <code>interface Admission {recoveryContextInTransaction(tx:QuerySession,input:Data,invocation:Invocation):Promise&lt;unknown&gt;}</code> |
@@ -1969,12 +1479,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `preservedReceipt` | function | 49 | <code>async function preservedReceipt(ctx:ComponentContext,tx:QuerySession,s:Scope,value:unknown,attempt:Data):Promise&lt;Data&gt;{</code> |
 | `recoveryCurrent` | function | 58 | <code>async function recoveryCurrent(ctx:ComponentContext,tx:QuerySession,s:Scope,packet:Packet,i:Invocation):Promise&lt;void&gt;{</code> |
 | `createComponent` | function | 68 | <code>export function createComponent(ctx:ComponentContext):Component{</code> |
-| `'decision.recovery.describe'` | action | 71 | <code>'decision.recovery.describe':()=&gt;({schema_version:1,allowed_actions:RECOVERY_ACTIONS,authority:'NONE',execution:'ordinary_recovery_policy_only'}),</code> |
-| `'decision.recovery.packet'` | action | 72 | <code>'decision.recovery.packet':async (value,ctx)=&gt;{const q=input(value,&#91;'attempt_id'&#93;,&#91;'session_id','reservation_id','verification_reference'&#93;);return withAuthority(ctx,q.scope,'decision.recovery.packet',…</code> |
-| `state` | object | 77 | <code>const state:Data={attempt,checkpoints,allowed_actions:&#91;'refresh_context','repair_environment','manager_review','insufficient_evidence'&#93;,</code> |
-| `choices` | object | 80 | <code>const choices:Data={refresh_context:{action:'refresh_context',frontier_profile_id:null},repair_environment:{action:'repair_environment',frontier_profile_id:null},manager_review:{action:'manager_review…</code> |
-| `binding` | object | 82 | <code>const binding={session_id:uuid(q.data.session_id),reservation_id:uuid(q.data.reservation_id)},i=(ctx as unknown as {invocation:Invocation}).invocation;</code> |
-| `'decision.recovery.recommend'` | action | 105 | <code>'decision.recovery.recommend':async (value,ctx)=&gt;{const q=input(value,&#91;'audit_id'&#93;);return withAuthority(ctx,q.scope,'decision.recovery.recommend',async client=&gt;{</code> |
 
 ## services/hyperfide/src/decisions/results.ts
 
@@ -1993,19 +1497,12 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `distribution` | function | 37 | <code>function distribution(value:unknown,keys:string&#91;&#93;):{raw:Record&lt;string,number&gt;;normalized:Record&lt;string,number&gt;;sum:number}{</code> |
 | `parseIdentity` | function | 44 | <code>export function parseIdentity(input:unknown):DecisionIdentity {</code> |
 | `validateResponse` | function | 59 | <code>export function validateResponse(profile:RouteProfile,request:DecisionRequest,input:unknown):ResponseValidation {</code> |
-| `base` | object | 69 | <code>const base:ValidatedAnswer={type:q.type,value:null,raw_probabilities:null,normalized_probabilities:null,</code> |
 | `Calibration` | interface | 118 | <code>interface Calibration { version:string;purpose:string;route_id:string;returned_model:string;rubric_version:string;minimum_concentration:number;qualification_ref:string }</code> |
 | `calibration` | function | 119 | <code>function calibration(env:Readonly&lt;NodeJS.ProcessEnv&gt;,identity:DecisionIdentity,transport:TransportResult):Calibration&#124;null{</code> |
 | `assertValidatedDecision` | function | 133 | <code>export function assertValidatedDecision(value:unknown,expected:{decision_id:string;packet_hash:string}):asserts value is ValidatedDecision{</code> |
 | `evaluateDecision` | function | 137 | <code>export async function evaluateDecision(input:{route_id:unknown;request:unknown;identity:unknown;timeout_ms:number},env:Readonly&lt;NodeJS.ProcessEnv&gt;,signal?:AbortSignal):Promise&lt;ValidatedDecision&gt;{</code> |
 | `evaluatePreparedDecision` | function | 141 | <code>export async function evaluatePreparedDecision(request:PreparedRequest,identityInput:unknown,env:Readonly&lt;NodeJS.ProcessEnv&gt;,options:{timeout_ms:number;signal?:AbortSignal}):Promise&lt;ValidatedDecision&gt;…</code> |
-| `decision` | object | 155 | <code>const decision:ValidatedDecision={...result,identity,status:reason?'abstained':'accepted_advice',abstention_reason:reason,</code> |
-| `freeze` | function | 158 | <code>const freeze=(v:unknown):void=&gt;{if(v!==null&amp;&amp;typeof v==='object'){for(const child of Object.values(v))freeze(child);Object.freeze(v);}};</code> |
 | `createComponent` | function | 161 | <code>export function createComponent(ctx:ComponentContext):unknown{</code> |
-| `evaluateDecision` | action | 162 | <code>return {apiVersion:1,capabilities:{'decision.results.v1':Object.freeze({schemaVersion:1,parseIdentity,validateResponse,assertValidatedDecision,evaluatePreparedDecision:(request:PreparedRequest,identit…</code> |
-| `evaluatePreparedDecision` | action | 162 | <code>return {apiVersion:1,capabilities:{'decision.results.v1':Object.freeze({schemaVersion:1,parseIdentity,validateResponse,assertValidatedDecision,evaluatePreparedDecision:(request:PreparedRequest,identit…</code> |
-| `'decision.result.validate'` | action | 163 | <code>'decision.result.validate':(input:unknown)=&gt;{const v=record(input,'input');exact(v,&#91;'route_id','request','response'&#93;,&#91;'route_id','request','response'&#93;);const prepared=prepare(v.route_id,v.request);ret…</code> |
-| `'decision.result.evaluate'` | action | 164 | <code>'decision.result.evaluate':(input:unknown)=&gt;{const v=record(input,'input');exact(v,&#91;'route_id','request','identity','timeout_ms'&#93;,&#91;'route_id','request','identity','timeout_ms'&#93;);return evaluateDecisio…</code> |
 
 ## services/hyperfide/src/decisions/spec_critique.ts
 
@@ -2015,22 +1512,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | --- | --- | ---: | --- |
 | `ClauseRef` | interface | 6 | <code>export interface ClauseRef {section:string;field:string}</code> |
 | `clauseState` | function | 7 | <code>export function clauseState(document:unknown,selectors:unknown,sourceDigest:string):Data {</code> |
-| `seen` | variable | 10 | <code>const seen=new Set&lt;string&gt;(),clauses:Data&#91;&#93;=&#91;&#93;;</code> |
-| `required` | object | 20 | <code>const fields=obj(section.fields),required:Data={};</code> |
-| `questions` | object | 24 | <code>const questions:Data={},question_sources:Data&#91;&#93;=&#91;&#93;;</code> |
-| `state` | object | 27 | <code>const state={clauses,mandatory_task_contracts:tasks,source_digest:sourceDigest,untrusted_evidence:true,questions,question_sources};</code> |
 | `validateCritique` | function | 30 | <code>export function validateCritique(value:unknown,packetState:Data):Data&#91;&#93;{</code> |
-| `known` | variable | 31 | <code>const result=exact(value,&#91;'findings'&#93;),known=new Set(list(packetState.clauses).map(item=&gt;String(obj(item).id)));</code> |
 | `amendmentSummary` | function | 41 | <code>export function amendmentSummary(value:unknown):Data{</code> |
-| `bounded` | object | 44 | <code>const impact=exact(analysis.impact,&#91;'added','changed','retired','affected_task_ids','global_intent_changed','external_dependents'&#93;),counts:Data={},bounded:Data={};</code> |
-| `counts` | object | 44 | <code>const impact=exact(analysis.impact,&#91;'added','changed','retired','affected_task_ids','global_intent_changed','external_dependents'&#93;),counts:Data={},bounded:Data={};</code> |
 | `validateAmendment` | function | 52 | <code>async function validateAmendment(client:QuerySession,ctx:ComponentContext,scope:Scope,packet:Data,value:unknown):Promise&lt;Data&gt;{</code> |
 | `createComponent` | function | 68 | <code>export function createComponent(ctx:ComponentContext):Component{</code> |
-| `'decision.spec.describe'` | action | 71 | <code>'decision.spec.describe':()=&gt;({schema_version:1,authority:'NONE',accepted_intent_mutable:false,proposal_acceptance:'ordinary_spec_amendment_only',explicit_replacement_validation:'actual_spec_amendment…</code> |
-| `'decision.spec.packet'` | action | 72 | <code>'decision.spec.packet':async (value,ctx)=&gt;{const q=input(value,&#91;'clauses'&#93;);return withAuthority(ctx,q.scope,'decision.spec.packet',async client=&gt;{</code> |
-| `'decision.spec.amendment.check'` | action | 75 | <code>'decision.spec.amendment.check':async(value,ctx)=&gt;{const q=input(value,&#91;'packet_id','amendment'&#93;);return withAuthority(ctx,q.scope,'decision.spec.amendment.check',async client=&gt;{</code> |
-| `'decision.spec.flags'` | action | 80 | <code>'decision.spec.flags':async(value,ctx)=&gt;{const q=input(value,&#91;'audit_id'&#93;);return withAuthority(ctx,q.scope,'decision.spec.flags',async client=&gt;{</code> |
-| `'decision.spec.propose'` | action | 86 | <code>'decision.spec.propose':async (value,ctx)=&gt;{const q=input(value,&#91;'audit_id','findings'&#93;,&#91;'amendment'&#93;);return withAuthority(ctx,q.scope,'decision.spec.propose',async client=&gt;{</code> |
 
 ## services/hyperfide/src/deployment/releases.ts
 
@@ -2047,11 +1532,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `compatibility` | function | 26 | <code>function compatibility(raw:unknown):unknown{</code> |
 | `execute` | function | 37 | <code>async function execute(ctx:ComponentContext,action:typeof actions&#91;number&#93;,raw:unknown):Promise&lt;unknown&gt;{</code> |
 | `trustedDetached` | function | 48 | <code>async function trustedDetached(filename:string,limit:number):Promise&lt;Buffer&gt;{</code> |
-| `protectedDirectory` | function | 54 | <code>async function protectedDirectory(handle:Awaited&lt;ReturnType&lt;typeof fs.open&gt;&gt;):Promise&lt;void&gt;{</code> |
 | `authenticateManifest` | function | 76 | <code>async function authenticateManifest(env:Readonly&lt;NodeJS.ProcessEnv&gt;,root:string,bytes:Buffer):Promise&lt;{mode:'UNAUTHENTICATED'}&#124;{mode:'ED25519';key_fingerprint:string;signature_digest:string}&gt;{</code> |
 | `inspectPrebuiltRelease` | function | 92 | <code>export async function inspectPrebuiltRelease(env:Readonly&lt;NodeJS.ProcessEnv&gt;,relativeManifest:unknown):Promise&lt;unknown&gt;{</code> |
-| `names` | variable | 103 | <code>const names=new Set&lt;string&gt;();</code> |
-| `audit` | function | 126 | <code>async function audit(directory:string):Promise&lt;void&gt;{</code> |
 | `createComponent` | function | 140 | <code>export function createComponent(_startup:ComponentContext):Component{return {apiVersion:1,actions:Object.fromEntries(actions.map(action=&gt;&#91;action,async(raw:unknown,ctx:ComponentContext)=&gt;{</code> |
 
 ## services/hyperfide/src/docs/closure.ts
@@ -2081,11 +1563,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `DocumentationPacket` | interface | 45 | <code>export interface DocumentationPacket{</code> |
 | `DocumentationReload` | interface | 50 | <code>export interface DocumentationReload{previous_baseline_digest:string&#124;null;changed:{repository_id:string;path:string}&#91;&#93;;removed:{repository_id:string;path:string}&#91;&#93;;unchanged:number}</code> |
 | `documentationReload` | function | 52 | <code>export function documentationReload(previous:unknown,files:{repositories:RepositorySnapshot&#91;&#93;},previousDigest:string&#124;null):DocumentationReload{</code> |
-| `prior` | variable | 53 | <code>const prior=new Map&lt;string,string&gt;();</code> |
-| `seen` | variable | 55 | <code>const changed:{repository_id:string;path:string}&#91;&#93;=&#91;&#93;,seen=new Set&lt;string&gt;();let unchanged=0;</code> |
 | `safeRelative` | function | 60 | <code>function safeRelative(value:unknown):string{</code> |
 | `policyFromDocument` | function | 63 | <code>function policyFromDocument(document:unknown):DocumentationPolicy{</code> |
-| `settings` | object | 69 | <code>const settings:RecordValue={};</code> |
 | `requireSchema` | function | 77 | <code>async function requireSchema(db:Pick&lt;PrimaryTransaction,'query'&gt;):Promise&lt;void&gt;{</code> |
 | `current` | function | 82 | <code>async function current(db:Pick&lt;PrimaryTransaction,'query'&gt;,scope:Scope):Promise&lt;{spec_revision_id:string;spec_generation:string;authority_epoch:string;document:unknown}&gt;{</code> |
 | `repositoryVersions` | function | 86 | <code>async function repositoryVersions(db:Pick&lt;PrimaryTransaction,'query'&gt;,scope:Scope):Promise&lt;RepositoryVersion&#91;&#93;&gt;{</code> |
@@ -2094,28 +1573,15 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `git` | function | 102 | <code>async function git(root:string,args:string&#91;&#93;,signal?:AbortSignal):Promise&lt;Buffer&gt;{</code> |
 | `matches` | function | 105 | <code>function matches(pattern:string,name:string):boolean{</code> |
 | `snapshot` | function | 112 | <code>async function snapshot(context:ComponentContext,scope:Scope,versions:RepositoryVersion&#91;&#93;,policy:DocumentationPolicy):Promise&lt;{repositories:RepositorySnapshot&#91;&#93;}&gt;{</code> |
-| `matched` | variable | 124 | <code>const files:BlobSnapshot&#91;&#93;=&#91;&#93;,matched=new Set&lt;string&gt;();</code> |
 | `inspectDocumentationClosure` | function | 137 | <code>export async function inspectDocumentationClosure(db:Pick&lt;PrimaryTransaction,'query'&gt;,scope:Scope,p:DocumentationPins):Promise&lt;DocumentationInspection&gt;{</code> |
 | `packetDocumentation` | function | 156 | <code>export async function packetDocumentation(input:unknown,context:ComponentContext):Promise&lt;unknown&gt;{</code> |
-| `scope` | object | 158 | <code>const scope={organisation_id:i.principal.organisation_id,run_id:i.principal.run_id};</code> |
-| `guard` | action | 159 | <code>const selected=await context.resources.gateway.withPrimaryTransaction({signal:i.signal,guard:tx=&gt;i.guard(tx)},async tx=&gt;{await requireSchema(tx);return assertCurrent(tx,scope,p);});</code> |
-| `guard` | action | 161 | <code>return context.resources.gateway.withPrimaryTransaction({signal:i.signal,guard:tx=&gt;i.guard(tx)},async tx=&gt;{</code> |
-| `packet` | object | 165 | <code>const packet:DocumentationPacket={schema_version:1,scope,pins:p,authority_epoch:selected.authority_epoch,policy:selected.policy,repositories:selected.versions,snapshot:files,snapshot_digest:contentDig…</code> |
 | `closeDocumentation` | function | 173 | <code>export async function closeDocumentation(input:unknown,context:ComponentContext):Promise&lt;unknown&gt;{</code> |
-| `scope` | object | 178 | <code>const scope={organisation_id:i.principal.organisation_id,run_id:i.principal.run_id};</code> |
-| `guard` | action | 179 | <code>return context.resources.gateway.withPrimaryTransaction({signal:i.signal,guard:tx=&gt;i.guard(tx)},async tx=&gt;{</code> |
-| `baseline` | object | 186 | <code>const baseline={schema_version:1,packet_id:packetID,packet_digest:row.packet_digest,check_id:checkID,checks:independentChecks,checker_receipt_digest:row.checker_receipt_digest,snapshot:packet.snapshot…</code> |
-| `receipt` | object | 191 | <code>const receipt={schema_version:1,packet_id:packetID,check_id:checkID,checks:independentChecks,baseline_id:actual,baseline_digest:baselineDigest,snapshot_digest:packet.snapshot_digest,checker_receipt_di…</code> |
 | `createClosureComponent` | function | 197 | <code>export function createClosureComponent(_context:ComponentContext):Component{</code> |
-| `'docs.inspect'` | action | 200 | <code>'docs.inspect':async(input,context)=&gt;{</code> |
-| `guard` | action | 201 | <code>const r=fields(input,&#91;'pins'&#93;),i=invocationOf(context);return context.resources.gateway.withPrimaryTransaction({signal:i.signal,guard:tx=&gt;i.guard(tx)},tx=&gt;inspectDocumentationClosure(tx,{organisation_…</code> |
 | `DurableArtifactFacade` | interface | 205 | <code>interface DurableArtifactFacade{invoke(action:string,input:unknown,context:ComponentContext):Promise&lt;unknown&gt;}</code> |
 | `invoke` | method | 205 | <code>interface DurableArtifactFacade{invoke(action:string,input:unknown,context:ComponentContext):Promise&lt;unknown&gt;}</code> |
 | `artifactFacade` | function | 206 | <code>function artifactFacade(value:unknown):value is DurableArtifactFacade{return object(value)&amp;&amp;typeof value.invoke==='function';}</code> |
 | `admittedArtifact` | function | 207 | <code>function admittedArtifact(value:unknown,scope:Scope,expected?:{digest:string;size:string}):RecordValue{</code> |
 | `persistReleaseArtifact` | function | 213 | <code>export async function persistReleaseArtifact(context:ComponentContext,kind:string,payload:unknown):Promise&lt;RecordValue&gt;{</code> |
-| `scope` | object | 214 | <code>const i=invocationOf(context),scope={organisation_id:i.principal.organisation_id,run_id:i.principal.run_id};</code> |
-| `retention` | object | 218 | <code>const retention={retention_class:'RELEASE',retention_until:null,retention_hold:false};</code> |
 | `DocumentationRemotePlan` | interface | 234 | <code>interface DocumentationRemotePlan{</code> |
 | `DocumentationRemote` | interface | 239 | <code>interface DocumentationRemote{</code> |
 | `prepare` | method | 240 | <code>prepare(tx:PrimaryTransaction,invocation:ReturnType&lt;typeof invocationOf&gt;,plan:DocumentationRemotePlan):Promise&lt;object&gt;;</code> |
@@ -2123,15 +1589,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `validateDocumentationResult` | function | 244 | <code>export function validateDocumentationResult(value:unknown,packet:DocumentationPacket,packetDigest:string,repositoryID:string):RecordValue{</code> |
 | `remoteCaptured` | function | 256 | <code>function remoteCaptured(value:unknown):Buffer{</code> |
 | `checkDocumentation` | function | 262 | <code>export async function checkDocumentation(input:unknown,context:ComponentContext):Promise&lt;unknown&gt;{</code> |
-| `scope` | object | 266 | <code>const scope={organisation_id:i.principal.organisation_id,run_id:i.principal.run_id};</code> |
-| `assertJobReservation` | method | 267 | <code>const allocations=context.dependencies.require('5.1','scheduler.allocations.v1',(v:unknown):v is {readJobAllocation(tx:PrimaryTransaction,input:RecordValue):Promise&lt;RecordValue&#124;null&gt;;assertJobReservat…</code> |
 | `readJobAllocation` | method | 267 | <code>const allocations=context.dependencies.require('5.1','scheduler.allocations.v1',(v:unknown):v is {readJobAllocation(tx:PrimaryTransaction,input:RecordValue):Promise&lt;RecordValue&#124;null&gt;;assertJobReservat…</code> |
-| `guard` | action | 276 | <code>const prepared=await context.resources.gateway.withPrimaryTransaction({signal:i.signal,guard:tx=&gt;i.guard(tx)},async tx=&gt;{</code> |
-| `plan` | object | 298 | <code>const plan:DocumentationRemotePlan={session_id:runnerSession,operation_id:operationID,repository_id:repositoryID,reservation_id:reservationID,job_id:jobID,job_kind:'TEST',task_id:uuid(allocation.task_…</code> |
-| `guard` | action | 306 | <code>await context.resources.gateway.withPrimaryTransaction({signal:i.signal,guard:tx=&gt;i.guard(tx)},async tx=&gt;{await tx.query("UPDATE hyperfide.documentation_jobs SET state='UNKNOWN' WHERE organisation_id=…</code> |
-| `guard` | action | 311 | <code>await context.resources.gateway.withPrimaryTransaction({signal:i.signal,guard:tx=&gt;i.guard(tx)},async tx=&gt;{await tx.query("UPDATE hyperfide.documentation_jobs SET state='UNKNOWN' WHERE organisation_id=…</code> |
-| `guard` | action | 320 | <code>return context.resources.gateway.withPrimaryTransaction({signal:i.signal,guard:tx=&gt;i.guard(tx)},async tx=&gt;{</code> |
-| `receipt` | object | 325 | <code>const receipt={schema_version:1,kind:'documentation_checker_receipt',packet_id:packetID,packet_digest:prepared.packetDigest,repository_id:repositoryID,job_id:prepared.jobID,generation:String(locked.ge…</code> |
+| `assertJobReservation` | method | 267 | <code>const allocations=context.dependencies.require('5.1','scheduler.allocations.v1',(v:unknown):v is {readJobAllocation(tx:PrimaryTransaction,input:RecordValue):Promise&lt;RecordValue&#124;null&gt;;assertJobReservat…</code> |
 | `createComponent` | function | 333 | <code>export function createComponent(context:ComponentContext):Component{</code> |
 | `DocumentationCheckReference` | interface | 337 | <code>interface DocumentationCheckReference{check_id:string;checker_receipt_digest:string;repository_id:string}</code> |
 | `validatedDocumentationChecks` | function | 338 | <code>async function validatedDocumentationChecks(db:Pick&lt;PrimaryTransaction,'query'&gt;,scope:Scope,packetID:string,ids:string&#91;&#93;,packet:DocumentationPacket):Promise&lt;DocumentationCheckReference&#91;&#93;&gt;{</code> |
@@ -2164,7 +1623,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `constructor` | method | 84 | <code>constructor(private context: ComponentContext) {}</code> |
 | `directory` | method | 85 | <code>private async directory(): Promise&lt;string&gt; {</code> |
 | `put` | method | 97 | <code>async put&lt;T&gt;(kind: string, payload: T): Promise&lt;string&gt; {</code> |
-| `artifact` | object | 98 | <code>const artifact: Artifact&lt;T&gt; = { schema_version: 1, kind, payload };</code> |
 | `get` | method | 112 | <code>async get&lt;T = Obj&gt;(identity: unknown, kind: string): Promise&lt;T&gt; {</code> |
 | `Packet` | interface | 122 | <code>export interface Packet {</code> |
 | `DatasetRow` | interface | 128 | <code>export interface DatasetRow { packet: Packet; target: string &#124; null; split: 'train'&#124;'calibration'&#124;'holdout'; packet_digest:string; label_digest:string; evidence_class:EvidenceClass; label_kind:string;…</code> |
@@ -2172,17 +1630,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `sequence` | function | 133 | <code>function sequence(value: unknown): string {</code> |
 | `parsePacket` | function | 136 | <code>function parsePacket(v: unknown): Packet {</code> |
 | `buildDataset` | function | 151 | <code>export async function buildDataset(input: unknown, context: ComponentContext): Promise&lt;Obj&gt; {</code> |
-| `packets` | variable | 153 | <code>const packets = new Set&lt;string&gt;(), seenCases = new Set&lt;string&gt;();</code> |
-| `seenCases` | variable | 153 | <code>const packets = new Set&lt;string&gt;(), seenCases = new Set&lt;string&gt;();</code> |
-| `find` | function | 180 | <code>const parent=rows.map((_,i)=&gt;i), find=(i:number):number=&gt;{while(parent&#91;i&#93;!==i)i=parent&#91;i&#93;!;return i;};</code> |
-| `owners` | variable | 181 | <code>const owners=new Map&lt;string,number&gt;();</code> |
-| `groups` | variable | 187 | <code>const groups=new Map&lt;number,DatasetRow&#91;&#93;&gt;();</code> |
-| `boundary` | function | 197 | <code>const boundary=(split:string,fn:(...values:number&#91;&#93;)=&gt;number)=&gt;fn(...rows.filter(r=&gt;r.split===split).map(r=&gt;Date.parse(r.packet.decision_at)));</code> |
-| `classes` | variable | 200 | <code>const classes=new Set(rows.map(r=&gt;r.evidence_class));</code> |
-| `dataset` | object | 201 | <code>const dataset:Dataset={name:id(request.name),purpose:rows&#91;0&#93;!.packet.purpose,split_seed:seed,rows,</code> |
 | `createComponent` | function | 208 | <code>export function createComponent(_context:ComponentContext):Component {</code> |
-| `'evaluation.dataset.inspect'` | action | 211 | <code>'evaluation.dataset.inspect':async(input,ctx)=&gt;{</code> |
-| `'evaluation.dataset.packet'` | action | 215 | <code>'evaluation.dataset.packet':async(input,ctx)=&gt;{</code> |
 
 ## services/hyperfide/src/evaluation/promotion.ts
 
@@ -2197,15 +1645,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `quality` | function | 15 | <code>function quality(score:Scorecard,p:Policy):string&#91;&#93;{</code> |
 | `validQualification` | function | 32 | <code>function validQualification(context:ComponentContext,input:unknown,kind:string,profileDigest:string,requiredCases:string&#91;&#93;):{reasons:string&#91;&#93;;expires_at:string}{</code> |
 | `assessPromotion` | function | 46 | <code>export async function assessPromotion(input:unknown,context:ComponentContext):Promise&lt;Obj&gt;{</code> |
-| `requiredCases` | object | 52 | <code>const requiredCases={route:strings(required.route,1,56),invariants:strings(required.invariants,1,56)};</code> |
-| `policy` | object | 54 | <code>const policy:Policy={version:id(p.version),purpose:id(p.purpose),profile:profile(p.profile),dataset_id:hash(p.dataset_id),</code> |
-| `store` | variable | 57 | <code>const store=new EvaluationStore(context),score=await store.get&lt;Scorecard&gt;(r.scorecard_id,'scorecard'),trial=await store.get&lt;TrialReport&gt;(r.trial_report_id,'trial_report');</code> |
-| `gate` | object | 76 | <code>const gate:Gate={policy,scorecard_id:hash(r.scorecard_id),trial_report_id:hash(r.trial_report_id),eligible:reasons.length===0,</code> |
 | `checkDrift` | function | 83 | <code>export async function checkDrift(input:unknown,context:ComponentContext):Promise&lt;Obj&gt;{</code> |
-| `store` | variable | 85 | <code>const store=new EvaluationStore(context),gate=await store.get&lt;Gate&gt;(r.gate_id,'promotion_gate'),score=await store.get&lt;Scorecard&gt;(r.scorecard_id,'scorecard');</code> |
-| `result` | object | 99 | <code>const result={gate_id:hash(r.gate_id),scorecard_id:hash(r.scorecard_id),policy_version:gate.policy.version,</code> |
 | `createComponent` | function | 105 | <code>export function createComponent(_context:ComponentContext):Component{</code> |
-| `'evaluation.selfhost.optional'` | action | 108 | <code>'evaluation.selfhost.optional':async(input)=&gt;{</code> |
 
 ## services/hyperfide/src/evaluation/scorecard.ts
 
@@ -2221,28 +1662,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `safeSum` | function | 17 | <code>function safeSum(values:number&#91;&#93;):number { const total=values.reduce((a,b)=&gt;a+b,0);return integer(total); }</code> |
 | `quantile` | function | 18 | <code>function quantile(values:number&#91;&#93;,q:number):number&#124;null {</code> |
 | `parsePredictions` | function | 21 | <code>export function parsePredictions(context:ComponentContext,values:unknown,rows:DatasetRow&#91;&#93;,profiles:Profile&#91;&#93;):Prediction&#91;&#93; {</code> |
-| `owners` | variable | 22 | <code>const selected=new Map(rows.map(r=&gt;&#91;r.packet.case_id,r&#93;)), owners=new Map(profiles.map(p=&gt;&#91;p.id,p&#93;));</code> |
-| `selected` | variable | 22 | <code>const selected=new Map(rows.map(r=&gt;&#91;r.packet.case_id,r&#93;)), owners=new Map(profiles.map(p=&gt;&#91;p.id,p&#93;));</code> |
-| `seen` | variable | 23 | <code>const seen=new Set&lt;string&gt;(),result:Prediction&#91;&#93;=&#91;&#93;;</code> |
 | `calibrate` | function | 51 | <code>export async function calibrate(input:unknown,context:ComponentContext):Promise&lt;Obj&gt;{</code> |
-| `store` | variable | 53 | <code>const store=new EvaluationStore(context),dataset=await store.get&lt;Dataset&gt;(r.dataset_id,'dataset'),p=profile(r.profile);</code> |
-| `result` | object | 65 | <code>const result:Calibration={dataset_id:hash(r.dataset_id),holdout_digest:dataset.holdout_digest,profile:p,bins,</code> |
 | `Scorecard` | interface | 71 | <code>export interface Scorecard {</code> |
 | `metrics` | function | 76 | <code>function metrics(rows:DatasetRow&#91;&#93;,predictions:Prediction&#91;&#93;,calibration:Calibration&#124;null):Obj{</code> |
-| `byCase` | variable | 77 | <code>const byCase=new Map(rows.map(r=&gt;&#91;r.packet.case_id,r&#93;)),labels=rows.filter(r=&gt;r.target!==null);</code> |
-| `confusion` | object | 81 | <code>const confusion:Record&lt;string,{tp:number;fp:number;fn:number;precision_interval:unknown;recall_interval:unknown}&gt;={};</code> |
-| `groupCounts` | variable | 102 | <code>const groupCounts=new Map&lt;string,number&gt;();</code> |
 | `score` | function | 130 | <code>export async function score(input:unknown,context:ComponentContext):Promise&lt;Obj&gt;{</code> |
-| `store` | variable | 133 | <code>const store=new EvaluationStore(context),dataset=await store.get&lt;Dataset&gt;(r.dataset_id,'dataset');</code> |
-| `calibrations` | variable | 138 | <code>const calibrations=new Map&lt;string,Calibration&gt;();</code> |
-| `resultMetrics` | object | 145 | <code>const resultMetrics:Record&lt;string,Obj&gt;={},strata:Record&lt;string,Record&lt;string,Obj&gt;&gt;={};</code> |
-| `strata` | object | 145 | <code>const resultMetrics:Record&lt;string,Obj&gt;={},strata:Record&lt;string,Record&lt;string,Obj&gt;&gt;={};</code> |
-| `subsets` | variable | 149 | <code>const subsets=new Map&lt;string,DatasetRow&#91;&#93;&gt;();</code> |
-| `names` | variable | 154 | <code>for(const&#91;tag,subset&#93;of subsets){const names=new Set(subset.map(v=&gt;v.packet.case_id));strata&#91;p.id&#93;!&#91;tag&#93;=metrics(subset,selected.filter(v=&gt;names.has(v.case_id)),c);}</code> |
-| `comparisons` | object | 156 | <code>const comparisons:Record&lt;string,Obj&gt;={},labelled=rows.filter(r=&gt;r.target!==null);</code> |
-| `predictionMap` | variable | 157 | <code>const predictionMap=new Map(predictions.map(p=&gt;&#91;p.case_id+':'+p.profile_id,p&#93;));</code> |
-| `weights` | variable | 159 | <code>const weights=new Map&lt;string,number&gt;();let delta=0;</code> |
-| `result` | object | 175 | <code>const result:Scorecard={dataset_id:hash(r.dataset_id),holdout_digest:dataset.holdout_digest,split:String(r.split),purpose:dataset.purpose,</code> |
 | `createComponent` | function | 182 | <code>export function createComponent(_context:ComponentContext):Component {</code> |
 
 ## services/hyperfide/src/evaluation/trials.ts
@@ -2254,14 +1677,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `Trial` | interface | 6 | <code>export interface Trial {</code> |
 | `TrialReport` | interface | 14 | <code>export interface TrialReport {</code> |
 | `createTrial` | function | 20 | <code>export async function createTrial(input:unknown,context:ComponentContext):Promise&lt;Obj&gt;{</code> |
-| `store` | variable | 24 | <code>const store=new EvaluationStore(context),scorecard=await store.get&lt;Scorecard&gt;(p.scorecard_id,'scorecard');</code> |
-| `trial` | object | 49 | <code>const trial:Trial={trial_id:id(p.trial_id),mode:p.mode as Trial&#91;'mode'&#93;,purpose:id(p.purpose),scorecard_id:hash(p.scorecard_id),dataset_id:scorecard.dataset_id,</code> |
 | `reportTrial` | function | 57 | <code>export async function reportTrial(input:unknown,context:ComponentContext):Promise&lt;Obj&gt;{</code> |
-| `store` | variable | 58 | <code>const r=fields(input,&#91;'trial_id','observations'&#93;),store=new EvaluationStore(context),trial=await store.get&lt;Trial&gt;(r.trial_id,'trial');</code> |
-| `arms` | object | 59 | <code>const seen=new Set&lt;string&gt;(),arms:Record&lt;string,{primary:number&#91;&#93;;defect_rates:number&#91;&#93;;qualified:number;defects:number;cost:number;attempts:number;retries:number;duration:number}&gt;={</code> |
-| `seen` | variable | 59 | <code>const seen=new Set&lt;string&gt;(),arms:Record&lt;string,{primary:number&#91;&#93;;defect_rates:number&#91;&#93;;qualified:number;defects:number;cost:number;attempts:number;retries:number;duration:number}&gt;={</code> |
-| `mean` | function | 90 | <code>const mean=(x:number&#91;&#93;)=&gt;x.reduce((a,b)=&gt;a+b,0)/x.length;</code> |
-| `report` | object | 102 | <code>const report:TrialReport={trial_id:hash(r.trial_id),mode:trial.mode,purpose:trial.purpose,scorecard_id:trial.scorecard_id,dataset_id:trial.dataset_id,</code> |
 | `createComponent` | function | 122 | <code>export function createComponent(_context:ComponentContext):Component {</code> |
 
 ## services/hyperfide/src/events/api.ts
@@ -2272,20 +1688,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | --- | --- | ---: | --- |
 | `Action` | type | 14 | <code>type Action=(input:unknown,context:ComponentContext)=&gt;Promise&lt;unknown&gt;&#124;unknown;</code> |
 | `nativeInvocation` | function | 16 | <code>async function nativeInvocation&lt;T&gt;(g:TransactionGateway,context:ComponentContext,input:unknown,</code> |
-| `guard` | action | 19 | <code>return g.withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:invocation.signal,guard:tx=&gt;invocation.identityGuard(tx)},async tx=&gt;{</code> |
-| `target` | object | 26 | <code>target={sandbox_id:uuid(p.sandbox_id),boot_id:uuid(p.boot_id)};</code> |
 | `observedAt` | function | 47 | <code>function observedAt(value:unknown):string {</code> |
 | `ingestRunnerEvent` | function | 52 | <code>export async function ingestRunnerEvent(g:TransactionGateway,context:ComponentContext,input:unknown):Promise&lt;unknown&gt; {</code> |
-| `e` | object | 62 | <code>const e={...s,event_id:uuid(v.event_id),attempt_id:uuid(v.attempt_id),attempt_generation:integer(v.attempt_generation),</code> |
-| `guard` | action | 70 | <code>return g.withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:invocation.signal,guard:tx=&gt;invocation.identityGuard(tx)},async tx=&gt;{</code> |
-| `record` | object | 108 | <code>const record={...e,payload:v.payload,receipt_cursor:e.sequence,received_at:clock.toISOString(),</code> |
 | `receipt` | function | 121 | <code>function receipt(value:unknown,status:'ADMITTED'&#124;'DUPLICATE'):Record&lt;string,unknown&gt; {</code> |
 | `runnerApi` | function | 127 | <code>export function runnerApi(g:TransactionGateway):Record&lt;string,Action&gt; {</code> |
-| `'instructions.runner.poll'` | action | 129 | <code>'instructions.runner.poll':(input,context)=&gt;pollRunnerCommands(context,input),</code> |
-| `'instructions.consumer.register'` | action | 130 | <code>'instructions.consumer.register':(input,context)=&gt;authorizedRun(g,context,input,&#91;'RUNNER'&#93;,(tx,invocation)=&gt;registerRunnerConsumer(tx,input,invocation)),</code> |
-| `'instructions.handoff'` | action | 131 | <code>'instructions.handoff':(input,context)=&gt;nativeInvocation(g,context,input,'HANDOFF',(tx,invocation)=&gt;handoff(tx,input,invocation.principal)),</code> |
-| `'instructions.ack'` | action | 132 | <code>'instructions.ack':(input,context)=&gt;nativeInvocation(g,context,input,'ACK',(tx,invocation)=&gt;recordRunnerAcknowledgement(tx,input,invocation)),</code> |
-| `'instructions.events.ingest'` | action | 133 | <code>'instructions.events.ingest':(input,context)=&gt;ingestRunnerEvent(g,context,input)</code> |
 
 ## services/hyperfide/src/events/dispatcher.ts
 
@@ -2296,23 +1702,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `Route` | interface | 11 | <code>interface Route {aggregate_type:string;event_type:string;component:string;action:string;input_mode:'DELIVERY'&#124;'CLAIM'}</code> |
 | `WorkerConfig` | interface | 12 | <code>interface WorkerConfig {organisation_id:string;run_id:string;credential_id:string;key_file:string;ca_file:string;</code> |
 | `ContinuousDispatch` | interface | 14 | <code>export interface ContinuousDispatch {describe():Readonly&lt;Record&lt;string,unknown&gt;&gt;;close():Promise&lt;void&gt;}</code> |
-| `close` | method | 14 | <code>export interface ContinuousDispatch {describe():Readonly&lt;Record&lt;string,unknown&gt;&gt;;close():Promise&lt;void&gt;}</code> |
 | `describe` | method | 14 | <code>export interface ContinuousDispatch {describe():Readonly&lt;Record&lt;string,unknown&gt;&gt;;close():Promise&lt;void&gt;}</code> |
+| `close` | method | 14 | <code>export interface ContinuousDispatch {describe():Readonly&lt;Record&lt;string,unknown&gt;&gt;;close():Promise&lt;void&gt;}</code> |
 | `readOwned` | function | 15 | <code>async function readOwned(file:string,secret:boolean,max:number):Promise&lt;Buffer&gt; {</code> |
 | `configuration` | function | 28 | <code>function configuration(value:unknown):WorkerConfig {</code> |
 | `startContinuousDispatch` | function | 51 | <code>export async function startContinuousDispatch(context:ComponentContext):Promise&lt;ContinuousDispatch&#124;undefined&gt; {</code> |
-| `stop` | variable | 63 | <code>const stop=new AbortController(),signal=AbortSignal.any(&#91;context.signal,stop.signal&#93;);</code> |
-| `status` | object | 65 | <code>const status={state:'STARTING',passes:0,claimed:0,acknowledged:0,unconfirmed_attempts:0,last_error:null as string&#124;null};</code> |
-| `call` | function | 66 | <code>const call=async(target:string,component:string,action:string,input:unknown,remaining?:number,operationId?:string):Promise&lt;unknown&gt;=&gt;{</code> |
-| `proof` | object | 72 | <code>const proof={id:config.credential_id,time:String(Math.floor(Date.now()/1000)),nonce:randomUUID()};</code> |
-| `finish` | function | 77 | <code>const finish=(error:Error&#124;null,value?:unknown):void=&gt;{if(done)return;done=true;if(error)reject(error);else resolve(value);};</code> |
-| `maintainIdentity` | function | 101 | <code>const maintainIdentity=async():Promise&lt;void&gt;=&gt;{</code> |
-| `pass` | function | 116 | <code>const pass=async():Promise&lt;void&gt;=&gt;{</code> |
-| `s` | object | 120 | <code>const s={organisation_id:config.organisation_id,run_id:config.run_id};</code> |
-| `claim` | object | 130 | <code>const claim={...s,event_id:e.id,consumer_id:consumer,attempt_count:integer(c.attempt_count)};</code> |
-| `finish` | function | 155 | <code>const finish=():void=&gt;{if(timer)clearTimeout(timer);signal.removeEventListener('abort',finish);wake=undefined;resolve();};</code> |
-| `describe` | action | 161 | <code>return Object.freeze({describe:()=&gt;Object.freeze({...status,consumer_count:config.consumer_ids.length,route_count:config.routes.length,</code> |
-| `close` | action | 162 | <code>transport:'signed-HTTPS',task_completion_authority:false}),close:async()=&gt;{if(closed)return;closed=true;stop.abort();wake?.();await loop;}});</code> |
 
 ## services/hyperfide/src/events/inbox.ts
 
@@ -2327,18 +1721,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `replay` | function | 71 | <code>export async function replay(tx:PrimaryTransaction,input:unknown):Promise&lt;unknown&gt; {</code> |
 | `SnapshotBootstrap` | interface | 91 | <code>export interface SnapshotBootstrap extends Scope {bootstrap_id:string;consumer_id:string;aggregate_types:readonly string&#91;&#93;;limit:number}</code> |
 | `bootstrapConsumer` | function | 92 | <code>export async function bootstrapConsumer(tx:PrimaryTransaction,input:SnapshotBootstrap,</code> |
-| `result` | object | 134 | <code>const result={bootstrap_id:bootstrap,snapshot_id:snapshotId,snapshot_digest:snapshotDigest,snapshot,</code> |
 | `DeliverySupersession` | interface | 161 | <code>export interface DeliverySupersession extends Scope {transfer_id:string;original_event_id:string;original_consumer_id:string;</code> |
 | `supersedeDelivery` | function | 163 | <code>export async function supersedeDelivery(tx:PrimaryTransaction,input:DeliverySupersession,</code> |
-| `decode` | function | 177 | <code>const decode=(r:Record&lt;string,unknown&gt;)=&gt;event({...s,id:r.id,aggregate_type:r.aggregate_type,aggregate_id:r.aggregate_id,</code> |
-| `result` | object | 208 | <code>const receiptId=admission.rows&#91;0&#93;?.id??randomUUID(),result={transfer_id:transfer,original_event_id:originalId,original_consumer_id:originalConsumer,</code> |
 | `EventInboxCapability` | interface | 221 | <code>export interface EventInboxCapability {receive:typeof receive;replay:typeof replay;bootstrapConsumer:typeof bootstrapConsumer;supersedeDelivery:typeof supersedeDelivery}</code> |
 | `isEventInboxCapability` | function | 222 | <code>export function isEventInboxCapability(value:unknown):value is EventInboxCapability {</code> |
 | `createComponent` | function | 226 | <code>export function createComponent(context:ComponentContext):Component {</code> |
-| `component` | object | 228 | <code>const component={apiVersion:1 as const,capabilities:{'events.inbox.v1':Object.freeze({receive,replay,bootstrapConsumer,supersedeDelivery})},actions:{</code> |
-| `'inbox.describe'` | action | 229 | <code>'inbox.describe':()=&gt;({schema_version:1,effect:'transactional-linked-callback',duplicate_effects:false,</code> |
-| `'inbox.receive'` | action | 231 | <code>'inbox.receive':(input:unknown,context:ComponentContext)=&gt;authorizedRun(g,context,input,&#91;'OPERATOR','COORDINATOR','DISPATCH'&#93;,tx=&gt;receive(tx,input)),</code> |
-| `'inbox.replay'` | action | 232 | <code>'inbox.replay':(input:unknown,context:ComponentContext)=&gt;authorizedRun(g,context,input,&#91;'OPERATOR','COORDINATOR','DISPATCH'&#93;,tx=&gt;replay(tx,input))</code> |
 
 ## services/hyperfide/src/events/instructions.ts
 
@@ -2355,24 +1742,15 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `runnerConsumerIdentity` | function | 86 | <code>function runnerConsumerIdentity(s:Scope,consumer:string,sandbox:string,boot:string,generation:string):Record&lt;string,unknown&gt; {</code> |
 | `resolveRunnerConsumer` | function | 89 | <code>export async function resolveRunnerConsumer(tx:PrimaryTransaction,input:unknown):Promise&lt;RunnerConsumerBinding&#124;null&gt; {</code> |
 | `registerRunnerConsumer` | function | 113 | <code>export async function registerRunnerConsumer(tx:PrimaryTransaction,input:unknown,invocation:InvocationContext):Promise&lt;unknown&gt; {</code> |
-| `result` | object | 130 | <code>const receipt=randomUUID(),result={...identity,empty_native_history:true,covered_native_events:'0',</code> |
 | `instructionRecipient` | function | 142 | <code>export async function instructionRecipient(tx:PrimaryTransaction,s:Scope,target:{sandbox_id:string;boot_id:string},generation:string,active:boolean):Promise&lt;string&gt; {</code> |
 | `issue` | function | 149 | <code>export async function issue(tx:PrimaryTransaction,input:unknown):Promise&lt;unknown&gt; {</code> |
 | `acceptInstruction` | function | 191 | <code>export async function acceptInstruction(tx:PrimaryTransaction,input:unknown):Promise&lt;unknown&gt; {</code> |
-| `result` | object | 205 | <code>const result={command_id:i.id,kind:i.kind,accepted:!suppressed,</code> |
 | `handoff` | function | 216 | <code>export async function handoff(tx:PrimaryTransaction,input:unknown,principal?:Principal):Promise&lt;unknown&gt; {</code> |
 | `replayInstructions` | function | 245 | <code>export async function replayInstructions(tx:PrimaryTransaction,input:unknown):Promise&lt;unknown&gt; {</code> |
 | `runnerMatches` | function | 264 | <code>export function runnerMatches(principal:Principal,i:Instruction,target:{sandbox_id:string;boot_id:string}):void {</code> |
 | `recordRunnerAcknowledgement` | function | 271 | <code>export async function recordRunnerAcknowledgement(tx:PrimaryTransaction,input:unknown,invocation:InvocationContext):Promise&lt;unknown&gt; {</code> |
-| `result` | object | 328 | <code>const result={recorded:true,replayed:false,command_id:command,ledger_receipt_id:ledger,ledger_version:version,</code> |
 | `issueAuthority` | function | 342 | <code>async function issueAuthority(tx:PrimaryTransaction,input:unknown,invocation:InvocationContext):Promise&lt;void&gt; {</code> |
 | `createComponent` | function | 359 | <code>export function createComponent(context:ComponentContext):Component {</code> |
-| `component` | object | 361 | <code>const component={apiVersion:1 as const,capabilities:{'events.instructions.v1':Object.freeze({issue,acceptInstruction,handoff,replayInstructions,recordRunnerAcknowledgement,lookupNativeLaunch,registerR…</code> |
-| `'instructions.describe'` | action | 362 | <code>'instructions.describe':()=&gt;({schema_version:1,kinds:&#91;'START','STEER','CANCEL'&#93;,identity:'stable-command-UUID',</code> |
-| `'instructions.issue'` | action | 364 | <code>'instructions.issue':(input:unknown,context:ComponentContext)=&gt;authorizedRun(g,context,input,&#91;'OPERATOR','LEADER','FEATURE_MANAGER','COORDINATOR'&#93;,async(tx,invocation)=&gt;{await issueAuthority(tx,input,…</code> |
-| `'instructions.accept'` | action | 365 | <code>'instructions.accept':(input:unknown,context:ComponentContext)=&gt;authorizedRun(g,context,input,&#91;'OPERATOR','COORDINATOR','DISPATCH'&#93;,tx=&gt;acceptInstruction(tx,input)),</code> |
-| `'instructions.replay'` | action | 366 | <code>'instructions.replay':(input:unknown,context:ComponentContext)=&gt;authorizedRun(g,context,input,&#91;'OPERATOR','COORDINATOR','DISPATCH'&#93;,tx=&gt;replayInstructions(tx,input)),</code> |
-| `'instructions.lookup-native'` | action | 367 | <code>'instructions.lookup-native':(input:unknown,context:ComponentContext)=&gt;authorizedRun(g,context,input,&#91;'RUNNER','OPERATOR','COORDINATOR','DISPATCH'&#93;,(tx,invocation)=&gt;lookupNativeLaunch(tx,input,invocat…</code> |
 
 ## services/hyperfide/src/events/outbox.ts
 
@@ -2391,22 +1769,17 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `bounded` | function | 39 | <code>export function bounded(value: unknown, min: number, max: number): number {</code> |
 | `scope` | function | 44 | <code>export function scope(value: Record&lt;string, unknown&gt;): Scope {</code> |
 | `canonical` | function | 48 | <code>export function canonical(value: unknown): string {</code> |
-| `seen` | variable | 49 | <code>const seen = new Set&lt;object&gt;();</code> |
-| `encode` | function | 50 | <code>function encode(v: unknown, depth: number): string {</code> |
 | `digest` | function | 68 | <code>export function digest(value: unknown): string { return 'sha256:' + createHash('sha256').update(canonical(value)).digest('hex'); }</code> |
 | `event` | function | 69 | <code>export function event(value: unknown): OutboxEvent {</code> |
-| `result` | object | 72 | <code>const result = { ...scope(v), id: uuid(v.id), aggregate_type: name(v.aggregate_type),</code> |
 | `eventDigest` | function | 77 | <code>export function eventDigest(e: OutboxEvent): string {</code> |
 | `gateway` | function | 81 | <code>export function gateway(context: ComponentContext): TransactionGateway {</code> |
 | `require` | method | 83 | <code>dependencies: { require&lt;T&gt;(id:string,capability:string,guard:(v:unknown)=&gt;v is T):T }</code> |
 | `run` | function | 89 | <code>export async function run&lt;T&gt;(g: TransactionGateway, operation:(tx:PrimaryTransaction)=&gt;Promise&lt;T&gt;): Promise&lt;T&gt; {</code> |
 | `requireInvocation` | function | 92 | <code>export function requireInvocation(context:ComponentContext,input:unknown,roles:readonly string&#91;&#93;):InvocationContext {</code> |
 | `authorizedRun` | function | 103 | <code>export function authorizedRun&lt;T&gt;(g:TransactionGateway,context:ComponentContext,input:unknown,roles:readonly string&#91;&#93;,</code> |
-| `guard` | action | 106 | <code>return g.withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:invocation.signal,guard:tx=&gt;invocation.guard(tx)},</code> |
 | `lockRun` | function | 111 | <code>export async function lockRun(tx: PrimaryTransaction, s: Scope, mode: 'shared'&#124;'exclusive' = 'shared'): Promise&lt;void&gt; {</code> |
 | `registerConsumer` | function | 118 | <code>export async function registerConsumer(tx: PrimaryTransaction, input: unknown): Promise&lt;unknown&gt; {</code> |
 | `enqueue` | function | 141 | <code>export async function enqueue(tx: PrimaryTransaction, value: unknown, options?: {consumer_ids:readonly string&#91;&#93;}): Promise&lt;{event:OutboxEvent; replayed:boolean; obligations:number}&gt; {</code> |
-| `known` | variable | 163 | <code>const known=new Map(prior.rows.map(r=&gt;&#91;r.consumer_id as string,r.critical as boolean&#93;));</code> |
 | `claimPending` | function | 181 | <code>export async function claimPending(tx: PrimaryTransaction, input:unknown):Promise&lt;DeliveryClaim&#91;&#93;&gt; {</code> |
 | `currentClaim` | function | 204 | <code>export async function currentClaim(tx:PrimaryTransaction,input:unknown):Promise&lt;{scope:Scope;event_id:string;consumer_id:string;attempt_count:string;row:Record&lt;string,unknown&gt;}&gt; {</code> |
 | `acknowledge` | function | 217 | <code>export async function acknowledge(tx:PrimaryTransaction,input:unknown):Promise&lt;unknown&gt; {</code> |
@@ -2421,17 +1794,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `resolveSessionConsumer` | function | 291 | <code>export async function resolveSessionConsumer(tx:PrimaryTransaction,input:unknown):Promise&lt;SessionConsumerBinding&#124;null&gt; {</code> |
 | `bindSessionConsumer` | function | 297 | <code>export async function bindSessionConsumer(tx:PrimaryTransaction,input:unknown,invocation:InvocationContext):Promise&lt;SessionConsumerBinding&amp;{replayed:boolean}&gt; {</code> |
 | `lookupNativeLaunch` | function | 318 | <code>export async function lookupNativeLaunch(tx:PrimaryTransaction,input:unknown,invocation:InvocationContext):Promise&lt;unknown&gt; {</code> |
-| `expected` | object | 354 | <code>const expected={command_id:e.id,operation_id:e.id,...s,attempt_id:attempt,attempt_generation:generation,authority_epoch:epoch,</code> |
 | `createComponent` | function | 383 | <code>export function createComponent(context:ComponentContext):Component {</code> |
-| `component` | object | 385 | <code>const component={apiVersion:1 as const,capabilities:{'events.outbox.v1':Object.freeze({enqueue,lockRun,registerConsumer,claimPending,acknowledge,retry,sessionConsumerKey,bindSessionConsumer,resolveSes…</code> |
-| `'outbox.describe'` | action | 386 | <code>'outbox.describe':()=&gt;({schema_version:1,delivery:'at-least-once',ordering:'per-aggregate-version',global_cursor:false,</code> |
-| `'outbox.consumer.register'` | action | 388 | <code>'outbox.consumer.register':(input:unknown,context:ComponentContext)=&gt;authorizedRun(g,context,input,&#91;'OPERATOR','COORDINATOR'&#93;,tx=&gt;registerConsumer(tx,input)),</code> |
-| `'outbox.consumer.bind-session'` | action | 389 | <code>'outbox.consumer.bind-session':(input:unknown,context:ComponentContext)=&gt;authorizedRun(g,context,input,&#91;'OPERATOR','COORDINATOR','LEADER','FEATURE_MANAGER'&#93;,(tx,invocation)=&gt;bindSessionConsumer(tx,inp…</code> |
-| `'outbox.consumer.resolve-session'` | action | 390 | <code>'outbox.consumer.resolve-session':(input:unknown,context:ComponentContext)=&gt;authorizedRun(g,context,input,&#91;'OPERATOR','COORDINATOR','LEADER','FEATURE_MANAGER'&#93;,async(tx,invocation)=&gt;{</code> |
-| `'outbox.enqueue'` | action | 394 | <code>'outbox.enqueue':(input:unknown,context:ComponentContext)=&gt;authorizedRun(g,context,input,&#91;'OPERATOR','COORDINATOR'&#93;,tx=&gt;{</code> |
-| `'outbox.claim'` | action | 398 | <code>'outbox.claim':(input:unknown,context:ComponentContext)=&gt;authorizedRun(g,context,input,&#91;'OPERATOR','COORDINATOR','DISPATCH'&#93;,tx=&gt;claimPending(tx,input)),</code> |
-| `'outbox.acknowledge'` | action | 399 | <code>'outbox.acknowledge':(input:unknown,context:ComponentContext)=&gt;authorizedRun(g,context,input,&#91;'OPERATOR','COORDINATOR','DISPATCH'&#93;,tx=&gt;acknowledge(tx,input)),</code> |
-| `'outbox.retry'` | action | 400 | <code>'outbox.retry':(input:unknown,context:ComponentContext)=&gt;authorizedRun(g,context,input,&#91;'OPERATOR','COORDINATOR','DISPATCH'&#93;,tx=&gt;retry(tx,input))</code> |
 | `EventOutboxCapability` | interface | 405 | <code>export interface EventOutboxCapability {</code> |
 | `isEventOutboxCapability` | function | 410 | <code>export function isEventOutboxCapability(value:unknown):value is EventOutboxCapability {</code> |
 
@@ -2450,21 +1813,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `constructor` | method | 72 | <code>constructor(private readonly g:TransactionGateway,private readonly config:DispatchConfig,private readonly deliver:DeliveryAdapter,private readonly context:ComponentContext) {</code> |
 | `wake` | method | 81 | <code>wake():void { this.wakeResolve?.(); }</code> |
 | `start` | method | 82 | <code>start():void {</code> |
-| `done` | function | 91 | <code>const done=()=&gt;{if(settled)return;settled=true;clearTimeout(timer);this.wakeResolve=undefined;resolve();};</code> |
 | `pass` | method | 98 | <code>pass():Promise&lt;DispatchPass&gt; {</code> |
 | `transaction` | method | 102 | <code>private transaction&lt;T&gt;(operation:(tx:PrimaryTransaction)=&gt;Promise&lt;T&gt;):Promise&lt;T&gt; {</code> |
-| `guard` | action | 104 | <code>return this.g.withPrimaryTransaction({timeoutMs:10000,maxRetries:3,guard:tx=&gt;invocation.guard(tx),</code> |
 | `execute` | method | 107 | <code>private async execute():Promise&lt;DispatchPass&gt; {</code> |
-| `result` | object | 111 | <code>const result={claimed:claims.length,acknowledged:0,pending:0};</code> |
-| `cleanup` | function | 121 | <code>const cleanup=()=&gt;{if(timer)clearTimeout(timer);signal.removeEventListener('abort',aborted);};</code> |
-| `aborted` | function | 122 | <code>const aborted=()=&gt;{cleanup();reject(new Error('Delivery acceptance deadline expired'));};</code> |
 | `close` | method | 143 | <code>async close():Promise&lt;void&gt; {</code> |
 | `createComponent` | function | 149 | <code>export async function createComponent(context:ComponentContext):Promise&lt;Component&gt; {</code> |
-| `component` | object | 151 | <code>const component={apiVersion:1 as const,capabilities:{'events.recovery.v1':Object.freeze({inspectPending,recoverySnapshot,DurableDispatcher})},actions:{</code> |
-| `'recovery.describe'` | action | 152 | <code>'recovery.describe':()=&gt;({schema_version:1,recovery:'bounded-primary-poll',notifications:'wakeups-only',worker:worker?.describe()??null,</code> |
-| `'recovery.inspect'` | action | 154 | <code>'recovery.inspect':(input:unknown,context:ComponentContext)=&gt;authorizedRun(g,context,input,&#91;'OPERATOR','COORDINATOR','DISPATCH'&#93;,tx=&gt;inspectPending(tx,input)),</code> |
-| `'recovery.claim'` | action | 155 | <code>'recovery.claim':(input:unknown,context:ComponentContext)=&gt;authorizedRun(g,context,input,&#91;'OPERATOR','COORDINATOR','DISPATCH'&#93;,tx=&gt;claimPending(tx,input))</code> |
-| `close` | action | 157 | <code>return {...component,close:async()=&gt;{await worker?.close();}};</code> |
 
 ## services/hyperfide/src/events/runner_commands.ts
 
@@ -2477,10 +1830,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `observationMatches` | function | 17 | <code>function observationMatches(value:unknown,row:Record&lt;string,any&gt;,invocation:InvocationContext):boolean {</code> |
 | `nativeObservation` | function | 30 | <code>async function nativeObservation(tx:PrimaryTransaction,row:Record&lt;string,any&gt;,invocation:InvocationContext):Promise&lt;boolean&gt; {</code> |
 | `pollRunnerCommands` | function | 41 | <code>export async function pollRunnerCommands(context:ComponentContext,input:unknown):Promise&lt;unknown&gt; {</code> |
-| `guard` | action | 49 | <code>guard:tx=&gt;invocation.identityGuard(tx)},async tx=&gt;{</code> |
-| `guard` | action | 84 | <code>guard:tx=&gt;invocation.identityGuard(tx)},async tx=&gt;{</code> |
-| `command` | object | 95 | <code>const command={...s,event_id:uuid(row.id),consumer_id:binding.consumer_id};</code> |
-| `claim` | object | 108 | <code>const claim={...command,attempt_count:integer(row.attempt_count),inbox_id:uuid(receipt.inbox_id)};</code> |
 
 ## services/hyperfide/src/findings/github.ts
 
@@ -2497,26 +1846,14 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `GitHubClient` | class | 18 | <code>export class GitHubClient {</code> |
 | `constructor` | method | 20 | <code>constructor(readonly env:Readonly&lt;NodeJS.ProcessEnv&gt;,readonly signal?:AbortSignal,public deadline=Date.now()+30000){</code> |
 | `request` | method | 28 | <code>async request(method:string,relative:string,payload?:unknown):Promise&lt;{data:unknown;link:string&#124;null}&gt;{</code> |
-| `url` | variable | 29 | <code>const url=new URL(relative,this.base);if(url.origin!==this.base.origin&#124;&#124;!url.pathname.startsWith(this.base.pathname))throw new GitHubFailure('GITHUB_UNSAFE_PAGINATION');</code> |
 | `issues` | method | 40 | <code>async issues(owner:string,name:string,since:string):Promise&lt;Issue&#91;&#93;&gt;{</code> |
-| `seen` | variable | 41 | <code>let next='repos/'+encodeURIComponent(owner)+'/'+encodeURIComponent(name)+'/issues?state=all&amp;sort=updated&amp;direction=asc&amp;per_page=100&amp;since='+encodeURIComponent(since);const seen=new Set&lt;string&gt;(),resul…</code> |
 | `enqueue` | function | 51 | <code>async function enqueue(value:FindingTransaction,input:unknown):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
-| `payload` | object | 56 | <code>const payload={title,body:body+'&#92;n&#92;n'+marker(value.context.env,value.scope,id,String(f.repository_id))},packet=digest({...p,payload});</code> |
 | `saveIssue` | function | 65 | <code>async function saveIssue(value:FindingTransaction,repositoryId:string,owner:string,name:string,external:Issue):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
 | `dispatch` | function | 85 | <code>async function dispatch(context:ComponentContext,input:unknown):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
-| `client` | variable | 86 | <code>const p=record(input);fields(p,&#91;'operation_id'&#93;);const id=uuid(p.operation_id),client=new GitHubClient(context.env,context.signal);</code> |
-| `authorizeMutation` | function | 98 | <code>const authorizeMutation=()=&gt;withFindingTransaction(context,'finding.github.dispatch',async value=&gt;{await admin(value);const current=await value.tx.query('SELECT generation::text,lease_owner,state,leas…</code> |
 | `webhook` | function | 124 | <code>async function webhook(value:FindingTransaction,input:unknown):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
 | `processDelivery` | function | 140 | <code>async function processDelivery(value:FindingTransaction,input:unknown):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
 | `reconcile` | function | 152 | <code>async function reconcile(context:ComponentContext,input:unknown):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
 | `createComponent` | function | 169 | <code>export function createComponent(_context:ComponentContext):Component{return {apiVersion:1,actions:{</code> |
-| `'finding.github.enqueue'` | action | 170 | <code>'finding.github.enqueue':(input,context)=&gt;withFindingTransaction(context,'finding.github.enqueue',value=&gt;enqueue(value,input)),</code> |
-| `'finding.github.dispatch'` | action | 171 | <code>'finding.github.dispatch':(input,context)=&gt;dispatch(context,input),</code> |
-| `'finding.github.webhook'` | action | 172 | <code>'finding.github.webhook':(input,context)=&gt;withFindingTransaction(context,'finding.github.webhook',value=&gt;webhook(value,input)),</code> |
-| `'finding.github.process-delivery'` | action | 173 | <code>'finding.github.process-delivery':(input,context)=&gt;withFindingTransaction(context,'finding.github.process-delivery',value=&gt;processDelivery(value,input)),</code> |
-| `'finding.github.due'` | action | 174 | <code>'finding.github.due':(input,context)=&gt;withFindingTransaction(context,'finding.github.due',async value=&gt;{</code> |
-| `'finding.github.status'` | action | 182 | <code>'finding.github.status':(input,context)=&gt;withFindingTransaction(context,'finding.github.status',async value=&gt;{</code> |
-| `'finding.github.reconcile'` | action | 189 | <code>'finding.github.reconcile':(input,context)=&gt;reconcile(context,input)</code> |
 
 ## services/hyperfide/src/findings/registry.ts
 
@@ -2545,8 +1882,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `readiness` | function | 42 | <code>export async function readiness(tx:FindingDatabase):Promise&lt;void&gt;{</code> |
 | `semanticDisposition` | function | 48 | <code>export async function semanticDisposition(tx:FindingDatabase,scope:FindingScope,write=false):Promise&lt;void&gt;{</code> |
 | `withFindingTransaction` | function | 53 | <code>export async function withFindingTransaction&lt;T&gt;(context:ComponentContext,action:string,fn:(value:FindingTransaction)=&gt;Promise&lt;T&gt;):Promise&lt;T&gt;{</code> |
-| `scope` | object | 56 | <code>const gateway=gatewayOf(context),scope={organisation_id:principal.organisation_id,run_id:principal.run_id};const readOnly=&#91;'finding.inspect','finding.list','finding.context.read','finding.blockers.ins…</code> |
-| `guarded` | function | 57 | <code>const guarded=async(tx:AuthorityTransaction)=&gt;{await semanticDisposition(tx,scope,!readOnly);await tx.query(readOnly?'SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))':'SELECT pg_advisory_x…</code> |
 | `admin` | function | 65 | <code>export async function admin(value:FindingTransaction):Promise&lt;void&gt;{</code> |
 | `manager` | function | 70 | <code>export async function manager(value:FindingTransaction,packageId:string):Promise&lt;void&gt;{</code> |
 | `emit` | function | 75 | <code>export async function emit(tx:FindingDatabase,scope:FindingScope,findingId:string,version:string,event:string,payload:Record&lt;string,unknown&gt;):Promise&lt;void&gt;{</code> |
@@ -2560,12 +1895,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `inspectBlockingFindings` | function | 154 | <code>export async function inspectBlockingFindings(tx:FindingDatabase,scope:FindingScope):Promise&lt;{clear:boolean;blockers:Record&lt;string,unknown&gt;&#91;&#93;} &gt;{</code> |
 | `confirmDuplicate` | function | 163 | <code>async function confirmDuplicate(value:FindingTransaction,input:unknown):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
 | `createComponent` | function | 193 | <code>export function createComponent(_context:ComponentContext):Component{return {apiVersion:1,actions:{</code> |
-| `'finding.report'` | action | 194 | <code>'finding.report':(input,context)=&gt;withFindingTransaction(context,'finding.report',value=&gt;reportFinding(value,input)),</code> |
-| `'finding.inspect'` | action | 195 | <code>'finding.inspect':(input,context)=&gt;withFindingTransaction(context,'finding.inspect',async value=&gt;{const p=record(input);fields(p,&#91;'finding_id'&#93;);const row=await finding(value.tx,value.scope,uuid(p.fin…</code> |
-| `'finding.context.read'` | action | 196 | <code>'finding.context.read':(input,context)=&gt;withFindingTransaction(context,'finding.context.read',value=&gt;readFindingContext(value.tx,value.scope,input)),</code> |
-| `'finding.blockers.inspect'` | action | 197 | <code>'finding.blockers.inspect':(input,context)=&gt;withFindingTransaction(context,'finding.blockers.inspect',async value=&gt;{const p=record(input);fields(p,&#91;&#93;,&#91;'repository_id'&#93;);return inspectBlockingFindings(…</code> |
-| `'finding.list'` | action | 198 | <code>'finding.list':(input,context)=&gt;withFindingTransaction(context,'finding.list',async value=&gt;{const p=record(input);fields(p,&#91;&#93;,&#91;'after_id','limit'&#93;);const limit=p.limit===undefined?50:p.limit;if(typeof…</code> |
-| `'finding.duplicate.confirm'` | action | 199 | <code>'finding.duplicate.confirm':(input,context)=&gt;withFindingTransaction(context,'finding.duplicate.confirm',value=&gt;confirmDuplicate(value,input))</code> |
 
 ## services/hyperfide/src/findings/remediation.ts
 
@@ -2580,9 +1909,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `submit` | function | 44 | <code>async function submit(value:FindingTransaction,input:unknown):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
 | `actualInspector` | function | 55 | <code>async function actualInspector(relative:string,name:string):Promise&lt;(...args:any&#91;&#93;)=&gt;Promise&lt;any&gt;&gt;{</code> |
 | `qualifiedRepairProof` | function | 59 | <code>async function qualifiedRepairProof(tx:FindingTransaction&#91;'tx'&#93;,scope:FindingScope,r:Record&lt;string,any&gt;,f:Record&lt;string,any&gt;,reproductionPlanId:unknown,historical=false):Promise&lt;{proof:Record&lt;string,u…</code> |
-| `bound` | function | 85 | <code>const bound=(x:Record&lt;string,unknown&gt;,sourceTask:string,sourceCriteria:string)=&gt;x.task_id===r.repair_task_id&amp;&amp;x.origin_task_id===f.origin_task_id&amp;&amp;x.source_task_id===sourceTask&amp;&amp;x.criteria_digest===re…</code> |
-| `hasSource` | function | 86 | <code>const hasSource=(x:Record&lt;string,unknown&gt;,source:string)=&gt;Array.isArray(x.source_set)&amp;&amp;x.source_set.some(entry=&gt;record(entry).repository_id===f.repository_id&amp;&amp;record(entry).source_object_id===source);</code> |
-| `hasCheck` | function | 87 | <code>const hasCheck=(x:Record&lt;string,unknown&gt;,status:string)=&gt;Array.isArray(x.checks)&amp;&amp;x.checks.some(entry=&gt;record(entry).id===selected?.id&amp;&amp;record(entry).status===status);</code> |
 | `resolve` | function | 101 | <code>async function resolve(value:FindingTransaction,input:unknown):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
 | `failure` | function | 114 | <code>async function failure(value:FindingTransaction,input:unknown):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
 | `inspectFindingResolution` | function | 124 | <code>export async function inspectFindingResolution(tx:FindingTransaction&#91;'tx'&#93;,scope:FindingScope,findingId:string):Promise&lt;{current:boolean;reason?:string}&gt;{</code> |
@@ -2591,13 +1917,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `inspect` | function | 139 | <code>async function inspect(value:FindingTransaction,input:unknown):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
 | `recheck` | function | 144 | <code>async function recheck(value:FindingTransaction,input:unknown):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
 | `createComponent` | function | 158 | <code>export function createComponent(_context:ComponentContext):Component{return {apiVersion:1,actions:{</code> |
-| `'finding.repair.request'` | action | 159 | <code>'finding.repair.request':(input,context)=&gt;withFindingTransaction(context,'finding.repair.request',value=&gt;request(value,input)),</code> |
-| `'finding.repair.attach'` | action | 160 | <code>'finding.repair.attach':(input,context)=&gt;withFindingTransaction(context,'finding.repair.attach',value=&gt;attach(value,input)),</code> |
-| `'finding.repair.submit'` | action | 161 | <code>'finding.repair.submit':(input,context)=&gt;withFindingTransaction(context,'finding.repair.submit',value=&gt;submit(value,input)),</code> |
-| `'finding.repair.resolve'` | action | 162 | <code>'finding.repair.resolve':(input,context)=&gt;withFindingTransaction(context,'finding.repair.resolve',value=&gt;resolve(value,input)),</code> |
-| `'finding.repair.fail'` | action | 163 | <code>'finding.repair.fail':(input,context)=&gt;withFindingTransaction(context,'finding.repair.fail',value=&gt;failure(value,input)),</code> |
-| `'finding.repair.inspect'` | action | 164 | <code>'finding.repair.inspect':(input,context)=&gt;withFindingTransaction(context,'finding.repair.inspect',value=&gt;inspect(value,input)),</code> |
-| `'finding.repair.recheck'` | action | 165 | <code>'finding.repair.recheck':(input,context)=&gt;withFindingTransaction(context,'finding.repair.recheck',value=&gt;recheck(value,input))</code> |
 
 ## services/hyperfide/src/findings/routing.ts
 
@@ -2609,10 +1928,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `route` | function | 11 | <code>async function route(value:FindingTransaction,input:unknown,explicit=false):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
 | `acknowledge` | function | 39 | <code>async function acknowledge(value:FindingTransaction,input:unknown,collaborator=false):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
 | `createComponent` | function | 62 | <code>export function createComponent(_context:ComponentContext):Component{return {apiVersion:1,actions:{</code> |
-| `'finding.route'` | action | 63 | <code>'finding.route':(input,context)=&gt;withFindingTransaction(context,'finding.route',value=&gt;route(value,input)),</code> |
-| `'finding.route.assign'` | action | 64 | <code>'finding.route.assign':(input,context)=&gt;withFindingTransaction(context,'finding.route.assign',value=&gt;route(value,input,true)),</code> |
-| `'finding.route.acknowledge'` | action | 65 | <code>'finding.route.acknowledge':(input,context)=&gt;withFindingTransaction(context,'finding.route.acknowledge',value=&gt;acknowledge(value,input)),</code> |
-| `'finding.route.collaborator.acknowledge'` | action | 66 | <code>'finding.route.collaborator.acknowledge':(input,context)=&gt;withFindingTransaction(context,'finding.route.collaborator.acknowledge',value=&gt;acknowledge(value,input,true))</code> |
 
 ## services/hyperfide/src/graph/contract_query.ts
 
@@ -2622,7 +1937,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | --- | --- | ---: | --- |
 | `optional` | function | 28 | <code>function optional(value:unknown,kind:string,limit=256):string&#124;null{return value===undefined?null:text(value,kind,limit);}</code> |
 | `contracts` | function | 29 | <code>export async function contracts(input:unknown,ctx:ComponentContext,executor:GraphQueryExecutor=primaryGraphQueryExecutor):Promise&lt;unknown&gt;{</code> |
-| `sources` | variable | 41 | <code>const sources=new Map((manifest.source_coverage as {bundle_digest:string;identity:ExtractionIdentity}&#91;&#93;).map(v=&gt;&#91;v.bundle_digest,v.identity&#93;));</code> |
 
 ## services/hyperfide/src/graph/extraction.ts
 
@@ -2648,38 +1962,14 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `BundleManifest` | interface | 56 | <code>export interface BundleManifest {schema_version:1;bundle_digest:string;identity:ExtractionIdentity;complete:boolean;</code> |
 | `Config` | interface | 58 | <code>interface Config {scratch:string;binary:string;binaryDigest:string;repositories:Record&lt;string,string&gt;;maxBytes:number;maxRows:number;chunkBytes:number;}</code> |
 | `config` | function | 59 | <code>async function config(env:Readonly&lt;NodeJS.ProcessEnv&gt;):Promise&lt;Config&gt; {</code> |
-| `repositories` | object | 68 | <code>const repositories:Record&lt;string,string&gt;={};</code> |
-| `bounded` | function | 70 | <code>const bounded=(v:unknown,base:number,max:number):number=&gt;{if(v===undefined)return base;if(!Number.isSafeInteger(v)&#124;&#124;Number(v)&lt;1024&#124;&#124;Number(v)&gt;max)fail('GRAPH_CONFIG_INVALID','Invalid graph bound');ret…</code> |
 | `command` | function | 74 | <code>async function command(executable:string,args:string&#91;&#93;,cwd:string,signal:AbortSignal,max=1048576):Promise&lt;string&gt; {</code> |
 | `snapshotRows` | function | 87 | <code>function snapshotRows(db:DatabaseSync,maxRows:number,maxBytes:number):{facts:Fact&#91;&#93;;counts:Record&lt;string,number&gt;;coverage:JsonObject} {</code> |
-| `counts` | object | 88 | <code>const facts:Fact&#91;&#93;=&#91;&#93;,counts:Record&lt;string,number&gt;={};let rowBytes=0;</code> |
-| `tableExists` | function | 89 | <code>const tableExists=(t:string)=&gt;!!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(t);</code> |
-| `normalized` | object | 95 | <code>const normalized:JsonObject={};for(const &#91;k,v&#93;of Object.entries(row))normalized&#91;k&#93;=typeof v==='bigint'?v.toString():v instanceof Uint8Array?{base64:Buffer.from(v).toString('base64')}:v;</code> |
 | `validateIdentity` | function | 114 | <code>export function validateIdentity(value:unknown):ExtractionIdentity {</code> |
 | `validateChunk` | function | 122 | <code>export function validateChunk(value:unknown):GraphChunk {</code> |
-| `body` | object | 125 | <code>const hash=sha(r.digest),body={schema_version:1,identity,index:Number(r.index),rows};</code> |
 | `validateManifest` | function | 131 | <code>export function validateManifest(value:unknown):BundleManifest {</code> |
-| `counts` | object | 134 | <code>const identity=validateIdentity(r.identity),counts:Record&lt;string,number&gt;={};</code> |
-| `body` | object | 141 | <code>const hash=sha(r.bundle_digest),body={schema_version:1 as const,identity,complete:r.complete,counts,chunks,coverage:r.coverage,authority:'NONE' as const,cache:'NON_AUTHORITATIVE' as const};</code> |
 | `extractionGuard` | function | 147 | <code>async function extractionGuard(ctx:ComponentContext,identity?:Pick&lt;ExtractionIdentity,'organisation_id'&#124;'run_id'&#124;'repository_id'&#124;'commit'&gt;,write=false):Promise&lt;void&gt;{</code> |
-| `guard` | action | 151 | <code>await gatewayOf(ctx).withPrimaryTransaction({timeoutMs:5000,signal:i.signal,guard:tx=&gt;i.guard(tx)},async tx=&gt;{</code> |
 | `create` | function | 155 | <code>async function create(input:unknown,ctx:ComponentContext,cfg:Config):Promise&lt;BundleManifest&gt; {</code> |
-| `seen` | variable | 180 | <code>const seen=new Set&lt;string&gt;();</code> |
-| `db` | variable | 200 | <code>const db=new DatabaseSync(root+'/.codegraph/graph.db',{readOnly:true});</code> |
-| `appendFact` | function | 204 | <code>const appendFact=(fact:Fact)=&gt;{const size=Buffer.byteLength(canonical(fact));if(data.facts.length&gt;=cfg.maxRows&#124;&#124;factBytes+size&gt;cfg.maxBytes)fail('GRAPH_BUDGET_EXCEEDED','Source body facts exceed confi…</code> |
-| `sourceManifest` | object | 218 | <code>const sourceManifest={organisation_id:org,run_id:run,repository_id:repo,commit,tree,overlay_digest:overlayDigest,overlay_name:overlayName};</code> |
-| `identity` | object | 219 | <code>const identity:ExtractionIdentity={...sourceManifest,generation,source_kind:overlayDigest?'OVERLAY':'COMMIT',parser_digest:cfg.binaryDigest,config_digest:configDigest,source_manifest_digest:digest(can…</code> |
-| `body` | object | 222 | <code>const finish=()=&gt;{if(!pending.length)return;const body={schema_version:1 as const,identity,index:chunks.length,rows:pending};chunks.push({...body,digest:digest(canonical(body))});pending=&#91;&#93;;};</code> |
-| `finish` | function | 222 | <code>const finish=()=&gt;{if(!pending.length)return;const body={schema_version:1 as const,identity,index:chunks.length,rows:pending};chunks.push({...body,digest:digest(canonical(body))});pending=&#91;&#93;;};</code> |
-| `body` | object | 226 | <code>const body={schema_version:1 as const,identity,complete:data.coverage.complete===true,counts:data.counts,</code> |
-| `manifest` | object | 228 | <code>const manifest:BundleManifest={...body,bundle_digest:digest(canonical(body))};</code> |
 | `createComponent` | function | 235 | <code>export async function createComponent(ctx:ComponentContext):Promise&lt;Component&gt; {</code> |
-| `getConfig` | function | 237 | <code>const getConfig=()=&gt;config(ctx.env);</code> |
-| `load` | function | 238 | <code>const load=async(value:unknown)=&gt;{const r=exact(value,&#91;'bundle_digest'&#93;),hash=sha(r.bundle_digest),cfg=await getConfig();const base=path.join(cfg.scratch,'bundles',hash.slice(7));const raw=await fs.re…</code> |
-| `'graph.extract.describe'` | action | 240 | <code>'graph.extract.describe':input=&gt;{exact(input,&#91;&#93;);return {schema_version:1,remote_execution_required:true,fact_families:&#91;...GRAPH_TABLES,'source_bodies'&#93;,authority:'NONE',cache:'NON_AUTHORITATIVE',cent…</code> |
-| `'graph.extract.create'` | action | 241 | <code>'graph.extract.create':async(input,context)=&gt;{invocationOf(context);if(active)fail('GRAPH_OVERLOADED','One extraction per remote dispatcher');active=true;try{return await create(input,context,await ge…</code> |
-| `'graph.extract.inspect'` | action | 242 | <code>'graph.extract.inspect':async(input,context)=&gt;{await extractionGuard(context);const loaded=await load(input);await extractionGuard(context,loaded.manifest.identity);return loaded.manifest;},</code> |
-| `'graph.extract.read-chunk'` | action | 243 | <code>'graph.extract.read-chunk':async(input,context)=&gt;{await extractionGuard(context);const r=exact(input,&#91;'bundle_digest','index'&#93;);if(!Number.isSafeInteger(r.index)&#124;&#124;Number(r.index)&lt;0)fail('GRAPH_INVALID…</code> |
 
 ## services/hyperfide/src/graph/ingestion.ts
 
@@ -2695,7 +1985,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `withPrimaryTransaction` | method | 14 | <code>export interface GraphGateway {withPrimaryTransaction&lt;T&gt;(options:{timeoutMs:number;maxRetries?:number;guard?:(tx:GraphTransaction)=&gt;void&#124;Promise&lt;void&gt;;signal?:AbortSignal},fn:(tx:GraphTransaction)=&gt;Pr…</code> |
 | `GraphScope` | interface | 15 | <code>export interface GraphScope {organisation_id:string;run_id:string;authority_epoch:string;}</code> |
 | `scopeInput` | function | 16 | <code>export function scopeInput(input:JsonObject,ctx:ComponentContext):GraphScope {</code> |
-| `scope` | object | 17 | <code>const p=invocationOf(ctx).principal,scope={organisation_id:uuid(p.organisation_id),run_id:uuid(p.run_id),authority_epoch:uuid(p.deployment_epoch)};</code> |
 | `graphRole` | function | 21 | <code>export function graphRole(ctx:ComponentContext,write:boolean):void {</code> |
 | `graphGateway` | function | 25 | <code>export function graphGateway(ctx:ComponentContext):GraphGateway {</code> |
 | `graphGuard` | function | 30 | <code>export async function graphGuard(tx:GraphTransaction,scope:GraphScope,ctx:ComponentContext,write=true):Promise&lt;void&gt; {</code> |
@@ -2705,11 +1994,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `constructor` | method | 48 | <code>constructor(readonly limits:GraphAdmissionLimits){}</code> |
 | `overloaded` | method | 49 | <code>private overloaded(message:string):FoundationError{this.refused++;return new FoundationError('GRAPH_OVERLOADED',message);}</code> |
 | `run` | method | 50 | <code>async run&lt;T&gt;(signal:AbortSignal&#124;undefined,fn:()=&gt;Promise&lt;T&gt;):Promise&lt;T&gt;{</code> |
-| `settle` | function | 57 | <code>const settle=()=&gt;{clearTimeout(timer);signal?.removeEventListener('abort',abort);const i=this.queue.indexOf(waiter);if(i&gt;=0)this.queue.splice(i,1);};</code> |
-| `grant` | action | 58 | <code>const waiter:AdmissionWaiter={grant:()=&gt;{settle();resolve();},refuse:error=&gt;{settle();reject(error);}};</code> |
-| `refuse` | action | 58 | <code>const waiter:AdmissionWaiter={grant:()=&gt;{settle();resolve();},refuse:error=&gt;{settle();reject(error);}};</code> |
-| `waiter` | object | 58 | <code>const waiter:AdmissionWaiter={grant:()=&gt;{settle();resolve();},refuse:error=&gt;{settle();reject(error);}};</code> |
-| `abort` | function | 59 | <code>const abort=()=&gt;waiter.refuse(new FoundationError('GRAPH_CANCELLED','Graph request cancelled while queued'));</code> |
 | `metrics` | method | 68 | <code>metrics():JsonObject{return {...this.limits,active:this.active,queued:this.queue.length,admitted:this.admitted,refused:this.refused};}</code> |
 | `admissionSetting` | function | 70 | <code>function admissionSetting(env:Readonly&lt;NodeJS.ProcessEnv&gt;,name:string,fallback:number,min:number,max:number):number{</code> |
 | `primaryPoolMax` | function | 75 | <code>function primaryPoolMax(ctx:ComponentContext):number{</code> |
@@ -2717,7 +2001,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `admissions` | variable | 85 | <code>const admissions=new WeakMap&lt;object,GraphAdmission&gt;();</code> |
 | `graphAdmission` | function | 86 | <code>export function graphAdmission(ctx:ComponentContext):GraphAdmission{</code> |
 | `graphTransaction` | function | 91 | <code>export async function graphTransaction&lt;T&gt;(ctx:ComponentContext,scope:GraphScope,fn:(tx:GraphTransaction)=&gt;Promise&lt;T&gt;,write=true):Promise&lt;T&gt;{</code> |
-| `guard` | action | 93 | <code>return graphAdmission(ctx).run(signal,()=&gt;gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal,guard:tx=&gt;graphGuard(tx,scope,ctx,write)},fn));</code> |
 | `sourceId` | function | 95 | <code>export function sourceId(build:string,bundle:string,family:string,legacy:unknown):string {</code> |
 | `semanticProjectionDebt` | function | 101 | <code>export async function semanticProjectionDebt(tx:Pick&lt;GraphTransaction,'query'&gt;,s:GraphScope,graphId:string):Promise&lt;{count:string;rows:JsonObject&#91;&#93;}&gt;{</code> |
 | `getBuild` | function | 105 | <code>export async function getBuild(tx:GraphTransaction,s:GraphScope,id:string,lock=false):Promise&lt;JsonObject&gt; {</code> |
@@ -2731,8 +2014,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `bodyPage` | function | 193 | <code>async function bodyPage(tx:GraphTransaction,s:GraphScope,id:string,bundle:string,cursor:string):Promise&lt;{bundle:string;key:string}&#124;null&gt;{</code> |
 | `resolve` | function | 211 | <code>async function resolve(input:unknown,ctx:ComponentContext):Promise&lt;unknown&gt;{</code> |
 | `createComponent` | function | 259 | <code>export function createComponent(ctx:ComponentContext):Component{</code> |
-| `wrap` | function | 261 | <code>const wrap=(fn:(value:unknown,context:ComponentContext)=&gt;Promise&lt;unknown&gt;)=&gt;async(input:unknown,context:ComponentContext)=&gt;{try{return await fn(input,context);}catch(e){if(e instanceof FoundationError…</code> |
-| `'graph.ingest.describe'` | action | 263 | <code>'graph.ingest.describe':(input,context)=&gt;{exact(input,&#91;&#93;);return {schema_version:1,transport:'POSTGRESQL_COPY_FROM_STDIN',max_chunk_bytes:262144,max_resolution_batch:256,publication:false,admission:gr…</code> |
 
 ## services/hyperfide/src/graph/projection.ts
 
@@ -2745,12 +2026,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `sort` | function | 13 | <code>const sort=(values:Iterable&lt;string&gt;)=&gt;&#91;...values&#93;.sort((a,b)=&gt;Buffer.compare(Buffer.from(a),Buffer.from(b)));</code> |
 | `intersects` | function | 14 | <code>const intersects=(a:Set&lt;string&gt;&#124;undefined,b:Set&lt;string&gt;)=&gt;!!a&amp;&amp;&#91;...a&#93;.some(v=&gt;b.has(v));</code> |
 | `computeDelta` | function | 19 | <code>export function computeDelta(base:RepositoryFacts,target:RepositoryFacts):Delta{</code> |
-| `after` | variable | 20 | <code>const before=new Set(base.files.keys()),after=new Set(target.files.keys());</code> |
-| `before` | variable | 20 | <code>const before=new Set(base.files.keys()),after=new Set(target.files.keys());</code> |
-| `origin` | variable | 24 | <code>const origin=new Map&lt;string,Origin&gt;();</code> |
-| `names` | variable | 29 | <code>const seeds=new Set(&#91;...added,...deleted,...changed&#93;),names=new Set&lt;string&gt;();</code> |
-| `seeds` | variable | 29 | <code>const seeds=new Set(&#91;...added,...deleted,...changed&#93;),names=new Set&lt;string&gt;();</code> |
-| `invalid` | variable | 34 | <code>const invalid=new Set(&#91;...added,...changed,...dependents&#93;);</code> |
 | `compose` | function | 38 | <code>export function compose(base:RepositoryFacts,target:RepositoryFacts,delta:Delta):NormalisedFile&#91;&#93;{</code> |
 | `summary` | function | 41 | <code>function summary(delta:Delta):JsonObject{</code> |
 | `pathFilter` | function | 45 | <code>function pathFilter(value:unknown):Set&lt;string&gt;&#124;null{</code> |
@@ -2774,17 +2049,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `cell` | function | 34 | <code>const cell=(value:unknown):Cell=&gt;value===null&#124;&#124;value===undefined?null:String(value);</code> |
 | `ordered` | function | 35 | <code>const ordered=(rows:Cell&#91;&#93;&#91;&#93;):Cell&#91;&#93;&#91;&#93;=&gt;rows.map(row=&gt;({row,key:Buffer.from(canonical(row))})).sort((a,b)=&gt;Buffer.compare(a.key,b.key)).map(v=&gt;v.row);</code> |
 | `repositoryFacts` | function | 38 | <code>export async function repositoryFacts(session:Pick&lt;QuerySession,'query'&gt;,s:GraphScope,manifest:JsonObject,repositoryId:string):Promise&lt;RepositoryFacts&gt;{</code> |
-| `by` | function | 44 | <code>const by=(family:string)=&gt;rows.filter(r=&gt;r.family===family).map(r=&gt;r.payload);</code> |
-| `paths` | variable | 45 | <code>const paths=new Map&lt;string,string&gt;(),symbols=new Map&lt;string,{name:Cell;path:Cell}&gt;();</code> |
-| `symbols` | variable | 45 | <code>const paths=new Map&lt;string,string&gt;(),symbols=new Map&lt;string,{name:Cell;path:Cell}&gt;();</code> |
-| `files` | variable | 46 | <code>const files=new Map&lt;string,NormalisedFile&gt;();</code> |
-| `fileOf` | function | 48 | <code>const fileOf=(id:unknown)=&gt;{const path=paths.get(String(id));if(path===undefined)fail('GRAPH_FACT_INCONSISTENT','Fact refers to a file absent from its bundle');return files.get(path)!;};</code> |
-| `symbolName` | function | 50 | <code>const symbolName=(id:unknown)=&gt;id===null&#124;&#124;id===undefined?null:symbols.get(String(id))?.name??null;</code> |
-| `symbolPath` | function | 51 | <code>const symbolPath=(id:unknown)=&gt;id===null&#124;&#124;id===undefined?null:symbols.get(String(id))?.path??null;</code> |
-| `refNamesByPath` | variable | 52 | <code>const symbolNamesByPath=new Map&lt;string,Set&lt;string&gt;&gt;(),targetPathsByPath=new Map&lt;string,Set&lt;string&gt;&gt;(),refNamesByPath=new Map&lt;string,Set&lt;string&gt;&gt;();</code> |
-| `symbolNamesByPath` | variable | 52 | <code>const symbolNamesByPath=new Map&lt;string,Set&lt;string&gt;&gt;(),targetPathsByPath=new Map&lt;string,Set&lt;string&gt;&gt;(),refNamesByPath=new Map&lt;string,Set&lt;string&gt;&gt;();</code> |
-| `targetPathsByPath` | variable | 52 | <code>const symbolNamesByPath=new Map&lt;string,Set&lt;string&gt;&gt;(),targetPathsByPath=new Map&lt;string,Set&lt;string&gt;&gt;(),refNamesByPath=new Map&lt;string,Set&lt;string&gt;&gt;();</code> |
-| `add` | function | 53 | <code>const add=(map:Map&lt;string,Set&lt;string&gt;&gt;,key:string,value:Cell)=&gt;{if(value===null)return;let set=map.get(key);if(!set)map.set(key,set=new Set());set.add(value);};</code> |
 | `sortedFiles` | function | 67 | <code>export function sortedFiles(files:Iterable&lt;NormalisedFile&gt;):NormalisedFile&#91;&#93;{return &#91;...files&#93;.sort((a,b)=&gt;Buffer.compare(Buffer.from(a.path),Buffer.from(b.path)));}</code> |
 | `factsDigest` | function | 68 | <code>export function factsDigest(files:Iterable&lt;NormalisedFile&gt;):string{return digest(canonical(sortedFiles(files)));}</code> |
 
@@ -2798,15 +2062,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `loadGraphSnapshot` | function | 19 | <code>export async function loadGraphSnapshot(tx:GraphTransaction,s:GraphScope,manifestId:string,expected:unknown):Promise&lt;JsonObject&gt;{</code> |
 | `stagingDebt` | function | 32 | <code>export async function stagingDebt(tx:GraphTransaction,s:GraphScope,id:string,channel:string):Promise&lt;JsonObject&gt;{</code> |
 | `publish` | function | 44 | <code>async function publish(input:unknown,ctx:ComponentContext):Promise&lt;unknown&gt;{</code> |
-| `manifestBody` | object | 71 | <code>const manifestBody={schema_version:1,build_id:id,input_digest:build.input_digest,source_manifest_digest:build.source_manifest_digest,</code> |
-| `receipt` | object | 81 | <code>const receipt={operation_id:operation,build_id:id,channel,manifest_id:stored.id,manifest_digest:manifestDigest,source_manifest_digest:build.source_manifest_digest,</code> |
 | `createComponent` | function | 87 | <code>export function createComponent(ctx:ComponentContext):Component{</code> |
-| `loadGraphSnapshot` | action | 89 | <code>loadGraphSnapshot:async(tx:GraphTransaction,input:unknown,invocation:InvocationContext)=&gt;{</code> |
-| `'graph.publish.describe'` | action | 96 | <code>'graph.publish.describe':input=&gt;{exact(input,&#91;&#93;);return {schema_version:1,atomic_manifest_and_channel:true,publication_requires:'COMPLETE_SOURCE_AND_RESOLUTION',unknown_references:'PRESERVED'};},</code> |
-| `'graph.publish.commit'` | action | 97 | <code>'graph.publish.commit':async(input,context)=&gt;{try{return await publish(input,context);}catch(e){if(e instanceof FoundationError)throw e;throw new FoundationError('GRAPH_PUBLICATION_UNKNOWN','Publicati…</code> |
-| `'graph.publish.snapshot'` | action | 98 | <code>'graph.publish.snapshot':async(input,context)=&gt;{const r=exact(input,&#91;'organisation_id','run_id','authority_epoch','manifest_id','expected_sources'&#93;),s=scopeInput(r,context);return graphTransaction(con…</code> |
-| `'graph.publish.debt'` | action | 99 | <code>'graph.publish.debt':async(input,context)=&gt;{const r=exact(input,&#91;'organisation_id','run_id','authority_epoch','build_id','channel'&#93;),s=scopeInput(r,context),channel=text(r.channel,'graph channel',128)…</code> |
-| `'graph.publish.inspect'` | action | 100 | <code>'graph.publish.inspect':async(input,context)=&gt;{const r=exact(input,&#91;'organisation_id','run_id','authority_epoch','manifest_id'&#93;),s=scopeInput(r,context);return graphTransaction(context,s,tx=&gt;published…</code> |
 
 ## services/hyperfide/src/graph/query.ts
 
@@ -2829,25 +2085,9 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `legacyWords` | function | 44 | <code>function legacyWords(q:string):string&#91;&#93;{</code> |
 | `status` | function | 49 | <code>async function status(input:unknown,ctx:ComponentContext):Promise&lt;unknown&gt;{</code> |
 | `search` | function | 62 | <code>export async function search(input:unknown,ctx:ComponentContext,executor:GraphQueryExecutor=primaryGraphQueryExecutor):Promise&lt;unknown&gt;{</code> |
-| `wordMatch` | function | 83 | <code>const wordMatch=(vector:string,body:string,indexedBody:string)=&gt;" AND NOT EXISTS(SELECT 1 FROM unnest($"+wordStart+"::text&#91;&#93;) AS w(word) WHERE NOT ("+vector+"@@plainto_tsquery('simple',w.word) OR "+bo…</code> |
-| `result` | object | 95 | <code>const result={...provenance(manifest),mode,ranking:(mode==='trigram'&#124;&#124;mode==='body-trigram')?'STABLE_IDENTITY':'POSTGRES_SIMPLE_TS_RANK_CD_WITH_STABLE_TIES',</code> |
 | `context` | function | 101 | <code>export async function context(input:unknown,ctx:ComponentContext,executor:GraphQueryExecutor=primaryGraphQueryExecutor):Promise&lt;unknown&gt;{</code> |
 | `traverse` | function | 122 | <code>export async function traverse(input:unknown,ctx:ComponentContext,executor:GraphQueryExecutor=primaryGraphQueryExecutor):Promise&lt;unknown&gt;{</code> |
-| `edges` | variable | 130 | <code>const seen=new Set(seeds),edges=new Map&lt;string,JsonObject&gt;();let frontier=seeds,truncated=false;</code> |
-| `seen` | variable | 130 | <code>const seen=new Set(seeds),edges=new Map&lt;string,JsonObject&gt;();let frontier=seeds,truncated=false;</code> |
-| `next` | variable | 134 | <code>if(batch.length&gt;maxNodes&#42;4)truncated=true;const next=new Set&lt;string&gt;();</code> |
 | `createComponent` | function | 147 | <code>export function createComponent(ctx:ComponentContext):Component {</code> |
-| `wrap` | function | 148 | <code>const wrap=(fn:(input:unknown,context:ComponentContext)=&gt;Promise&lt;unknown&gt;)=&gt;async(input:unknown,context:ComponentContext)=&gt;{try{return await fn(input,context);}catch(e){if(e instanceof FoundationError…</code> |
-| `bound` | function | 149 | <code>const bound=(invocation:InvocationContext):ComponentContext=&gt;{const context=Object.freeze({...ctx,invocation});invocationOf(context);return context;};</code> |
-| `cache` | variable | 151 | <code>const cache=new GraphQueryCache(cacheCapacity(ctx.env)),executor=routedGraphQueryExecutor(primaryGraphQueryExecutor,cache);</code> |
-| `routed` | function | 152 | <code>const routed=(fn:(input:unknown,context:ComponentContext,executor:GraphQueryExecutor)=&gt;Promise&lt;unknown&gt;)=&gt;(input:unknown,context:ComponentContext)=&gt;fn(input,context,executor);</code> |
-| `traverse` | action | 154 | <code>traverse:(input:unknown,invocation:InvocationContext)=&gt;traverse(input,bound(invocation),executor),</code> |
-| `context` | action | 155 | <code>context:(input:unknown,invocation:InvocationContext)=&gt;context(input,bound(invocation),executor),</code> |
-| `search` | action | 156 | <code>search:(input:unknown,invocation:InvocationContext)=&gt;search(input,bound(invocation),executor),</code> |
-| `status` | action | 157 | <code>status:(input:unknown,invocation:InvocationContext)=&gt;status(input,bound(invocation)),</code> |
-| `contracts` | action | 158 | <code>contracts:(input:unknown,invocation:InvocationContext)=&gt;contracts(input,bound(invocation),executor),</code> |
-| `projectionView` | action | 159 | <code>projectionView:(input:unknown,invocation:InvocationContext)=&gt;projectionView(input,bound(invocation),executor)</code> |
-| `'graph.query.describe'` | action | 161 | <code>'graph.query.describe':input=&gt;{exact(input,&#91;&#93;);return {schema_version:1,exact_manifest_required:true,max_depth:4,max_nodes:500,route:'PRIMARY',</code> |
 
 ## services/hyperfide/src/graph/replica_query.ts
 
@@ -2871,11 +2111,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `replicaCode` | function | 52 | <code>function replicaCode(error:unknown):string&#124;null{</code> |
 | `admit` | function | 56 | <code>async function admit(ctx:ComponentContext,s:GraphScope,manifestId:string,barrier:boolean):Promise&lt;Admission&gt;{</code> |
 | `replicaRead` | function | 71 | <code>async function replicaRead&lt;T extends JsonObject&gt;(ctx:ComponentContext,s:GraphScope,manifestId:string,admitted:Admission,options:GraphReadOptions,operation:(session:QuerySession,manifest:JsonObject)=&gt;P…</code> |
-| `query` | action | 91 | <code>query:async&lt;R extends pg.QueryResultRow=pg.QueryResultRow&gt;(sql:string,values?:readonly unknown&#91;&#93;):Promise&lt;pg.QueryResult&lt;R&gt;&gt;=&gt;{if(!valid)throw new StorageError('TX_CLOSED','Replica graph snapshot expi…</code> |
-| `remainingMs` | action | 92 | <code>remainingMs:()=&gt;session.remainingMs(),signal:session.signal</code> |
 | `routedGraphQueryExecutor` | function | 106 | <code>export function routedGraphQueryExecutor(primary:GraphQueryExecutor,cache:GraphQueryCache):GraphQueryExecutor{</code> |
-| `store` | function | 116 | <code>const store=(value:T):T=&gt;{if(options.cache==='USE'&amp;&amp;value.complete===true)cache.set(key,value);return value;};</code> |
-| `primaryRead` | function | 117 | <code>const primaryRead=(fallback:JsonObject&#124;null)=&gt;primary(ctx,s,manifestId,query,(session,manifest)=&gt;operation(session,route(manifest,{route:'PRIMARY',cache:options.cache==='USE'?'MISS':'NONE',snapshot:'S…</code> |
 
 ## services/hyperfide/src/hierarchy/adoption.ts
 
@@ -2895,26 +2131,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `liveDescendants` | function | 80 | <code>async function liveDescendants(tx:PrimaryTransaction,scope:Scope,filter:{package_ids?:string&#91;&#93;;session_id?:string}):Promise&lt;Descendant&#91;&#93;&gt;{</code> |
 | `requireAccounted` | function | 100 | <code>function requireAccounted(found:readonly Descendant&#91;&#93;):void{</code> |
 | `assertChildExecutionAuthority` | function | 105 | <code>export async function assertChildExecutionAuthority(tx:PrimaryTransaction,input:{organisation_id:string;run_id:string;session_id:string}):Promise&lt;Descendant&gt;{</code> |
-| `scope` | object | 107 | <code>const scope={organisation_id:uuid(input.organisation_id),run_id:uuid(input.run_id)};</code> |
 | `identity` | function | 115 | <code>function identity(d:Descendant){</code> |
 | `continues` | function | 119 | <code>function continues(before:Record&lt;string,any&gt;,after:Descendant&#124;undefined):boolean{</code> |
 | `childAuthority` | function | 124 | <code>async function childAuthority(tx:PrimaryTransaction,a:TrustedActor,childId:string,v:Record&lt;string,unknown&gt;){</code> |
 | `supervisorRegistration` | function | 134 | <code>export async function supervisorRegistration(tx:PrimaryTransaction,input:{organisation_id:string;run_id:string;session_id:string}){</code> |
-| `receipt` | object | 146 | <code>const receipt={schema_version:1,organisation_id:org,run_id:run,session_id:sessionId,role:row.role,parent_session_id:row.parent_session_id,connector:row.connector,account_key:row.account_key,</code> |
 | `createComponent` | function | 151 | <code>export function createComponent(context:ComponentContext):Component{</code> |
-| `'hierarchy.supervisor.register'` | action | 158 | <code>'hierarchy.supervisor.register':async(input,current)=&gt;{</code> |
-| `'hierarchy.supervisor.select'` | action | 182 | <code>'hierarchy.supervisor.select':async(input,current)=&gt;{</code> |
-| `'hierarchy.child.register'` | action | 203 | <code>'hierarchy.child.register':async(input,current)=&gt;{</code> |
-| `executor` | object | 218 | <code>const executor={organisation_id:a.organisation_id,run_id:a.run_id,sandbox_id:token.sandbox_id,sandbox_boot_generation:token.sandbox_boot_generation,slot_id:token.slot_id};</code> |
-| `resources` | object | 220 | <code>const reservationRequest=randomUUID(),resources={cpu_millis:String(policy.resource_requirements.cpu_millis),memory_bytes:String(policy.resource_requirements.memory_bytes),disk_bytes:String(policy.reso…</code> |
-| `'hierarchy.child.usage.observe'` | action | 256 | <code>'hierarchy.child.usage.observe':async(input,current)=&gt;{</code> |
-| `'hierarchy.child.release'` | action | 274 | <code>'hierarchy.child.release':async(input,current)=&gt;{</code> |
-| `'hierarchy.child.verify'` | action | 293 | <code>'hierarchy.child.verify':async(input,current)=&gt;{</code> |
-| `'hierarchy.adoption.propose'` | action | 304 | <code>'hierarchy.adoption.propose':async(input,current)=&gt;{</code> |
-| `'hierarchy.adoption.acknowledge'` | action | 326 | <code>'hierarchy.adoption.acknowledge':async(input,current)=&gt;{</code> |
-| `load` | function | 328 | <code>const load=async(tx:PrimaryTransaction)=&gt;{</code> |
-| `result` | object | 359 | <code>const result={adopted:adopted.sort(),not_adopted:notAdopted.sort((x,y)=&gt;x.session_id.localeCompare(y.session_id)),before_digest:hash(before.observed),after_digest:hash(after.map(identity)),workers_res…</code> |
-| `'hierarchy.adoption.inspect'` | action | 367 | <code>'hierarchy.adoption.inspect':async(input,current)=&gt;{</code> |
 | `WorkerRegistrationInput` | interface | 391 | <code>export interface WorkerRegistrationInput {</code> |
 | `WorkerRegistrationReceipt` | interface | 394 | <code>export interface WorkerRegistrationReceipt {</code> |
 | `WorkerRegistrationAuthority` | interface | 397 | <code>export interface WorkerRegistrationAuthority {</code> |
@@ -2922,11 +2143,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `workerSchema` | function | 403 | <code>async function workerSchema(tx:PrimaryTransaction){</code> |
 | `workerSeat` | function | 409 | <code>async function workerSeat(tx:PrimaryTransaction,token:ComputeToken,packetDigest:string,native:NativeAuthAuthority,i:InvocationContext):Promise&lt;WorkerRegistrationReceipt&gt;{</code> |
 | `createWorkerComponent` | function | 435 | <code>export function createWorkerComponent(context:ComponentContext):Component{</code> |
-| `registerWorker` | function | 437 | <code>const registerWorker:WorkerRegistrationAuthority&#91;'registerWorker'&#93;=async(tx,input,i)=&gt;{</code> |
-| `expected` | object | 441 | <code>const command=uuid(v.command_id),packet=digest(v.packet_digest),payload=digest(v.payload_digest),expected={command_id:command,token,packet_digest:packet};</code> |
-| `'hierarchy.worker.register'` | action | 450 | <code>'hierarchy.worker.register':async(input,current)=&gt;{</code> |
-| `guard` | action | 452 | <code>const guarded={...a,guard:async(tx:PrimaryTransaction)=&gt;{</code> |
-| `guarded` | object | 452 | <code>const guarded={...a,guard:async(tx:PrimaryTransaction)=&gt;{</code> |
 
 ## services/hyperfide/src/hierarchy/packages.ts
 
@@ -2945,7 +2161,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `requireLeaderReplacement` | method | 22 | <code>requireLeaderReplacement(tx:PrimaryTransaction,input:LeaderReplacementRequest):Promise&lt;Record&lt;string,unknown&gt;&gt;;</code> |
 | `LeaderReplacementRequest` | interface | 25 | <code>export interface LeaderReplacementRequest extends Scope {</code> |
 | `requireLeaderReplacement` | function | 30 | <code>export async function requireLeaderReplacement(tx:PrimaryTransaction,input:LeaderReplacementRequest):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
-| `proof` | object | 57 | <code>const proof={organisation_id:org,run_id:run,predecessor_session_id:priorId,predecessor_generation:priorGeneration,predecessor_authority_epoch:priorEpoch,</code> |
 | `Data` | type | 62 | <code>type Data=Record&lt;string,unknown&gt;;</code> |
 | `refuse` | function | 64 | <code>export function refuse(code:string,message:string):never {throw new FoundationError(code,message);}</code> |
 | `record` | function | 65 | <code>export function record(value:unknown,keys:readonly string&#91;&#93;,required:readonly string&#91;&#93;=keys):Data {</code> |
@@ -2961,18 +2176,14 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `isHierarchyAuthority` | function | 105 | <code>export function isHierarchyAuthority(value:unknown):value is HierarchyAuthority {</code> |
 | `leadership` | function | 108 | <code>export async function leadership(tx:PrimaryTransaction,scope:Scope):Promise&lt;Leadership&gt; {</code> |
 | `requireAuthority` | function | 114 | <code>export async function requireAuthority(tx:PrimaryTransaction,input:AuthorityRequest):Promise&lt;AuthorityView&gt; {</code> |
-| `result` | object | 127 | <code>const result:AuthorityView={...current,session_id:actor,role:session.role};</code> |
 | `TrustedActor` | interface | 146 | <code>export interface TrustedActor extends Scope {session_id:string;authority_epoch:string;guard:(tx:PrimaryTransaction)=&gt;Promise&lt;void&gt;;signal:AbortSignal;invocation:InvocationContext}</code> |
 | `trustedActor` | function | 147 | <code>export function trustedActor(context:ComponentContext):TrustedActor {</code> |
-| `guard` | action | 151 | <code>authority_epoch:uuid(principal.deployment_epoch),guard:tx=&gt;invocation.guard(tx),signal:invocation.signal,invocation};</code> |
 | `provenReady` | variable | 155 | <code>const provenReady=new WeakSet&lt;object&gt;();</code> |
 | `ready` | function | 157 | <code>export async function ready(tx:PrimaryTransaction):Promise&lt;void&gt; {</code> |
 | `event` | function | 166 | <code>export async function event(tx:PrimaryTransaction,actor:TrustedActor,generation:string,kind:string,payload:Data):Promise&lt;void&gt; {</code> |
 | `hierarchyReadGuard` | function | 171 | <code>export function hierarchyReadGuard(actor:TrustedActor):(tx:PrimaryTransaction)=&gt;Promise&lt;void&gt; {</code> |
 | `hierarchyWriteGuard` | function | 174 | <code>export function hierarchyWriteGuard(actor:TrustedActor):(tx:PrimaryTransaction)=&gt;Promise&lt;void&gt; {</code> |
 | `operation` | function | 177 | <code>export async function operation&lt;T&gt;(g:TransactionGateway,actor:TrustedActor,name:string,input:Data,fn:(tx:PrimaryTransaction)=&gt;Promise&lt;T&gt;):Promise&lt;T&gt; {</code> |
-| `lookup` | function | 182 | <code>const lookup=async(operationName:string,operationKey:string,requestDigest:string)=&gt;{</code> |
-| `finish` | function | 190 | <code>const finish=async(id:string,result:unknown)=&gt;{</code> |
 | `manager` | function | 206 | <code>async function manager(tx:PrimaryTransaction,actor:TrustedActor,id:string):Promise&lt;void&gt; {</code> |
 | `packageRows` | function | 211 | <code>async function packageRows(tx:PrimaryTransaction,actor:TrustedActor,ids:string&#91;&#93;) {</code> |
 | `Snapshot` | type | 236 | <code>type Snapshot={package_id:string;owner_generation:string;previous_state:string};</code> |
@@ -2980,24 +2191,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `handoffOutcome` | function | 242 | <code>async function handoffOutcome(tx:PrimaryTransaction,actor:TrustedActor,id:string):Promise&lt;string&#124;null&gt; {</code> |
 | `stableComplete` | function | 246 | <code>async function stableComplete(tx:PrimaryTransaction,actor:TrustedActor,rows:Data&#91;&#93;,ids:string&#91;&#93;,code:string,message:string):Promise&lt;void&gt; {</code> |
 | `restore` | function | 253 | <code>async function restore(tx:PrimaryTransaction,actor:TrustedActor,leaderGeneration:string,snapshots:Snapshot&#91;&#93;,acknowledged:boolean,cause:string,reason:string,handoffId:string):Promise&lt;Record&lt;string,str…</code> |
-| `restored` | object | 254 | <code>const restored:Record&lt;string,string&gt;={};</code> |
 | `limitOf` | function | 264 | <code>function limitOf(value:unknown):number {</code> |
 | `createComponent` | function | 269 | <code>export async function createComponent(context:ComponentContext):Promise&lt;Component&gt; {</code> |
-| `actions` | object | 274 | <code>const actions:Component&#91;'actions'&#93;={</code> |
-| `'hierarchy.describe'` | action | 275 | <code>'hierarchy.describe':async (input,invocation)=&gt;{</code> |
-| `'hierarchy.leader.acquire'` | action | 280 | <code>'hierarchy.leader.acquire':async (input,invocation)=&gt;{</code> |
-| `'hierarchy.package.configure'` | action | 295 | <code>'hierarchy.package.configure':async (input,invocation)=&gt;{</code> |
-| `'hierarchy.package.assign'` | action | 318 | <code>'hierarchy.package.assign':async (input,invocation)=&gt;{</code> |
-| `'hierarchy.package.handoff.propose'` | action | 340 | <code>'hierarchy.package.handoff.propose':async (input,invocation)=&gt;{</code> |
-| `covered` | function | 364 | <code>const covered=(id:string)=&gt;prior.some(s=&gt;s.package_id===id);</code> |
-| `'hierarchy.package.handoff.acknowledge'` | action | 386 | <code>'hierarchy.package.handoff.acknowledge':async (input,invocation)=&gt;{</code> |
-| `'hierarchy.package.handoff.withdraw'` | action | 416 | <code>'hierarchy.package.handoff.withdraw':async (input,invocation)=&gt;{</code> |
-| `'hierarchy.package.transition'` | action | 435 | <code>'hierarchy.package.transition':async (input,invocation)=&gt;{</code> |
-| `evidence` | object | 446 | <code>let evidence:Data={evidence_refs:refs};</code> |
-| `'hierarchy.domain.handoff'` | action | 461 | <code>'hierarchy.domain.handoff':async (input,invocation)=&gt;{</code> |
-| `'hierarchy.role.bind'` | action | 481 | <code>'hierarchy.role.bind':async (input,invocation)=&gt;{</code> |
-| `'hierarchy.inspect'` | action | 494 | <code>'hierarchy.inspect':async (input,invocation)=&gt;{</code> |
-| `'hierarchy.history'` | action | 505 | <code>'hierarchy.history':async (input,invocation)=&gt;{</code> |
 
 ## services/hyperfide/src/hierarchy/packets.ts
 
@@ -3009,7 +2204,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `ContinuationBinding` | interface | 20 | <code>export interface ContinuationBinding {</code> |
 | `ContinuationReader` | type | 26 | <code>export type ContinuationReader=(tx:PrimaryTransaction,scope:{organisation_id:string;run_id:string;checkpoint_id:string},invocation:InvocationContext)=&gt;Promise&lt;ContinuationBinding&gt;;</code> |
 | `continuationBinding` | function | 27 | <code>function continuationBinding(value:unknown,checkpointId:string):ContinuationBinding {</code> |
-| `artifact` | function | 30 | <code>function artifact(value:unknown):ContinuationArtifactBinding{</code> |
 | `ContinuationProvider` | interface | 50 | <code>interface ContinuationProvider {reader:ContinuationReader&#124;null;sealed:boolean}</code> |
 | `continuationProviders` | variable | 51 | <code>const continuationProviders=new Map&lt;string,ContinuationProvider&gt;();</code> |
 | `currentContinuation` | function | 52 | <code>async function currentContinuation(tx:PrimaryTransaction,scope:{organisation_id:string;run_id:string;checkpoint_id:string},invocation:InvocationContext&#124;undefined){</code> |
@@ -3041,20 +2235,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `acceptedExecutionProfile` | function | 281 | <code>function acceptedExecutionProfile(definition:unknown,profile:ReturnType&lt;typeof validateProfile&gt;){</code> |
 | `deriveQualificationInputs` | function | 292 | <code>export function deriveQualificationInputs(packet:unknown):{</code> |
 | `createComponent` | function | 313 | <code>export function createComponent(context:ComponentContext):Component {</code> |
-| `provider` | object | 316 | <code>const provider:ContinuationProvider={reader:null,sealed:false};continuationProviders.set(run,provider);</code> |
-| `installContinuationReader` | function | 317 | <code>const installContinuationReader=(reader:ContinuationReader)=&gt;{</code> |
-| `graphReader` | function | 322 | <code>const graphReader=()=&gt;context.dependencies.require('7.3','graph.snapshot.v1',isGraphSnapshotCapability);</code> |
-| `validateInputs` | function | 323 | <code>const validateInputs:typeof validateExecutionInputs=(tx,input,invocation,reader)=&gt;validateExecutionInputs(tx,input,invocation,reader??(invocation?graphReader():undefined));</code> |
-| `'hierarchy.packet.describe'` | action | 325 | <code>'hierarchy.packet.describe':async input=&gt;{provider.sealed=true;record(input,&#91;&#93;);return {schema_version:1,packet_phase:'PROSPECTIVE_ADMISSION',execution_authority:false,hash:'SHA256_CANONICAL_JSON',max…</code> |
-| `'hierarchy.packet.create'` | action | 327 | <code>'hierarchy.packet.create':async (input,invocation)=&gt;{</code> |
-| `profileRow` | object | 363 | <code>const profileRow={content_digest:prepared.preparation_digest},profile=prepared.declared_profile;</code> |
-| `repos` | object | 369 | <code>const repos={rows:await currentRepositories(tx,a.organisation_id,a.run_id)};</code> |
-| `deps` | object | 378 | <code>const deps={rows:await currentDependencies(tx,a.organisation_id,a.run_id,taskId)};</code> |
-| `mandatory` | object | 408 | <code>const mandatory={identity:{organisation_id:a.organisation_id,run_id:a.run_id,authority_epoch:a.authority_epoch,leader_generation:auth.leader_generation,</code> |
-| `payload` | function | 417 | <code>const payload=()=&gt;({schema_version:1,packet_phase:'PROSPECTIVE_ADMISSION',execution_authority:false,mandatory,mandatory_digest:mandatoryDigest,</code> |
-| `'hierarchy.packet.validate'` | action | 434 | <code>'hierarchy.packet.validate':async (input,invocation)=&gt;{</code> |
-| `'hierarchy.packet.derive'` | action | 444 | <code>'hierarchy.packet.derive':async (input,invocation)=&gt;{</code> |
-| `'hierarchy.packet.inspect'` | action | 455 | <code>'hierarchy.packet.inspect':async (input,invocation)=&gt;{</code> |
 
 ## services/hyperfide/src/hierarchy/views.ts
 
@@ -3066,16 +2246,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `iso` | function | 14 | <code>const iso=(value:unknown):string&#124;null=&gt;value===null&#124;&#124;value===undefined?null:new Date(value as string).toISOString();</code> |
 | `intentList` | function | 15 | <code>function intentList(value:unknown):unknown&#91;&#93;{</code> |
 | `mandatoryIntent` | function | 20 | <code>function mandatoryIntent(row:Row){</code> |
-| `constraints` | object | 22 | <code>const constraints:Record&lt;string,string&#91;&#93;&gt;={},omitted:Record&lt;string,number&gt;={};let cut=purpose!==null&amp;&amp;purpose.length&gt;INTENT_PURPOSE_CHARS;</code> |
-| `omitted` | object | 22 | <code>const constraints:Record&lt;string,string&#91;&#93;&gt;={},omitted:Record&lt;string,number&gt;={};let cut=purpose!==null&amp;&amp;purpose.length&gt;INTENT_PURPOSE_CHARS;</code> |
 | `freshness` | function | 32 | <code>function freshness(e:Row):'CURRENT'&#124;'PENDING'&#124;'STALE'&#124;'MISSING'{</code> |
 | `createComponent` | function | 37 | <code>export function createComponent(context:ComponentContext):Component {</code> |
-| `'hierarchy.views.describe'` | action | 40 | <code>'hierarchy.views.describe':async input=&gt;{record(input,&#91;&#93;);return {api_version:1,max_page_size:100,max_response_bytes:262144,min_response_bytes:4096,authority:'NONE',freshness_source:'PRIMARY_TRANSACTI…</code> |
-| `'hierarchy.view'` | action | 42 | <code>'hierarchy.view':async (input,invocation)=&gt;{</code> |
-| `base` | object | 92 | <code>const base={schema_version:1,authority:'NONE',scope:{organisation_id:actor.organisation_id,run_id:actor.run_id,package_id:packageId??null},current_authority:authority,</code> |
-| `result` | function | 100 | <code>const result=()=&gt;({...base,tasks,blocking_exceptions:exceptions,dependency_exceptions:dependencies,current_findings:currentFindings,</code> |
-| `blocking` | function | 108 | <code>const blocking=(f:Row)=&gt;f.severity==='ERROR'&#124;&#124;f.severity==='CRITICAL';</code> |
-| `dropLast` | function | 109 | <code>const dropLast=&lt;T,&gt;(list:T&#91;&#93;,keep:number,accept:(item:T)=&gt;boolean=()=&gt;true):T&#91;&#93;&#124;null=&gt;{</code> |
 
 ## services/hyperfide/src/identity/authorization.ts
 
@@ -3090,19 +2262,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `isAuthorizationAuthority` | function | 11 | <code>export function isAuthorizationAuthority(v:unknown):v is AuthorizationAuthority{return object(v)&amp;&amp;typeof v.authorize==='function'&amp;&amp;typeof v.resource==='function';}</code> |
 | `code` | function | 17 | <code>function code(error:unknown):string{const c=(error as {code?:unknown})?.code;return typeof c==='string'&amp;&amp;/^&#91;A-Z_&#93;{1,64}$/.test(c)?c:'AUTHORIZATION_FAILED';}</code> |
 | `audit` | function | 19 | <code>function audit(i:unknown,error:unknown,resource?:unknown):void{</code> |
-| `id` | function | 21 | <code>const id=(x:unknown)=&gt;typeof x==='string'&amp;&amp;uuid(x)?x:null,name=(x:unknown)=&gt;typeof x==='string'&amp;&amp;NAME.test(x)?x:null;</code> |
-| `name` | function | 21 | <code>const id=(x:unknown)=&gt;typeof x==='string'&amp;&amp;uuid(x)?x:null,name=(x:unknown)=&gt;typeof x==='string'&amp;&amp;NAME.test(x)?x:null;</code> |
 | `list` | function | 26 | <code>function list(v:unknown):string&#91;&#93;{if(!Array.isArray(v)&#124;&#124;v.length&gt;256&#124;&#124;v.some(x=&gt;typeof x!=='string'&#124;&#124;!x.length&#124;&#124;x.length&gt;1024)&#124;&#124;new Set(v).size!==v.length)fail('AUTHORIZATION_CONFIG','Explicit bounded…</code> |
 | `gitRef` | function | 27 | <code>function gitRef(v:string):boolean{return v.startsWith('refs/')&amp;&amp;!/&#91;&#92;x00-&#92;x20&#92;x7f~^:?&#42;&#92;&#92;&#91;&#93;/.test(v)&amp;&amp;!v.includes('..')&amp;&amp;!v.includes('@{')&amp;&amp;!v.endsWith('/')&amp;&amp;!v.endsWith('.')&amp;&amp;!v.split('/').some(p=&gt;!p&#124;&#124;…</code> |
 | `rules` | function | 28 | <code>async function rules(ctx:ComponentContext):Promise&lt;readonly Rule&#91;&#93;&gt;{</code> |
-| `rule` | object | 40 | <code>const result:Rule&#91;&#93;=&#91;&#93;;for(const r of value.rules){exact(r,&#91;'role','actions','repositories','artifact_prefixes','git_refs','model_destinations','model_profiles'&#93;);if(typeof r.role!=='string'&#124;&#124;!/^&#91;A-Z_…</code> |
 | `createComponent` | function | 44 | <code>export async function createComponent(ctx:ComponentContext):Promise&lt;Component&gt;{</code> |
-| `check` | function | 46 | <code>const check=async(i:InvocationContext):Promise&lt;void&gt;=&gt;{</code> |
-| `authorize` | function | 59 | <code>const authorize=async(i:InvocationContext):Promise&lt;void&gt;=&gt;{try{await check(i);}catch(error){audit(i,error);throw error;}};</code> |
-| `resource` | function | 60 | <code>const resource:AuthorizationAuthority&#91;'resource'&#93;=async(i,input)=&gt;{try{return await checkResource(i,input);}catch(error){audit(i,error,input);throw error;}};</code> |
-| `checkResource` | function | 61 | <code>const checkResource=async(i:InvocationContext,input:unknown):Promise&lt;Record&lt;string,unknown&gt;&gt;=&gt;{</code> |
-| `'authorization.resource.check'` | action | 96 | <code>'authorization.resource.check':async(v,context)=&gt;resource(invocationOf(context),v),</code> |
-| `'authorization.inspect'` | action | 97 | <code>'authorization.inspect':async(v,context)=&gt;{exact(v,&#91;&#93;);const i=invocationOf(context);await authorize(i);return {principal:i.principal,allowed_rules:policy.filter(r=&gt;r.role===i.principal.role),authorit…</code> |
 
 ## services/hyperfide/src/identity/credentials.ts
 
@@ -3118,11 +2281,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `CredentialStatus` | type | 20 | <code>export type CredentialStatus='AVAILABLE'&#124;'MISSING'&#124;'EXPIRED'&#124;'REVOKED'&#124;'AUTH_BLOCKED';</code> |
 | `CredentialAvailability` | interface | 21 | <code>export interface CredentialAvailability {schema_version:1;reference_id:string;credential_version:string&#124;null;status:CredentialStatus;expires_at:string&#124;null;assignment_scope:{run_id:string;actor_id:str…</code> |
 | `CredentialAuthority` | interface | 22 | <code>export interface CredentialAuthority {inspectInTransaction(tx:IdentityTransaction,i:InvocationContext,reference:string):Promise&lt;CredentialAvailability&gt;;resolveCredentialReferences(i:InvocationContext,…</code> |
-| `attach` | method | 22 | <code>export interface CredentialAuthority {inspectInTransaction(tx:IdentityTransaction,i:InvocationContext,reference:string):Promise&lt;CredentialAvailability&gt;;resolveCredentialReferences(i:InvocationContext,…</code> |
-| `inspect` | method | 22 | <code>export interface CredentialAuthority {inspectInTransaction(tx:IdentityTransaction,i:InvocationContext,reference:string):Promise&lt;CredentialAvailability&gt;;resolveCredentialReferences(i:InvocationContext,…</code> |
 | `inspectInTransaction` | method | 22 | <code>export interface CredentialAuthority {inspectInTransaction(tx:IdentityTransaction,i:InvocationContext,reference:string):Promise&lt;CredentialAvailability&gt;;resolveCredentialReferences(i:InvocationContext,…</code> |
-| `privateAttachment` | method | 22 | <code>export interface CredentialAuthority {inspectInTransaction(tx:IdentityTransaction,i:InvocationContext,reference:string):Promise&lt;CredentialAvailability&gt;;resolveCredentialReferences(i:InvocationContext,…</code> |
 | `resolveCredentialReferences` | method | 22 | <code>export interface CredentialAuthority {inspectInTransaction(tx:IdentityTransaction,i:InvocationContext,reference:string):Promise&lt;CredentialAvailability&gt;;resolveCredentialReferences(i:InvocationContext,…</code> |
+| `inspect` | method | 22 | <code>export interface CredentialAuthority {inspectInTransaction(tx:IdentityTransaction,i:InvocationContext,reference:string):Promise&lt;CredentialAvailability&gt;;resolveCredentialReferences(i:InvocationContext,…</code> |
+| `attach` | method | 22 | <code>export interface CredentialAuthority {inspectInTransaction(tx:IdentityTransaction,i:InvocationContext,reference:string):Promise&lt;CredentialAvailability&gt;;resolveCredentialReferences(i:InvocationContext,…</code> |
+| `privateAttachment` | method | 22 | <code>export interface CredentialAuthority {inspectInTransaction(tx:IdentityTransaction,i:InvocationContext,reference:string):Promise&lt;CredentialAvailability&gt;;resolveCredentialReferences(i:InvocationContext,…</code> |
 | `Source` | interface | 23 | <code>interface Source {name:string;relative_path:string;expires_at:string;purposes:CredentialPurpose&#91;&#93;}</code> |
 | `Target` | interface | 24 | <code>interface Target {actor_id:string;uid:number;layers:string&#91;&#93;}</code> |
 | `Configuration` | interface | 25 | <code>interface Configuration {secret_root:string;attachment_root:string;sources:Source&#91;&#93;;targets:Target&#91;&#93;}</code> |
@@ -3139,24 +2302,14 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `availability` | function | 57 | <code>function availability(reference_id:string,row:Record&lt;string,any&gt;&#124;undefined,i:InvocationContext,attachment_id:string&#124;null=null):CredentialAvailability{</code> |
 | `discardRevoked` | function | 62 | <code>async function discardRevoked(config:Configuration,attachments:readonly unknown&#91;&#93;,locators:readonly unknown&#91;&#93;):Promise&lt;void&gt;{</code> |
 | `createComponent` | function | 66 | <code>export async function createComponent(ctx:ComponentContext):Promise&lt;Component&gt;{</code> |
-| `transact` | function | 68 | <code>const transact=&lt;T&gt;(i:InvocationContext,fn:(tx:IdentityTransaction)=&gt;Promise&lt;T&gt;)=&gt;{assertInvocation(i);return gateway.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal:i.signal,guard:i.guard},…</code> |
-| `inspectInTransaction` | function | 69 | <code>const inspectInTransaction:CredentialAuthority&#91;'inspectInTransaction'&#93;=async(tx,i,ref)=&gt;{assertInvocation(i);await i.guard(tx);if(!reference(ref))fail('INVALID_REQUEST','Credential reference required'…</code> |
-| `inspect` | function | 70 | <code>const inspect:CredentialAuthority&#91;'inspect'&#93;=async(i,ref)=&gt;transact(i,tx=&gt;inspectInTransaction(tx,i,ref));</code> |
-| `privateAttachment` | function | 71 | <code>const privateAttachment:CredentialAuthority&#91;'privateAttachment'&#93;=async(i,id)=&gt;{if(!uuid(id))fail('INVALID_REQUEST','Attachment ID required');return transact(i,async tx=&gt;{const a=(await tx.query('SELEC…</code> |
-| `attach` | function | 72 | <code>const attach:CredentialAuthority&#91;'attach'&#93;=async(i,ref,layer)=&gt;{</code> |
-| `resolveCredentialReferences` | function | 79 | <code>const resolveCredentialReferences:CredentialAuthority&#91;'resolveCredentialReferences'&#93;=async(i,request,signal)=&gt;{</code> |
-| `names` | variable | 82 | <code>const names=new Set&lt;string&gt;();for(const r of request.references){exact(r,&#91;'name','reference_id'&#93;);if(typeof r.name!=='string'&#124;&#124;!/^&#91;A-Za-z_&#93;&#91;A-Za-z0-9_&#93;{0,127}$/.test(r.name)&#124;&#124;LOADER_VARIABLES.includes…</code> |
-| `check` | function | 85 | <code>const check=async(tx:IdentityTransaction)=&gt;{</code> |
-| `act` | function | 98 | <code>const act=(fn:(v:Record&lt;string,unknown&gt;,i:InvocationContext)=&gt;Promise&lt;unknown&gt;)=&gt;async(v:unknown,context:ComponentContext)=&gt;{if(!object(v))fail('INVALID_REQUEST','Object input required');return fn(v,i…</code> |
 | `IsolationPermitClaims` | interface | 129 | <code>export interface IsolationPermitClaims {</code> |
 | `IsolationPermitExpectation` | interface | 136 | <code>export interface IsolationPermitExpectation {</code> |
 | `VerifiedIsolationPermit` | interface | 141 | <code>export interface VerifiedIsolationPermit extends IsolationPermitClaims {readonly permit_digest:string;readonly issuer_key_id:string}</code> |
 | `IsolationPermitVerifier` | interface | 142 | <code>export interface IsolationPermitVerifier {verifySigned(serialized:Buffer&#124;string):VerifiedIsolationPermit;verify(serialized:Buffer&#124;string,expected:IsolationPermitExpectation):VerifiedIsolationPermit}</code> |
-| `verify` | method | 142 | <code>export interface IsolationPermitVerifier {verifySigned(serialized:Buffer&#124;string):VerifiedIsolationPermit;verify(serialized:Buffer&#124;string,expected:IsolationPermitExpectation):VerifiedIsolationPermit}</code> |
 | `verifySigned` | method | 142 | <code>export interface IsolationPermitVerifier {verifySigned(serialized:Buffer&#124;string):VerifiedIsolationPermit;verify(serialized:Buffer&#124;string,expected:IsolationPermitExpectation):VerifiedIsolationPermit}</code> |
+| `verify` | method | 142 | <code>export interface IsolationPermitVerifier {verifySigned(serialized:Buffer&#124;string):VerifiedIsolationPermit;verify(serialized:Buffer&#124;string,expected:IsolationPermitExpectation):VerifiedIsolationPermit}</code> |
 | `verifiedIsolationPermits` | variable | 143 | <code>const verifiedIsolationPermits=new WeakSet&lt;object&gt;();</code> |
 | `canonicalPermitJSON` | function | 144 | <code>function canonicalPermitJSON(value:unknown):string {</code> |
-| `sorted` | function | 145 | <code>const sorted=(v:unknown):unknown=&gt;Array.isArray(v)?v.map(sorted):object(v)?Object.fromEntries(Object.keys(v).sort().map(k=&gt;&#91;k,sorted(v&#91;k&#93;)&#93;)):v;</code> |
 | `digestText` | function | 148 | <code>function digestText(v:unknown):v is string{return typeof v==='string'&amp;&amp;/^sha256:&#91;0-9a-f&#93;{64}$/.test(v);}</code> |
 | `referenceKey` | function | 149 | <code>function referenceKey(v:unknown):v is string{return typeof v==='string'&amp;&amp;/^&#91;A-Za-z0-9&#93;&#91;A-Za-z0-9._:/-&#93;{0,127}$/.test(v);}</code> |
 | `validateIsolationClaims` | function | 150 | <code>function validateIsolationClaims(v:unknown,nowMs:number):asserts v is IsolationPermitClaims {</code> |
@@ -3166,9 +2319,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `isolationSigningBytes` | function | 170 | <code>function isolationSigningBytes(keyId:string,payload:Buffer):Buffer{return Buffer.from('HYPERFIDE-ISOLATION-PERMIT-V1&#92;n'+keyId+'&#92;n'+hash(payload)+'&#92;n','utf8');}</code> |
 | `issueIsolationPermit` | function | 171 | <code>export async function issueIsolationPermit(claims:IsolationPermitClaims,issuer:{key_id:string;private_key_file:string}):Promise&lt;string&gt;{</code> |
 | `loadIsolationPermitVerifier` | function | 179 | <code>export async function loadIsolationPermitVerifier(configFile:string):Promise&lt;IsolationPermitVerifier&gt;{</code> |
-| `keys` | variable | 184 | <code>const keys=new Map&lt;string,ReturnType&lt;typeof createPublicKey&gt;&gt;();</code> |
-| `verifySigned` | function | 186 | <code>const verifySigned=(serialized:Buffer&#124;string):VerifiedIsolationPermit=&gt;{</code> |
-| `verify` | action | 192 | <code>};return Object.freeze({verifySigned,verify:(serialized:Buffer&#124;string,expected:IsolationPermitExpectation)=&gt;{const result=verifySigned(serialized);assertIsolationPermit(result,expected);return result;…</code> |
 | `WriterObservationPermitClaims` | type | 196 | <code>export type WriterObservationPermitClaims=Omit&lt;IsolationPermitClaims,'purpose'&gt;&amp;{readonly purpose:'EXTERNAL_WRITER_OBSERVATION_ONLY'};</code> |
 | `VerifiedWriterObservationPermit` | interface | 197 | <code>export interface VerifiedWriterObservationPermit extends WriterObservationPermitClaims {readonly permit_digest:string;readonly issuer_key_id:string}</code> |
 | `WriterObservationPermitVerifier` | interface | 198 | <code>export interface WriterObservationPermitVerifier {</code> |
@@ -3182,9 +2332,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `writerObservationSigningBytes` | function | 220 | <code>function writerObservationSigningBytes(keyId:string,payload:Buffer):Buffer{return Buffer.from('HYPERFIDE-WRITER-OBSERVATION-PERMIT-V1&#92;n'+keyId+'&#92;n'+hash(payload)+'&#92;n','utf8');}</code> |
 | `issueWriterObservationPermit` | function | 221 | <code>export async function issueWriterObservationPermit(claims:WriterObservationPermitClaims,issuer:{key_id:string;private_key_file:string}):Promise&lt;string&gt;{</code> |
 | `loadWriterObservationPermitVerifier` | function | 229 | <code>export async function loadWriterObservationPermitVerifier(configFile:string):Promise&lt;WriterObservationPermitVerifier&gt;{</code> |
-| `keys` | variable | 234 | <code>const keys=new Map&lt;string,ReturnType&lt;typeof createPublicKey&gt;&gt;();for(const issuer of config.issuers){exact(issuer,&#91;'key_id','public_key_b64'&#93;);if(typeof issuer.key_id!=='string'&#124;&#124;!NAME.test(issuer.key_…</code> |
-| `verifySigned` | function | 235 | <code>const verifySigned=(serialized:Buffer&#124;string):VerifiedWriterObservationPermit=&gt;{</code> |
-| `verify` | action | 241 | <code>};return Object.freeze({verifySigned,verify:(serialized:Buffer&#124;string,expected:IsolationPermitExpectation)=&gt;{const result=verifySigned(serialized);assertWriterObservationPermit(result,expected);return…</code> |
 
 ## services/hyperfide/src/identity/enrollment.ts
 
@@ -3203,13 +2350,13 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `MainSessionIdentityVerifier` | interface | 15 | <code>export interface MainSessionIdentityVerifier {verify(tx:PrimaryTransaction,scope:{organisation_id:string;run_id:string;session_id:string},invocation:InvocationContext):Promise&lt;MainSessionIdentityBindi…</code> |
 | `verify` | method | 15 | <code>export interface MainSessionIdentityVerifier {verify(tx:PrimaryTransaction,scope:{organisation_id:string;run_id:string;session_id:string},invocation:InvocationContext):Promise&lt;MainSessionIdentityBindi…</code> |
 | `IdentityAuthority` | interface | 16 | <code>export interface IdentityAuthority {installMainSessionVerifier(verifier:MainSessionIdentityVerifier):void;sealTrustedRegistrations():void;verifyFreshRunner(i:InvocationContext,tx:IdentityTransaction,t…</code> |
-| `authenticate` | method | 16 | <code>export interface IdentityAuthority {installMainSessionVerifier(verifier:MainSessionIdentityVerifier):void;sealTrustedRegistrations():void;verifyFreshRunner(i:InvocationContext,tx:IdentityTransaction,t…</code> |
-| `authorize` | method | 16 | <code>export interface IdentityAuthority {installMainSessionVerifier(verifier:MainSessionIdentityVerifier):void;sealTrustedRegistrations():void;verifyFreshRunner(i:InvocationContext,tx:IdentityTransaction,t…</code> |
-| `enroll` | method | 16 | <code>export interface IdentityAuthority {installMainSessionVerifier(verifier:MainSessionIdentityVerifier):void;sealTrustedRegistrations():void;verifyFreshRunner(i:InvocationContext,tx:IdentityTransaction,t…</code> |
-| `guard` | method | 16 | <code>export interface IdentityAuthority {installMainSessionVerifier(verifier:MainSessionIdentityVerifier):void;sealTrustedRegistrations():void;verifyFreshRunner(i:InvocationContext,tx:IdentityTransaction,t…</code> |
 | `installMainSessionVerifier` | method | 16 | <code>export interface IdentityAuthority {installMainSessionVerifier(verifier:MainSessionIdentityVerifier):void;sealTrustedRegistrations():void;verifyFreshRunner(i:InvocationContext,tx:IdentityTransaction,t…</code> |
 | `sealTrustedRegistrations` | method | 16 | <code>export interface IdentityAuthority {installMainSessionVerifier(verifier:MainSessionIdentityVerifier):void;sealTrustedRegistrations():void;verifyFreshRunner(i:InvocationContext,tx:IdentityTransaction,t…</code> |
 | `verifyFreshRunner` | method | 16 | <code>export interface IdentityAuthority {installMainSessionVerifier(verifier:MainSessionIdentityVerifier):void;sealTrustedRegistrations():void;verifyFreshRunner(i:InvocationContext,tx:IdentityTransaction,t…</code> |
+| `guard` | method | 16 | <code>export interface IdentityAuthority {installMainSessionVerifier(verifier:MainSessionIdentityVerifier):void;sealTrustedRegistrations():void;verifyFreshRunner(i:InvocationContext,tx:IdentityTransaction,t…</code> |
+| `authenticate` | method | 16 | <code>export interface IdentityAuthority {installMainSessionVerifier(verifier:MainSessionIdentityVerifier):void;sealTrustedRegistrations():void;verifyFreshRunner(i:InvocationContext,tx:IdentityTransaction,t…</code> |
+| `enroll` | method | 16 | <code>export interface IdentityAuthority {installMainSessionVerifier(verifier:MainSessionIdentityVerifier):void;sealTrustedRegistrations():void;verifyFreshRunner(i:InvocationContext,tx:IdentityTransaction,t…</code> |
+| `authorize` | method | 16 | <code>export interface IdentityAuthority {installMainSessionVerifier(verifier:MainSessionIdentityVerifier):void;sealTrustedRegistrations():void;verifyFreshRunner(i:InvocationContext,tx:IdentityTransaction,t…</code> |
 | `invocationOf` | function | 19 | <code>export function invocationOf(ctx:ComponentContext):InvocationContext {const i=(ctx as ComponentContext&amp;{invocation?:InvocationContext}).invocation;assertInvocation(i);return i;}</code> |
 | `gatewayOf` | function | 20 | <code>export function gatewayOf(ctx:ComponentContext):IdentityGateway {const g=(ctx as unknown as {resources?:{gateway?:IdentityGateway}}).resources?.gateway;if(!g&#124;&#124;typeof g.withPrimaryTransaction!=='functi…</code> |
 | `isIdentityAuthority` | function | 21 | <code>export function isIdentityAuthority(v:unknown):v is IdentityAuthority{return object(v)&amp;&amp;typeof v.guard==='function'&amp;&amp;typeof v.authenticate==='function'&amp;&amp;typeof v.enroll==='function'&amp;&amp;typeof v.authoriz…</code> |
@@ -3218,8 +2365,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `assertCredentialIdentity` | function | 24 | <code>async function assertCredentialIdentity(tx:IdentityTransaction,p:Principal,strictCompute:boolean,action?:string,continuation=false):Promise&lt;void&gt;{</code> |
 | `assertCurrentPrincipal` | function | 39 | <code>export async function assertCurrentPrincipal(tx:IdentityTransaction,p:Principal,authority:GlobalIdentityAuthority):Promise&lt;void&gt;{assertPrimaryTransaction(tx);if(!authority&#124;&#124;typeof authority.assertCurr…</code> |
 | `continuationInvocation` | function | 41 | <code>export function continuationInvocation(i:InvocationContext,validatePersistedAdmission:(tx:IdentityTransaction,invocation:InvocationContext)=&gt;Promise&lt;void&gt;):InvocationContext{assertInvocation(i);if(typ…</code> |
-| `guard` | action | 41 | <code>export function continuationInvocation(i:InvocationContext,validatePersistedAdmission:(tx:IdentityTransaction,invocation:InvocationContext)=&gt;Promise&lt;void&gt;):InvocationContext{assertInvocation(i);if(typ…</code> |
-| `guard` | action | 42 | <code>export async function identityTransaction&lt;T&gt;(ctx:ComponentContext,operation:(tx:IdentityTransaction,i:InvocationContext)=&gt;Promise&lt;T&gt;):Promise&lt;T&gt;{const i=invocationOf(ctx);return gatewayOf(ctx).withPri…</code> |
 | `identityTransaction` | function | 42 | <code>export async function identityTransaction&lt;T&gt;(ctx:ComponentContext,operation:(tx:IdentityTransaction,i:InvocationContext)=&gt;Promise&lt;T&gt;):Promise&lt;T&gt;{const i=invocationOf(ctx);return gatewayOf(ctx).withPri…</code> |
 | `recorded` | function | 43 | <code>export async function recorded&lt;T&gt;(tx:IdentityTransaction,scope:string,name:string,op:Operation,action:()=&gt;Promise&lt;T&gt;):Promise&lt;T&gt;{</code> |
 | `ready` | function | 49 | <code>async function ready(g:IdentityGateway):Promise&lt;void&gt;{const bytes=await fs.readFile(new URL('../../migrations/0014-enrollment.sql',import.meta.url));await g.withPrimaryTransaction({timeoutMs:5000},asy…</code> |
@@ -3229,19 +2374,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `role` | function | 53 | <code>function role(i:InvocationContext,values:string&#91;&#93;):void{if(!values.includes(i.principal.role))fail('ROLE_DENIED','Principal role is not permitted');}</code> |
 | `result` | function | 54 | <code>function result(p:Record&lt;string,any&gt;):unknown{return {protocol_version:1,credential_id:p.credential_id,actor_id:p.actor_id,run_id:p.run_id,role:p.role,sandbox_id:p.sandbox_id,boot_generation:p.boot_ge…</code> |
 | `createComponent` | function | 55 | <code>export async function createComponent(ctx:ComponentContext):Promise&lt;Component&gt;{</code> |
-| `installMainSessionVerifier` | function | 58 | <code>const installMainSessionVerifier=(verifier:MainSessionIdentityVerifier):void=&gt;{</code> |
-| `sealTrustedRegistrations` | function | 63 | <code>const sealTrustedRegistrations=():void=&gt;{registrationsSealed=true;};</code> |
-| `assertBoundIdentity` | function | 64 | <code>const assertBoundIdentity=async(tx:IdentityTransaction,p:Principal,strict:boolean,action?:string,continuation=false):Promise&lt;void&gt;=&gt;{assertPrimaryTransaction(tx);await assertCredentialIdentity(tx,p,st…</code> |
-| `assertBoundPrincipal` | function | 65 | <code>const assertBoundPrincipal=(tx:IdentityTransaction,p:Principal)=&gt;assertCurrentPrincipal(tx,p,globalAuthority);</code> |
-| `authorize` | function | 66 | <code>const authorize=async(i:InvocationContext):Promise&lt;void&gt;=&gt;{const p=i.principal,b=i.payload;if(p.run_id!==b.run_id&#124;&#124;!p.allowed_actions.includes(b.action))fail('AUTH_SCOPE_DENIED','Operation outside gra…</code> |
-| `authenticate` | function | 67 | <code>const authenticate:IdentityAuthority&#91;'authenticate'&#93;=async(body,headers,signal)=&gt;{const decoded=decodeInvoke(body),item=proof(headers);const p=await g.withPrimaryTransaction({timeoutMs:5000,signal},as…</code> |
-| `continuationGuard` | action | 67 | <code>const authenticate:IdentityAuthority&#91;'authenticate'&#93;=async(body,headers,signal)=&gt;{const decoded=decodeInvoke(body),item=proof(headers);const p=await g.withPrimaryTransaction({timeoutMs:5000,signal},as…</code> |
-| `guard` | action | 67 | <code>const authenticate:IdentityAuthority&#91;'authenticate'&#93;=async(body,headers,signal)=&gt;{const decoded=decodeInvoke(body),item=proof(headers);const p=await g.withPrimaryTransaction({timeoutMs:5000,signal},as…</code> |
-| `identityGuard` | action | 67 | <code>const authenticate:IdentityAuthority&#91;'authenticate'&#93;=async(body,headers,signal)=&gt;{const decoded=decodeInvoke(body),item=proof(headers);const p=await g.withPrimaryTransaction({timeoutMs:5000,signal},as…</code> |
-| `enroll` | function | 68 | <code>const enroll:IdentityAuthority&#91;'enroll'&#93;=async(body,headers,signal)=&gt;{const d=decodeEnrollment(body),item=proof(headers,true),secret=enrollmentSecret(headers),b=d.payload;verifyProof(b.public_key_b64,…</code> |
-| `verifyFreshRunner` | function | 76 | <code>const verifyFreshRunner:IdentityAuthority&#91;'verifyFreshRunner'&#93;=async(i,tx,target)=&gt;{</code> |
-| `action` | function | 86 | <code>const action=(name:string,fn:(tx:IdentityTransaction,v:Record&lt;string,unknown&gt;,i:InvocationContext)=&gt;Promise&lt;unknown&gt;)=&gt;async(v:unknown,context:ComponentContext)=&gt;identityTransaction(context,async(tx,i…</code> |
-| `'identity.describe'` | action | 90 | <code>'identity.describe':async(_v,context)=&gt;{const i=invocationOf(context);await authorize(i);return {protocol_version:1,principal:i.principal};},</code> |
 
 ## services/hyperfide/src/identity/native_auth.ts
 
@@ -3252,32 +2384,17 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `AuthProfileSnapshot` | interface | 15 | <code>export interface AuthProfileSnapshot {</code> |
 | `Profile` | interface | 22 | <code>interface Profile {snapshot:AuthProfileSnapshot;runtime_home:string;target_uid:number;configured_account_key:string}</code> |
 | `NativeAuthAuthority` | interface | 23 | <code>export interface NativeAuthAuthority {resolve(profileId:string):AuthProfileSnapshot;privateRuntimeInTransaction(tx:PrimaryTransaction,i:InvocationContext,profileId:string):Promise&lt;{snapshot:AuthProfil…</code> |
-| `privateRuntime` | method | 23 | <code>export interface NativeAuthAuthority {resolve(profileId:string):AuthProfileSnapshot;privateRuntimeInTransaction(tx:PrimaryTransaction,i:InvocationContext,profileId:string):Promise&lt;{snapshot:AuthProfil…</code> |
-| `privateRuntimeInTransaction` | method | 23 | <code>export interface NativeAuthAuthority {resolve(profileId:string):AuthProfileSnapshot;privateRuntimeInTransaction(tx:PrimaryTransaction,i:InvocationContext,profileId:string):Promise&lt;{snapshot:AuthProfil…</code> |
-| `probe` | method | 23 | <code>export interface NativeAuthAuthority {resolve(profileId:string):AuthProfileSnapshot;privateRuntimeInTransaction(tx:PrimaryTransaction,i:InvocationContext,profileId:string):Promise&lt;{snapshot:AuthProfil…</code> |
 | `resolve` | method | 23 | <code>export interface NativeAuthAuthority {resolve(profileId:string):AuthProfileSnapshot;privateRuntimeInTransaction(tx:PrimaryTransaction,i:InvocationContext,profileId:string):Promise&lt;{snapshot:AuthProfil…</code> |
+| `privateRuntimeInTransaction` | method | 23 | <code>export interface NativeAuthAuthority {resolve(profileId:string):AuthProfileSnapshot;privateRuntimeInTransaction(tx:PrimaryTransaction,i:InvocationContext,profileId:string):Promise&lt;{snapshot:AuthProfil…</code> |
+| `privateRuntime` | method | 23 | <code>export interface NativeAuthAuthority {resolve(profileId:string):AuthProfileSnapshot;privateRuntimeInTransaction(tx:PrimaryTransaction,i:InvocationContext,profileId:string):Promise&lt;{snapshot:AuthProfil…</code> |
+| `probe` | method | 23 | <code>export interface NativeAuthAuthority {resolve(profileId:string):AuthProfileSnapshot;privateRuntimeInTransaction(tx:PrimaryTransaction,i:InvocationContext,profileId:string):Promise&lt;{snapshot:AuthProfil…</code> |
 | `isNativeAuthAuthority` | function | 24 | <code>export function isNativeAuthAuthority(v:unknown):v is NativeAuthAuthority{return object(v)&amp;&amp;typeof v.resolve==='function'&amp;&amp;typeof v.privateRuntime==='function'&amp;&amp;typeof v.privateRuntimeInTransaction===…</code> |
 | `sorted` | function | 25 | <code>function sorted(v:unknown):unknown {if(Array.isArray(v))return v.map(sorted);if(object(v))return Object.fromEntries(Object.keys(v).sort().map(k=&gt;&#91;k,sorted(v&#91;k&#93;)&#93;));return v;}</code> |
 | `nonempty` | function | 26 | <code>function nonempty(v:unknown):v is string{return typeof v==='string'&amp;&amp;v.length&gt;0&amp;&amp;v.length&lt;=255&amp;&amp;!/&#91;&#92;x00-&#92;x1f&#93;/.test(v);}</code> |
 | `binaryIdentity` | function | 27 | <code>async function binaryIdentity(filename:string):Promise&lt;{digest:string;header:Buffer}&gt;{</code> |
 | `profiles` | function | 36 | <code>async function profiles(ctx:ComponentContext):Promise&lt;Map&lt;string,Profile&gt;&gt;{</code> |
-| `homes` | variable | 40 | <code>const result=new Map&lt;string,Profile&gt;(),homes=new Set&lt;string&gt;(),uids=new Set&lt;number&gt;();</code> |
-| `result` | variable | 40 | <code>const result=new Map&lt;string,Profile&gt;(),homes=new Set&lt;string&gt;(),uids=new Set&lt;number&gt;();</code> |
-| `uids` | variable | 40 | <code>const result=new Map&lt;string,Profile&gt;(),homes=new Set&lt;string&gt;(),uids=new Set&lt;number&gt;();</code> |
 | `run` | function | 54 | <code>async function run(profile:Profile,args:string&#91;&#93;,signal:AbortSignal):Promise&lt;{exit_code:number&#124;null;stdout:string;stderr:string}&gt;{</code> |
-| `terminate` | function | 61 | <code>const terminate=():void=&gt;{failed=true;child.kill('SIGKILL');};</code> |
-| `data` | function | 64 | <code>const data=(target:Buffer&#91;&#93;) =&gt; (chunk:Buffer):void=&gt;{size+=chunk.length;if(size&gt;65536){terminate();return;}target.push(chunk);};</code> |
 | `createComponent` | function | 76 | <code>export async function createComponent(ctx:ComponentContext):Promise&lt;Component&gt;{</code> |
-| `resolve` | function | 79 | <code>const resolve=(id:string):AuthProfileSnapshot=&gt;{const p=inventory.get(id);if(!p)fail('NATIVE_AUTH_PROFILE_UNKNOWN','Unknown configured authentication profile');return p.snapshot;};</code> |
-| `privateRuntimeInTransaction` | function | 80 | <code>const privateRuntimeInTransaction:NativeAuthAuthority&#91;'privateRuntimeInTransaction'&#93;=async(tx,i,id)=&gt;{</code> |
-| `privateRuntime` | function | 86 | <code>const privateRuntime:NativeAuthAuthority&#91;'privateRuntime'&#93;=(i,id)=&gt;gateway.withPrimaryTransaction({timeoutMs:5000,signal:i.signal,guard:i.guard},async tx=&gt;{assertPrimaryTransaction(tx);return privateR…</code> |
-| `probe` | function | 87 | <code>const probe:NativeAuthAuthority&#91;'probe'&#93;=async(i,id)=&gt;{</code> |
-| `input` | function | 102 | <code>const input=(v:unknown):string=&gt;{exact(v,&#91;'profile_id'&#93;);if(typeof v.profile_id!=='string')fail('INVALID_REQUEST','Configured profile identity required');return v.profile_id;};</code> |
-| `'native.auth.snapshot'` | action | 104 | <code>'native.auth.snapshot':async(v,context)=&gt;{const i=invocationOf(context);return gateway.withPrimaryTransaction({timeoutMs:5000,signal:i.signal,guard:i.guard},async()=&gt;resolve(input(v)));},</code> |
-| `'native.auth.probe'` | action | 105 | <code>'native.auth.probe':async(v,context)=&gt;probe(invocationOf(context),input(v)),</code> |
-| `'native.auth.qualify'` | action | 107 | <code>'native.auth.qualify':async(v,context)=&gt;{const i=invocationOf(context),id=input(v);return qualification.qualify(i,resolve(id),async()=&gt;probe(i,id) as Promise&lt;{native_authentication:string}&gt;);},</code> |
-| `'native.auth.qualification.inspect'` | action | 108 | <code>'native.auth.qualification.inspect':async(v,context)=&gt;{exact(v,&#91;'connector'&#93;);return qualification.inspect(invocationOf(context),v.connector);},</code> |
-| `'native.auth.refresh.commit'` | action | 109 | <code>'native.auth.refresh.commit':async(v,context)=&gt;qualification.commitRefresh(invocationOf(context),v)</code> |
 
 ## services/hyperfide/src/identity/qualification.ts
 
@@ -3299,18 +2416,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `shape` | function | 33 | <code>function shape(v:unknown,names:readonly string&#91;&#93;):asserts v is Record&lt;string,unknown&gt;{if(!object(v)&#124;&#124;Object.keys(v).length!==names.length&#124;&#124;names.some(n=&gt;!Object.hasOwn(v,n)))fail('NATIVE_AUTH_MODE_CON…</code> |
 | `label` | function | 34 | <code>function label(v:unknown):v is string{return typeof v==='string'&amp;&amp;NAME.test(v);}</code> |
 | `modeConfig` | function | 36 | <code>async function modeConfig(ctx:ComponentContext,profiles:ReadonlyMap&lt;string,AuthProfileSnapshot&gt;):Promise&lt;OperatorModeConfig&gt;{</code> |
-| `connectors` | variable | 42 | <code>const connectors=new Map&lt;Connector,ConnectorEntry&gt;();</code> |
 | `record` | function | 61 | <code>function record(r:Record&lt;string,any&gt;):QualificationRecord{</code> |
 | `createQualificationStore` | function | 66 | <code>export function createQualificationStore(ctx:ComponentContext,g:IdentityGateway,profiles:ReadonlyMap&lt;string,AuthProfileSnapshot&gt;):QualificationStore{</code> |
-| `transact` | function | 67 | <code>const transact=&lt;T&gt;(i:InvocationContext,fn:(tx:IdentityTransaction)=&gt;Promise&lt;T&gt;)=&gt;{assertInvocation(i);return g.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal:i.signal,guard:i.guard},async…</code> |
-| `operator` | function | 68 | <code>const operator=(i:InvocationContext,roles:string&#91;&#93;):void=&gt;{if(!roles.includes(i.principal.role))fail('ROLE_DENIED','Principal role is not permitted');};</code> |
-| `cas` | function | 69 | <code>const cas=async(tx:IdentityTransaction,i:InvocationContext,lineage:string,expected:string,digest:string):Promise&lt;string&#124;null&gt;=&gt;{</code> |
-| `refreshRace` | function | 76 | <code>const refreshRace=async(i:InvocationContext,id:string):Promise&lt;'SERIALISED'&#124;'UNSAFE'&gt;=&gt;{</code> |
-| `qualify` | function | 84 | <code>const qualify:QualificationStore&#91;'qualify'&#93;=async(i,s,probe)=&gt;{</code> |
-| `fields` | object | 98 | <code>const fields={id,connector:s.connector,auth_mode:s.auth_mode,profile_id:s.profile_id,profile_digest:s.profile_digest,cli_version:s.binary.version,cli_digest:s.binary.digest,</code> |
-| `inspect` | function | 107 | <code>const inspect:QualificationStore&#91;'inspect'&#93;=async(i,connector)=&gt;{</code> |
-| `modes` | object | 111 | <code>const modes:Record&lt;string,{configured:boolean;profile_id:string&#124;null;latest:QualificationRecord&#124;null}&gt;={};</code> |
-| `commitRefresh` | function | 119 | <code>const commitRefresh:QualificationStore&#91;'commitRefresh'&#93;=async(i,v)=&gt;{</code> |
 
 ## services/hyperfide/src/identity/recovery.ts
 
@@ -3336,7 +2443,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `fresh` | function | 58 | <code>async function fresh(tx:PrimaryTransaction,input:AcceptedRunRebindInput,attestation:ExternalAuthorityAttestation):Promise&lt;void&gt;{</code> |
 | `receiptOf` | function | 63 | <code>function receiptOf(row:Record&lt;string,any&gt;):RunRebindReceipt {</code> |
 | `rebindAcceptedRun` | function | 74 | <code>export async function rebindAcceptedRun(resources:ServiceResources,journal:ExternalAuthorityJournal,raw:AcceptedRunRebindInput,prepared:PreparedAcceptedRunRecovery,options:TransactionOptions={}):Promi…</code> |
-| `body` | object | 107 | <code>const body={schema_version:1 as const,organisation_id:input.organisation_id,run_id:input.run_id,recovery_operation_id:input.recovery_operation_id,deployment_id:input.deployment_id,activation_operation…</code> |
 | `inspectRunRebindReceipt` | function | 116 | <code>export async function inspectRunRebindReceipt(tx:PrimaryTransaction,expected:RunRebindReceiptExpectation):Promise&lt;RunRebindReceipt&gt;{</code> |
 
 ## services/hyperfide/src/integration/candidates.ts
@@ -3354,15 +2460,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `gateway` | function | 18 | <code>function gateway(context:ComponentContext):Gateway{</code> |
 | `runnerRemote` | function | 23 | <code>export async function runnerRemote(context:ComponentContext):Promise&lt;{prepare:(db:DB,invocation:unknown,plan:Record&lt;string,unknown&gt;)=&gt;Promise&lt;unknown&gt;;execute:(permit:unknown,signal:AbortSignal)=&gt;Prom…</code> |
 | `bindScope` | function | 28 | <code>export function bindScope(ctx:ComponentContext,component:Component):Component{</code> |
-| `actions` | object | 30 | <code>const actions:Component&#91;'actions'&#93;={};</code> |
 | `currentInvocation` | function | 40 | <code>export function currentInvocation():IntegrationInvocation{</code> |
 | `prepareRemote` | function | 43 | <code>export async function prepareRemote(db:DB,plan:Record&lt;string,unknown&gt;):Promise&lt;{remote:Awaited&lt;ReturnType&lt;typeof runnerRemote&gt;&gt;;permit:unknown;plan:Record&lt;string,unknown&gt;;expected_source_object_id?:st…</code> |
 | `snapshotRemote` | function | 47 | <code>export function snapshotRemote(prepared:Awaited&lt;ReturnType&lt;typeof prepareRemote&gt;&gt;):Record&lt;string,unknown&gt;{</code> |
-| `payload` | object | 48 | <code>const payload={plan:prepared.plan,expected_source_object_id:prepared.expected_source_object_id??null,expected_source_tree_id:prepared.expected_source_tree_id??null};return {...payload,digest:hash(cano…</code> |
 | `restoreRemote` | function | 50 | <code>export async function restoreRemote(db:DB,snapshot:unknown):Promise&lt;Awaited&lt;ReturnType&lt;typeof prepareRemote&gt;&gt;&gt;{</code> |
 | `executeRemote` | function | 55 | <code>export async function executeRemote(prepared:Awaited&lt;ReturnType&lt;typeof prepareRemote&gt;&gt;):Promise&lt;Record&lt;string,any&gt;&gt;{</code> |
-| `decode` | function | 56 | <code>const active=currentInvocation();const captured=await prepared.remote.execute(prepared.permit,active.context.signal);const decode=(value:unknown):string=&gt;{const output=obj(value);if(!(output.bytes ins…</code> |
-| `result` | object | 56 | <code>const active=currentInvocation();const captured=await prepared.remote.execute(prepared.permit,active.context.signal);const decode=(value:unknown):string=&gt;{const output=obj(value);if(!(output.bytes ins…</code> |
 | `Scope` | interface | 62 | <code>export interface Scope {organisation_id:string;run_id:string}</code> |
 | `fail` | function | 63 | <code>export function fail(code:string,message:string):never{throw new FoundationError(code,message);}</code> |
 | `obj` | function | 64 | <code>export function obj(v:unknown):Record&lt;string,unknown&gt;{if(!object(v))fail('INTEGRATION_INVALID','Object required');return v;}</code> |
@@ -3377,25 +2479,18 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `values` | function | 80 | <code>export function values(s:Scope):string&#91;&#93;{return &#91;s.organisation_id,s.run_id&#93;;}</code> |
 | `semanticDisposition` | function | 81 | <code>export async function semanticDisposition(db:DB,s:{organisation_id:string;run_id:string},mode:'READ'&#124;'WRITE'):Promise&lt;void&gt;{</code> |
 | `tx` | function | 85 | <code>export async function tx&lt;T&gt;(_pool:unknown,fn:(db:DB)=&gt;Promise&lt;T&gt;,mode:'READ'&#124;'WRITE'='WRITE'):Promise&lt;T&gt;{</code> |
-| `guard` | action | 88 | <code>return gateway(active.context).withPrimaryTransaction({timeoutMs:10000,maxRetries:2,guard:async db=&gt;{const principal=(active.invocation as {principal:{organisation_id:string;run_id:string}}).principal…</code> |
 | `primaryClient` | function | 92 | <code>export function primaryClient():DB{</code> |
-| `query` | action | 93 | <code>return {query:async&lt;Row extends pg.QueryResultRow=any&gt;(text:string,parameters?:unknown&#91;&#93;)=&gt;{if(!/^&#92;s&#42;SELECT&#92;b/i.test(text))fail('INTEGRATION_DETACHED_WRITE_DENIED','Detached primary facade accepts rea…</code> |
 | `prepareRemoteGate` | function | 96 | <code>export async function prepareRemoteGate(db:DB,s:Scope,request:{session_id:string;reservation_id:string;repository_id:string;input_digest:string;policy_digest:string;gate:GateConfig;mode:'CANDIDATE'&#124;'W…</code> |
-| `harnessEnv` | object | 100 | <code>const harnessEnv={HYPERFIDE_QUALIFICATION_ROOT:env.HYPERFIDE_REMOTE_QUALIFICATION_ROOT??'',HYPERFIDE_QUALIFIER_DIGEST:env.HYPERFIDE_QUALIFIER_DIGEST??'',HYPERFIDE_CHECKER_DIGEST:env.HYPERFIDE_CHECKER_…</code> |
-| `data` | object | 102 | <code>const data={operation_id:operationId,module_path:modulePath,module_digest:moduleDigest,mode:request.mode,repository_id:request.repository_id,candidate_head:request.candidate_head??null,scope:compact??…</code> |
 | `AdmittedIntegrationWork` | interface | 107 | <code>export interface AdmittedIntegrationWork {kind:'CANDIDATE'&#124;'SCOPE'&#124;'PREPARATION';id:string}</code> |
 | `currentRun` | function | 108 | <code>export async function currentRun(db:DB,s:Scope,lock=false,admittedPublicationId?:string,observe=false,admittedWork?:AdmittedIntegrationWork):Promise&lt;Record&lt;string,any&gt;&gt;{</code> |
 | `GateConfig` | interface | 130 | <code>export interface GateConfig {id:string;kind:'build'&#124;'test';argv:string&#91;&#93;;timeout_ms:number;proof:{manifest_path:string;manifest_digest:string;registry_path:string;registry_digest:string;expected_asser…</code> |
 | `RepositoryConfig` | interface | 131 | <code>export interface RepositoryConfig {repository_id:string;path:string;target_ref:string;receive_path?:string;gates:GateConfig&#91;&#93;;review_policy_digest:string;review_rubrics:string&#91;&#93;;required_graph:boolean…</code> |
 | `IntegrationConfig` | interface | 132 | <code>export interface IntegrationConfig {version:1;organisation_id:string;root:string;repositories:RepositoryConfig&#91;&#93;;closure:Record&lt;string,unknown&gt;}</code> |
 | `config` | function | 133 | <code>export async function config(env:Readonly&lt;NodeJS.ProcessEnv&gt;):Promise&lt;IntegrationConfig&gt;{</code> |
-| `seen` | variable | 139 | <code>const seen=new Set&lt;string&gt;();</code> |
-| `gates` | variable | 148 | <code>const gates=new Set&lt;string&gt;();</code> |
 | `safeDirectory` | function | 153 | <code>export async function safeDirectory(root:string,directory:string):Promise&lt;string&gt;{</code> |
 | `repository` | function | 159 | <code>export function repository(c:IntegrationConfig,id:string):RepositoryConfig{return c.repositories.find(r=&gt;r.repository_id===id)??fail('INTEGRATION_REPOSITORY_UNKNOWN','Repository absent from trusted pr…</code> |
 | `git` | function | 160 | <code>export async function git(directory:string,args:string&#91;&#93;,env:NodeJS.ProcessEnv={}):Promise&lt;string&gt;{</code> |
 | `isolatedPush` | function | 166 | <code>export async function isolatedPush(repositoryPath:string,args:string&#91;&#93;,environment:Readonly&lt;NodeJS.ProcessEnv&gt;,transport:'file'&#124;'https'):Promise&lt;{stdout:string;stderr:string}&gt;{</code> |
-| `baseEnv` | object | 168 | <code>const baseEnv:NodeJS.ProcessEnv={PATH:environment.PATH,HOME:'/nonexistent',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_TERMINAL_PROMPT:'0'};</code> |
 | `custody` | function | 177 | <code>export async function custody(db:DB,s:Scope,id:string,expectedGeneration?:string):Promise&lt;Record&lt;string,any&gt;&gt;{</code> |
 | `CandidateManifest` | interface | 188 | <code>export interface CandidateManifest {</code> |
 | `readCandidate` | function | 195 | <code>export async function readCandidate(db:DB,s:Scope,id:string,lock=false):Promise&lt;{row:Record&lt;string,any&gt;;manifest:CandidateManifest}&gt;{</code> |
@@ -3404,33 +2499,17 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `latestPublishedCandidate` | function | 203 | <code>async function latestPublishedCandidate(db:DB,s:Scope,m:CandidateManifest,id:string):Promise&lt;void&gt;{</code> |
 | `reviewCoverage` | function | 207 | <code>export async function reviewCoverage(db:DB,s:Scope,m:CandidateManifest,inputDigest:string,candidateId:string,phase:ReviewPhase='ADMISSION'):Promise&lt;{digest:string;observations:Record&lt;string,any&gt;&#91;&#93;}&gt;{</code> |
 | `bindReviews` | function | 223 | <code>async function bindReviews(pool:DB,input:unknown):Promise&lt;unknown&gt;{</code> |
-| `sources` | variable | 229 | <code>const sources=new Set&lt;string&gt;();</code> |
 | `gateOutcomes` | function | 243 | <code>export async function gateOutcomes(db:DB,s:Scope,id:string,row:Record&lt;string,any&gt;,m:CandidateManifest):Promise&lt;Record&lt;string,any&gt;&#91;&#93;&gt;{</code> |
 | `commitSetEvidence` | function | 247 | <code>export function commitSetEvidence(row:Record&lt;string,any&gt;,m:CandidateManifest):Record&lt;string,unknown&gt;{</code> |
 | `Readiness` | interface | 250 | <code>interface Readiness {s:Scope;id:string;run:Record&lt;string,any&gt;;row:Record&lt;string,any&gt;;m:CandidateManifest;reviews?:{digest:string;observations:Record&lt;string,any&gt;&#91;&#93;}}</code> |
 | `candidateReady` | function | 282 | <code>export async function candidateReady(db:DB,s:Scope,id:string,admittedPublicationId?:string):Promise&lt;{row:Record&lt;string,any&gt;;manifest:CandidateManifest}&gt;{</code> |
-| `state` | object | 285 | <code>const state:Readiness={s,id,run,row,m};for(const &#91;,check&#93; of READINESS)await check(db,state);</code> |
 | `candidateStatus` | function | 291 | <code>async function candidateStatus(pool:DB,input:unknown):Promise&lt;unknown&gt;{</code> |
-| `state` | object | 301 | <code>try{await tx(pool,async db=&gt;{const run=(await db.query('SELECT &#42; FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2',values(s))).rows&#91;0&#93;;const {row,manifest:m}=await readCandidate(db,s,id);const s…</code> |
 | `createCandidate` | function | 313 | <code>async function createCandidate(pool:DB,cfg:IntegrationConfig,input:unknown):Promise&lt;unknown&gt;{</code> |
-| `source` | object | 338 | <code>const source={repository_id:t.repository_id,base:a.expected_old_head,commits:contributors.map(c=&gt;c.source_object_id),script_digest:hash(CANDIDATE_BUILD_SCRIPT)};</code> |
-| `plan` | object | 339 | <code>const plan={session_id:t.session_id,operation_id:randomUUID(),repository_id:t.repository_id,reservation_id:t.reservation_id,argv:&#91;'node','--input-type=module','-e',CANDIDATE_BUILD_SCRIPT&#93;,cwd:'.',envi…</code> |
-| `gitProvenance` | object | 376 | <code>const gitProvenance={schema_version:1,kind:'GIT_CANDIDATE_PROVENANCE_V1',repository_id:p.t.repository_id,source_object_id:p.head,tree:p.tree,parents:p.parents,baseline:p.a.expected_old_head,constructi…</code> |
-| `m` | object | 376 | <code>const gitProvenance={schema_version:1,kind:'GIT_CANDIDATE_PROVENANCE_V1',repository_id:p.t.repository_id,source_object_id:p.head,tree:p.tree,parents:p.parents,baseline:p.a.expected_old_head,constructi…</code> |
 | `runGates` | function | 386 | <code>async function runGates(pool:DB,_cfg:IntegrationConfig,_env:Readonly&lt;NodeJS.ProcessEnv&gt;,input:unknown):Promise&lt;unknown&gt;{</code> |
 | `remoteGateRuntime` | function | 402 | <code>async function remoteGateRuntime():Promise&lt;void&gt;{</code> |
 | `executeCandidateJob` | function | 406 | <code>async function executeCandidateJob(pool:DB,s:Scope,id:string,job:{id:string;row:Record&lt;string,any&gt;;plans:{gate:GateConfig;prepared:Awaited&lt;ReturnType&lt;typeof prepareRemote&gt;&gt;}&#91;&#93;;verificationInput:string…</code> |
 | `recoverCandidateJob` | function | 419 | <code>async function recoverCandidateJob(pool:DB,input:unknown):Promise&lt;unknown&gt;{</code> |
 | `createComponent` | function | 431 | <code>export function createComponent(ctx:ComponentContext):Component{</code> |
-| `settings` | function | 432 | <code>let cfg:Promise&lt;IntegrationConfig&gt;&#124;undefined;const settings=()=&gt;cfg??=config(ctx.env);</code> |
-| `'integration.candidate.create'` | action | 434 | <code>'integration.candidate.create':async input=&gt;createCandidate(primaryClient(),await settings(),input),</code> |
-| `'integration.candidate.bind_reviews'` | action | 435 | <code>'integration.candidate.bind_reviews':async input=&gt;bindReviews(primaryClient(),input),</code> |
-| `'integration.candidate.inspect'` | action | 436 | <code>'integration.candidate.inspect':async input=&gt;{const v=obj(input);keys(v,&#91;'organisation_id','run_id','candidate_id'&#93;);return readCandidate(primaryClient(),scope(v),uuid(v.candidate_id));},</code> |
-| `'integration.candidate.reconcile'` | action | 437 | <code>'integration.candidate.reconcile':async input=&gt;recoverCandidateJob(primaryClient(),input),</code> |
-| `'integration.candidate.status'` | action | 438 | <code>'integration.candidate.status':async input=&gt;candidateStatus(primaryClient(),input),</code> |
-| `'integration.candidate.cleanup'` | action | 439 | <code>'integration.candidate.cleanup':async input=&gt;cleanupIntegration(primaryClient(),await settings(),input),</code> |
-| `'integration.candidate.verify'` | action | 440 | <code>'integration.candidate.verify':async input=&gt;runGates(primaryClient(),await settings(),ctx.env,input),</code> |
-| `'integration.candidate.admit'` | action | 441 | <code>'integration.candidate.admit':async input=&gt;{const v=obj(input);keys(v,&#91;'organisation_id','run_id','candidate_id'&#93;);const s=scope(v),id=uuid(v.candidate_id);return tx(primaryClient(),async db=&gt;{const c…</code> |
 
 ## services/hyperfide/src/integration/cleanup.ts
 
@@ -3442,8 +2521,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `releaseTerminalReservations` | function | 17 | <code>export async function releaseTerminalReservations(db:DB,s:Scope,jobId?:string):Promise&lt;string&#91;&#93;&gt;{</code> |
 | `refs` | function | 26 | <code>async function refs(directory:string):Promise&lt;string&#91;&#93;&gt;{</code> |
 | `cleanupIntegration` | function | 29 | <code>export async function cleanupIntegration(pool:DB,cfg:IntegrationConfig,input:unknown):Promise&lt;unknown&gt;{</code> |
-| `busyCandidates` | variable | 34 | <code>const busyRepositories=new Set&lt;string&gt;(),busyCandidates=new Set&lt;string&gt;();</code> |
-| `busyRepositories` | variable | 34 | <code>const busyRepositories=new Set&lt;string&gt;(),busyCandidates=new Set&lt;string&gt;();</code> |
 
 ## services/hyperfide/src/integration/closure.ts
 
@@ -3457,41 +2534,22 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `ClosurePolicy` | interface | 16 | <code>interface ClosurePolicy {wave_gates:ScopeGate&#91;&#93;;programme_gates:ScopeGate&#91;&#93;;required_acceptance_ids:string&#91;&#93;;required_docs:boolean;end_to_end_ids?:string&#91;&#93;;activation_rehearsal_ids?:string&#91;&#93;}</code> |
 | `ClosureObligation` | interface | 18 | <code>export interface ClosureObligation {level:Level;id:string;met:boolean;reason:string&#124;null;detail?:unknown}</code> |
 | `closurePolicy` | function | 20 | <code>export function closurePolicy(c:IntegrationConfig):ClosurePolicy{</code> |
-| `ids` | variable | 24 | <code>const ids=new Set&lt;string&gt;();for(const raw of gates){const g=obj(raw);keys(g,&#91;'id','kind','argv','timeout_ms','covers','proof'&#93;);if(typeof g.id!=='string'&#124;&#124;!/^&#91;A-Za-z0-9._-&#93;{1,128}$/.test(g.id)&#124;&#124;ids.ha…</code> |
 | `programmeCaseObligations` | function | 34 | <code>export function programmeCaseObligations(policy:ClosurePolicy,receipts:Record&lt;string,any&gt;&#91;&#93;,inputDigest:string):ClosureObligation&#91;&#93;{</code> |
 | `registerClosurePolicy` | function | 47 | <code>async function registerClosurePolicy(db:DB,s:Scope,cfg:IntegrationConfig):Promise&lt;void&gt;{</code> |
 | `closureSnapshot` | function | 54 | <code>export async function closureSnapshot(db:DB,s:Scope,level:Level,wave?:number,taskId?:string,admittedWork?:AdmittedIntegrationWork):Promise&lt;Record&lt;string,any&gt;&gt;{</code> |
 | `parse` | function | 100 | <code>function parse(input:unknown):{s:Scope;level:Level;wave?:number;taskId?:string}{</code> |
 | `evaluateClosure` | function | 108 | <code>export async function evaluateClosure(pool:import('./candidates.js').DB,cfg:IntegrationConfig,input:unknown):Promise&lt;unknown&gt;{</code> |
-| `need` | function | 112 | <code>const prefix=p.level.toLowerCase(),need=(id:string,met:boolean,reason:string,detail?:unknown)=&gt;{obligations.push({level:p.level,id:prefix+'.'+id,met,reason:met?null:reason,...(detail===undefined?{}:{d…</code> |
-| `receiptFor` | function | 113 | <code>const receiptFor=(task:Record&lt;string,any&gt;)=&gt;m.publications.find((pub:Record&lt;string,any&gt;)=&gt;pub.state==='PUBLISHED'&amp;&amp;pub.observed_head===pub.candidate_head&amp;&amp;pub.manifest.contributors.some((c:Record&lt;stri…</code> |
-| `accepted` | function | 114 | <code>const accepted=(receipt:Record&lt;string,any&gt;&#124;undefined)=&gt;!!receipt&amp;&amp;m.acceptances.some((a:Record&lt;string,any&gt;)=&gt;a.operation_id===receipt.id);</code> |
-| `covers` | variable | 143 | <code>const covers=new Set(gates.filter(g=&gt;g.kind==='test').flatMap(g=&gt;g.covers));</code> |
-| `required` | variable | 144 | <code>const required=new Set&lt;string&gt;(m.proofInventory.flatMap((r:Record&lt;string,any&gt;)=&gt;(r.obligations??&#91;&#93;).flatMap((o:Record&lt;string,any&gt;)=&gt;o.acceptance_ids??&#91;&#93;)));</code> |
-| `status` | object | 166 | <code>const status={level:p.level,outcome,wave:p.wave??null,task_id:p.taskId??null,obligation_count:obligations.length,unmet_obligations:unmet.map(o=&gt;o.id),lower_levels_complete:p.level==='TASK'?null:taskSt…</code> |
-| `evaluation` | object | 167 | <code>const evaluation={...m,documentation,input_manifest_digest:inputDigest,reasons,scope:p.level,outcome,status,obligations,unmet_obligations:unmet,task_statuses:taskStatuses,wave_statuses:waveStatuses,de…</code> |
 | `dependentRelease` | function | 172 | <code>async function dependentRelease(db:DB,s:Scope,taskIds:string&#91;&#93;):Promise&lt;Record&lt;string,unknown&gt;&#91;&#93;&gt;{</code> |
-| `verdicts` | variable | 177 | <code>const verdicts=new Map&lt;string,{released:boolean;code:string&#124;null}&gt;();</code> |
 | `integratedRepositoryManifest` | function | 186 | <code>export function integratedRepositoryManifest(snapshot:Record&lt;string,any&gt;):Record&lt;string,string&gt;&#91;&#93;{</code> |
 | `integratedManifestDigest` | function | 193 | <code>export function integratedManifestDigest(snapshot:Record&lt;string,any&gt;):string{return hash(canonical(integratedRepositoryManifest(snapshot)));}</code> |
 | `proofFile` | function | 195 | <code>async function proofFile(root:string,name:string):Promise&lt;Buffer&gt;{</code> |
 | `registeredScopeGate` | function | 201 | <code>export async function registeredScopeGate(gate:ScopeGate,cwd:string,work:string,inputDigest:string,env:Readonly&lt;NodeJS.ProcessEnv&gt;,requireFull=true):Promise&lt;{stdout:string;stderr:string;exitCode:numbe…</code> |
-| `cleanEnv` | object | 218 | <code>const cleanEnv={PATH:env.PATH,HOME:'/nonexistent',CI:'1',HYPERFIDE_SCOPE_DIGEST:inputDigest};</code> |
-| `bundle` | object | 226 | <code>const bundle:Record&lt;string,string&gt;={};let bytes=0;</code> |
-| `collect` | function | 227 | <code>async function collect(directory:string):Promise&lt;void&gt;{</code> |
 | `verifyScope` | function | 238 | <code>async function verifyScope(pool:import('./candidates.js').DB,cfg:IntegrationConfig,_env:Readonly&lt;NodeJS.ProcessEnv&gt;,input:unknown):Promise&lt;unknown&gt;{</code> |
 | `executeScopeJob` | function | 255 | <code>async function executeScopeJob(pool:DB,p:ReturnType&lt;typeof parse&gt;,prepared:{id:string;snapshot:Record&lt;string,any&gt;;inputDigest:string;plans:{gate:ScopeGate;remote:Awaited&lt;ReturnType&lt;typeof prepareRemot…</code> |
 | `recoverScopeJob` | function | 267 | <code>async function recoverScopeJob(pool:DB,input:unknown):Promise&lt;unknown&gt;{</code> |
-| `p` | object | 274 | <code>const p:ReturnType&lt;typeof parse&gt;={s,level:row.level,...(row.wave===null?{}:{wave:row.wave})};return {terminal:false,state:row.state,p,prepared:{id,snapshot:obj(manifest.snapshot),inputDigest:row.input…</code> |
 | `createComponent` | function | 279 | <code>export function createComponent(ctx:ComponentContext):Component{</code> |
-| `settings` | function | 280 | <code>let cfg:Promise&lt;IntegrationConfig&gt;&#124;undefined;const settings=()=&gt;cfg??=config(ctx.env);</code> |
-| `'integration.closure.evaluate'` | action | 282 | <code>'integration.closure.evaluate':async input=&gt;evaluateClosure(primaryClient(),await settings(),input),</code> |
-| `'integration.closure.reconcile'` | action | 283 | <code>'integration.closure.reconcile':async input=&gt;recoverScopeJob(primaryClient(),input),</code> |
-| `'integration.closure.verify'` | action | 284 | <code>'integration.closure.verify':async input=&gt;verifyScope(primaryClient(),await settings(),ctx.env,input),</code> |
-| `'integration.closure.inspect'` | action | 285 | <code>'integration.closure.inspect':async input=&gt;{const v=obj(input);keys(v,&#91;'organisation_id','run_id','evaluation_id'&#93;);const rows=await primaryClient().query('SELECT &#42; FROM hyperfide.integration_closure_…</code> |
 | `qualifiedIntegratedOutcomes` | function | 290 | <code>export async function qualifiedIntegratedOutcomes(db:DB,s:Scope):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
 | `inspectProgrammeClosure` | function | 313 | <code>export async function inspectProgrammeClosure(db:DB,invocation:unknown):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
-| `s` | object | 316 | <code>const input=obj(i.payload.input),s={organisation_id:uuid(i.principal.organisation_id),run_id:uuid(i.principal.run_id)};if(i.payload.run_id!==s.run_id)fail('INTEGRATION_SCOPE_DENIED','Programme inspect…</code> |
 
 ## services/hyperfide/src/integration/github.ts
 
@@ -3506,7 +2564,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `GitHubTransport` | type | 36 | <code>export type GitHubTransport=(route:string,token:string,method?:string,body?:unknown)=&gt;Promise&lt;{status:number;body:unknown}&gt;;</code> |
 | `privateBytes` | function | 37 | <code>async function privateBytes(filename:string,max=65536):Promise&lt;Buffer&gt;{</code> |
 | `githubHTTP` | function | 41 | <code>export async function githubHTTP(route:string,token:string,method='GET',body?:unknown):Promise&lt;{status:number;body:unknown}&gt;{</code> |
-| `value` | object | 48 | <code>const raw=Buffer.concat(chunks).toString('utf8');let value:unknown={};try{if(raw)value=JSON.parse(raw);}catch{fail('GITHUB_RESPONSE_INVALID','GitHub response was not JSON');}</code> |
 | `integer` | function | 51 | <code>function integer(v:unknown):number{if(!Number.isSafeInteger(v)&#124;&#124;Number(v)&lt;1)fail('GITHUB_CONFIG_INVALID','Positive provider integer required');return Number(v);}</code> |
 | `loadGitHubProfile` | function | 52 | <code>export async function loadGitHubProfile(env:Readonly&lt;NodeJS.ProcessEnv&gt;,repositoryId:string):Promise&lt;GitHubProfile&gt;{</code> |
 | `validateGitHubProtection` | function | 62 | <code>export function validateGitHubProtection(profile:GitHubProfile,repository:unknown,activeRules:unknown,rulesets:unknown&#91;&#93;,classic:unknown):string{</code> |
@@ -3550,27 +2607,12 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `reconcilePublication` | function | 79 | <code>export async function reconcilePublication(pool:import('./candidates.js').DB,cfg:IntegrationConfig,s:Scope,id:string,transportSettled=false,env:Readonly&lt;NodeJS.ProcessEnv&gt;=process.env,hostedResult?:Ho…</code> |
 | `headChanged` | function | 125 | <code>async function headChanged(pool:import('./candidates.js').DB,s:Scope,id:string,intent:string):Promise&lt;never&gt;{</code> |
 | `executePublication` | function | 130 | <code>async function executePublication(pool:import('./candidates.js').DB,cfg:IntegrationConfig,env:Readonly&lt;NodeJS.ProcessEnv&gt;,input:unknown):Promise&lt;unknown&gt;{</code> |
-| `permit` | object | 155 | <code>const permit:Permit={version:1,organisation_id:s.organisation_id,run_id:s.run_id,operation_id:id,generation:String(prepared.op.operation_generation),repository_id:m.repository_id,ref:r.target_ref,old:…</code> |
 | `pushManaged` | function | 166 | <code>export async function pushManaged(repositoryPath:string,receivePath:string,ref:string,next:string,old:string,permitToken:string,env:Readonly&lt;NodeJS.ProcessEnv&gt;):Promise&lt;void&gt;{</code> |
 | `installGatewayHook` | function | 169 | <code>export async function installGatewayHook(receivePath:string,serverConfigPath:string,node=process.execPath):Promise&lt;void&gt;{</code> |
-| `quote` | function | 172 | <code>const quote=(v:string)=&gt;"'"+v.replaceAll("'","'&#92;&#92;''")+"'";</code> |
 | `inspectIntegratedPublication` | function | 179 | <code>export async function inspectIntegratedPublication(db:import('./candidates.js').DB,s:Scope,pins:{task_id:string;custody_id:string;custody_generation:string}):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
-| `valid` | function | 183 | <code>const valid=(row:Record&lt;string,any&gt;):boolean=&gt;row.state==='PUBLISHED'&amp;&amp;row.candidate_state==='PUBLISHED'&amp;&amp;row.observed_head===row.candidate_head&amp;&amp;hash(canonical(row.manifest))===row.input_manifest_dig…</code> |
-| `originalReceipt` | object | 188 | <code>const originalReceipt={operation_id:original.id,candidate_id:original.candidate_id,repository_id:original.repository_id,source_object_id:original.candidate_head,tree:original.manifest.tree,parents:ori…</code> |
-| `currentSource` | object | 194 | <code>const currentSource={repository_id:latest.repository_id,source_object_id:latest.candidate_head,tree:latest.manifest.tree,parents:latest.manifest.parents,source_manifest_digest:physical?.source_manifes…</code> |
 | `acceptPublished` | function | 197 | <code>async function acceptPublished(pool:import('./candidates.js').DB,cfg:IntegrationConfig,env:Readonly&lt;NodeJS.ProcessEnv&gt;,input:unknown):Promise&lt;unknown&gt;{</code> |
 | `stopIntegration` | function | 226 | <code>export async function stopIntegration(db:import('./candidates.js').DB,s:Scope,control:{mode:'CANCEL'&#124;'STOP';control_generation:string}):Promise&lt;{cancelled_operation_ids:string&#91;&#93;;unresolved_operation_i…</code> |
-| `deferred` | variable | 233 | <code>const cancelled:string&#91;&#93;=&#91;&#93;,unresolved:string&#91;&#93;=&#91;&#93;,deferred=new Set&lt;string&gt;();</code> |
 | `createComponent` | function | 247 | <code>export function createComponent(ctx:ComponentContext):Component{</code> |
-| `settings` | function | 248 | <code>let cfg:Promise&lt;IntegrationConfig&gt;&#124;undefined;const settings=()=&gt;cfg??=config(ctx.env);</code> |
-| `'integration.publication.capabilities'` | action | 250 | <code>'integration.publication.capabilities':async input=&gt;{const v=obj(input);keys(v,&#91;'organisation_id','run_id','repository_id'&#93;);const r=repository(await settings(),uuid(v.repository_id));return {reposito…</code> |
-| `'integration.publication.protection'` | action | 251 | <code>'integration.publication.protection':async input=&gt;{const v=obj(input);keys(v,&#91;'organisation_id','run_id','repository_id'&#93;);return(await githubAdapter(ctx.env,uuid(v.repository_id))).inspectProtection(…</code> |
-| `'integration.publication.accept'` | action | 252 | <code>'integration.publication.accept':async input=&gt;acceptPublished(primaryClient(),await settings(),ctx.env,input),</code> |
-| `'integration.publication.authorize'` | action | 253 | <code>'integration.publication.authorize':async input=&gt;authorize(primaryClient(),input),</code> |
-| `'integration.publication.execute'` | action | 254 | <code>'integration.publication.execute':async input=&gt;executePublication(primaryClient(),await settings(),ctx.env,input),</code> |
-| `'integration.publication.reconcile'` | action | 255 | <code>'integration.publication.reconcile':async input=&gt;{const v=obj(input);keys(v,&#91;'organisation_id','run_id','operation_id'&#93;);return reconcilePublication(primaryClient(),await settings(),scope(v),uuid(v.op…</code> |
-| `'integration.publication.inspect'` | action | 256 | <code>'integration.publication.inspect':async input=&gt;{const v=obj(input);keys(v,&#91;'organisation_id','run_id','operation_id'&#93;);return operation(primaryClient(),scope(v),uuid(v.operation_id));}</code> |
-| `resources` | variable | 264 | <code>const runtime='../storage/runtime.js';const ResourceContainer=(await import(runtime)).ResourceContainer;const resources=new ResourceContainer('control',env,new AbortController().signal);try{await rece…</code> |
 
 ## services/hyperfide/src/integration/release_barrier.ts
 
@@ -3581,26 +2623,17 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `readBarrier` | function | 7 | <code>async function readBarrier(pool:DB,s:Scope,id:string,lock=false):Promise&lt;Record&lt;string,any&gt;&gt;{</code> |
 | `candidateSet` | function | 11 | <code>function candidateSet(v:unknown):string&#91;&#93;{</code> |
 | `insertBarrier` | function | 16 | <code>async function insertBarrier(db:DB,s:Scope,request:string,ids:string&#91;&#93;,policy:string,supersedes?:{barrier_id:string;manifest_digest:string;recovery_id:string}):Promise&lt;Record&lt;string,any&gt;&gt;{</code> |
-| `manifest` | object | 23 | <code>const manifest={version:1,request_id:request,organisation_id:s.organisation_id,run_id:s.run_id,spec_revision_id:run.spec_revision_id,spec_generation:String(run.spec_generation),authority_epoch:run.aut…</code> |
 | `createBarrier` | function | 30 | <code>async function createBarrier(pool:DB,cfg:IntegrationConfig,input:unknown):Promise&lt;unknown&gt;{</code> |
 | `latestObservations` | function | 40 | <code>async function latestObservations(db:DB,s:Scope,id:string):Promise&lt;Record&lt;string,any&gt;&#91;&#93;&gt;{</code> |
 | `readRecovery` | function | 43 | <code>async function readRecovery(db:DB,s:Scope,id:string):Promise&lt;Record&lt;string,any&gt;&#124;undefined&gt;{</code> |
 | `recoveryStatus` | function | 50 | <code>function recoveryStatus(recovery:Record&lt;string,any&gt;,heads:Map&lt;string,string&#124;null&gt;):Record&lt;string,unknown&gt;{</code> |
 | `observeHeads` | function | 57 | <code>async function observeHeads(cfg:IntegrationConfig,targets:Record&lt;string,any&gt;&#91;&#93;):Promise&lt;Map&lt;string,string&#124;null&gt;&gt;{</code> |
-| `heads` | variable | 58 | <code>const heads=new Map&lt;string,string&#124;null&gt;();</code> |
 | `classify` | function | 64 | <code>function classify(op:Record&lt;string,any&gt;&#124;undefined,head:string,old:string&#124;null,observed:string&#124;null):string{</code> |
 | `derive` | function | 71 | <code>function derive(outcomes:Record&lt;string,any&gt;&#91;&#93;):string{</code> |
 | `refresh` | function | 74 | <code>async function refresh(pool:DB,cfg:IntegrationConfig,s:Scope,id:string):Promise&lt;Record&lt;string,any&gt;&gt;{</code> |
-| `previous` | variable | 79 | <code>const recovery=await readRecovery(db,s,id);const previous=new Map((await latestObservations(db,s,id)).map(o=&gt;&#91;o.repository_id,o&#93;));</code> |
 | `release` | function | 97 | <code>async function release(pool:DB,cfg:IntegrationConfig,input:unknown):Promise&lt;unknown&gt;{</code> |
 | `recover` | function | 114 | <code>async function recover(pool:DB,cfg:IntegrationConfig,input:unknown):Promise&lt;unknown&gt;{</code> |
-| `outcome` | variable | 128 | <code>const outcome=new Map(latest.map(o=&gt;&#91;o.repository_id,o&#93;));const targets:Record&lt;string,any&gt;&#91;&#93;=row.manifest.targets;</code> |
 | `createComponent` | function | 157 | <code>export function createComponent(ctx:ComponentContext):Component{</code> |
-| `settings` | function | 158 | <code>let cfg:Promise&lt;IntegrationConfig&gt;&#124;undefined;const settings=()=&gt;cfg??=config(ctx.env);</code> |
-| `'integration.release.create'` | action | 160 | <code>'integration.release.create':async input=&gt;createBarrier(primaryClient(),await settings(),input),</code> |
-| `'integration.release.inspect'` | action | 161 | <code>'integration.release.inspect':async input=&gt;{const v=obj(input);keys(v,&#91;'organisation_id','run_id','barrier_id'&#93;);return refresh(primaryClient(),await settings(),scope(v),uuid(v.barrier_id));},</code> |
-| `'integration.release.evaluate'` | action | 162 | <code>'integration.release.evaluate':async input=&gt;release(primaryClient(),await settings(),input),</code> |
-| `'integration.release.recover'` | action | 163 | <code>'integration.release.recover':async input=&gt;recover(primaryClient(),await settings(),input)</code> |
 
 ## services/hyperfide/src/issue-watcher.ts
 
@@ -3623,21 +2656,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `IssueWatcher` | class | 95 | <code>export class IssueWatcher {</code> |
 | `constructor` | method | 97 | <code>constructor(private readonly config:WatcherConfig,private readonly key:KeyObject,private readonly ca:Buffer,private readonly signal:AbortSignal){}</code> |
 | `call` | method | 98 | <code>private call(component:string,action:string,input:unknown):Promise&lt;unknown&gt;{</code> |
-| `proof` | object | 102 | <code>const proof={id:this.config.credential_id,time:String(Math.floor(Date.now()/1000)),nonce:randomUUID()};</code> |
-| `finish` | function | 105 | <code>let done=false;const finish=(error:Error&#124;null,value?:unknown)=&gt;{if(done)return;done=true;if(error)reject(error);else resolve(value);};</code> |
 | `observed` | method | 124 | <code>private async observed(report:PassReport,component:string,action:string,subject:string&#124;null,input:unknown):Promise&lt;unknown&gt;{</code> |
 | `pass` | method | 132 | <code>async pass():Promise&lt;PassReport&gt;{</code> |
-| `report` | object | 133 | <code>const report:PassReport={pass:++this.passes,confirmed:true,reconciled:&#91;&#93;,deferred:&#91;&#93;,calls:&#91;&#93;};</code> |
-| `known` | variable | 154 | <code>const known=new Map(this.config.repositories.map(r=&gt;&#91;r.repository_id,r&#93;));</code> |
 | `issueWatcherCommand` | function | 170 | <code>export async function issueWatcherCommand(args:readonly string&#91;&#93;,env:Readonly&lt;NodeJS.ProcessEnv&gt;,signal:AbortSignal,emit:(line:Record&lt;string,unknown&gt;)=&gt;void):Promise&lt;number&gt;{</code> |
-| `watcher` | variable | 179 | <code>const watcher=new IssueWatcher(config,key,ca,signal);</code> |
 | `createComponent` | function | 189 | <code>export function createComponent(_context:ComponentContext):Component{return {apiVersion:1,actions:{</code> |
-| `'issue.watcher.describe'` | action | 190 | <code>'issue.watcher.describe':(input,context)=&gt;{</code> |
-| `'issue.watcher.plan'` | action | 197 | <code>'issue.watcher.plan':input=&gt;plan(validateWatcherConfig(input)),</code> |
-| `'supervisory.host.validate'` | action | 198 | <code>'supervisory.host.validate':input=&gt;validateSupervisoryHostConfig(input)</code> |
-| `controller` | variable | 201 | <code>const controller=new AbortController(),stop=()=&gt;controller.abort();process.once('SIGTERM',stop);process.once('SIGINT',stop);</code> |
-| `stop` | function | 201 | <code>const controller=new AbortController(),stop=()=&gt;controller.abort();process.once('SIGTERM',stop);process.once('SIGINT',stop);</code> |
-| `emit` | function | 202 | <code>const emit=(line:Record&lt;string,unknown&gt;)=&gt;{process.stdout.write(JSON.stringify(line)+'&#92;n');};</code> |
 
 ## services/hyperfide/src/migration/cutover.ts
 
@@ -3654,27 +2676,16 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `requireAuthority` | method | 18 | <code>requireAuthority(tx:IdentityTransaction,input:{organisation_id:string;run_id:string;authority_epoch:string;session_id:string;leader_generation:string;roles:string&#91;&#93;}):Promise&lt;unknown&gt;;</code> |
 | `Fingerprint` | type | 20 | <code>type Fingerprint=Record&lt;string,{rows:string;digest:string}&gt;;</code> |
 | `guarded` | function | 21 | <code>async function guarded&lt;T&gt;(ctx:ComponentContext,action:string,fn:(tx:IdentityTransaction)=&gt;Promise&lt;T&gt;):Promise&lt;T&gt;{</code> |
-| `scope` | object | 31 | <code>const scope={organisation_id:p.organisation_id,run_id:p.run_id},current=await hierarchy.leadership(tx,scope);</code> |
 | `fields` | object | 39 | <code>const fields:Record&lt;string,string&#91;&#93;&gt;={</code> |
 | `fail` | function | 52 | <code>function fail(code:string,message:string):never{throw new FoundationError(code,message);}</code> |
 | `controls` | function | 53 | <code>function controls(ctx:ComponentContext):RecoveryControls {</code> |
 | `legacy` | function | 57 | <code>function legacy(ctx:ComponentContext):LegacyWriterCapability {</code> |
 | `ready` | function | 61 | <code>async function ready(tx:IdentityTransaction):Promise&lt;void&gt;{</code> |
 | `input` | function | 68 | <code>function input(action:string,raw:unknown):Record&lt;string,unknown&gt;{</code> |
-| `id` | function | 72 | <code>const id=(v:unknown)=&gt;typeof v==='string'&amp;&amp;uuid.test(v);</code> |
 | `fingerprint` | function | 81 | <code>async function fingerprint(tx:IdentityTransaction,scope:Scope):Promise&lt;Fingerprint&gt;{</code> |
-| `result` | object | 82 | <code>const result:Fingerprint={};</code> |
-| `read` | function | 83 | <code>const read=async(key:string,table:string,by:'run'&#124;'organisation')=&gt;{</code> |
 | `changes` | function | 92 | <code>function changes(baseline:Fingerprint,observed:Fingerprint,prefix:string):bigint{</code> |
 | `legacyInput` | function | 102 | <code>function legacyInput(ctx:ComponentContext,operation:string,epoch:unknown,signal:AbortSignal):LegacyWriterInput{</code> |
 | `createComponent` | function | 112 | <code>export function createComponent(_startup:ComponentContext):Component{return {apiVersion:1,actions:Object.fromEntries(names.map(action=&gt;&#91;action,async(raw:unknown,ctx:ComponentContext)=&gt;{</code> |
-| `scope` | object | 125 | <code>const scope:Scope={organisation_id:principal.organisation_id,run_id:principal.run_id,authority_epoch:principal.deployment_epoch};</code> |
-| `replay` | function | 134 | <code>const replay=async(tx:IdentityTransaction)=&gt;{</code> |
-| `current` | function | 141 | <code>const current=async(tx:IdentityTransaction,allowed:string&#91;&#93;)=&gt;{</code> |
-| `receipt` | function | 149 | <code>const receipt=async(tx:IdentityTransaction,result:Record&lt;string,unknown&gt;)=&gt;{</code> |
-| `fresh` | function | 153 | <code>const fresh=async(tx:IdentityTransaction,expires:string)=&gt;{</code> |
-| `evidence` | object | 177 | <code>const evidence={run_quiescence:'OBSERVED',legacy_admission:{status:admission.status,evidence_digest:admission.evidence_digest,source_epoch:admission.source_epoch},</code> |
-| `procedure` | object | 246 | <code>const procedure={target:'POSTGRESQL_FORWARD_RECOVERY',source_of_truth:'POSTGRESQL',sqlite_archive:'READ_ONLY_HISTORY',legacy_admission:'REMAINS_DISABLED',reverse_export:reverse,</code> |
 
 ## services/hyperfide/src/migration/generated.ts
 
@@ -3686,14 +2697,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `owned` | function | 13 | <code>function owned(file:string,bytes:Buffer):boolean{</code> |
 | `inventory` | function | 19 | <code>async function inventory(root:FileHandle):Promise&lt;unknown&#91;&#93;&gt;{</code> |
 | `execute` | function | 27 | <code>async function execute(binary:FileHandle,root:FileHandle,args:readonly string&#91;&#93;,context:ComponentContext):Promise&lt;{exit_code:number;stdout:Buffer;stderr:Buffer}&gt;{</code> |
-| `stop` | function | 33 | <code>const stop=()=&gt;{killed=true;if(child.pid)try{process.kill(-child.pid,'SIGKILL');}catch{/&#42; Exit can race cancellation. &#42;/}};</code> |
-| `abort` | function | 34 | <code>const abort=()=&gt;stop();context.signal.addEventListener('abort',abort,{once:true});</code> |
-| `collect` | function | 36 | <code>const collect=(chunks:Buffer&#91;&#93;)=&gt;(data:Buffer)=&gt;{total+=data.length;if(total&gt;4194304)stop();else chunks.push(data);};</code> |
 | `executable` | function | 46 | <code>async function executable(context:ComponentContext):Promise&lt;FileHandle&gt;{</code> |
 | `createComponent` | function | 57 | <code>export function createComponent(context:ComponentContext):Component{</code> |
-| `'migration.generated.inspect'` | action | 59 | <code>'migration.generated.inspect':async(value:unknown)=&gt;{</code> |
-| `'migration.generated.run'` | action | 63 | <code>'migration.generated.run':async(value:unknown)=&gt;{</code> |
-| `wanted` | variable | 72 | <code>const wanted=new Set&lt;string&gt;();</code> |
 
 ## services/hyperfide/src/migration/legacy.ts
 
@@ -3727,10 +2732,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `descriptor` | function | 66 | <code>function descriptor(config:Config,input:LegacyWriterInput):string{return canonical({schema_version:1,mode:'distributed',authority_epoch:config.source_epoch??input.operation_id})+'&#92;n';}</code> |
 | `admission` | function | 67 | <code>async function admission(config:Config,input:LegacyWriterInput):Promise&lt;string&gt;{</code> |
 | `aliases` | function | 74 | <code>function aliases(all:Mount&#91;&#93;,targets:Target&#91;&#93;):string&#91;&#93;{</code> |
-| `result` | variable | 75 | <code>const result=new Set&lt;string&gt;();</code> |
 | `identities` | function | 83 | <code>async function identities(roots:string&#91;&#93;):Promise&lt;Set&lt;string&gt;&gt;{</code> |
-| `found` | variable | 84 | <code>const found=new Set&lt;string&gt;();let count=0;</code> |
-| `walk` | function | 85 | <code>async function walk(name:string):Promise&lt;void&gt;{</code> |
 | `pids` | function | 95 | <code>async function pids():Promise&lt;string&#91;&#93;&gt;{</code> |
 | `gone` | function | 99 | <code>async function gone(pid:string):Promise&lt;boolean&gt;{try{await fs.stat('/proc/'+pid);return false;}catch(e){if(object(e)&amp;&amp;e.code==='ENOENT')return true;throw e;}}</code> |
 | `LegacyWriterAdmission` | class | 103 | <code>export class LegacyWriterAdmission {</code> |
@@ -3739,14 +2741,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `restoreAdmission` | method | 126 | <code>async restoreAdmission(input:LegacyWriterInput):Promise&lt;LegacyRestoreReceipt&gt;{</code> |
 | `binding` | method | 141 | <code>private binding(input:LegacyWriterInput){return {deployment_id:input.deployment_id,operation_id:input.operation_id,source_epoch:input.source_epoch};}</code> |
 | `observeIsolation` | method | 142 | <code>async observeIsolation(input:LegacyWriterInput):Promise&lt;LegacyIsolationReceipt&gt;{</code> |
-| `seen` | variable | 147 | <code>const before=await pids(),seen=new Set&lt;string&gt;(),observations:string&#91;&#93;=&#91;&#93;;let read_only_aliases=0,unsafeMount=false,checked_processes=0;</code> |
-| `identity` | function | 178 | <code>const identity=(v:string)=&gt;v.slice(v.lastIndexOf(')')+2).split(' ')&#91;19&#93;;</code> |
-| `observed_visibility` | object | 191 | <code>const observed_at=new Date().toISOString(),expires_at=new Date(Date.now()+10000).toISOString(),observed_visibility={...visibility,checked_processes,checked_mount_namespaces:seen.size};</code> |
-| `evidence` | object | 192 | <code>const evidence={topology,admission_digest,observations:observations.sort(),observed_visibility,read_only_aliases,observed_at,expires_at};</code> |
 | `createLegacyWriterAdmission` | function | 196 | <code>export function createLegacyWriterAdmission(env:Readonly&lt;NodeJS.ProcessEnv&gt;):LegacyWriterAdmission{return new LegacyWriterAdmission(env);}</code> |
 | `createLegacyComponent` | function | 198 | <code>export function createLegacyComponent(ctx:ComponentContext):Component {</code> |
-| `capabilities` | object | 199 | <code>const capabilities={'migration.legacy-writers.v1':createLegacyWriterAdmission(ctx.env)};</code> |
-| `'legacy.writer.describe'` | action | 205 | <code>'legacy.writer.describe':async(raw:unknown,context:ComponentContext)=&gt;{</code> |
 
 ## services/hyperfide/src/migration/names.ts
 
@@ -3760,7 +2756,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `strictObject` | function | 280 | <code>export function strictObject(value:unknown,keys:string&#91;&#93;):Record&lt;string,unknown&gt;{</code> |
 | `relativePath` | function | 286 | <code>export function relativePath(value:unknown,empty=false):string{</code> |
 | `resolveEnvironmentAliases` | function | 292 | <code>export function resolveEnvironmentAliases(env:Readonly&lt;NodeJS.ProcessEnv&gt;):NodeJS.ProcessEnv{</code> |
-| `result` | object | 293 | <code>const result={...env};</code> |
 | `contentDigest` | function | 301 | <code>export const contentDigest=(data:Uint8Array&#124;string):string=&gt;'sha256:'+createHash('sha256').update(data).digest('hex');</code> |
 | `canonical` | function | 302 | <code>function canonical(value:unknown):string{</code> |
 | `openDirectory` | function | 307 | <code>export async function openDirectory(root:FileHandle,relative:string,create=false):Promise&lt;FileHandle&gt;{</code> |
@@ -3771,20 +2766,12 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `json` | function | 362 | <code>async function json(root:FileHandle,relative:string):Promise&lt;unknown&#124;null&gt;{</code> |
 | `writeJSON` | function | 366 | <code>async function writeJSON(root:FileHandle,relative:string,value:unknown):Promise&lt;void&gt;{</code> |
 | `locked` | function | 369 | <code>async function locked&lt;T&gt;(root:FileHandle,operation:()=&gt;Promise&lt;T&gt;):Promise&lt;T&gt;{</code> |
-| `ended` | variable | 376 | <code>const ended=new Promise&lt;void&gt;(resolve=&gt;child.once('close',()=&gt;resolve()));</code> |
 | `manifest` | function | 387 | <code>function manifest(value:unknown):NamesManifest{</code> |
-| `body` | object | 406 | <code>const body={schema_version:1 as const,migration_id:m.migration_id,files,retained_paths:retained};</code> |
 | `plan` | function | 410 | <code>async function plan(root:FileHandle,id:unknown):Promise&lt;NamesManifest&gt;{</code> |
-| `body` | object | 428 | <code>const body={schema_version:1 as const,migration_id:id,files,retained_paths:retained};</code> |
 | `apply` | function | 431 | <code>async function apply(root:FileHandle,m:NamesManifest,signal:AbortSignal):Promise&lt;unknown&gt;{</code> |
 | `quarantineContained` | function | 459 | <code>async function quarantineContained(root:FileHandle,relative:string,targetRelative:string):Promise&lt;void&gt;{</code> |
 | `rollback` | function | 472 | <code>async function rollback(root:FileHandle,m:NamesManifest):Promise&lt;unknown&gt;{</code> |
-| `journal` | object | 488 | <code>const journal:{state:string;manifest_digest:string;moves:{from:string;to:string;digest:string;state:string}&#91;&#93;}={state:'ROLLING_BACK',manifest_digest:m.digest,moves:&#91;&#93;};</code> |
-| `move` | object | 493 | <code>const move={from:item.to,to:target,digest:item.digest,state:'PLANNED'};journal.moves.push(move);await writeJSON(root,base+'/state.json',journal);</code> |
-| `move` | object | 504 | <code>const move={from:'.hyperfide/names.json',to:target,digest:contentDigest(current.bytes),state:'PLANNED'};journal.moves.push(move);await writeJSON(root,base+'/state.json',journal);</code> |
 | `createComponent` | function | 514 | <code>export function createComponent(context:ComponentContext):Component{</code> |
-| `action` | function | 515 | <code>const action=(fn:(root:FileHandle,input:Record&lt;string,unknown&gt;)=&gt;Promise&lt;unknown&gt;,keys:string&#91;&#93;)=&gt;async(value:unknown)=&gt;{</code> |
-| `'migration.names.aliases'` | action | 526 | <code>'migration.names.aliases':value=&gt;{</code> |
 
 ## services/hyperfide/src/migration/parity.ts
 
@@ -3803,13 +2790,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `sample` | function | 27 | <code>function sample(db:ReturnType&lt;typeof open&gt;,table:string,offset:bigint,source:string,repository:string):LogicalRow&#124;null{</code> |
 | `historyDigest` | function | 31 | <code>export async function historyDigest(tx:ParityReader,importId:string):Promise&lt;string&gt;{</code> |
 | `compareParity` | function | 38 | <code>export async function compareParity(tx:ParityReader,ctx:ComponentContext,i:InvocationContext,scope:Scope,importId:string):Promise&lt;ParityReport&gt;{</code> |
-| `imported` | variable | 47 | <code>const imported=new Map(history.rows.map(r=&gt;&#91;String(r.table_name),String(r.n)&#93;));</code> |
-| `archived` | variable | 52 | <code>const archived=new Map((inventory(archive).tables as Table&#91;&#93;).map(t=&gt;&#91;t.name,t.rows&#93;));</code> |
-| `byId` | variable | 73 | <code>const byId=new Map(rows.map(r=&gt;&#91;String(r.mapped_id),r&#93;));</code> |
-| `git` | object | 82 | <code>const git={repository_id:row.repository_id,integration_ref:row.integration_ref,source_object_id:row.source_object_id,observed:row.observed_object===row.source_object_id,</code> |
-| `artifacts` | object | 87 | <code>let artifacts:Json={archive:'MISSING'};</code> |
-| `source` | object | 99 | <code>const source={profile:profile.id,source_id:row.source_id,legacy_tables:liveTables.length,counts_match:!mismatches.some(m=&gt;m.startsWith('SOURCE_COUNT')&#124;&#124;m.startsWith('SOURCE_TABLE')),samples_match:!mis…</code> |
-| `body` | object | 100 | <code>const body={schema_version:1 as const,import_id:importId,snapshot_digest:snapshot,history_digest:await historyDigest(tx,importId),counts,samples,source,git,artifacts,mismatches,</code> |
 | `shadowCompare` | function | 107 | <code>export async function shadowCompare(ctx:ComponentContext,i:InvocationContext,scope:Scope,importId:string):Promise&lt;ParityReport&gt;{</code> |
 
 ## services/hyperfide/src/migration/sqlite.ts
@@ -3837,29 +2817,20 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `profile` | function | 65 | <code>async function profile(env:Readonly&lt;NodeJS.ProcessEnv&gt;,name:unknown):Promise&lt;Profile&gt;{</code> |
 | `archiveRoot` | function | 68 | <code>export async function archiveRoot(env:Readonly&lt;NodeJS.ProcessEnv&gt;):Promise&lt;string&gt;{</code> |
 | `open` | function | 73 | <code>export function open(filename:string):DatabaseSync{</code> |
-| `db` | variable | 74 | <code>const db=new DatabaseSync(filename,{readOnly:true,allowExtension:false,timeout:3000,readBigInts:true});</code> |
 | `rows` | function | 77 | <code>function rows(db:DatabaseSync,sql:string):Record&lt;string,unknown&gt;&#91;&#93; {const q=db.prepare(sql);q.setReadBigInts(true);return q.all() as Record&lt;string,unknown&gt;&#91;&#93;;}</code> |
 | `plain` | function | 78 | <code>function plain(value:unknown):unknown{</code> |
 | `inventory` | function | 84 | <code>export function inventory(db:DatabaseSync):Json{</code> |
-| `foreignKeyViolations` | object | 99 | <code>const foreignKeyViolations:Record&lt;string,number&gt;={};let foreignKeyCheck='OBSERVED';</code> |
 | `externalInventory` | function | 111 | <code>async function externalInventory(p:Profile):Promise&lt;unknown&#91;&#93;&gt;{</code> |
 | `kvxInventory` | function | 131 | <code>async function kvxInventory(p:Profile):Promise&lt;unknown&#91;&#93;&gt;{</code> |
-| `field` | function | 146 | <code>const field=(section:{fields:Record&lt;string,{value:unknown}&gt;},key:string):unknown=&gt;Object.hasOwn(section.fields,key)?section.fields&#91;key&#93;!.value:null;</code> |
 | `ready` | function | 162 | <code>async function ready(pool:IdentityTransaction):Promise&lt;void&gt;{</code> |
 | `snapshot` | function | 170 | <code>async function snapshot(p:Profile,ctx:ComponentContext):Promise&lt;unknown&gt;{</code> |
 | `load` | function | 193 | <code>async function load(p:Profile,importId:string,ctx:ComponentContext):Promise&lt;Json&gt;{</code> |
 | `cell` | function | 201 | <code>function cell(value:unknown):unknown {</code> |
 | `LogicalRow` | interface | 209 | <code>export interface LogicalRow {key:unknown;data:unknown;mapped:string;digest:string;disposition:string}</code> |
 | `logicalBatch` | function | 212 | <code>export function logicalBatch(db:DatabaseSync,table:string,offset:string,limit:number,source:string,repository:string):{rows:LogicalRow&#91;&#93;;total:bigint}{</code> |
-| `lowerNames` | variable | 221 | <code>const lowerNames=new Set(names.map(n=&gt;n.toLowerCase()));</code> |
 | `importBatch` | function | 264 | <code>async function importBatch(p:Profile,value:Json,ctx:ComponentContext):Promise&lt;unknown&gt;{</code> |
-| `result` | object | 284 | <code>const next=BigInt(offset)+BigInt(payloads.length),result={outcome:'SUCCEEDED',import_id:importId,table,offset,next_offset:next.toString(),imported:payloads.length,complete:next&gt;=total,authority:'NONE'…</code> |
 | `verifiedArtifact` | function | 292 | <code>function verifiedArtifact(raw:unknown,expectedDigest?:string,expectedSize?:string):Record&lt;string,unknown&gt;&#124;null {</code> |
 | `preserve` | function | 298 | <code>async function preserve(p:Profile,importId:string,ctx:ComponentContext):Promise&lt;unknown&gt;{</code> |
-| `retention` | object | 304 | <code>const scope={organisation_id:i.principal.organisation_id,run_id:i.principal.run_id},retention={retention_class:'RUN',retention_until:null,retention_hold:false};</code> |
-| `scope` | object | 304 | <code>const scope={organisation_id:i.principal.organisation_id,run_id:i.principal.run_id},retention={retention_class:'RUN',retention_until:null,retention_hold:false};</code> |
-| `manifest` | object | 319 | <code>const manifest={...scope,...retention,expected_chunks:chunks.length,total_size_bytes:String(size),content_digest:snapshotDigest,complete:true,truncated:false,missing_ranges:&#91;&#93;,chunks};</code> |
-| `evidence` | object | 324 | <code>const evidence={classification:'TRUSTED_DIGEST_APPROVED',approved_snapshot_digest:snapshotDigest,manifest_artifact_id:artifact.artifact_id,manifest_digest:artifact.digest,receipt:object(raw)?raw.recei…</code> |
 | `scoped` | function | 335 | <code>async function scoped(tx:IdentityTransaction,p:Profile,ctx:ComponentContext):Promise&lt;void&gt;{</code> |
 | `createComponent` | function | 341 | <code>export function createComponent(_startup:ComponentContext):Component{return {apiVersion:1,capabilities:{'migration.legacy-writers.v1':createLegacyWriterAdmission(_startup.env)},actions:Object.fromEntr…</code> |
 
@@ -3878,21 +2849,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `task` | function | 38 | <code>async function task(tx:PrimaryTransaction,a:TrustedActor,reference:string,leader:string,owner:string):Promise&lt;Data&gt; {</code> |
 | `capture` | function | 48 | <code>async function capture(tx:PrimaryTransaction,a:TrustedActor,t:Data):Promise&lt;Data&gt; {</code> |
 | `save` | function | 54 | <code>async function save(tx:PrimaryTransaction,a:TrustedActor,snapshot:Data):Promise&lt;string&gt; {</code> |
-| `body` | object | 55 | <code>const body={schema_version:1,actor_id:a.session_id,snapshot},key=hash(body),content=hash(snapshot);</code> |
 | `provenance` | function | 61 | <code>async function provenance(tx:PrimaryTransaction){</code> |
 | `omitted` | function | 65 | <code>function omitted(){return {workspace_delta:{available:false,reason:'REMOTE_WORKSPACE_ATTESTATION_REQUIRED'},focused_graph:{available:false,reason:'EXACT_GRAPH_MANIFEST_REQUIRED'},memories:{available:f…</code> |
 | `Handoff` | interface | 66 | <code>interface Handoff {propose:Action;acknowledge:Action}</code> |
 | `isHandoff` | function | 67 | <code>function isHandoff(value:unknown):value is Handoff{return object(value)&amp;&amp;typeof value.propose==='function'&amp;&amp;typeof value.acknowledge==='function';}</code> |
 | `createComponent` | function | 70 | <code>export function createComponent(context:ComponentContext):Component {</code> |
-| `'work.open'` | action | 73 | <code>'work.open':async(input,ctx)=&gt;{</code> |
-| `guard` | action | 77 | <code>const guarded={...a,guard:async(tx:PrimaryTransaction)=&gt;{await a.guard(tx);await task(tx,a,reference,leader,owner);}};</code> |
-| `guarded` | object | 77 | <code>const guarded={...a,guard:async(tx:PrimaryTransaction)=&gt;{await a.guard(tx);await task(tx,a,reference,leader,owner);}};</code> |
-| `'work.update'` | action | 85 | <code>'work.update':async(input,ctx)=&gt;{</code> |
-| `load` | function | 88 | <code>const load=async(tx:PrimaryTransaction)=&gt;{const old=await revision(tx,a,key),snapshot=old.snapshot as Data;if(!object(snapshot.task))return refuse('WORK_REVISION_UNAVAILABLE','Revision task identity i…</code> |
-| `guard` | action | 89 | <code>const guarded={...a,guard:async(tx:PrimaryTransaction)=&gt;{await a.guard(tx);await load(tx);}};</code> |
-| `guarded` | object | 89 | <code>const guarded={...a,guard:async(tx:PrimaryTransaction)=&gt;{await a.guard(tx);await load(tx);}};</code> |
-| `'work.handoff'` | action | 95 | <code>'work.handoff':async(input,ctx)=&gt;{</code> |
-| `'work.projection'` | action | 100 | <code>'work.projection':async(input,ctx)=&gt;{</code> |
 
 ## services/hyperfide/src/observability/metrics.ts
 
@@ -3907,13 +2868,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `Series` | interface | 9 | <code>interface Series {id:string;name:string;phase:string;profile_key:string;variant:string;unit:string;currency:string&#124;null;provenance_digest:string;bucket_bounds:string&#91;&#93;}</code> |
 | `parseSeries` | function | 10 | <code>function parseSeries(raw:unknown):Series{</code> |
 | `recordMetrics` | function | 18 | <code>export async function recordMetrics(tx:Session,p:Principal,input:unknown):Promise&lt;unknown&gt;{</code> |
-| `body` | object | 24 | <code>const body={series,source_artifact_id:artifact,measurement_kind:kind,samples},identity=hash(body);</code> |
-| `buckets` | variable | 39 | <code>const buckets=new Map&lt;string,{bucket_start:string;sample_count:string;value_sum:string;value_min:string;value_max:string;histogram:string&#91;&#93;;first_observed_at:string;last_observed_at:string}&gt;();</code> |
 | `distribution` | function | 52 | <code>async function distribution(tx:Session,p:Principal,id:string):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
-| `quantile` | function | 58 | <code>const quantile=(numerator:bigint,denominator:bigint):string&#124;null=&gt;{let seen=0n;for(let i=0;i&lt;hist.length;i++){seen+=hist&#91;i&#93;!;if(seen&#42;denominator&gt;=count&#42;numerator)return bounds&#91;i&#93;??null;}return null;};</code> |
 | `PoolState` | interface | 68 | <code>interface PoolState {maxActive:number;maxQueued:number;active:number;queued:number}</code> |
-| `describe` | method | 69 | <code>function poolState(resources:unknown):PoolState&#124;null{const d=(resources as {describe?():unknown}&#124;undefined)?.describe?.() as {primary?:PoolState}&#124;undefined,v=d?.primary;return v&amp;&amp;Number.isSafeInteger(…</code> |
 | `poolState` | function | 69 | <code>function poolState(resources:unknown):PoolState&#124;null{const d=(resources as {describe?():unknown}&#124;undefined)?.describe?.() as {primary?:PoolState}&#124;undefined,v=d?.primary;return v&amp;&amp;Number.isSafeInteger(…</code> |
+| `describe` | method | 69 | <code>function poolState(resources:unknown):PoolState&#124;null{const d=(resources as {describe?():unknown}&#124;undefined)?.describe?.() as {primary?:PoolState}&#124;undefined,v=d?.primary;return v&amp;&amp;Number.isSafeInteger(…</code> |
 | `PoolPressure` | class | 70 | <code>class PoolPressure {</code> |
 | `constructor` | method | 73 | <code>constructor(private readonly resources:unknown){const s=poolState(resources);if(s){this.timer=setInterval(()=&gt;this.sample(),100);this.timer.unref();}}</code> |
 | `sample` | method | 74 | <code>sample():void{const s=poolState(this.resources);if(!s)return;this.samples_total++;if(s.active&gt;=s.maxActive){this.saturated_total++;this.last_saturated_at=new Date().toISOString();}if(s.queued&gt;0)this.q…</code> |
@@ -3921,20 +2879,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `describe` | method | 76 | <code>describe():Record&lt;string,unknown&gt;&#124;null{if(!this.timer)return null;const w=this.window.filter(x=&gt;x.at&gt;=Date.now()-60000);return {interval_ms:100,window_ms:60000,window_samples:w.length,window_saturated…</code> |
 | `close` | method | 77 | <code>close():void{if(this.timer)clearInterval(this.timer);this.timer=undefined;}</code> |
 | `summary` | function | 79 | <code>function summary(values:number&#91;&#93;,truncated:boolean):Record&lt;string,unknown&gt;{</code> |
-| `f` | function | 81 | <code>const sorted=&#91;...values&#93;.sort((a,b)=&gt;a-b),f=(n:number)=&gt;display(BigInt(Math.round(n&#42;1000))&#42;1000n),q=(x:number)=&gt;f(sorted&#91;Math.min(sorted.length-1,Math.ceil(x&#42;sorted.length)-1)&#93;!),sum=sorted.reduce((a,…</code> |
-| `q` | function | 81 | <code>const sorted=&#91;...values&#93;.sort((a,b)=&gt;a-b),f=(n:number)=&gt;display(BigInt(Math.round(n&#42;1000))&#42;1000n),q=(x:number)=&gt;f(sorted&#91;Math.min(sorted.length-1,Math.ceil(x&#42;sorted.length)-1)&#93;!),sum=sorted.reduce((a,…</code> |
 | `derived` | function | 85 | <code>function derived(name:string,phase:string,scope:string,basis:string,values:number&#91;&#93;,truncated:boolean,unknown:string,extra:Record&lt;string,unknown&gt;={}):Record&lt;string,unknown&gt;{</code> |
 | `millis` | function | 88 | <code>async function millis(tx:Session,sql:string,values:unknown&#91;&#93;):Promise&lt;{values:number&#91;&#93;;truncated:boolean}&gt;{</code> |
 | `serverDerived` | function | 91 | <code>async function serverDerived(tx:Session,p:Principal,pressure:PoolPressure,request:{queue_wait_ms:number;pool_at_entry:PoolState&#124;null}):Promise&lt;unknown&gt;{</code> |
 | `createComponent` | function | 110 | <code>export function createComponent(startup:ComponentContext):Component{</code> |
-| `pressure` | variable | 111 | <code>const pressure=new PoolPressure((startup as unknown as {resources?:unknown}).resources);</code> |
-| `timed` | function | 112 | <code>const timed=&lt;T&gt;(ctx:ComponentContext,operation:string,fn:(tx:Session,p:Principal,request:{queue_wait_ms:number;pool_at_entry:PoolState&#124;null})=&gt;Promise&lt;T&gt;):Promise&lt;T&gt;=&gt;{const entered=performance.now(),…</code> |
-| `close` | action | 113 | <code>return {apiVersion:1,close:()=&gt;pressure.close(),actions:{</code> |
-| `'fleet.metrics.describe'` | action | 114 | <code>'fleet.metrics.describe':async input=&gt;{object(input,&#91;&#93;);return {schema_version:1,metrics:METRICS,phases:PHASES,series_limit:128,receipt_limit:100000,batch_limit:100,retained_hours:72,queue_wait_is_api…</code> |
 | `describe` | method | 114 | <code>'fleet.metrics.describe':async input=&gt;{object(input,&#91;&#93;);return {schema_version:1,metrics:METRICS,phases:PHASES,series_limit:128,receipt_limit:100000,batch_limit:100,retained_hours:72,queue_wait_is_api…</code> |
-| `'fleet.metrics.record'` | action | 115 | <code>'fleet.metrics.record':(input,ctx)=&gt;timed(ctx,'fleet.metrics.record',(tx,p)=&gt;recordMetrics(tx,p,input)),</code> |
-| `'fleet.metrics.snapshot'` | action | 116 | <code>'fleet.metrics.snapshot':(input,ctx)=&gt;timed(ctx,'fleet.metrics.snapshot',async(tx,p,request)=&gt;{const v=object(input,&#91;'series_id','server_derived'&#93;);if((v.series_id===undefined)===(v.server_derived===u…</code> |
-| `'fleet.metrics.compare'` | action | 117 | <code>'fleet.metrics.compare':(input,ctx)=&gt;timed(ctx,'fleet.metrics.compare',async(tx,p)=&gt;{const v=object(input,&#91;'baseline_series_id','current_series_id'&#93;),baseline=await distribution(tx,p,uuid(v.baseline_s…</code> |
 
 ## services/hyperfide/src/observability/notifications.ts
 
@@ -3956,16 +2905,9 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `reconcileAcknowledgements` | function | 38 | <code>async function reconcileAcknowledgements(tx:Session,p:Principal):Promise&lt;void&gt;{</code> |
 | `bindRecipient` | function | 41 | <code>export async function bindRecipient(tx:Session,p:Principal,input:unknown,outbox:Outbox,invocation:unknown):Promise&lt;unknown&gt;{</code> |
 | `enqueueNotice` | function | 48 | <code>export async function enqueueNotice(tx:Session,p:Principal,input:unknown,knownSecrets:readonly string&#91;&#93;=&#91;&#93;):Promise&lt;unknown&gt;{</code> |
-| `payload` | object | 60 | <code>const payload={target_session_id:target,target_consumer_id:consumer,target_boot_generation:session.rows&#91;0&#93;!.sandbox_boot_generation??null,severity,code,untrusted_summary:summary,action_code:action,art…</code> |
 | `dispatchNotices` | function | 69 | <code>export async function dispatchNotices(tx:Session,p:Principal,input:unknown,outbox:Outbox,budget:number):Promise&lt;unknown&gt;{</code> |
 | `createComponent` | function | 96 | <code>export function createComponent(startup:ComponentContext):Component{</code> |
 | `require` | method | 97 | <code>const resolver=(startup as unknown as {dependencies?:{require&lt;T&gt;(id:string,capability:string,validate:(v:unknown)=&gt;v is T):T}}).dependencies;</code> |
-| `'fleet.notifications.describe'` | action | 110 | <code>'fleet.notifications.describe':async input=&gt;{object(input,&#91;&#93;);return {schema_version:1,page_budget_per_recipient_per_minute:budget,pending_limit_per_recipient:1000,total_history_limit:10000,summary_tr…</code> |
-| `'fleet.notifications.bootstrap-recipient'` | action | 111 | <code>'fleet.notifications.bootstrap-recipient':(input,ctx)=&gt;authority(ctx,'fleet.notifications.bootstrap-recipient',(tx,p)=&gt;bootstrapRecipient(tx,p,input,inbox)),</code> |
-| `'fleet.notifications.bind-recipient'` | action | 112 | <code>'fleet.notifications.bind-recipient':(input,ctx)=&gt;authority(ctx,'fleet.notifications.bind-recipient',(tx,p)=&gt;bindRecipient(tx,p,input,outbox,(ctx as unknown as {invocation:unknown}).invocation)),</code> |
-| `'fleet.notifications.enqueue'` | action | 113 | <code>'fleet.notifications.enqueue':(input,ctx)=&gt;authority(ctx,'fleet.notifications.enqueue',(tx,p)=&gt;enqueueNotice(tx,p,input,knownSecrets)),</code> |
-| `'fleet.notifications.dispatch'` | action | 114 | <code>'fleet.notifications.dispatch':(input,ctx)=&gt;authority(ctx,'fleet.notifications.dispatch',(tx,p)=&gt;dispatchNotices(tx,p,input,outbox,budget)),</code> |
-| `'fleet.notifications.inspect'` | action | 115 | <code>'fleet.notifications.inspect':(input,ctx)=&gt;authority(ctx,'fleet.notifications.inspect',async(tx,p)=&gt;{const v=object(input,&#91;'target_session_id','limit','after_id'&#93;),target=uuid(v.target_session_id),lim…</code> |
 
 ## services/hyperfide/src/observability/resources.ts
 
@@ -3977,13 +2919,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `decimal` | function | 7 | <code>export function decimal(value:unknown):string{</code> |
 | `micros` | function | 11 | <code>export function micros(value:string):bigint{const &#91;whole,fraction=''&#93;=value.split('.');return BigInt(whole!)&#42;1000000n+BigInt(fraction.padEnd(6,'0'));}</code> |
 | `putProfile` | function | 12 | <code>export async function putProfile(tx:Session,p:Principal,input:unknown):Promise&lt;unknown&gt;{</code> |
-| `seen` | variable | 16 | <code>const seen=new Set&lt;string&gt;(),dimensions=v.dimensions.map(raw=&gt;{const d=object(raw,&#91;'dimension','configured_limit','declared_reservation','window_ms'&#93;),name=text(d.dimension);</code> |
-| `content` | object | 22 | <code>const content={profile_key:key,revision,declared_agents_per_sandbox:density,dimensions},identity=hash(content);await lockRun(tx,p,'resources');</code> |
 | `Sample` | interface | 30 | <code>interface Sample {profile_id:string;subject_id:string;dimension:string;value:string;observed_at:string;producer_sequence:string;origin:string;source_digest:string;source_artifact_id:string}</code> |
 | `recordSamples` | function | 31 | <code>export async function recordSamples(tx:Session,p:Principal,input:unknown,allowReplay:boolean):Promise&lt;unknown&gt;{</code> |
-| `keys` | variable | 33 | <code>const keys=new Set&lt;string&gt;(),samples:Sample&#91;&#93;=v.samples.map(raw=&gt;{const s=object(raw,&#91;'profile_id','subject_id','dimension','value','observed_at','producer_sequence','origin','source_digest','source_a…</code> |
-| `sample` | object | 35 | <code>const sample={profile_id:uuid(s.profile_id),subject_id:uuid(s.subject_id),dimension,value:decimal(s.value),observed_at:timestamp(s.observed_at),producer_sequence:generation(s.producer_sequence),origin…</code> |
-| `old` | variable | 47 | <code>const old=new Map(existing.rows.map(r=&gt;&#91;r.profile_id+':'+r.subject_id+':'+r.dimension,r&#93;));</code> |
 | `resourceSnapshot` | function | 55 | <code>export async function resourceSnapshot(tx:Session,p:Principal,input:unknown):Promise&lt;unknown&gt;{</code> |
 | `WAIT_STATES` | object | 72 | <code>const WAIT_STATES:Record&lt;string,string&gt;={BUILD:'BUILD_WAITING',MODEL:'MODEL_WAITING',PROVIDER_RATE:'PROVIDER_RATE_WAITING',EXCLUSIVE_SERVICE:'EXCLUSIVE_SERVICE_WAITING',REVIEW:'REVIEW_WAITING',CAPACIT…</code> |
 | `WAIT_DIMENSIONS` | object | 73 | <code>const WAIT_DIMENSIONS:Record&lt;string,string&gt;={BUILD:'BUILD',MODEL:'MODEL_REQUEST',PROVIDER_RATE:'PROVIDER_API',EXCLUSIVE_SERVICE:'EXCLUSIVE_SERVICE'};</code> |
@@ -3993,14 +2930,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `observedUtilisation` | function | 78 | <code>function observedUtilisation(u:Utilisation&#124;undefined):unknown{</code> |
 | `executionAccounting` | function | 83 | <code>export async function executionAccounting(tx:Session,scope:unknown&#91;&#93;,profile:string&#124;null){</code> |
 | `sandboxBudgets` | function | 108 | <code>export async function sandboxBudgets(input:unknown,ctx:ComponentContext):Promise&lt;unknown&gt;{</code> |
-| `guard` | action | 118 | <code>const guard=()=&gt;ctx.resources.gateway.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal:i.signal,guard:tx=&gt;i.guard(tx)},async()=&gt;undefined);</code> |
-| `guard` | function | 118 | <code>const guard=()=&gt;ctx.resources.gateway.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal:i.signal,guard:tx=&gt;i.guard(tx)},async()=&gt;undefined);</code> |
 | `createComponent` | function | 166 | <code>export function createComponent(_startup:ComponentContext):Component{return {apiVersion:1,actions:{</code> |
-| `'fleet.resources.describe'` | action | 167 | <code>'fleet.resources.describe':async input=&gt;{object(input,&#91;&#93;);return {schema_version:1,dimensions:DIMENSIONS,profile_limit:64,measurement_limit:10000,batch_limit:100,unknown_measurements:'NULL_OR_ABSENT',…</code> |
-| `'fleet.resources.profile.put'` | action | 168 | <code>'fleet.resources.profile.put':(input,ctx)=&gt;authority(ctx,'fleet.resources.profile.put',(tx,p)=&gt;putProfile(tx,p,input)),</code> |
-| `'fleet.resources.observe'` | action | 169 | <code>'fleet.resources.observe':(input,ctx)=&gt;authority(ctx,'fleet.resources.observe',(tx,p)=&gt;recordSamples(tx,p,input,ctx.env.HYPERFIDE_OBSERVABILITY_ALLOW_REPLAY==='1')),</code> |
-| `'fleet.resources.sandbox-budgets'` | action | 170 | <code>'fleet.resources.sandbox-budgets':(input,ctx)=&gt;sandboxBudgets(input,ctx),</code> |
-| `'fleet.resources.snapshot'` | action | 171 | <code>'fleet.resources.snapshot':(input,ctx)=&gt;authority(ctx,'fleet.resources.snapshot',(tx,p)=&gt;resourceSnapshot(tx,p,input))</code> |
 
 ## services/hyperfide/src/observability/views.ts
 
@@ -4027,38 +2957,20 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `hash` | function | 30 | <code>export function hash(value:unknown):string {return 'sha256:'+createHash('sha256').update(JSON.stringify(value)).digest('hex');}</code> |
 | `principal` | function | 31 | <code>export function principal(context:ComponentContext,operation:string):Principal{</code> |
 | `authority` | function | 36 | <code>export async function authority&lt;T&gt;(context:ComponentContext,operation:string,fn:(tx:Session,scope:Principal)=&gt;Promise&lt;T&gt;):Promise&lt;T&gt;{</code> |
-| `guard` | action | 39 | <code>return c.resources.gateway.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal:invocation.signal??context.signal,guard:tx=&gt;invocation.guard(tx)},tx=&gt;fn(tx,p));</code> |
 | `requireArtifact` | function | 41 | <code>export async function requireArtifact(tx:Session,p:Principal,id:string):Promise&lt;void&gt;{</code> |
 | `lockRun` | function | 45 | <code>export async function lockRun(tx:Session,p:Principal,namespace='general'):Promise&lt;void&gt;{</code> |
 | `numbers` | function | 50 | <code>export function numbers(value:unknown):unknown{</code> |
 | `IntegratedProof` | interface | 56 | <code>export interface IntegratedProof {current_task_ids:string&#91;&#93;;status:'CURRENT'&#124;'HELD';count:string&#124;null;proof_level:'TASK_CURRENT_INTEGRATED';proof_digest:string&#124;null;as_of:string;programme_outcome:'PAS…</code> |
 | `integratedProof` | function | 57 | <code>export async function integratedProof(tx:Session,p:Principal):Promise&lt;IntegratedProof&gt;{</code> |
-| `unavailable` | function | 58 | <code>const unavailable=(reason:string):IntegratedProof=&gt;({status:'HELD',count:null,current_task_ids:&#91;&#93;,proof_level:'TASK_CURRENT_INTEGRATED',proof_digest:null,as_of:new Date().toISOString(),programme_outco…</code> |
-| `location` | variable | 59 | <code>const location=new URL('../integration/closure.js',import.meta.url);</code> |
 | `TaskNode` | interface | 69 | <code>interface TaskNode {id:string;task_key:string;state:string}</code> |
 | `Dependency` | interface | 70 | <code>interface Dependency {task_id:string;predecessor_task_id:string;predecessor_run_id:string;milestone:string;predecessor_state:string&#124;null}</code> |
 | `criticalPath` | function | 71 | <code>export function criticalPath(tasks:TaskNode&#91;&#93;,dependencies:Dependency&#91;&#93;,runId:string,currentTaskIds:readonly string&#91;&#93;=&#91;&#93;,proofStatus='HELD'):unknown {</code> |
-| `nodes` | variable | 72 | <code>const terminal=new Set(currentTaskIds),nodes=new Map(tasks.filter(t=&gt;!terminal.has(t.id)).map(t=&gt;&#91;t.id,t&#93;));</code> |
-| `terminal` | variable | 72 | <code>const terminal=new Set(currentTaskIds),nodes=new Map(tasks.filter(t=&gt;!terminal.has(t.id)).map(t=&gt;&#91;t.id,t&#93;));</code> |
-| `children` | variable | 73 | <code>const incoming=new Map&lt;string,number&gt;(),children=new Map&lt;string,string&#91;&#93;&gt;(),distance=new Map&lt;string,number&gt;(),parent=new Map&lt;string,string&gt;();</code> |
-| `distance` | variable | 73 | <code>const incoming=new Map&lt;string,number&gt;(),children=new Map&lt;string,string&#91;&#93;&gt;(),distance=new Map&lt;string,number&gt;(),parent=new Map&lt;string,string&gt;();</code> |
-| `incoming` | variable | 73 | <code>const incoming=new Map&lt;string,number&gt;(),children=new Map&lt;string,string&#91;&#93;&gt;(),distance=new Map&lt;string,number&gt;(),parent=new Map&lt;string,string&gt;();</code> |
-| `parent` | variable | 73 | <code>const incoming=new Map&lt;string,number&gt;(),children=new Map&lt;string,string&#91;&#93;&gt;(),distance=new Map&lt;string,number&gt;(),parent=new Map&lt;string,string&gt;();</code> |
 | `snapshot` | function | 83 | <code>export async function snapshot(tx:Session,p:Principal,input:unknown):Promise&lt;unknown&gt;{</code> |
-| `evidence` | object | 100 | <code>let evidence:unknown={status:'UNKNOWN',reason:'ASSURANCE_AUTHORITY_NOT_INSTALLED'},queues:unknown={status:'UNKNOWN',reason:'SCHEDULER_NOT_INSTALLED'},recovery:unknown={status:'UNKNOWN',reason:'RECOVER…</code> |
-| `queues` | object | 100 | <code>let evidence:unknown={status:'UNKNOWN',reason:'ASSURANCE_AUTHORITY_NOT_INSTALLED'},queues:unknown={status:'UNKNOWN',reason:'SCHEDULER_NOT_INSTALLED'},recovery:unknown={status:'UNKNOWN',reason:'RECOVER…</code> |
-| `recovery` | object | 100 | <code>let evidence:unknown={status:'UNKNOWN',reason:'ASSURANCE_AUTHORITY_NOT_INSTALLED'},queues:unknown={status:'UNKNOWN',reason:'SCHEDULER_NOT_INSTALLED'},recovery:unknown={status:'UNKNOWN',reason:'RECOVER…</code> |
 | `requireCollector` | function | 109 | <code>export function requireCollector(p:Principal,subjectId?:string):void{</code> |
 | `observationPriority` | function | 114 | <code>async function observationPriority(tx:Session,p:Principal,type:string,id:string,row:Record&lt;string,unknown&gt;):Promise&lt;number&gt;{</code> |
 | `observe` | function | 127 | <code>export async function observe(tx:Session,p:Principal,input:unknown):Promise&lt;unknown&gt;{</code> |
-| `queries` | object | 131 | <code>const queries:Record&lt;string,string&gt;={ATTEMPT:'SELECT generation AS generation,sandbox_id,sandbox_boot_generation AS boot_generation,task_id FROM hyperfide.attempts WHERE organisation_id=$1 AND run_id=…</code> |
 | `entityPage` | function | 143 | <code>export async function entityPage(tx:Session,p:Principal,input:unknown):Promise&lt;unknown&gt;{</code> |
-| `queries` | object | 148 | <code>const queries:Record&lt;string,string&gt;={</code> |
 | `createComponent` | function | 159 | <code>export function createComponent(_startup:ComponentContext):Component{return {apiVersion:1,actions:{</code> |
-| `'fleet.views.describe'` | action | 160 | <code>'fleet.views.describe':async input=&gt;{object(input,&#91;&#93;);return {schema_version:1,scope:'AUTHENTICATED_RUN',migration:MIGRATION,activity_is_progress:false,read_route:'PRIMARY',replica_routing:'UNSUPPORTE…</code> |
-| `'fleet.views.snapshot'` | action | 161 | <code>'fleet.views.snapshot':(input,ctx)=&gt;authority(ctx,'fleet.views.snapshot',(tx,p)=&gt;snapshot(tx,p,input)),</code> |
-| `'fleet.views.entities'` | action | 162 | <code>'fleet.views.entities':(input,ctx)=&gt;authority(ctx,'fleet.views.entities',(tx,p)=&gt;entityPage(tx,p,input)),</code> |
-| `'fleet.views.observe'` | action | 163 | <code>'fleet.views.observe':(input,ctx)=&gt;authority(ctx,'fleet.views.observe',(tx,p)=&gt;observe(tx,p,input))</code> |
 
 ## services/hyperfide/src/policy/frontier.ts
 
@@ -4083,11 +2995,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `snapshot` | function | 60 | <code>function snapshot(input:unknown):NativeProfileSnapshot{</code> |
 | `measurements` | function | 80 | <code>function measurements(input:unknown):Measurements&#124;null{</code> |
 | `validateFrontierPolicy` | function | 90 | <code>export function validateFrontierPolicy(input:unknown,context:ComponentContext):FrontierPolicy{</code> |
-| `policy` | object | 107 | <code>const policy:FrontierPolicy={schema_version:1,programme_id:context.policy.programme_id,repository:context.policy.repository,</code> |
-| `find` | function | 110 | <code>const find=(alias:string)=&gt;deployments.find(row=&gt;row.native_profile.configured_model_alias===alias);</code> |
 | `validateSelection` | function | 116 | <code>export function validateSelection(input:unknown):SelectionInput{</code> |
 | `selectFrontierRoute` | function | 123 | <code>export function selectFrontierRoute(policy:FrontierPolicy,input:SelectionInput):Record&lt;string,unknown&gt;{</code> |
-| `record` | object | 132 | <code>const record={spec_revision:policy.spec_revision,policy_revision:policy.policy_revision,task:input,selected_alias:alias,</code> |
 | `refuse` | function | 142 | <code>function refuse(code:string,message:string):never{throw new FoundationError(code,message);}</code> |
 | `sha` | function | 143 | <code>function sha(input:unknown):string{return 'sha256:'+createHash('sha256').update(canonical(input)).digest('hex');}</code> |
 | `nameId` | function | 145 | <code>function nameId(...parts:string&#91;&#93;):string{</code> |
@@ -4098,12 +3007,9 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `TERMINAL` | variable | 161 | <code>const TERMINAL=new Set(&#91;'ESCALATE','AUTH_BLOCKED'&#93;);</code> |
 | `trailing` | function | 162 | <code>function trailing(history:OutcomeSignal&#91;&#93;,member:(s:OutcomeSignal)=&gt;boolean):number{let n=0;for(let i=history.length-1;i&gt;=0&amp;&amp;member(history&#91;i&#93;!);i--)n++;return n;}</code> |
 | `decideOutcome` | function | 164 | <code>export function decideOutcome(prior:OutcomeSignal&#91;&#93;,signal:OutcomeSignal):{decision:string;reason:string;retry_after_ms:number&#124;null;retries_used:number;retry_limit:number&#124;null}{</code> |
-| `backoff` | function | 166 | <code>const backoff=(base:number,n:number)=&gt;Math.min(L.max_backoff_ms,base&#42;2&#42;&#42;(n-1));</code> |
 | `trustedJSON` | function | 187 | <code>async function trustedJSON(filename:string&#124;undefined,label:string):Promise&lt;unknown&gt;{</code> |
 | `QualificationReceipt` | interface | 195 | <code>interface QualificationReceipt {</code> |
 | `qualificationReceipts` | function | 202 | <code>export async function qualificationReceipts(env:NodeJS.ProcessEnv):Promise&lt;Map&lt;string,{receipt:QualificationReceipt;receipt_digest:string}&gt;&gt;{</code> |
-| `out` | variable | 210 | <code>const out=new Map&lt;string,{receipt:QualificationReceipt;receipt_digest:string}&gt;();</code> |
-| `receipt` | object | 219 | <code>const receipt:QualificationReceipt={schema_version:1,qualifier:'13.1-connector-qualification',profile_id:text(body.profile_id),profile_digest:digest(body.profile_digest),</code> |
 | `qualifiedSnapshot` | function | 231 | <code>export function qualifiedSnapshot(actual:unknown,receipts:Map&lt;string,{receipt:QualificationReceipt;receipt_digest:string}&gt;):NativeProfileSnapshot{</code> |
 | `Tx` | type | 244 | <code>type Tx=IdentityTransaction;</code> |
 | `Scope` | interface | 245 | <code>interface Scope {organisation_id:string;run_id:string}</code> |
@@ -4116,14 +3022,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `selectedRoute` | function | 278 | <code>async function selectedRoute(tx:Tx,scope:Scope,selection_id:string):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
 | `scopeOf` | function | 285 | <code>function scopeOf(i:InvocationContext,current:ComponentContext):Scope{</code> |
 | `createComponent` | function | 290 | <code>export function createComponent(context:ComponentContext):Component {</code> |
-| `propose` | function | 293 | <code>const propose=async(input:unknown,current:ComponentContext)=&gt;{</code> |
-| `transaction` | function | 305 | <code>const transaction=&lt;T&gt;(i:InvocationContext,operation:(tx:Tx)=&gt;Promise&lt;T&gt;)=&gt;gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:i.signal,guard:i.guard},operation);</code> |
-| `'frontier.check'` | action | 308 | <code>'frontier.check':async(input,current)=&gt;{</code> |
-| `'frontier.select'` | action | 312 | <code>'frontier.select':async(input,current)=&gt;{</code> |
-| `record` | object | 338 | <code>const record={...selectFrontierRoute({...policy,deployments:policy.deployments.map(row=&gt;row===approved?{...row,native_profile:actual}:row)},selection),</code> |
-| `'frontier.outcome'` | action | 347 | <code>'frontier.outcome':async(input,current)=&gt;{</code> |
-| `record` | object | 366 | <code>const record={schema_version:1,selection_id,sequence,task_id:selection.task_id,selected_alias:selection.selected_alias,profile_id:selection.profile_id,</code> |
-| `'frontier.inspect'` | action | 376 | <code>'frontier.inspect':async(input,current)=&gt;{</code> |
 
 ## services/hyperfide/src/policy/human_interface.ts
 
@@ -4168,9 +3066,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `autonomousConsumer` | function | 95 | <code>async function autonomousConsumer(tx:Tx,actor:Principal,operation:string):Promise&lt;string&gt; {</code> |
 | `policyApproval` | function | 101 | <code>function policyApproval(context:RuntimeContext,operation:RoutineOperation):Record&lt;string,unknown&gt; {</code> |
 | `route` | function | 108 | <code>async function route(context:RuntimeContext,action:string,input:IntentInput,autonomousOperation:string&#124;null):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
-| `guard` | action | 115 | <code>return gateway.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal:context.signal,guard:tx=&gt;invocation.guard(tx)},async tx=&gt;recorded(tx,actor.actor_id,'envelope.'+action,invocation.operation,as…</code> |
-| `payload` | object | 135 | <code>const payload={schema_version:1,request_id:input.request_id,kind:input.kind,payload:input.payload,</code> |
-| `result` | object | 162 | <code>const result={status:'ENQUEUED',command_id:command,event_id:eventId,leader_session_id:leader.leader_session_id,</code> |
 | `IntentState` | interface | 173 | <code>interface IntentState {state:'PENDING'&#124;'LEADER_REPORTED_COMPLETE';root_event_id:string;current_event_id:string;target_session_id:string;target_consumer_id:string;leader_generation:string;authority_epo…</code> |
 | `digest` | function | 174 | <code>function digest(value:unknown):string{return 'sha256:'+createHash('sha256').update(canonical(value)).digest('hex');}</code> |
 | `scope` | function | 175 | <code>function scope(actor:Principal):{organisation_id:string;run_id:string}{return {organisation_id:actor.organisation_id,run_id:actor.run_id};}</code> |
@@ -4179,25 +3074,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `currentLeader` | function | 188 | <code>async function currentLeader(tx:Tx,hierarchy:Hierarchy,actor:Principal,expected:string):Promise&lt;Leader&gt;{</code> |
 | `sourceProof` | function | 195 | <code>async function sourceProof(tx:Tx,hierarchy:Hierarchy,outbox:Outbox,actor:Principal,leader:Leader,event:EventInput):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
 | `processing` | function | 203 | <code>async function processing(context:RuntimeContext,action:string,input:unknown):Promise&lt;unknown&gt;{</code> |
-| `guard` | action | 214 | <code>return gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:context.signal,guard:tx=&gt;invocation.guard(tx)},async tx=&gt;recorded(tx,actor.actor_id,'envelope.'+action,invocation.operation,a…</code> |
-| `result` | object | 239 | <code>const result={...state,state:'LEADER_REPORTED_COMPLETE',completion_event_id:event.id,completion_evidence_digest:v.evidence_digest,completion_actor_id:actor.actor_id,completion_authority_epoch:actor.de…</code> |
-| `payload` | object | 244 | <code>const transfer=randomUUID(),replacementId=randomUUID(),payload={schema_version:1,target:'PRIMARY_LEADER',target_session_id:leader.leader_session_id,target_consumer_id:binding.consumer_id,</code> |
-| `result` | object | 257 | <code>const result={status:'ADOPTED',event_id:replacementId,root_event_id:root,source_event_id:event.id,transfer_id:transfer,delivery_obligations:queued.obligations,receipt,task_completed:false,intent_autho…</code> |
 | `routineReceive` | function | 264 | <code>async function routineReceive(context:RuntimeContext,input:unknown):Promise&lt;unknown&gt;{</code> |
-| `guard` | action | 272 | <code>return gateway.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal:context.signal,guard:tx=&gt;invocation.guard(tx)},async tx=&gt;{</code> |
 | `createComponent` | function | 287 | <code>export function createComponent(_context:ComponentContext):Component{</code> |
-| `'human.adopt'` | action | 289 | <code>'human.adopt':(input,context)=&gt;processing(context as RuntimeContext,'human.adopt',input),</code> |
-| `'human.bootstrap'` | action | 290 | <code>'human.bootstrap':(input,context)=&gt;processing(context as RuntimeContext,'human.bootstrap',input),</code> |
-| `'human.intent.read'` | action | 291 | <code>'human.intent.read':(input,context)=&gt;processing(context as RuntimeContext,'human.intent.read',input),</code> |
-| `'human.intent.complete'` | action | 292 | <code>'human.intent.complete':(input,context)=&gt;processing(context as RuntimeContext,'human.intent.complete',input),</code> |
-| `'human.routine.receive'` | action | 293 | <code>'human.routine.receive':(input,context)=&gt;routineReceive(context as RuntimeContext,input),</code> |
-| `'human.describe'` | action | 294 | <code>'human.describe':async(input,context)=&gt;{</code> |
-| `guard` | action | 299 | <code>return gateway.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal:context.signal,guard:tx=&gt;invocation.guard(tx)},async tx=&gt;{</code> |
-| `'human.status'` | action | 305 | <code>'human.status':async(input,context)=&gt;{</code> |
-| `guard` | action | 313 | <code>return gateway.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal:context.signal,guard:tx=&gt;invocation.guard(tx)},async tx=&gt;{</code> |
-| `'human.submit'` | action | 321 | <code>'human.submit':(input,context)=&gt;route(context as RuntimeContext,'human.submit',validateIntent(input),null),</code> |
-| `'human.escalate'` | action | 322 | <code>'human.escalate':(input,context)=&gt;route(context as RuntimeContext,'human.escalate',validateIntent(input),null),</code> |
-| `'human.autonomous'` | action | 323 | <code>'human.autonomous':(input,context)=&gt;{</code> |
 
 ## services/hyperfide/src/policy/placement.ts
 
@@ -4238,14 +3116,9 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `checkPrincipal` | function | 158 | <code>async function checkPrincipal(context:ComponentContext,tx:PrimaryTransaction,invocation:PlacementInvocation,action:string,execution=true):Promise&lt;PlacementPrincipal&gt; {</code> |
 | `remoteHost` | function | 173 | <code>async function remoteHost(tx:PrimaryTransaction,principal:PlacementPrincipal,sandboxId:string,bootGeneration:string):Promise&lt;HostBinding&gt; {</code> |
 | `supervisoryHost` | function | 190 | <code>async function supervisoryHost(context:ComponentContext,tx:PrimaryTransaction,principal:PlacementPrincipal,profile:PlacementProfile):Promise&lt;HostBinding&gt; {</code> |
-| `record` | object | 197 | <code>const scope='host:'+host.host_id,record={schema_version:1,host_id:host.host_id,boot_generation:host.boot_generation};</code> |
 | `trustedProfile` | function | 206 | <code>async function trustedProfile(context:ComponentContext):Promise&lt;PlacementProfile&gt; {</code> |
 | `isPlacementAuthority` | function | 217 | <code>export function isPlacementAuthority(value:unknown):value is PlacementAuthority {</code> |
 | `placementAuthority` | function | 220 | <code>function placementAuthority(context:ComponentContext):PlacementAuthority {</code> |
-| `finish` | function | 221 | <code>const finish=(profile:PlacementProfile,host:HostBinding,input:{job_class:JobClass;tool:MainTool}):PlacementAuthorization=&gt;({</code> |
-| `authorize` | action | 226 | <code>authorize:async(tx:PrimaryTransaction,invocation:PlacementInvocation,input:{job_class:JobClass;tool:MainTool})=&gt;{</code> |
-| `authorizeSupervisor` | action | 243 | <code>authorizeSupervisor:async(tx:PrimaryTransaction,invocation:PlacementInvocation,input:SupervisorSessionInput)=&gt;{</code> |
-| `admitRemote` | action | 279 | <code>admitRemote:async(tx:PrimaryTransaction,invocation:PlacementInvocation,input:RemoteDestinationInput)=&gt;{</code> |
 | `Outbox` | type | 292 | <code>type Outbox={enqueue(tx:PrimaryTransaction,event:Record&lt;string,unknown&gt;,options?:{consumer_ids:readonly string&#91;&#93;}):Promise&lt;{obligations:number}&gt;;</code> |
 | `enqueue` | method | 292 | <code>type Outbox={enqueue(tx:PrimaryTransaction,event:Record&lt;string,unknown&gt;,options?:{consumer_ids:readonly string&#91;&#93;}):Promise&lt;{obligations:number}&gt;;</code> |
 | `claimPending` | method | 293 | <code>claimPending(tx:PrimaryTransaction,input:unknown):Promise&lt;Array&lt;Record&lt;string,unknown&gt;&amp;{id:string;payload:Record&lt;string,unknown&gt;;attempt_count:string;lease_expires_at:string}&gt;&gt;;</code> |
@@ -4257,26 +3130,12 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `remoteQueue` | function | 307 | <code>async function remoteQueue(tx:PrimaryTransaction,principal:PlacementPrincipal,sandboxId:string,create:boolean):Promise&lt;string&#124;null&gt; {</code> |
 | `DelegationInput` | interface | 316 | <code>interface DelegationInput {job_id:string;idempotency_key:string;job_class:unknown;tool:unknown;target_sandbox_id:unknown;boot_generation:unknown;packet_digest:string}</code> |
 | `delegateRemote` | function | 317 | <code>async function delegateRemote(current:ComponentContext,authority:PlacementAuthority,tx:PrimaryTransaction,invocation:PlacementInvocation,</code> |
-| `result` | object | 339 | <code>const result={status:'ENQUEUED',command_id:commandId,event_id:eventId,job_id:value.job_id,placement:admitted,consumer_id:queue,</code> |
 | `delegationInput` | function | 345 | <code>function delegationInput(value:Record&lt;string,unknown&gt;):DelegationInput {</code> |
 | `runnerHost` | function | 350 | <code>async function runnerHost(context:ComponentContext,tx:PrimaryTransaction,invocation:PlacementInvocation,action:string):Promise&lt;{principal:PlacementPrincipal;host:HostBinding}&gt; {</code> |
 | `delegatedEvent` | function | 355 | <code>async function delegatedEvent(tx:PrimaryTransaction,principal:PlacementPrincipal,eventId:string){</code> |
 | `settleDelivery` | function | 363 | <code>async function settleDelivery(current:ComponentContext,tx:PrimaryTransaction,principal:PlacementPrincipal,consumer:string,</code> |
 | `bounded` | function | 383 | <code>function bounded(value:unknown,min:number,max:number):number {</code> |
 | `createComponent` | function | 388 | <code>export function createComponent(context:ComponentContext):Component {</code> |
-| `transaction` | function | 390 | <code>const transaction=&lt;T&gt;(current:ComponentContext,invocation:PlacementInvocation,work:(tx:PrimaryTransaction)=&gt;Promise&lt;T&gt;):Promise&lt;T&gt;=&gt;</code> |
-| `guard` | action | 391 | <code>current.resources.gateway.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal:current.signal,guard:tx=&gt;invocation.guard(tx)},work);</code> |
-| `'placement.supervisor.authorize'` | action | 393 | <code>'placement.supervisor.authorize':async(input,current)=&gt;{</code> |
-| `'placement.check'` | action | 398 | <code>'placement.check':async(input,current)=&gt;{</code> |
-| `'placement.runner.authorize'` | action | 403 | <code>'placement.runner.authorize':async(input,current)=&gt;{</code> |
-| `'placement.authorize'` | action | 410 | <code>'placement.authorize':async(input,current)=&gt;{</code> |
-| `'placement.delegate'` | action | 415 | <code>'placement.delegate':async(input,current)=&gt;{</code> |
-| `'placement.exec.request'` | action | 427 | <code>'placement.exec.request':async(input,current)=&gt;{</code> |
-| `result` | object | 460 | <code>const result={schema_version:1,host_id:host.host_id,host_kind:host.kind,boot_generation:host.boot_generation,actor_id:principal.actor_id,</code> |
-| `'placement.remote.claim'` | action | 469 | <code>'placement.remote.claim':async(input,current)=&gt;{</code> |
-| `claim` | object | 481 | <code>const claim={event_id:delivery.id,attempt_count:delivery.attempt_count};</code> |
-| `'placement.remote.complete'` | action | 494 | <code>'placement.remote.complete':async(input,current)=&gt;{</code> |
-| `'placement.audit'` | action | 513 | <code>'placement.audit':async(input,current)=&gt;{</code> |
 
 ## services/hyperfide/src/policy/programme.ts
 
@@ -4294,7 +3153,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `validatePolicy` | function | 26 | <code>export function validatePolicy(value: unknown, expectedRevision: string, role: ServiceRole): ProgrammePolicy {</code> |
 | `assertAdmission` | function | 53 | <code>export function assertAdmission(policy: ProgrammePolicy, role: ServiceRole, action: string): void {</code> |
 | `createComponent` | function | 58 | <code>export function createComponent(_context: ComponentContext): Component {</code> |
-| `'programme.authorize'` | action | 60 | <code>'programme.authorize': async (input, context) =&gt; {</code> |
 
 ## services/hyperfide/src/preparation/checkpoint.ts
 
@@ -4318,29 +3176,13 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `ordered` | function | 30 | <code>function ordered&lt;T extends {path:string}&gt;(items:T&#91;&#93;):T&#91;&#93;{return items.sort((a,b)=&gt;Buffer.compare(Buffer.from(a.path),Buffer.from(b.path)));}</code> |
 | `rootOpen` | function | 31 | <code>function rootOpen(name:string):number{</code> |
 | `metadata` | function | 37 | <code>function metadata(bytes:Buffer):Row{</code> |
-| `seen` | variable | 38 | <code>const source=utf8(bytes),seen=new Set&lt;string&gt;();let offset=0;</code> |
-| `ws` | function | 41 | <code>const ws=()=&gt;{while(/&#92;s/.test(source&#91;offset&#93;??'')&amp;&amp;offset&lt;source.length)offset++;};</code> |
-| `token` | function | 42 | <code>const token=()=&gt;{pattern.lastIndex=offset;const found=pattern.exec(source);if(!found)fail('CHECKPOINT_METADATA_INVALID');offset=pattern.lastIndex;return JSON.parse(found&#91;0&#93;) as string;};</code> |
 | `unpack` | function | 54 | <code>function unpack(capsule:Buffer):{metadata:Buffer;bundle:Buffer;patch:Buffer;tree:Buffer}{</code> |
 | `parseTree` | function | 61 | <code>function parseTree(bytes:Buffer,algorithm:string):Entry&#91;&#93;{</code> |
-| `seen` | variable | 62 | <code>const result:Entry&#91;&#93;=&#91;&#93;,seen=new Map&lt;string,string&gt;();let offset=0;</code> |
-| `blob` | function | 70 | <code>const blob=()=&gt;createHash(algorithm).update('blob '+data.length+'&#92;0').update(data).digest('hex');</code> |
 | `git` | function | 78 | <code>async function git(root:string,args:string&#91;&#93;,deadline:number,signal?:AbortSignal,extra:NodeJS.ProcessEnv={},input?:Uint8Array):Promise&lt;Buffer&gt;{</code> |
-| `stop` | function | 83 | <code>const stop=()=&gt;{invalid=true;child.kill('SIGKILL');};const timer=setTimeout(stop,remaining);signal?.addEventListener('abort',stop,{once:true});</code> |
 | `indexEntries` | function | 89 | <code>function indexEntries(bytes:Buffer,head=false):IndexEntry&#91;&#93;{</code> |
-| `names` | variable | 90 | <code>const result:IndexEntry&#91;&#93;=&#91;&#93;,names=new Set&lt;string&gt;();</code> |
 | `inventory` | function | 99 | <code>async function inventory(rootFd:number,algorithm:string,deadline:number,signal?:AbortSignal):Promise&lt;Entry&#91;&#93;&gt;{</code> |
-| `walk` | function | 101 | <code>const walk=async(fd:number,prefix:string,depth:number):Promise&lt;void&gt;=&gt;{</code> |
 | `roles` | function | 132 | <code>function roles(manifest:PreparationManifest,key:string,entries:Entry&#91;&#93;):Row{</code> |
-| `map` | variable | 133 | <code>const profile=validateProfile(manifest.profile),map=new Map(entries.map(e=&gt;&#91;e.path,e&#93;));</code> |
-| `measured` | variable | 134 | <code>const measured=new Map&lt;string,FilePin&gt;();</code> |
-| `observe` | function | 135 | <code>const observe=(pin:FilePin):Row=&gt;{</code> |
 | `validateRestoredCheckpoint` | function | 147 | <code>export async function validateRestoredCheckpoint(input:RestoredCheckpointInput):Promise&lt;Row&gt;{</code> |
-| `env` | object | 189 | <code>const gitPath=path.join(input.workspace_path,'.git'),alternate=path.join(gitPath,'objects'),env={GIT_INDEX_FILE:path.join(temporary,'expected-index'),GIT_OBJECT_DIRECTORY:path.join(temporary,'objects'…</code> |
-| `base` | variable | 196 | <code>const headEntries=indexEntries(await git(input.workspace_path,&#91;'ls-tree','-r','-z','HEAD'&#93;,deadline,input.signal),true),base=new Map(headEntries.map(e=&gt;&#91;e.path,e&#93;)),indexed=new Map(actualIndex.map(e=&gt;…</code> |
-| `indexed` | variable | 196 | <code>const headEntries=indexEntries(await git(input.workspace_path,&#91;'ls-tree','-r','-z','HEAD'&#93;,deadline,input.signal),true),base=new Map(headEntries.map(e=&gt;&#91;e.path,e&#93;)),indexed=new Map(actualIndex.map(e=&gt;…</code> |
-| `work` | variable | 196 | <code>const headEntries=indexEntries(await git(input.workspace_path,&#91;'ls-tree','-r','-z','HEAD'&#93;,deadline,input.signal),true),base=new Map(headEntries.map(e=&gt;&#91;e.path,e&#93;)),indexed=new Map(actualIndex.map(e=&gt;…</code> |
-| `overlay` | object | 202 | <code>const overlay={head_commit:head,head_tree_id:headTree,index_tree_id:indexTree,index_entries:actualIndex,worktree:actual};</code> |
 
 ## services/hyperfide/src/preparation/effective.ts
 
@@ -4365,19 +3207,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `relative` | function | 49 | <code>function relative(value:unknown):string{</code> |
 | `pins` | function | 53 | <code>function pins(profile:EnvironmentProfile):FilePin&#91;&#93;{</code> |
 | `deriveEffectiveProfile` | function | 61 | <code>export function deriveEffectiveProfile(input:EffectiveProfileInput):{</code> |
-| `parentFiles` | variable | 94 | <code>const parentFiles=new Map&lt;string,string&gt;();</code> |
-| `parentPins` | variable | 101 | <code>const parentPins=new Map(pins(parentProfile).map(pin=&gt;&#91;pin.path,pin.digest&#93;));</code> |
-| `measuredPins` | variable | 103 | <code>const measuredPins=new Map&lt;string,string&gt;();</code> |
-| `modulePaths` | variable | 110 | <code>const modules:SubmodulePin&#91;&#93;=&#91;&#93;;const modulePaths=new Set&lt;string&gt;();</code> |
-| `resultBinding` | object | 121 | <code>const resultBinding={custody_id:result.custody_id,custody_generation:result.custody_generation,</code> |
-| `lineage` | object | 125 | <code>const lineage={schema_version:1,parent_profile_id:parentId,parent_profile_key:parentProfile.profile_id,parent_profile_digest:hash(parentProfile),</code> |
 | `PreparationRecipePolicy` | interface | 142 | <code>export interface PreparationRecipePolicy {</code> |
 | `policyError` | function | 148 | <code>function policyError(code:string):never{throw new Error(code);}</code> |
 | `policyKeys` | function | 149 | <code>function policyKeys(source:string):void{</code> |
 | `readPreparationRecipePolicy` | function | 164 | <code>export function readPreparationRecipePolicy(parent:PreparationManifest,recipeBytes:Uint8Array):PreparationRecipePolicy {</code> |
-| `repositories` | variable | 174 | <code>const repositories=new Set(manifest.profile.repositories.map(repository=&gt;repository.id));let lifetime=0;</code> |
-| `seen` | variable | 188 | <code>const seen=new Set&lt;string&gt;();</code> |
-| `storage` | function | 197 | <code>const storage=(value:unknown):string=&gt;{</code> |
 
 ## services/hyperfide/src/preparation/manifests.ts
 
@@ -4397,7 +3230,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `PreparationManifest` | interface | 32 | <code>export interface PreparationManifest {</code> |
 | `InventoryContext` | type | 36 | <code>type InventoryContext = Pick&lt;ComponentContext, 'env' &#124; 'signal'&gt;;</code> |
 | `operatingLimits` | function | 38 | <code>function operatingLimits(context: InventoryContext): { files: number; fileBytes: number; totalBytes: number; depth: number; directories: number } {</code> |
-| `read` | function | 39 | <code>const read = (name: string, fallback: number, maximum: number): number =&gt; {</code> |
 | `fail` | function | 54 | <code>function fail(reason: string): never { throw new Error('Preparation refused: ' + reason); }</code> |
 | `record` | function | 55 | <code>function record(value: unknown, keys: string&#91;&#93;): Record&lt;string, unknown&gt; {</code> |
 | `text` | function | 62 | <code>function text(value: unknown, maximum = 256): string {</code> |
@@ -4418,9 +3250,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `timestamp` | function | 110 | <code>function timestamp(value: unknown): string {</code> |
 | `repositoryURL` | function | 117 | <code>function repositoryURL(value: unknown): string {</code> |
 | `validateProfile` | function | 125 | <code>export function validateProfile(input: unknown): EnvironmentProfile {</code> |
-| `profile` | object | 142 | <code>const profile: EnvironmentProfile = {</code> |
 | `scanPolicy` | function | 177 | <code>function scanPolicy(input: unknown): ScanPolicy {</code> |
-| `canaries` | function | 179 | <code>const canaries = (input: unknown): string&#91;&#93; =&gt; unique(list(input, value =&gt; {</code> |
 | `canonicalJSON` | function | 185 | <code>export function canonicalJSON(value: unknown): string {</code> |
 | `sha` | function | 193 | <code>function sha(bytes: Buffer &#124; string): string { return 'sha256:' + createHash('sha256').update(bytes).digest('hex'); }</code> |
 | `declaration` | function | 194 | <code>function declaration(policy: ScanPolicy): ScanDeclaration {</code> |
@@ -4436,22 +3266,9 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `mode` | function | 266 | <code>function mode(info: Stat): number {</code> |
 | `names` | function | 269 | <code>function names(fd: number): string&#91;&#93; {</code> |
 | `inventory` | function | 281 | <code>async function inventory(candidate: string, context: InventoryContext, policy: ScanPolicy, allowSymlinks: boolean): Promise&lt;{ files: InventoryEntry&#91;&#93;; directories: DirectoryEntry&#91;&#93;; symlinks: SymlinkE…</code> |
-| `inodeGroups` | variable | 292 | <code>const inodeGroups = new Map&lt;string, { before: Stat; paths: string&#91;&#93;; digest: string }&gt;();</code> |
-| `directoryInodes` | variable | 293 | <code>const directoryInodes = new Set&lt;string&gt;();</code> |
-| `openDirectory` | function | 298 | <code>const openDirectory = (parent: number, name: string, strict = true): number =&gt; {</code> |
-| `visit` | function | 304 | <code>const visit = async (fd: number, prefix: string, depth: number): Promise&lt;void&gt; =&gt; {</code> |
-| `equivalent` | function | 408 | <code>const equivalent = (value: Stat): boolean =&gt; link.strict ? same(link.before, value) :</code> |
 | `validateLinkGraph` | function | 452 | <code>async function validateLinkGraph(files: InventoryEntry&#91;&#93;, directories: DirectoryEntry&#91;&#93;, links: SymlinkEntry&#91;&#93;, signal: AbortSignal): Promise&lt;void&gt; {</code> |
-| `kinds` | variable | 453 | <code>const kinds = new Map&lt;string, 'file' &#124; 'directory' &#124; 'link'&gt;(&#91;&#91;'.', 'directory'&#93;&#93;);</code> |
-| `targets` | variable | 456 | <code>const targets = new Map(links.map(link =&gt; &#91;link.path, link.target&#93;));</code> |
-| `lookup` | function | 458 | <code>const lookup = (parts: string&#91;&#93;): string =&gt; parts.length ? parts.join('/') : '.';</code> |
-| `expand` | function | 459 | <code>const expand = (key: string, active: Set&lt;string&gt;, budget: { remaining: number }): string&#91;&#93; =&gt; {</code> |
-| `next` | variable | 463 | <code>const next = new Set(active); next.add(key);</code> |
 | `pinInventory` | function | 483 | <code>function pinInventory(profile: EnvironmentProfile, files: InventoryEntry&#91;&#93;): void {</code> |
-| `byPath` | variable | 484 | <code>const byPath = new Map(files.map(file =&gt; &#91;file.path, file.digest&#93;));</code> |
 | `make` | function | 489 | <code>async function make(input: unknown, context: InventoryContext, verifying: boolean): Promise&lt;PreparationManifest&gt; {</code> |
-| `body` | object | 508 | <code>const body = { schema_version: schemaVersion, profile, files: entries.files, directories: entries.directories,</code> |
-| `manifest` | object | 510 | <code>const manifest: PreparationManifest = { ...body, digest: sha(canonicalJSON(body)) };</code> |
 | `createManifest` | function | 514 | <code>export async function createManifest(input: unknown, context: InventoryContext): Promise&lt;PreparationManifest&gt; { return make(input, context, false); }</code> |
 | `verifyManifest` | function | 516 | <code>export async function verifyManifest(input: unknown, context: InventoryContext): Promise&lt;{ valid: true; digest: string; file_count: number }&gt; {</code> |
 | `createComponent` | function | 519 | <code>export function createComponent(_context: InventoryContext): Component {</code> |
@@ -4460,17 +3277,9 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `metadataInteger` | function | 532 | <code>function metadataInteger(value:unknown,min:number,max:number):number{</code> |
 | `metadataDecimal` | function | 535 | <code>function metadataDecimal(value:unknown):string{</code> |
 | `validateManifestMetadata` | function | 538 | <code>export function validateManifestMetadata(value:unknown):PreparationManifest{</code> |
-| `body` | object | 544 | <code>const body={schema_version:row.schema_version,profile:row.profile,files:row.files,directories:row.directories,</code> |
-| `directories` | variable | 547 | <code>const paths=new Set&lt;string&gt;(),directories=new Set&lt;string&gt;(),fileDigests=new Map&lt;string,string&gt;();let previous='';</code> |
-| `fileDigests` | variable | 547 | <code>const paths=new Set&lt;string&gt;(),directories=new Set&lt;string&gt;(),fileDigests=new Map&lt;string,string&gt;();let previous='';</code> |
-| `paths` | variable | 547 | <code>const paths=new Set&lt;string&gt;(),directories=new Set&lt;string&gt;(),fileDigests=new Map&lt;string,string&gt;();let previous='';</code> |
-| `validPath` | function | 548 | <code>const validPath=(value:unknown,root=false):string=&gt;{</code> |
-| `linked` | variable | 568 | <code>let previousLink='';const linked=new Set&lt;string&gt;();</code> |
 | `compatibilitySortedPins` | function | 604 | <code>function compatibilitySortedPins&lt;T extends {name:string}&gt;(values:T&#91;&#93;):T&#91;&#93;{return &#91;...values&#93;.sort((a,b)=&gt;a.name&lt;b.name?-1:a.name&gt;b.name?1:0);}</code> |
 | `compatibilitySoftware` | function | 605 | <code>function compatibilitySoftware(profile:EnvironmentProfile):unknown {</code> |
 | `compareEnvironmentCompatibility` | function | 616 | <code>export async function compareEnvironmentCompatibility(source:unknown,target:unknown):Promise&lt;{</code> |
-| `targetFiles` | variable | 625 | <code>const targetFiles=new Map(to.files.map(file=&gt;&#91;file.path,file.digest&#93;));</code> |
-| `evidence` | object | 629 | <code>const evidence={schema_version:1,scope:'pinned-preparation-compatibility' as const,</code> |
 
 ## services/hyperfide/src/preparation/prewarm.ts
 
@@ -4485,7 +3294,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `boundedInteger` | function | 26 | <code>function boundedInteger(value:string&#124;undefined,fallback:number,min:number,max:number):number{</code> |
 | `retryPolicy` | function | 32 | <code>export function retryPolicy(env:Readonly&lt;NodeJS.ProcessEnv&gt;):{max_attempts:number;backoff_base_ms:number;backoff_max_ms:number}{</code> |
 | `primary` | function | 39 | <code>function primary&lt;T&gt;(context:ComponentContext,invocation:InvocationContext,body:(tx:PrimaryTransaction)=&gt;Promise&lt;T&gt;):Promise&lt;T&gt;{</code> |
-| `guard` | action | 40 | <code>return context.resources.gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:context.signal,guard:tx=&gt;invocation.guard(tx)},body);</code> |
 | `target` | function | 42 | <code>async function target(context:ComponentContext,tx:PrimaryTransaction,pool_id:string):Promise&lt;PreparationTarget&gt;{</code> |
 | `acceptedManifest` | function | 47 | <code>async function acceptedManifest(tx:PrimaryTransaction,organisation:string,profile:string,preparation:string):Promise&lt;unknown&gt;{</code> |
 | `resolveCurrent` | function | 52 | <code>async function resolveCurrent(context:ComponentContext,tx:PrimaryTransaction,organisation:string,pool_id:string,profile_id:string,job_class:PreparationJobClass){</code> |
@@ -4495,18 +3303,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `utcAfter` | function | 76 | <code>function utcAfter(ms:number):string{return new Date(Date.now()+ms).toISOString();}</code> |
 | `publicJob` | function | 77 | <code>function publicJob(row:PreparationJobRow&amp;Record&lt;string,unknown&gt;):Record&lt;string,unknown&gt;{</code> |
 | `createComponent` | function | 86 | <code>export function createComponent(context:ComponentContext):Component{</code> |
-| `'preparation.prewarm.schedule'` | action | 92 | <code>'preparation.prewarm.schedule':async(value,request)=&gt;{</code> |
-| `'preparation.recipe.resolve'` | action | 136 | <code>'preparation.recipe.resolve':async(value,request)=&gt;{</code> |
-| `'preparation.prewarm.inspect'` | action | 157 | <code>'preparation.prewarm.inspect':async(value,request)=&gt;{</code> |
 | `remoteReport` | function | 172 | <code>function remoteReport(value:unknown):RemoteReport{</code> |
-| `receipt` | function | 181 | <code>const receipt=(raw:unknown,kind:string)=&gt;{const row=fields(raw,kind==='hyperfide.preparation-execution'?&#91;'schema_version','kind','job_id','attempt','plan_digest','preparation_digest','bootstrap','down…</code> |
 | `lockJob` | function | 188 | <code>async function lockJob(tx:PrimaryTransaction,invocation:InvocationContext,id:string):Promise&lt;PreparationJobRow&amp;Record&lt;string,unknown&gt;&gt;{</code> |
 | `providerFailure` | function | 193 | <code>function providerFailure(error:unknown):{failure_class:FailureClass;code:string;message:string}{</code> |
 | `createProvisionerComponent` | function | 199 | <code>export function createProvisionerComponent(context:ComponentContext):Component{</code> |
-| `'preparation.jobs.execute'` | action | 204 | <code>'preparation.jobs.execute':async(value,request)=&gt;{</code> |
-| `'preparation.jobs.report'` | action | 244 | <code>'preparation.jobs.report':async(value,request)=&gt;{</code> |
-| `evidence` | object | 265 | <code>const evidence={execution_receipt_artifact_digest:execution,verification_receipt_artifact_digest:verification,sandbox_id:job.sandbox_id,boot_generation:report.execution.boot_generation};</code> |
-| `'preparation.jobs.get'` | action | 284 | <code>'preparation.jobs.get':async(value,request)=&gt;{</code> |
 
 ## services/hyperfide/src/preparation/recipe.ts
 
@@ -4522,7 +3322,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `planDigest` | function | 24 | <code>export const planDigest=(plan:PreparationPlan)=&gt;sha(canonicalJSON(plan));</code> |
 | `readTrustedRecipe` | function | 27 | <code>export async function readTrustedRecipe(env:Readonly&lt;NodeJS.ProcessEnv&gt;,digest:string):Promise&lt;Uint8Array&gt;{</code> |
 | `resolvePreparationPlan` | function | 45 | <code>export function resolvePreparationPlan(input:{manifest:unknown;recipe:Uint8Array;configuration_digest:string;job_class:PreparationJobClass}):ResolvedPreparation{</code> |
-| `plan` | object | 59 | <code>const plan:PreparationPlan={schema_version:1,kind:'hyperfide.preparation-plan',job_class:input.job_class,</code> |
 
 ## services/hyperfide/src/preparation/seal.ts
 
@@ -4541,7 +3340,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `digest` | function | 28 | <code>const digest=(value:unknown)=&gt;typeof value==='string'&amp;&amp;/^sha256:&#91;0-9a-f&#93;{64}$/.test(value);</code> |
 | `isObsolete` | function | 31 | <code>export function isObsolete(job:PreparationJobRow,target:PreparationTarget):boolean{</code> |
 | `classifyRemoteReport` | function | 40 | <code>export function classifyRemoteReport(job:PreparationJobRow,report:RemoteReport,target:PreparationTarget):Classification{</code> |
-| `obsolete` | object | 43 | <code>const obsolete={ok:false as const,failure_class:'OBSOLETE_MANIFEST' as const,retryable:false,detail:'Prepared inputs no longer match the current pool configuration and manifest'};</code> |
 | `backoffMs` | function | 62 | <code>export function backoffMs(job:Pick&lt;PreparationJobRow,'backoff_base_ms'&#124;'backoff_max_ms'&gt;,attempt:number):number{</code> |
 | `retainDiagnostics` | function | 67 | <code>export async function retainDiagnostics(tx:PrimaryTransaction,job:PreparationJobRow,attempt:number,diagnostics:Record&lt;string,unknown&gt;):Promise&lt;string&gt;{</code> |
 | `finishAttempt` | function | 76 | <code>export async function finishAttempt(tx:PrimaryTransaction,job:PreparationJobRow,attempt:number,result:{outcome:'SUCCEEDED'}&#124;{outcome:'FAILURE';failure_class:FailureClass;retryable:boolean},</code> |
@@ -4575,46 +3373,29 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `under` | function | 60 | <code>function under(p:string,root:string):boolean{return p===root&#124;&#124;p.startsWith(root+'/');}</code> |
 | `recipe` | function | 61 | <code>function recipe(v:unknown):ImageRecipe{</code> |
 | `storage` | function | 67 | <code>function storage(v:unknown,manifest:PreparationManifest):StoragePlan{</code> |
-| `p` | object | 70 | <code>const p:StoragePlan={overlay_bytes:bytes(o.overlay_bytes,true),reserved_memory_bytes:bytes(o.reserved_memory_bytes,true),headroom_bytes:bytes(o.headroom_bytes,true),volume,</code> |
 | `probes` | function | 83 | <code>function probes(v:unknown):ProbeRequirements{</code> |
 | `candidatePath` | function | 89 | <code>async function candidatePath(value:unknown,ctx:ComponentContext):Promise&lt;string&gt;{</code> |
 | `validateCandidate` | function | 93 | <code>async function validateCandidate(candidate:string,manifest:PreparationManifest,scan_policy:unknown,ctx:ComponentContext):Promise&lt;void&gt;{</code> |
 | `rendered` | function | 97 | <code>function rendered(i:ImageRecipe):{dockerfile:string;blaxel_toml:string}{</code> |
 | `planBlaxelImage` | function | 102 | <code>export async function planBlaxelImage(value:unknown,ctx:ComponentContext):Promise&lt;BlaxelImagePlan&gt;{</code> |
-| `result` | object | 107 | <code>const result={schema_version:1 as const,preparation_digest:manifest.digest,manifest,image,storage:storage(o.storage,manifest),probe_requirements:probes(o.probe_requirements),recipe:rendered(image)};</code> |
 | `validateBlaxelImagePlan` | function | 110 | <code>export function validateBlaxelImagePlan(value:unknown):BlaxelImagePlan{</code> |
-| `expected` | object | 113 | <code>const image=recipe(p.image),expected={schema_version:1 as const,preparation_digest:manifest.digest,manifest,image,storage:storage(p.storage,manifest),probe_requirements:probes(p.probe_requirements),re…</code> |
 | `rejectTemplateLinks` | function | 118 | <code>async function rejectTemplateLinks(root:string,p:StoragePlan):Promise&lt;void&gt;{</code> |
-| `seen` | variable | 119 | <code>if(!p.volume)return;const seen=new Set&lt;string&gt;();</code> |
-| `walk` | function | 120 | <code>async function walk(dir:string):Promise&lt;void&gt;{for(const name of await fs.readdir(dir)){const child=path.join(dir,name),s=await fs.lstat(child);if(s.isSymbolicLink()&#124;&#124;(!s.isDirectory()&amp;&amp;!s.isFile())&#124;&#124;(…</code> |
 | `ProcessObservation` | interface | 124 | <code>interface ProcessObservation{exit_code:number&#124;null;stdout:string;stderr:string;timed_out:boolean}</code> |
 | `runBlaxelCommand` | function | 126 | <code>export async function runBlaxelCommand(argv:string&#91;&#93;,cwd:string,env:NodeJS.ProcessEnv,timeout:number,signal:AbortSignal):Promise&lt;ProcessObservation&gt;{</code> |
-| `kill` | function | 131 | <code>const kill=()=&gt;{try{process.kill(-child.pid!,'SIGKILL');}catch{}};</code> |
-| `abort` | function | 132 | <code>const terminate=()=&gt;{try{process.kill(-child.pid!,'SIGTERM');}catch{};killTimer??=setTimeout(kill,6000);},abort=()=&gt;terminate();signal.addEventListener('abort',abort,{once:true});</code> |
-| `terminate` | function | 132 | <code>const terminate=()=&gt;{try{process.kill(-child.pid!,'SIGTERM');}catch{};killTimer??=setTimeout(kill,6000);},abort=()=&gt;terminate();signal.addEventListener('abort',abort,{once:true});</code> |
-| `consume` | function | 134 | <code>const consume=(which:'stdout'&#124;'stderr',chunk:Buffer)=&gt;{if(Buffer.byteLength(stdout)+Buffer.byteLength(stderr)+chunk.length&gt;2&#42;1024&#42;1024){overflow=true;terminate();return;}if(which==='stdout')stdout+=ch…</code> |
-| `finish` | function | 136 | <code>const finish=()=&gt;{clearTimeout(timer);if(killTimer)clearTimeout(killTimer);signal.removeEventListener('abort',abort);};</code> |
 | `tools` | function | 141 | <code>function tools(p:BlaxelImagePlan):Array&lt;{name:string;version:string}&gt;{</code> |
-| `map` | variable | 142 | <code>const x=p.manifest.profile,pins=&#91;...x.toolchains,...x.package_managers.map(p=&gt;({name:p.name,version:p.version})),...x.native_agents,x.supervisor,{name:'hyperfide',version:x.hyperfide.version},{name:'s…</code> |
 | `shell` | function | 145 | <code>function shell(v:string):string{return "'"+v.replaceAll("'","'&#92;&#92;''")+"'";}</code> |
 | `blaxelCredentials` | function | 146 | <code>export function blaxelCredentials(ctx:Pick&lt;ComponentContext,'env'&gt;):{workspace:string;apiKey:string}{</code> |
 | `assertSDKConfiguration` | function | 150 | <code>async function assertSDKConfiguration():Promise&lt;void&gt;{</code> |
 | `BlaxelRuntimeSDK` | interface | 165 | <code>export interface BlaxelRuntimeSDK {</code> |
 | `setConfig` | method | 166 | <code>settings:{readonly baseUrl:string;readonly runUrl:string;setConfig(config:{apiKey:string;workspace:string;maxConcurrentH2Requests:number;maxConcurrentUploadH2Requests:number;fsPartRetries:number;sandb…</code> |
-| `exec` | method | 167 | <code>SandboxInstance:{get(name:string):Promise&lt;{process:{exec(request:{command:string;workingDir:string;waitForCompletion:boolean;timeout:number;keepAlive:boolean}):Promise&lt;unknown&gt;}}&gt;};</code> |
 | `get` | method | 167 | <code>SandboxInstance:{get(name:string):Promise&lt;{process:{exec(request:{command:string;workingDir:string;waitForCompletion:boolean;timeout:number;keepAlive:boolean}):Promise&lt;unknown&gt;}}&gt;};</code> |
+| `exec` | method | 167 | <code>SandboxInstance:{get(name:string):Promise&lt;{process:{exec(request:{command:string;workingDir:string;waitForCompletion:boolean;timeout:number;keepAlive:boolean}):Promise&lt;unknown&gt;}}&gt;};</code> |
 | `configuredBlaxelSDK` | function | 170 | <code>export async function configuredBlaxelSDK(ctx:Pick&lt;ComponentContext,'env'&gt;):Promise&lt;BlaxelRuntimeSDK&gt;{</code> |
 | `inspectBlaxelImage` | function | 185 | <code>export async function inspectBlaxelImage(value:unknown,ctx:ComponentContext):Promise&lt;unknown&gt;{</code> |
-| `config` | object | 192 | <code>const config={root,api_port:port,tools:tools(p),files:p.manifest.files,required_paths:p.storage.required_paths,writable_paths:p.storage.writable_paths,headroom_bytes:p.storage.headroom_bytes,packages:…</code> |
-| `env` | object | 193 | <code>if(local){const env={PATH:ctx.env.HF_BLAXEL_PROBE_PATH??'/usr/local/bin:/usr/bin:/bin',HOME:root,TMPDIR:root},r=await runBlaxelCommand(&#91;process.execPath,'-e',PROBE_SCRIPT,encoded&#93;,root,env,60000,ctx.s…</code> |
 | `copyContext` | function | 202 | <code>async function copyContext(candidate:string,manifest:PreparationManifest,destination:string,signal:AbortSignal,deadline:number):Promise&lt;void&gt;{</code> |
 | `blaxelImageOperationReference` | function | 237 | <code>export function blaxelImageOperationReference(plan:BlaxelImagePlan):string{return 'hyperfide/blaxel-plan@'+plan.plan_digest;}</code> |
 | `publishBlaxelImage` | function | 238 | <code>export async function publishBlaxelImage(value:unknown,ctx:ComponentContext):Promise&lt;ProviderOutcome&lt;'prepare'&gt;&gt;{</code> |
-| `identity` | object | 246 | <code>const identity={schema_version:1 as const,operation_id:op.identity.operation_id,payload_digest:op.identity.payload_digest,scope:op.scope,observed_at:'',provider_request_id:null,resource:null};</code> |
-| `env` | object | 248 | <code>const env={PATH:'/usr/local/bin:/usr/bin:/bin',HOME:home,BL_WORKSPACE:auth.workspace,BL_API_KEY:auth.apiKey,BL_INSTALL_SKILLS:'false',BL_INSTALL_SETUP:'false',CI:'true'},version=await runBlaxelCommand…</code> |
-| `outcome` | object | 253 | <code>const outcome:ProviderOutcome&lt;'prepare'&gt;={...identity,status:'SUCCEEDED',acceptance:'CONFIRMED_ACCEPTED',result:{preparation_reference:'sandbox/'+p.image.name+':'+tag,preparation_digest:p.preparation_…</code> |
 | `createComponent` | function | 256 | <code>export function createComponent(_ctx:ComponentContext):Component{return{apiVersion:1,actions:{</code> |
-| `'blaxel.image.describe'` | action | 257 | <code>'blaxel.image.describe':async input=&gt;{shape(input,&#91;&#93;);await assertSDKConfiguration();const name:string='@blaxel/core';const sdk:unknown=await import(name);</code> |
 
 ## services/hyperfide/src/providers/blaxel/lifetime.ts
 
@@ -4635,18 +3416,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `blaxelSandboxLifetimeOptions` | function | 61 | <code>export function blaxelSandboxLifetimeOptions(policy:BlaxelLifetimePolicy):{</code> |
 | `observation` | function | 69 | <code>function observation(v:unknown):LifetimeObservation{</code> |
 | `assessBlaxelLifetime` | function | 79 | <code>export function assessBlaxelLifetime(value:unknown):unknown{</code> |
-| `add` | function | 83 | <code>const add=(mechanism:string,at:number)=&gt;deadlines.push({mechanism,at:new Date(at).toISOString()});</code> |
 | `boundedBlaxelRead` | function | 108 | <code>export async function boundedBlaxelRead&lt;T&gt;(read:(signal:AbortSignal)=&gt;Promise&lt;T&gt;,signal:AbortSignal,deadline:number):Promise&lt;T&gt;{</code> |
-| `unavailable` | function | 109 | <code>const unavailable=()=&gt;new FoundationError('BLAXEL_LIFETIME_UNAVAILABLE','Provider lifetime read did not complete within its trusted deadline');</code> |
-| `controller` | variable | 111 | <code>const controller=new AbortController();let rejectAbort:(reason:Error)=&gt;void=()=&gt;{};</code> |
-| `rejectAbort` | function | 111 | <code>const controller=new AbortController();let rejectAbort:(reason:Error)=&gt;void=()=&gt;{};</code> |
-| `cancelled` | variable | 112 | <code>const cancelled=new Promise&lt;never&gt;((_resolve,reject)=&gt;{rejectAbort=reject;});</code> |
-| `abort` | function | 113 | <code>const abort=()=&gt;{controller.abort();rejectAbort(unavailable());};</code> |
 | `observeBlaxelLifetime` | function | 125 | <code>export async function observeBlaxelLifetime(value:unknown,ctx:ComponentContext):Promise&lt;unknown&gt;{</code> |
 | `get` | method | 131 | <code>const actual=sandbox as unknown as {metadata:unknown;spec:unknown;expiresIn:unknown;lastUsedAt:unknown;process:{get(id:string,options:{signal:AbortSignal;retry:boolean}):Promise&lt;unknown&gt;}};</code> |
 | `createComponent` | function | 147 | <code>export function createComponent(_ctx:ComponentContext):Component{return{apiVersion:1,actions:{</code> |
-| `'blaxel.lifetime.describe'` | action | 148 | <code>'blaxel.lifetime.describe':input=&gt;{shape(input,&#91;&#93;);return{schema_version:1,provider_process_timeout_unit:'seconds',maximum_api_wait_seconds:60,</code> |
-| `'blaxel.lifetime.plan'` | action | 150 | <code>'blaxel.lifetime.plan':input=&gt;{const p=validateBlaxelLifetimePolicy(input);return{policy:p,process_options:blaxelProcessLifetimeOptions(p),sandbox_options:blaxelSandboxLifetimeOptions(p),authority:'NO…</code> |
 
 ## services/hyperfide/src/providers/blaxel/processes.ts
 
@@ -4689,51 +3462,33 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `BlaxelProcess` | interface | 68 | <code>interface BlaxelProcess{</code> |
 | `get` | method | 69 | <code>get(id:string,options?:{signal?:AbortSignal;retry?:boolean}):Promise&lt;Obj&gt;;</code> |
 | `exec` | method | 70 | <code>exec(request:Obj):Promise&lt;Obj&gt;;stop(id:string):Promise&lt;Obj&gt;;kill(id:string):Promise&lt;Obj&gt;;</code> |
-| `kill` | method | 70 | <code>exec(request:Obj):Promise&lt;Obj&gt;;stop(id:string):Promise&lt;Obj&gt;;kill(id:string):Promise&lt;Obj&gt;;</code> |
 | `stop` | method | 70 | <code>exec(request:Obj):Promise&lt;Obj&gt;;stop(id:string):Promise&lt;Obj&gt;;kill(id:string):Promise&lt;Obj&gt;;</code> |
-| `closeStdin` | method | 71 | <code>writeStdin(id:string,data:Uint8Array):Promise&lt;void&gt;;closeStdin(id:string):Promise&lt;void&gt;;</code> |
+| `kill` | method | 70 | <code>exec(request:Obj):Promise&lt;Obj&gt;;stop(id:string):Promise&lt;Obj&gt;;kill(id:string):Promise&lt;Obj&gt;;</code> |
 | `writeStdin` | method | 71 | <code>writeStdin(id:string,data:Uint8Array):Promise&lt;void&gt;;closeStdin(id:string):Promise&lt;void&gt;;</code> |
+| `closeStdin` | method | 71 | <code>writeStdin(id:string,data:Uint8Array):Promise&lt;void&gt;;closeStdin(id:string):Promise&lt;void&gt;;</code> |
 | `BlaxelSandbox` | interface | 73 | <code>interface BlaxelSandbox{metadata:Obj;spec:Obj;status?:string;process:BlaxelProcess;fs:{readBinary(path:string):Promise&lt;Blob&gt;}}</code> |
 | `readBinary` | method | 73 | <code>interface BlaxelSandbox{metadata:Obj;spec:Obj;status?:string;process:BlaxelProcess;fs:{readBinary(path:string):Promise&lt;Blob&gt;}}</code> |
 | `BlaxelSDK` | interface | 74 | <code>interface BlaxelSDK{</code> |
 | `createSandbox` | method | 75 | <code>createSandbox(request:{body:Obj;throwOnError:false;signal:AbortSignal}):Promise&lt;{data?:unknown;error?:unknown;response:Response}&gt;;</code> |
-| `create` | method | 76 | <code>SandboxInstance:{get(name:string):Promise&lt;BlaxelSandbox&gt;;create(model:Obj,options:{safe:false;timeout:number}):Promise&lt;BlaxelSandbox&gt;;</code> |
 | `get` | method | 76 | <code>SandboxInstance:{get(name:string):Promise&lt;BlaxelSandbox&gt;;create(model:Obj,options:{safe:false;timeout:number}):Promise&lt;BlaxelSandbox&gt;;</code> |
-| `delete` | method | 77 | <code>list(query:Obj):Promise&lt;{data:BlaxelSandbox&#91;&#93;;hasMore:boolean;nextCursor?:string}&gt;;delete(name:string):Promise&lt;unknown&gt;};</code> |
+| `create` | method | 76 | <code>SandboxInstance:{get(name:string):Promise&lt;BlaxelSandbox&gt;;create(model:Obj,options:{safe:false;timeout:number}):Promise&lt;BlaxelSandbox&gt;;</code> |
 | `list` | method | 77 | <code>list(query:Obj):Promise&lt;{data:BlaxelSandbox&#91;&#93;;hasMore:boolean;nextCursor?:string}&gt;;delete(name:string):Promise&lt;unknown&gt;};</code> |
+| `delete` | method | 77 | <code>list(query:Obj):Promise&lt;{data:BlaxelSandbox&#91;&#93;;hasMore:boolean;nextCursor?:string}&gt;;delete(name:string):Promise&lt;unknown&gt;};</code> |
 | `runtimeSDK` | function | 79 | <code>function runtimeSDK(v:unknown):BlaxelSDK{</code> |
 | `boundedBlaxelOperation` | function | 84 | <code>export async function boundedBlaxelOperation&lt;T&gt;(fn:(signal:AbortSignal)=&gt;Promise&lt;T&gt;,parent:AbortSignal,deadline:number):Promise&lt;T&gt;{</code> |
-| `c` | variable | 86 | <code>const c=new AbortController();let reject:(reason:Error)=&gt;void=()=&gt;{};</code> |
-| `reject` | function | 86 | <code>const c=new AbortController();let reject:(reason:Error)=&gt;void=()=&gt;{};</code> |
-| `interrupted` | variable | 87 | <code>const interrupted=new Promise&lt;never&gt;((_r,j)=&gt;{reject=j;});</code> |
-| `abort` | function | 88 | <code>const abort=()=&gt;{c.abort();reject(new FoundationError('BLAXEL_OPERATION_UNAVAILABLE','Provider operation exceeded its observation deadline'));};</code> |
 | `blaxelCaptureControl` | function | 95 | <code>export function blaxelCaptureControl(operation:ProviderOperation,contextSignal:AbortSignal,requestSignal:AbortSignal,identitySignal:AbortSignal):{deadline:number;signal:AbortSignal}{</code> |
 | `blaxelCreateName` | function | 98 | <code>export function blaxelCreateName(operation:ProviderOperation&lt;'create'&gt;,generation:string):string{</code> |
 | `planBlaxelCreate` | function | 102 | <code>export function planBlaxelCreate(operation:ProviderOperation&lt;'create'&gt;,generation:string,base:QualifiedBlaxelBase):Obj{</code> |
 | `verifyBlaxelCreate` | function | 129 | <code>export function verifyBlaxelCreate(observation:unknown,expected:Obj,scope:ProviderScope):{matches:true;native_sandbox_id:string}{</code> |
 | `retainBlaxelCreateCandidate` | function | 140 | <code>export async function retainBlaxelCreateCandidate(actual:{metadata:Obj;spec:Obj;status:string&#124;undefined},expected:Obj,scope:ProviderScope,generation:string,remember:(resource:ResourceRef)=&gt;void,persis…</code> |
-| `candidate` | object | 141 | <code>const returnedName=nativeName(actual.metadata?.name),candidate={native_sandbox_id:returnedName,sandbox_boot_generation:generation};</code> |
 | `state` | function | 149 | <code>function state(raw:string&#124;undefined):ProviderState{</code> |
 | `planBlaxelProcess` | function | 186 | <code>export function planBlaxelProcess(operation:ProviderOperation&lt;'execute'&gt;):{process_ref:string;spool_path:string;launch_digest:string;request:Obj}{</code> |
-| `launch` | object | 190 | <code>const launch={schema_version:1,scope_digest:scopeDigest(operation.scope),resource:operation.resource,</code> |
 | `verifyBlaxelCapturedOutput` | function | 199 | <code>export function verifyBlaxelCapturedOutput(input:{receipt:unknown;stdout:Uint8Array;stderr:Uint8Array;scope:ProviderScope;resource:ResourceRef;process_ref:string;expected:{operation_id:string;payload_…</code> |
 | `noOutput` | function | 213 | <code>function noOutput(ref:string,raw:Obj):ProcessResult{</code> |
 | `outcome` | function | 218 | <code>function outcome&lt;K extends ProviderMethod&gt;(op:ProviderOperation&lt;K&gt;,status:'SUCCEEDED'&#124;'FAILED'&#124;'UNKNOWN'&#124;'UNSUPPORTED',result:ProviderResults&#91;K&#93;&#124;null,resource:ResourceRef&#124;null=op.resource):ProviderOut…</code> |
-| `common` | object | 219 | <code>const common={schema_version:1 as const,operation_id:op.identity.operation_id,payload_digest:op.identity.payload_digest,scope:op.scope,</code> |
 | `BlaxelAdapter` | interface | 226 | <code>export interface BlaxelAdapter extends ProviderAdapter{</code> |
 | `readCapturedOutput` | method | 227 | <code>readCapturedOutput(scope:ProviderScope,resource:ResourceRef,processRef:string,maxBytes:number):Promise&lt;CapturedBlaxelOutput&gt;;</code> |
 | `createBlaxelAdapter` | function | 229 | <code>export function createBlaxelAdapter(scope:ProviderScope,hooks:BlaxelPersistenceHooks,deps:Partial&lt;BlaxelTrustedDependencies&gt;,ctx:ComponentContext):BlaxelAdapter{</code> |
-| `sdk` | function | 233 | <code>const sdk=async()=&gt;runtimeSDK(await configuredBlaxelSDK(ctx));</code> |
-| `bound` | function | 234 | <code>const bound=async(op:ProviderOperation,signal:AbortSignal)=&gt;{await hooks.assertResourceBinding(op);if(!deps.assertPreparedResource)fail('BLAXEL_PROCESS_UNAVAILABLE','Qualified preparation binding unav…</code> |
-| `read` | function | 235 | <code>const read=&lt;T&gt;(fn:(s:AbortSignal)=&gt;Promise&lt;T&gt;,op:ProviderOperation,signal:AbortSignal)=&gt;boundedBlaxelOperation(fn,signal,Date.parse(op.deadline_at));</code> |
-| `sandbox` | function | 236 | <code>const sandbox=async(op:ProviderOperation,signal:AbortSignal)=&gt;{await bound(op,signal);return read(async()=&gt;await(await sdk()).SandboxInstance.get(nativeName(op.resource?.native_sandbox_id)),op,signal)…</code> |
-| `save` | function | 237 | <code>const save=async&lt;K extends ProviderMethod&gt;(op:ProviderOperation&lt;K&gt;,o:ProviderOutcome&lt;K&gt;)=&gt;{await hooks.recordObservation(op as ProviderOperation,o as ProviderOutcome);return o;};</code> |
-| `processBinding` | function | 238 | <code>const processBinding=async(op:ProviderOperation,ref:string)=&gt;{</code> |
-| `capture` | function | 242 | <code>const capture=async(sc:ProviderScope,resource:ResourceRef,ref:string,max:number):Promise&lt;CapturedBlaxelOutput&gt;=&gt;{</code> |
-| `observe` | function | 246 | <code>const observe=&lt;T&gt;(fn:(signal:AbortSignal)=&gt;Promise&lt;T&gt;)=&gt;boundedBlaxelOperation(fn,control.signal,control.deadline);</code> |
-| `readFile` | function | 252 | <code>const readFile=async(path:string,limit:number)=&gt;{</code> |
-| `adapter` | object | 272 | <code>const adapter:Partial&lt;BlaxelAdapter&gt;={provider:'blaxel',readCapturedOutput:capture};</code> |
-| `record` | object | 311 | <code>const record={process_ref:plan.process_ref,spool_path:plan.spool_path,launch_digest:plan.launch_digest};</code> |
 | `BlaxelStdinLedger` | interface | 399 | <code>export interface BlaxelStdinLedger{</code> |
 | `assertWritable` | method | 400 | <code>assertWritable(resource:ResourceRef,processRef:string):Promise&lt;void&gt;;</code> |
 | `beginWrite` | method | 401 | <code>beginWrite(resource:ResourceRef,processRef:string,instructionId:string,bytesDigest:string,byteCount:number):Promise&lt;'NEW'&#124;'CONFIRMED'&#124;'UNKNOWN'&gt;;</code> |
@@ -4748,24 +3503,12 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `BlaxelPrivatePolicy` | interface | 420 | <code>interface BlaxelPrivatePolicy{</code> |
 | `readPrivateBlaxelPolicy` | function | 424 | <code>async function readPrivateBlaxelPolicy(ctx:ComponentContext,scope:ProviderScope,expectedDigest:string):Promise&lt;BlaxelPrivatePolicy&gt;{</code> |
 | `trustedBlaxelDependencies` | function | 448 | <code>function trustedBlaxelDependencies(ctx:ComponentContext,hooks:BlaxelPersistenceHooks,credentials:BlaxelCredentialAuthority):BlaxelTrustedDependencies{</code> |
-| `assertPreparedResource` | action | 450 | <code>assertPreparedResource:async op=&gt;hooks.assertResourceBinding(op),</code> |
-| `resolvePreparedBase` | action | 451 | <code>resolvePreparedBase:async op=&gt;{</code> |
-| `resolveCredentialReferences` | action | 479 | <code>resolveCredentialReferences:async(op,refs,signal)=&gt;{</code> |
 | `assertBlaxelAdministrativeScope` | function | 492 | <code>function assertBlaxelAdministrativeScope(scope:ProviderScope,ctx:Pick&lt;ComponentContext,'env'&gt;):void{</code> |
 | `probeBlaxelOwnership` | function | 495 | <code>async function probeBlaxelOwnership(ctx:ComponentContext,scope:ProviderScope,operationId:string,nativeId:string,signal:AbortSignal){</code> |
 | `createBlaxelIsolationTransport` | function | 502 | <code>export function createBlaxelIsolationTransport(scope:ProviderScope,ctx:Pick&lt;ComponentContext,'env'&#124;'signal'&gt;){</code> |
-| `check` | function | 504 | <code>const check=(raw:unknown,kind:'destroy'&#124;'observe')=&gt;requireOperation(raw,kind,scope);</code> |
-| `verify` | function | 505 | <code>const verify=(s:BlaxelSandbox,op:ProviderOperation)=&gt;{</code> |
 | `destroy` | method | 513 | <code>async destroy(raw:ProviderOperation&lt;'destroy'&gt;,signal=ctx.signal):Promise&lt;ProviderOutcome&lt;'destroy'&gt;&gt;{</code> |
 | `observe` | method | 524 | <code>async observe(raw:ProviderOperation&lt;'observe'&gt;,signal=ctx.signal):Promise&lt;ProviderOutcome&lt;'observe'&gt;&gt;{</code> |
 | `createComponent` | function | 537 | <code>export function createComponent(ctx:ComponentContext):Component{</code> |
-| `close` | action | 547 | <code>return{apiVersion:1,close:()=&gt;{for(const dispose of disposers.reverse())dispose();},actions:{</code> |
-| `'blaxel.process.describe'` | action | 548 | <code>'blaxel.process.describe':input=&gt;{shape(input,&#91;&#93;);return{schema_version:1,sdk:BLAXEL_PINS.sdk,adapter_registered:disposers.length&gt;0,</code> |
-| `'blaxel.process.create-plan'` | action | 552 | <code>'blaxel.process.create-plan':input=&gt;{</code> |
-| `'blaxel.process.verify-create'` | action | 557 | <code>'blaxel.process.verify-create':input=&gt;{</code> |
-| `'blaxel.process.capture-validate'` | action | 561 | <code>'blaxel.process.capture-validate':input=&gt;{</code> |
-| `decode` | function | 563 | <code>const decode=(v:unknown)=&gt;{if(typeof v!=='string'&#124;&#124;v.length&gt;22369624)fail('BLAXEL_PROCESS_INVALID','Bounded base64 required');const b=Buffer.from(v,'base64');if(b.toString('base64')!==v)fail('BLAXEL_P…</code> |
-| `'blaxel.process.plan'` | action | 567 | <code>'blaxel.process.plan':input=&gt;{</code> |
 
 ## services/hyperfide/src/providers/blaxel/recovery.ts
 
@@ -4787,21 +3530,12 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `blaxelRecoveryPolicy` | function | 46 | <code>export function blaxelRecoveryPolicy():unknown{</code> |
 | `planBlaxelRecovery` | function | 54 | <code>export function planBlaxelRecovery(input:unknown):unknown{</code> |
 | `createBlaxelRecoveryController` | function | 76 | <code>export function createBlaxelRecoveryController(scope:ProviderScope,deps:BlaxelRecoveryDependencies){</code> |
-| `verifyFreshEnrollment` | function | 78 | <code>const verifyFreshEnrollment=async(resource:ResourceRef)=&gt;{</code> |
 | `negotiate` | method | 84 | <code>async negotiate(feature:BlaxelPreviewFeature):Promise&lt;{enabled:true;evidence_digest:string}&gt;{</code> |
 | `createFresh` | method | 96 | <code>async createFresh(adapter:BlaxelAdapter,operation:ProviderOperation&lt;'create'&gt;):Promise&lt;{outcome:ProviderOutcome&lt;'create'&gt;;enrollment:'PENDING'&#124;'VERIFIED';enrollment_digest:string&#124;null;outward_action_a…</code> |
 | `FreshRunnerAuthority` | interface | 110 | <code>interface FreshRunnerAuthority{</code> |
 | `verifyFreshRunner` | method | 111 | <code>verifyFreshRunner(invocation:InvocationContext,tx:AuthorityTransaction,target:{sandbox_id:string;boot_id:string;boot_generation:string;provisioning_intent_id:string;credential_id:string;observed_after…</code> |
 | `authenticatedRecoveryController` | function | 115 | <code>function authenticatedRecoveryController(ctx:ComponentContext,invocation:InvocationContext,scope:ProviderScope){</code> |
-| `access` | function | 119 | <code>const access=async()=&gt;{</code> |
-| `assertScope` | function | 123 | <code>const assertScope=async()=&gt;{</code> |
-| `readQualification` | action | 134 | <code>readQualification:async()=&gt;null,</code> |
-| `assertFreshEnrollment` | action | 135 | <code>assertFreshEnrollment:async(selected,resource)=&gt;{</code> |
 | `createComponent` | function | 157 | <code>export function createComponent(ctx:ComponentContext):Component{</code> |
-| `controller` | action | 158 | <code>return{apiVersion:1,capabilities:{'blaxel.recovery.v1':{controller:(invocation:InvocationContext,scope:ProviderScope)=&gt;authenticatedRecoveryController(ctx,invocation,scope)}},actions:{</code> |
-| `'blaxel.recovery.describe'` | action | 159 | <code>'blaxel.recovery.describe':input=&gt;{shape(input,&#91;&#93;);return blaxelRecoveryPolicy();},</code> |
-| `'blaxel.recovery.enrollment'` | action | 161 | <code>'blaxel.recovery.enrollment':async(input,requestContext)=&gt;{</code> |
-| `'blaxel.recovery.preview'` | action | 167 | <code>'blaxel.recovery.preview':input=&gt;{</code> |
 
 ## services/hyperfide/src/providers/contract.ts
 
@@ -4855,27 +3589,16 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `same` | function | 205 | <code>function same(a: unknown, b: unknown): boolean { return canonical(a) === canonical(b); }</code> |
 | `integrity` | function | 206 | <code>function integrity(value: unknown): void {</code> |
 | `validateCapabilityProfile` | function | 213 | <code>export function validateCapabilityProfile(value: unknown): CapabilityProfile {</code> |
-| `names` | variable | 221 | <code>const names = new Set&lt;string&gt;();</code> |
 | `evaluateCapabilities` | function | 235 | <code>export function evaluateCapabilities(value: unknown): unknown {</code> |
-| `seen` | variable | 242 | <code>const seen = new Set&lt;string&gt;();</code> |
-| `add` | function | 249 | <code>const add = (capability:string&#124;null,code:string) =&gt; reasons.push({capability,code});</code> |
 | `operationPayloadDigest` | function | 268 | <code>export function operationPayloadDigest(operation: Pick&lt;ProviderOperation,'kind'&#124;'scope'&#124;'deadline_at'&#124;'resource'&#124;'preparation_digest'&#124;'parameters'&gt;): Digest {</code> |
 | `parameters` | function | 274 | <code>function parameters(kind: ProviderMethod, input: unknown): Obj {</code> |
 | `validateProviderOperation` | function | 322 | <code>export function validateProviderOperation(value: unknown): ProviderOperation {</code> |
 | `inventoryPage` | function | 340 | <code>function inventoryPage(value: unknown): InventoryPage {</code> |
-| `ids` | variable | 347 | <code>const ids=new Set&lt;string&gt;();</code> |
 | `validateInventory` | function | 354 | <code>export function validateInventory(value: unknown): unknown {</code> |
-| `cursors` | variable | 358 | <code>const ids=new Set&lt;string&gt;(), cursors=new Set&lt;string&gt;(); let previousTime=-Infinity;</code> |
-| `ids` | variable | 358 | <code>const ids=new Set&lt;string&gt;(), cursors=new Set&lt;string&gt;(); let previousTime=-Infinity;</code> |
 | `processResult` | function | 374 | <code>function processResult(value: unknown): ProcessResult {</code> |
 | `successResult` | function | 385 | <code>function successResult(op: ProviderOperation, value: unknown): void {</code> |
 | `validateProviderOutcome` | function | 421 | <code>export function validateProviderOutcome(value: unknown): unknown {</code> |
 | `createComponent` | function | 466 | <code>export function createComponent(_context: ComponentContext): Component {</code> |
-| `'provider.contract.describe'` | action | 468 | <code>'provider.contract.describe': input =&gt; {</code> |
-| `'provider.capabilities.check'` | action | 472 | <code>'provider.capabilities.check': input =&gt; evaluateCapabilities(input),</code> |
-| `'provider.operation.validate'` | action | 473 | <code>'provider.operation.validate': input =&gt; {</code> |
-| `'provider.outcome.validate'` | action | 478 | <code>'provider.outcome.validate': input =&gt; validateProviderOutcome(input),</code> |
-| `'provider.inventory.validate'` | action | 479 | <code>'provider.inventory.validate': input =&gt; validateInventory(input),</code> |
 
 ## services/hyperfide/src/providers/placement.ts
 
@@ -4895,19 +3618,12 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `Target` | interface | 46 | <code>interface Target {name:'coordinator'&#124;'git'&#124;'artifact'&#124;'model';url:string;header_name:string;header_prefix:string;credential_ref:string;expected_status:number;denied_statuses:number&#91;&#93;;expected_body_sha…</code> |
 | `ConnectivityConfig` | interface | 47 | <code>interface ConnectivityConfig {schema_version:1;evidence_scope:'LIVE_POOL'&#124;'COMPONENT_FIXTURE';targets:Target&#91;&#93;;timeout_ms:number;maximum_attempts:number;base_backoff_ms:number;max_backoff_ms:number;pr…</code> |
 | `connectivity` | function | 48 | <code>async function connectivity(env:Readonly&lt;NodeJS.ProcessEnv&gt;):Promise&lt;ConnectivityConfig&gt;{</code> |
-| `names` | variable | 57 | <code>const names=new Set&lt;string&gt;();</code> |
-| `url` | variable | 61 | <code>const url=new URL(str(t.url));if(url.protocol!=='https:'&#124;&#124;url.username&#124;&#124;url.password&#124;&#124;url.search&#124;&#124;url.hash&#124;&#124;url.hostname.endsWith('.railway.internal'))</code> |
 | `boundedEffect` | function | 94 | <code>async function boundedEffect&lt;T&gt;(effect:Promise&lt;T&gt;,signal:AbortSignal,deadline:number):Promise&lt;T&gt;{</code> |
-| `stop` | function | 97 | <code>const stop=()=&gt;reject(new Error('Provider effect requires reconciliation'));</code> |
 | `verifyEnrollmentInTx` | function | 102 | <code>async function verifyEnrollmentInTx(tx:PrimaryTransaction,pool:ProviderDatabase,config:DeploymentConfig,poolId:string,sandbox:Record&lt;string,any&gt;,runId:string,maxAge:number,dependencies:Pick&lt;PlacementD…</code> |
 | `verifyEnrollment` | function | 114 | <code>async function verifyEnrollment(pool:ProviderDatabase,config:DeploymentConfig,poolId:string,sandbox:Record&lt;string,any&gt;,runId:string,maxAge:number,dependencies:Pick&lt;PlacementDependencies,"authority"&gt;):…</code> |
 | `probePool` | function | 117 | <code>export async function probePool(pool:ProviderDatabase,config:DeploymentConfig,policy:ConnectivityConfig,value:unknown,signal:AbortSignal,resolveDependencies?:()=&gt;PlacementDependencies):Promise&lt;unknown…</code> |
-| `env` | object | 127 | <code>const env:Record&lt;string,string&gt;={},targets=policy.targets.map((target,index)=&gt;{const name='HYPERFIDE_PROBE_CREDENTIAL_'+index;env&#91;name&#93;=target.credential_ref;return{...target,env:name,credential_ref:u…</code> |
-| `request` | object | 129 | <code>const request:import('./reconcile.js').BoundProviderRequest={binding:{organisation_id:config.organisation_id,run_id:runId,session_id:proof.session_id,pool_id:poolId,sandbox_id:sandboxId,external_sandb…</code> |
-| `sourceInvocation` | object | 131 | <code>const sourceInvocation={component:incoming.payload.component,action:incoming.payload.action,payload_digest:incoming.operation.payload_digest,operation_id:incoming.operation.operation_id,credential_id:…</code> |
 | `recordPoolFailure` | function | 174 | <code>export async function recordPoolFailure(pool:ProviderDatabase,config:DeploymentConfig,policy:ConnectivityConfig,value:unknown):Promise&lt;unknown&gt;{</code> |
 | `planRelocation` | function | 193 | <code>export async function planRelocation(pool:ProviderDatabase,config:DeploymentConfig,policy:ConnectivityConfig,value:unknown,environmentVerifier?:EnvironmentCompatibilityVerifier):Promise&lt;unknown&gt;{</code> |
-| `source` | object | 245 | <code>const source={checkpoint_id:checkpoint.id,artifact_digest:checkpoint.artifact_digest,repository_id:checkpoint.repository_id,source_object_id:checkpoint.source_object_id,input_packet_digest:checkpoint.…</code> |
 | `ProviderIsolationReceipt` | interface | 256 | <code>export interface ProviderIsolationReceipt {</code> |
 | `ProviderIsolationBinding` | interface | 261 | <code>export interface ProviderIsolationBinding {</code> |
 | `ProviderIsolationState` | interface | 265 | <code>export interface ProviderIsolationState {binding:ProviderIsolationBinding;receipt:ProviderIsolationReceipt&#124;null}</code> |
@@ -4918,37 +3634,20 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `IsolationTarget` | interface | 271 | <code>export interface IsolationTarget {</code> |
 | `IsolationConfiguration` | interface | 275 | <code>interface IsolationConfiguration {</code> |
 | `isolationConfiguration` | function | 279 | <code>async function isolationConfiguration(env:Readonly&lt;NodeJS.ProcessEnv&gt;):Promise&lt;IsolationConfiguration&gt;{</code> |
-| `names` | variable | 287 | <code>const names=new Set&lt;string&gt;();</code> |
 | `isolationOperation` | function | 295 | <code>function isolationOperation&lt;K extends 'destroy'&#124;'observe'&gt;(kind:K,target:IsolationTarget,id:string,deadline:string,correlation:string):ProviderOperation&lt;K&gt;{</code> |
-| `base` | object | 296 | <code>const base={schema_version:1 as const,kind,scope:target.scope,deadline_at:deadline,resource:target.resource,preparation_digest:target.preparation_digest,</code> |
 | `unknownIsolationOutcome` | function | 301 | <code>function unknownIsolationOutcome(op:ProviderOperation):ProviderOutcome {</code> |
 | `ProviderIsolationCustodyProof` | interface | 306 | <code>export interface ProviderIsolationCustodyProof {</code> |
 | `ProviderIsolationCustodyPreflight` | type | 309 | <code>export type ProviderIsolationCustodyPreflight=(target:Readonly&lt;IsolationTarget&gt;,operationId:string,authority:unknown,signal:AbortSignal)=&gt;Promise&lt;ProviderIsolationCustodyProof&#124;null&gt;;</code> |
 | `ProviderIsolationRuntime` | interface | 310 | <code>export interface ProviderIsolationRuntime {</code> |
 | `createProviderIsolation` | function | 314 | <code>export function createProviderIsolation(runtime:ProviderIsolationRuntime){</code> |
-| `expected` | object | 324 | <code>const expected={operation_id:operationId,organisation_id:config.organisation_id,run_id:config.run_id,deployment_id:config.deployment_id,source_epoch:config.source_epoch,topology_digest:config.topology…</code> |
-| `guard` | action | 335 | <code>revalidateAuthority=async()=&gt;{await runtime.gateway!.withPrimaryTransaction({timeoutMs:5000,signal,guard:tx=&gt;invocation.guard(tx)},async()=&gt;{});};</code> |
-| `binding` | object | 352 | <code>const binding:ProviderIsolationBinding={schema_version:1,reference_key:referenceKey,operation_id:operationId,topology_digest:config.topology_digest,resource_identity_digest:resourceDigest,</code> |
-| `seen` | variable | 363 | <code>const observations:Array&lt;{operation:ProviderOperation;outcome:ProviderOutcome}&gt;=&#91;&#93;,seen=new Set&lt;string&gt;();</code> |
-| `add` | function | 364 | <code>const add=(op:ProviderOperation,outcome:ProviderOutcome)=&gt;{</code> |
-| `receipt` | function | 368 | <code>const receipt=(observed:ProviderOutcome&#124;null):ProviderIsolationReceipt=&gt;{</code> |
-| `result` | object | 372 | <code>const result={reference_key:referenceKey,operation_id:operationId,status:fact&amp;&amp;end&gt;now?'ISOLATED' as const:'UNKNOWN' as const,topology_digest:config.topology_digest,resource_identity_digest:resourceDi…</code> |
-| `withinDeadline` | function | 380 | <code>const withinDeadline=()=&gt;{if(combined.aborted&#124;&#124;Date.now()&gt;=deadline)fail('PROVIDER_TIMEOUT','Isolation budget expired before provider call');};</code> |
 | `ProviderWriterObservation` | interface | 398 | <code>export interface ProviderWriterObservation {</code> |
 | `ProviderIsolationObservationJournal` | interface | 403 | <code>export interface ProviderIsolationObservationJournal {</code> |
 | `read` | method | 404 | <code>read():Promise&lt;ProviderIsolationState&#124;null&gt;;</code> |
 | `recordObservation` | method | 405 | <code>recordObservation(value:{binding:ProviderIsolationBinding;observation:ProviderWriterObservation;</code> |
 | `ProviderIsolationObserverRuntime` | interface | 409 | <code>export interface ProviderIsolationObserverRuntime {</code> |
 | `createProviderIsolationObserver` | function | 415 | <code>export function createProviderIsolationObserver(runtime:ProviderIsolationObserverRuntime){</code> |
-| `expected` | object | 420 | <code>const expected={operation_id:operationId,organisation_id:config.organisation_id,run_id:config.run_id,deployment_id:config.deployment_id,</code> |
-| `authorise` | function | 424 | <code>const authorise=()=&gt;{(assert as (v:unknown,e:unknown)=&gt;void)(authority,expected);};</code> |
-| `observed` | object | 459 | <code>const observed={reference_key:referenceKey,operation_id:operationId,status:absence&#124;&#124;present?'OBSERVED' as const:'UNKNOWN' as const,</code> |
-| `observation` | object | 464 | <code>const observation={...observed,evidence_digest:digestDocument({binding,authorization_digest:authorizationDigest,operation,outcome,observation:observed})};</code> |
 | `createComponent` | function | 470 | <code>export function createComponent(context:ComponentContext):Component{</code> |
-| `guarded` | function | 472 | <code>const guarded=(fn:(i:unknown,c:DeploymentConfig,p:ConnectivityConfig,database:ProviderDatabase)=&gt;Promise&lt;unknown&gt;)=&gt;async(input:unknown,requestContext:ComponentContext)=&gt;{</code> |
 | `createProbeComponent` | function | 500 | <code>export function createProbeComponent(context:ComponentContext):Component{</code> |
-| `close` | action | 505 | <code>return{apiVersion:1,close:()=&gt;{if(database.runtime.connectivityProbe===availability)delete database.runtime.connectivityProbe;},actions:{</code> |
-| `'provider.placement.probe'` | action | 506 | <code>'provider.placement.probe':async(input,requestContext)=&gt;{</code> |
 
 ## services/hyperfide/src/providers/pools.ts
 
@@ -4995,15 +3694,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `providerDeployment` | function | 72 | <code>export function providerDeployment(database:ProviderDatabase):DeploymentConfig {if(!database.deployment)fail('POOL_CONFIG_REQUIRED','Authenticated deployment binding required');return database.deploym…</code> |
 | `providerInvocation` | function | 73 | <code>export function providerInvocation(database:ProviderDatabase):InvocationContext {const i=database.invocation;assertInvocation(i);return i;}</code> |
 | `bindProviderInvocation` | function | 74 | <code>export function bindProviderInvocation(database:ProviderDatabase,config:DeploymentConfig,invocation:InvocationContext,roles:readonly string&#91;&#93;=&#91;'OPERATOR','COORDINATOR','PROVISIONER','LEADER','FEATURE_…</code> |
-| `gateway` | object | 77 | <code>const gateway:Pick&lt;TransactionGateway,'withPrimaryTransaction'&gt;={withPrimaryTransaction:&lt;T&gt;(options:Parameters&lt;TransactionGateway&#91;'withPrimaryTransaction'&#93;&gt;&#91;0&#93;,body:(tx:PrimaryTransaction)=&gt;Promise&lt;T&gt;…</code> |
-| `withPrimaryTransaction` | action | 77 | <code>const gateway:Pick&lt;TransactionGateway,'withPrimaryTransaction'&gt;={withPrimaryTransaction:&lt;T&gt;(options:Parameters&lt;TransactionGateway&#91;'withPrimaryTransaction'&#93;&gt;&#91;0&#93;,body:(tx:PrimaryTransaction)=&gt;Promise&lt;T&gt;…</code> |
-| `guard` | action | 78 | <code>{...options,signal:AbortSignal.any(&#91;invocation.signal,...(options.signal?&#91;options.signal&#93;:&#91;&#93;)&#93;),guard:async tx=&gt;{await invocation.guard(tx);await options.guard?.(tx);}},body)};</code> |
-| `query` | action | 79 | <code>return{gateway,runtime:database.runtime,invocation,deployment:config,query:&lt;R extends pg.QueryResultRow=pg.QueryResultRow&gt;(text:string,values?:readonly unknown&#91;&#93;)=&gt;gateway.withPrimaryTransaction({time…</code> |
 | `assertInvocationRun` | function | 81 | <code>export function assertInvocationRun(database:ProviderDatabase,run:string):void{</code> |
 | `resolveSandboxBinding` | function | 84 | <code>export async function resolveSandboxBinding(database:ProviderDatabase,config:DeploymentConfig,run:string,sandbox:string,op:ProviderOperation):Promise&lt;ProviderResourceBinding&gt;{</code> |
 | `createProviderRuntimeRegistry` | function | 95 | <code>export function createProviderRuntimeRegistry():ProviderRuntimeRegistry{return{adapters:new Map(),observers:new Map(),probes:new Map(),isolation:new Map()};}</code> |
 | `createProviderDatabase` | function | 96 | <code>export function createProviderDatabase(context:ComponentContext):ProviderDatabase {</code> |
-| `query` | action | 98 | <code>return{gateway,runtime,query:&lt;R extends pg.QueryResultRow=pg.QueryResultRow&gt;(text:string,values?:readonly unknown&#91;&#93;)=&gt;gateway.withPrimaryTransaction(</code> |
 | `register` | function | 101 | <code>function register&lt;T&gt;(map:Map&lt;string,T&gt;,provider:string,implementation:T):()=&gt;void {</code> |
 | `registerArtifactReferenceReader` | function | 106 | <code>export function registerArtifactReferenceReader(runtime:ProviderRuntimeRegistry,reader:ProviderArtifactReferenceReader):()=&gt;void{</code> |
 | `registerIsolationTransport` | function | 111 | <code>export function registerIsolationTransport(runtime:ProviderRuntimeRegistry,provider:'railway'&#124;'blaxel',factory:ProviderIsolationFactory){return register(runtime.isolation,provider,factory);}</code> |
@@ -5030,40 +3724,26 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `limits` | function | 173 | <code>function limits(value:unknown):Limits {</code> |
 | `provider` | function | 177 | <code>function provider(value:unknown):'railway'&#124;'blaxel' {</code> |
 | `validateDeployment` | function | 180 | <code>export function validateDeployment(value:unknown):DeploymentConfig {</code> |
-| `accounts` | variable | 188 | <code>const accounts=new Set&lt;string&gt;(),ids=new Set&lt;string&gt;();</code> |
-| `ids` | variable | 188 | <code>const accounts=new Set&lt;string&gt;(),ids=new Set&lt;string&gt;();</code> |
 | `readDeployment` | function | 203 | <code>export async function readDeployment(env:Readonly&lt;NodeJS.ProcessEnv&gt;):Promise&lt;DeploymentConfig&gt;{</code> |
 | `inspectProviderSchema` | function | 210 | <code>export async function inspectProviderSchema(pool:ProviderDatabase):Promise&lt;unknown&gt;{</code> |
-| `filename` | variable | 211 | <code>const filename=new URL('../../migrations/0008-provider-coordination.sql',import.meta.url);</code> |
 | `configuredPool` | function | 222 | <code>export function configuredPool(config:DeploymentConfig,id:string):PoolConfig {</code> |
 | `configuredScope` | function | 225 | <code>export function configuredScope(config:DeploymentConfig,p:PoolConfig):ProviderScope {</code> |
 | `applyConfig` | function | 230 | <code>async function applyConfig(pool:ProviderDatabase,config:DeploymentConfig):Promise&lt;unknown&gt;{</code> |
 | `validateQuotaObservation` | function | 249 | <code>export function validateQuotaObservation(value:unknown,scope:ProviderScope):QuotaObservation {</code> |
 | `currentPool` | function | 260 | <code>export async function currentPool(client:Pick&lt;PrimaryTransaction,'query'&gt;,config:DeploymentConfig,id:string):Promise&lt;{pool:PoolConfig;scope:ProviderScope}&gt;{</code> |
 | `poolCapacity` | function | 267 | <code>export async function poolCapacity(client:Pick&lt;PrimaryTransaction,'query'&gt;,config:DeploymentConfig,id:string):Promise&lt;unknown&gt;{</code> |
-| `relevant` | function | 275 | <code>const relevant=(kind:string,key:string,dimension:string)=&gt;{</code> |
-| `amount` | function | 282 | <code>const amount=(poolId:string,name:QuotaDimension):bigint=&gt;{</code> |
-| `origins` | function | 298 | <code>const origins=(scope:string)=&gt;observations.rows.filter(r=&gt;r.scope_kind===scope&amp;&amp;r.scope_key===(scope==='ACCOUNT'?p.account_key:scope==='ENVIRONMENT'?p.environment_key:p.id)&amp;&amp;r.dimension===name);</code> |
-| `minimum` | function | 299 | <code>const minimum=(rows:typeof observations.rows)=&gt;rows.length?rows.reduce((n,r)=&gt;BigInt(r.quota_limit)&lt;n?BigInt(r.quota_limit):n,BigInt(rows&#91;0&#93;!.quota_limit)).toString():null;</code> |
 | `assertPoolCapacity` | function | 309 | <code>export async function assertPoolCapacity(client:PrimaryTransaction,config:DeploymentConfig,id:string,requested:Partial&lt;Record&lt;QuotaDimension,string&gt;&gt;,alreadyReserved=false):Promise&lt;void&gt;{</code> |
 | `providerPrimaryNow` | function | 326 | <code>async function providerPrimaryNow(tx:PrimaryTransaction):Promise&lt;number&gt;{</code> |
 | `approvedProfilePolicyDigest` | function | 330 | <code>export function approvedProfilePolicyDigest(value:unknown):string{</code> |
-| `pins` | function | 333 | <code>const pins=(raw:unknown)=&gt;{if(!Array.isArray(raw))fail('PREPARATION_MISMATCH','Profile pin collection unavailable');return raw.map(v=&gt;({path:obj(v).path}));};</code> |
 | `SelectedEnvironmentInput` | interface | 342 | <code>export interface SelectedEnvironmentInput {</code> |
 | `readSelectedEnvironmentProfile` | function | 346 | <code>export async function readSelectedEnvironmentProfile(tx:PrimaryTransaction,input:SelectedEnvironmentInput):Promise&lt;{manifest:Record&lt;string,unknown&gt;;lineage:Record&lt;string,unknown&gt;&#124;null}&#124;null&gt;{</code> |
-| `read` | function | 348 | <code>const read=async(id:string,expected:string)=&gt;{</code> |
-| `body` | object | 352 | <code>const manifest=obj(raw,raw.schema_version===1?&#91;'schema_version','profile','files','directories','scan','digest'&#93;:&#91;'schema_version','profile','files','directories','symlinks','hardlinks','scan','digest…</code> |
 | `attestCapacity` | function | 373 | <code>async function attestCapacity(database:ProviderDatabase,config:DeploymentConfig,env:Readonly&lt;NodeJS.ProcessEnv&gt;):Promise&lt;unknown&gt;{</code> |
-| `seen` | variable | 381 | <code>const seen=new Set&lt;string&gt;();</code> |
 | `sourceBindingsMatchProfile` | function | 405 | <code>export function sourceBindingsMatchProfile(profile:unknown,bindings:unknown):boolean{</code> |
-| `seen` | variable | 407 | <code>const seen=new Set&lt;string&gt;();</code> |
 | `RuntimeReadinessInput` | interface | 410 | <code>export interface RuntimeReadinessInput {</code> |
 | `RuntimeReadinessRecord` | interface | 413 | <code>export interface RuntimeReadinessRecord extends Record&lt;string,unknown&gt; {</code> |
 | `readRuntimeReadiness` | function | 418 | <code>export async function readRuntimeReadiness(tx:PrimaryTransaction,input:RuntimeReadinessInput):Promise&lt;RuntimeReadinessRecord&#124;null&gt;{</code> |
-| `manifestBody` | object | 426 | <code>const manifest=row.profile_manifest as Record&lt;string,unknown&gt;,manifestBody={...manifest};delete manifestBody.digest;</code> |
 | `VerifiedRuntimeReadinessPublication` | interface | 450 | <code>export interface VerifiedRuntimeReadinessPublication {</code> |
 | `runtimeReadinessDigest` | function | 474 | <code>export function runtimeReadinessDigest(value:Record&lt;string,unknown&gt;):string {</code> |
-| `identity` | object | 475 | <code>const identity:Record&lt;string,unknown&gt;={};</code> |
 | `RuntimeReadinessPublicationVerifier` | type | 482 | <code>export type RuntimeReadinessPublicationVerifier=(tx:PrimaryTransaction,invocation:InvocationContext,input:VerifiedRuntimeReadinessPublication,producerProof:unknown)=&gt;Promise&lt;void&gt;;</code> |
 | `registerPublicationVerifier` | function | 483 | <code>export function registerPublicationVerifier(runtime:ProviderRuntimeRegistry,verifier:RuntimeReadinessPublicationVerifier):()=&gt;void{</code> |
 | `ProviderReadinessCapability` | interface | 487 | <code>export interface ProviderReadinessCapability {</code> |
@@ -5072,28 +3752,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `publishVerifiedRuntimeReadiness` | method | 491 | <code>publishVerifiedRuntimeReadiness(tx:PrimaryTransaction,invocation:InvocationContext,input:VerifiedRuntimeReadinessPublication,producerProof:unknown):Promise&lt;{created:boolean;id:string;readiness_digest:…</code> |
 | `isProviderReadinessCapability` | function | 493 | <code>export function isProviderReadinessCapability(value:unknown):value is ProviderReadinessCapability {</code> |
 | `publishVerifiedRuntimeReadiness` | function | 501 | <code>export async function publishVerifiedRuntimeReadiness(tx:PrimaryTransaction,invocation:InvocationContext,</code> |
-| `oid` | function | 518 | <code>const oid=(v:unknown)=&gt;{if(typeof v!=='string'&#124;&#124;!/^(&#91;0-9a-f&#93;{40}&#124;&#91;0-9a-f&#93;{64})$/.test(v))fail('RUNTIME_OBSERVATION_INVALID','Exact measured Git object identity required');};</code> |
-| `keys` | variable | 521 | <code>const keys=new Set&lt;string&gt;();</code> |
-| `manifestBody` | object | 529 | <code>const manifest=obj(input.manifest),manifestBody={...manifest};delete manifestBody.digest;</code> |
-| `ref` | function | 552 | <code>const ref=(key:string)=&gt;artifacts&#91;key&#93; as unknown as ProviderArtifactReference;</code> |
-| `parentBody` | object | 556 | <code>const parentManifest=obj(physical.parent_manifest),parentBody={...parentManifest};delete parentBody.digest;</code> |
-| `identity` | object | 566 | <code>const identity={organisation_id:organisation,id:input.lineage_id,pool_id:physical.pool_id,configuration_digest:physical.configuration_digest,parent_profile_id:physical.parent_profile_id,parent_prepara…</code> |
-| `row` | object | 570 | <code>const row:Record&lt;string,unknown&gt;={...identity,lineage_digest:lineageDigest,state:'QUALIFIED',observed_at:at,expires_at:until},columns=Object.keys(row);</code> |
-| `row` | object | 574 | <code>const row:Record&lt;string,unknown&gt;={organisation_id:organisation,run_id:run,...o,profile_digest:profileDigest,source_digest:o.source_manifest_digest,source_manifest_artifact_digest:ref('source_manifest'…</code> |
 | `createComponent` | function | 586 | <code>export function createComponent(context:ComponentContext):Component {</code> |
-| `provisioner` | function | 588 | <code>const provisioner=()=&gt;{if(context.role!=='provisioner')fail('ROLE_FORBIDDEN','Provider administration requires the provisioner role');};</code> |
-| `config` | function | 589 | <code>const config=()=&gt;readDeployment(context.env);</code> |
-| `guarded` | function | 590 | <code>const guarded=(fn:(input:unknown,database:ProviderDatabase)=&gt;Promise&lt;unknown&gt;&#124;unknown)=&gt;async(input:unknown,requestContext:ComponentContext)=&gt;{</code> |
-| `publishVerifiedRuntimeReadiness` | action | 594 | <code>return {apiVersion:1,capabilities:{'provider.pools.v1':database,'provider.readiness.v1':{readRuntimeReadiness,registerPublicationVerifier:(verifier:RuntimeReadinessPublicationVerifier)=&gt;registerPublic…</code> |
-| `registerArtifactReferenceReader` | action | 594 | <code>return {apiVersion:1,capabilities:{'provider.pools.v1':database,'provider.readiness.v1':{readRuntimeReadiness,registerPublicationVerifier:(verifier:RuntimeReadinessPublicationVerifier)=&gt;registerPublic…</code> |
-| `registerPublicationVerifier` | action | 594 | <code>return {apiVersion:1,capabilities:{'provider.pools.v1':database,'provider.readiness.v1':{readRuntimeReadiness,registerPublicationVerifier:(verifier:RuntimeReadinessPublicationVerifier)=&gt;registerPublic…</code> |
-| `registerArtifactReferenceReader` | action | 595 | <code>registerArtifactReferenceReader:(reader:ProviderArtifactReferenceReader)=&gt;registerArtifactReferenceReader(database.runtime,reader),</code> |
-| `registerIsolationTransport` | action | 596 | <code>registerIsolationTransport:(provider:'railway'&#124;'blaxel',factory:ProviderIsolationFactory)=&gt;registerIsolationTransport(database.runtime,provider,factory),</code> |
-| `registerProviderAdapter` | action | 597 | <code>registerProviderAdapter:(provider:'railway'&#124;'blaxel',factory:ProviderAdapterFactory)=&gt;registerProviderAdapter(database.runtime,provider,factory),</code> |
-| `registerProviderQuotaObserver` | action | 598 | <code>registerProviderQuotaObserver:(provider:'railway'&#124;'blaxel',observer:ProviderQuotaObserver)=&gt;registerProviderQuotaObserver(database.runtime,provider,observer),</code> |
-| `registerProviderOwnershipProbe` | action | 599 | <code>registerProviderOwnershipProbe:(provider:'railway'&#124;'blaxel',probe:ProviderOwnershipProbe)=&gt;registerProviderOwnershipProbe(database.runtime,provider,probe)</code> |
-| `'provider.pools.describe'` | action | 601 | <code>'provider.pools.describe':input=&gt;{obj(input,&#91;&#93;);return{schema_version:1,dimensions:&#91;...QUOTA_DIMENSIONS&#93;,configuration_source:'TRUSTED_PRIVATE_FILE',planning_grants_capacity:false,connectivity_probe_a…</code> |
-| `seen` | variable | 611 | <code>const observations=raw.map(v=&gt;validateQuotaObservation(v,scope));if(observations.some(v=&gt;v.basis!=='PROVIDER_API'))fail('QUOTA_PROVENANCE_INVALID','Provider observation route accepts actual API eviden…</code> |
 
 ## services/hyperfide/src/providers/railway/preparation.ts
 
@@ -5117,13 +3776,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `boundedBody` | function | 64 | <code>async function boundedBody(response:Response):Promise&lt;Buffer&gt; {</code> |
 | `RailwayClient` | class | 87 | <code>export class RailwayClient {</code> |
 | `constructor` | method | 90 | <code>constructor(value:unknown,env:Readonly&lt;NodeJS.ProcessEnv&gt;,private readonly transport:typeof fetch=fetch) {</code> |
-| `endpoint` | variable | 95 | <code>const endpoint=new URL(text(v.endpoint));</code> |
-| `ws` | variable | 105 | <code>if(v.exec_ws_endpoint!==null){const ws=new URL(text(v.exec_ws_endpoint));</code> |
 | `assertScope` | method | 115 | <code>assertScope(s:ProviderScope):void {</code> |
 | `sdkOptions` | method | 119 | <code>sdkOptions(capture?:(stream:'stdout'&#124;'stderr',bytes:Uint8Array)=&gt;void):ConnectOptions {</code> |
 | `RailwayWebSocket` | class | 120 | <code>class RailwayWebSocket extends WebSocket {</code> |
 | `constructor` | method | 121 | <code>constructor(url:string,protocols?:string&#124;string&#91;&#93;){</code> |
-| `fetch` | action | 133 | <code>environmentId:this.config.environment_id,fetch:async(input,init)=&gt;{</code> |
 | `request` | method | 140 | <code>async request&lt;T&gt;(query:string,variables:JsonObject,signal?:AbortSignal):Promise&lt;T&gt; {</code> |
 | `provenance` | method | 159 | <code>provenance():{mode:RailwayConfiguration&#91;'mode'&#93;;sdk:typeof RAILWAY_PIN;live_qualification:'NOT_EVALUATED'} {</code> |
 | `configuredClient` | function | 163 | <code>export function configuredClient(context:Pick&lt;ComponentContext,'env'&gt;):RailwayClient {</code> |
@@ -5134,7 +3790,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `persistCheckpoint` | method | 191 | <code>persistCheckpoint(base:PreparedRailwayBase):Promise&lt;void&gt;;</code> |
 | `withPreparationLock` | method | 193 | <code>withPreparationLock&lt;T&gt;(digest:string,action:()=&gt;Promise&lt;T&gt;):Promise&lt;T&gt;;</code> |
 | `capturePreparedBase` | function | 195 | <code>export async function capturePreparedBase(client:RailwayClient,input:{</code> |
-| `base` | object | 221 | <code>const base:PreparedRailwayBase={schema_version:1,provider:'railway',scope:input.scope,</code> |
 | `buildRailwayTemplate` | function | 228 | <code>export async function buildRailwayTemplate(client:RailwayClient,input:{</code> |
 | `freshRestoreObservation` | function | 257 | <code>export function freshRestoreObservation(base:PreparedRailwayBase,child:{</code> |
 | `checkpointByKey` | function | 265 | <code>export async function checkpointByKey(client:RailwayClient,key:string,signal?:AbortSignal):Promise&lt;{id:string;key:string}&gt; {</code> |
@@ -5148,26 +3803,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `processAlive` | method | 308 | <code>processAlive(id:string,marker:string):boolean {</code> |
 | `fileDigest` | method | 318 | <code>fileDigest(id:string,relative:string):string&#124;null {</code> |
 | `hooks` | method | 324 | <code>hooks(id:string,expected:ProviderScope):PreparationCaptureHooks {</code> |
-| `quiesced` | function | 325 | <code>const quiesced=()=&gt;{const r=this.runner(id);</code> |
-| `withPreparationLock` | action | 330 | <code>withPreparationLock:(key,action)=&gt;serialized(key,action),</code> |
-| `quiesceAndVerify` | action | 331 | <code>quiesceAndVerify:async()=&gt;{const r=quiesced();return {boot_id:r.boot_id,preparation_digest:r.preparation_digest,</code> |
-| `assertHeld` | action | 332 | <code>assertHeld:async()=&gt;{if(quiesced().boot_id!==r.boot_id)throw new Error('Railway preparation fence lost');},release:async()=&gt;{}};},</code> |
-| `release` | action | 332 | <code>assertHeld:async()=&gt;{if(quiesced().boot_id!==r.boot_id)throw new Error('Railway preparation fence lost');},release:async()=&gt;{}};},</code> |
-| `persistCheckpoint` | action | 333 | <code>persistCheckpoint:async base=&gt;{const folder=path.join(this.client.config.preparation_root,'checkpoints');</code> |
 | `locks` | variable | 339 | <code>const locks=new Map&lt;string,Promise&lt;unknown&gt;&gt;();</code> |
 | `serialized` | function | 340 | <code>async function serialized&lt;T&gt;(key:string,action:()=&gt;Promise&lt;T&gt;):Promise&lt;T&gt; {</code> |
 | `preparationInput` | function | 345 | <code>function preparationInput(value:unknown,keys:string&#91;&#93;):JsonObject {</code> |
 | `createComponent` | function | 352 | <code>export function createComponent(_context:ComponentContext):Component {</code> |
-| `'railway.preparation.capture'` | action | 354 | <code>'railway.preparation.capture':async(input,context)=&gt;{</code> |
-| `view` | variable | 356 | <code>const client=configuredClient(context),view=new SimulatedSandboxView(client),id=text(v.sandbox_id,128);</code> |
-| `'railway.preparation.template.build'` | action | 362 | <code>'railway.preparation.template.build':async(input,context)=&gt;{</code> |
-| `'railway.preparation.sentinel.verify'` | action | 369 | <code>'railway.preparation.sentinel.verify':(input,context)=&gt;{</code> |
-| `sentinel` | object | 373 | <code>const sentinel={path:text(s.path,1024),sha256:digest(s.sha256),process_marker:text(s.process_marker,256)};</code> |
-| `view` | variable | 374 | <code>const client=configuredClient(context),view=new SimulatedSandboxView(client),child=text(v.child_sandbox_id,128);</code> |
-| `'railway.preparation.describe'` | action | 381 | <code>'railway.preparation.describe':input=&gt;{object(input,&#91;&#93;);return {sdk:RAILWAY_PIN,clone:'DISK_ONLY',</code> |
-| `'railway.preparation.reference.verify'` | action | 383 | <code>'railway.preparation.reference.verify':input=&gt;{</code> |
-| `'railway.preparation.restore.observe'` | action | 387 | <code>'railway.preparation.restore.observe':input=&gt;{</code> |
-| `'railway.preparation.checkpoint.resolve'` | action | 392 | <code>'railway.preparation.checkpoint.resolve':async(input,context)=&gt;{</code> |
 
 ## services/hyperfide/src/providers/railway/processes.ts
 
@@ -5197,15 +3836,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `folder` | method | 102 | <code>private folder(operationId:string):string {return path.join(this.directory,this.key(operationId));}</code> |
 | `sessionKey` | method | 103 | <code>private sessionKey(resource:ResourceRef,sessionName:string):string {</code> |
 | `indexSession` | method | 106 | <code>private indexSession(record:RailwaySessionRecord):void {</code> |
-| `binding` | object | 111 | <code>const binding={schema_version:1,operation_id:record.operation_id,scope_digest:record.scope_digest,</code> |
 | `save` | method | 127 | <code>private save(record:RailwaySessionRecord):void {</code> |
 | `read` | method | 137 | <code>read(operationId:string):RailwaySessionRecord {</code> |
 | `append` | method | 146 | <code>private append(record:RailwaySessionRecord,stream:'stdout'&#124;'stderr',value:string&#124;Uint8Array):void {</code> |
-| `chunk` | object | 155 | <code>const chunk:Chunk={sequence:record.chunk_count,stream,offset:record.stream_bytes&#91;stream&#93;,</code> |
 | `index` | method | 165 | <code>private &#42;index(operationId:string):Generator&lt;Chunk&gt; {</code> |
 | `verify` | method | 185 | <code>verify(operationId:string):{complete:boolean;byte_count:string;digest:string;chunks:number} {</code> |
-| `offsets` | object | 187 | <code>const offsets={stdout:0n,stderr:0n};let total=0n,count=0;</code> |
-| `expected` | variable | 188 | <code>const folder=this.folder(operationId),expected=new Set(&#91;'session.json','uploads.json','upload-receipts.ndjson'&#93;);</code> |
 | `uploadState` | method | 223 | <code>private uploadState(operationId:string):UploadState {</code> |
 | `saveUploadState` | method | 234 | <code>private saveUploadState(operationId:string,state:UploadState):void {</code> |
 | `receipt` | method | 242 | <code>private receipt(receipt:RailwayChunkReceipt,digestValue:string,size:string):void {</code> |
@@ -5217,45 +3852,19 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `archiveJournal` | method | 329 | <code>private archiveJournal(operationId:string,key:string,value:unknown):void {</code> |
 | `archiveEffect` | method | 337 | <code>private async archiveEffect(operationId:string,action:'artifact.object.put'&#124;'artifact.manifest.commit',input:Record&lt;string,unknown&gt;,</code> |
 | `sealStreams` | method | 372 | <code>async sealStreams(operationId:string,invoke:RailwayArtifactInvoke,binding:RailwayArchiveBinding,maxSegmentChunks=2048):Promise&lt;{</code> |
-| `retention` | object | 381 | <code>const retention={retention_class:binding.retention_class,retention_until:binding.retention_until,retention_hold:binding.retention_hold};</code> |
-| `scope` | object | 382 | <code>const scope={organisation_id:binding.organisation_id,run_id:binding.run_id};</code> |
-| `flush` | function | 388 | <code>const flush=async()=&gt;{</code> |
-| `manifest` | object | 390 | <code>const manifest={schema_version:1,kind:'chunk-manifest',...scope,expected_chunks:references.length,</code> |
-| `fingerprintReceipt` | function | 403 | <code>const fingerprintReceipt=(row:Record&lt;string,unknown&gt;):string=&gt;{</code> |
-| `index` | object | 453 | <code>const index:RailwayStreamIndex={schema_version:1,kind:'railway-session-stream-index',...scope,</code> |
-| `expected` | object | 463 | <code>const expected={organisation_id:index.organisation_id,run_id:index.run_id,sandbox_id:index.sandbox_id,boot_id:index.boot_id,</code> |
-| `retained` | variable | 467 | <code>const retained=new Map&lt;string,RailwayArchiveReference&gt;();</code> |
-| `ref` | object | 469 | <code>const ref={artifact_id:segment.artifact_id,receipt_id:segment.receipt_id,digest:segment.digest,size_bytes:segment.size_bytes};</code> |
 | `reconcileArtifactUploads` | method | 477 | <code>async reconcileArtifactUploads(operationId:string,invoke:RailwayArtifactInvoke,binding:Pick&lt;RailwayArchiveBinding,'organisation_id'&#124;'run_id'&gt;):Promise&lt;boolean&gt; {</code> |
-| `scope` | object | 479 | <code>const scope={organisation_id:binding.organisation_id,run_id:binding.run_id};</code> |
 | `result` | method | 499 | <code>private result(record:RailwaySessionRecord):ProcessResult {</code> |
 | `start` | method | 508 | <code>async start(client:RailwayClient,operation:ProviderOperation&lt;'execute'&gt;,resolve:CredentialResolver,</code> |
-| `record` | object | 519 | <code>const record:RailwaySessionRecord={schema_version:1,operation_id:operation.identity.operation_id,</code> |
 | `find` | method | 568 | <code>find(resource:ResourceRef,sessionName:string):RailwaySessionRecord {</code> |
 | `inspect` | method | 585 | <code>inspect(resource:ResourceRef,sessionName:string):ProcessResult {</code> |
 | `stdin` | method | 591 | <code>async stdin(resource:ResourceRef,sessionName:string,bytes:Uint8Array):Promise&lt;void&gt; {</code> |
 | `detach` | method | 597 | <code>async detach(resource:ResourceRef,sessionName:string):Promise&lt;void&gt; {</code> |
 | `readCapturedOutput` | method | 604 | <code>readCapturedOutput(resource:ResourceRef,sessionName:string,maxBytes:number):{</code> |
-| `streams` | object | 611 | <code>const streams:{stdout:Buffer;stderr:Buffer}={stdout:Buffer.alloc(0),stderr:Buffer.alloc(0)};</code> |
-| `capture` | object | 634 | <code>const capture:RailwayCaptureProof={schema_version:1,scheme:'ORDERED_CHUNKS_SHA256',chunks:ranges.map(range=&gt;({</code> |
 | `detachAll` | method | 639 | <code>async detachAll():Promise&lt;void&gt; {</code> |
 | `stop` | method | 649 | <code>async stop(client:RailwayClient,resource:ResourceRef,sessionName:string,signal:'TERM'&#124;'KILL'):Promise&lt;ProcessResult&gt; {</code> |
 | `createRailwayArtifactChunkSink` | function | 679 | <code>export function createRailwayArtifactChunkSink(invoke:(action:string,input:unknown)=&gt;Promise&lt;unknown&gt;,binding:{</code> |
 | `verifyRailwayStreamArchive` | function | 709 | <code>export async function verifyRailwayStreamArchive(invoke:RailwayArtifactInvoke,reference:RailwayArchiveReference,</code> |
-| `scoped` | object | 714 | <code>const scoped={organisation_id:expected.organisation_id,run_id:expected.run_id};</code> |
 | `createComponent` | function | 769 | <code>export function createComponent(_context:ComponentContext):Component {</code> |
-| `getSpool` | function | 771 | <code>const getSpool=(context:ComponentContext):RailwaySessionSpool=&gt;{</code> |
-| `resolve` | function | 779 | <code>const resolve=(context:ComponentContext):CredentialResolver=&gt;async(refs,signal)=&gt;{</code> |
-| `output` | object | 788 | <code>const output:Record&lt;string,string&gt;={};</code> |
-| `resource` | function | 797 | <code>const resource=(raw:unknown):ResourceRef=&gt;{</code> |
-| `close` | action | 803 | <code>return {apiVersion:1,close:()=&gt;spool?.detachAll(),actions:{</code> |
-| `'railway.process.describe'` | action | 804 | <code>'railway.process.describe':input=&gt;{object(input,&#91;&#93;);return {transport:'DURABLE_WEBSOCKET',</code> |
-| `'railway.process.start'` | action | 807 | <code>'railway.process.start':async(input,context)=&gt;{</code> |
-| `'railway.process.inspect'` | action | 813 | <code>'railway.process.inspect':(input,context)=&gt;{</code> |
-| `'railway.process.stdin'` | action | 817 | <code>'railway.process.stdin':async(input,context)=&gt;{</code> |
-| `'railway.process.detach'` | action | 824 | <code>'railway.process.detach':async(input,context)=&gt;{</code> |
-| `'railway.process.stop'` | action | 829 | <code>'railway.process.stop':async(input,context)=&gt;{</code> |
-| `'railway.process.spool.verify'` | action | 835 | <code>'railway.process.spool.verify':(input,context)=&gt;{</code> |
 
 ## services/hyperfide/src/providers/railway/profile.ts
 
@@ -5266,19 +3875,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `RailwayRuntimeProfile` | interface | 6 | <code>export interface RailwayRuntimeProfile {</code> |
 | `bytes` | function | 15 | <code>function bytes(value:unknown,positive=false):string {</code> |
 | `validateRuntimeProfile` | function | 20 | <code>export function validateRuntimeProfile(value:unknown):RailwayRuntimeProfile {</code> |
-| `ports` | variable | 41 | <code>const ports=new Set&lt;number&gt;(),prefixes=new Set&lt;string&gt;();</code> |
-| `prefixes` | variable | 41 | <code>const ports=new Set&lt;number&gt;(),prefixes=new Set&lt;string&gt;();</code> |
-| `body` | object | 68 | <code>const body={...v};delete body.digest;</code> |
 | `CredentialResolver` | type | 72 | <code>export type CredentialResolver=(references:Readonly&lt;Record&lt;string,string&gt;&gt;,signal:AbortSignal,layer?:'runtime'&#124;'process',operation?:ProviderOperation)=&gt;Promise&lt;Record&lt;string,string&gt;&gt;;</code> |
 | `runtimeOptions` | function | 73 | <code>export async function runtimeOptions(profile:RailwayRuntimeProfile,client:RailwayClient,resolve:CredentialResolver,</code> |
-| `env` | object | 76 | <code>const refs:Record&lt;string,string&gt;={},env:Record&lt;string,string&gt;={};</code> |
-| `refs` | object | 76 | <code>const refs:Record&lt;string,string&gt;={},env:Record&lt;string,string&gt;={};</code> |
 | `runtimeGraphQLInput` | function | 95 | <code>export function runtimeGraphQLInput(profile:RailwayRuntimeProfile,options:CreateOptions):JsonObject {</code> |
-| `input` | object | 96 | <code>const input:JsonObject={environmentId:profile.scope.environment_id,</code> |
 | `observeRuntimeProfile` | function | 104 | <code>export function observeRuntimeProfile(profile:RailwayRuntimeProfile,observed:unknown):{</code> |
 | `createComponent` | function | 121 | <code>export function createComponent(_context:ComponentContext):Component {</code> |
-| `'railway.profile.validate'` | action | 123 | <code>'railway.profile.validate':input=&gt;{</code> |
-| `'railway.profile.observe'` | action | 129 | <code>'railway.profile.observe':input=&gt;{</code> |
 
 ## services/hyperfide/src/providers/railway/reconciliation.ts
 
@@ -5289,17 +3890,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `ProviderInfo` | interface | 23 | <code>interface ProviderInfo {id:string;status:ProviderState;environmentId:string;region:string;idleTimeoutMinutes:number&#124;null}</code> |
 | `info` | function | 24 | <code>function info(value:unknown,client:RailwayClient):ProviderInfo {</code> |
 | `inventoryPage` | function | 30 | <code>export async function inventoryPage(client:RailwayClient,s:ProviderScope,cursor:string&#124;null,pageSize:number,</code> |
-| `seen` | variable | 38 | <code>const seen=new Set&lt;string&gt;();</code> |
 | `completeInventory` | function | 47 | <code>export async function completeInventory(client:RailwayClient,s:ProviderScope,signal?:AbortSignal,maxPages=10000):</code> |
-| `tokens` | variable | 50 | <code>const pages:InventoryPage&#91;&#93;=&#91;&#93;,tokens=new Set&lt;string&gt;();let cursor:string&#124;null=null;</code> |
 | `completeSessions` | function | 61 | <code>export async function completeSessions(client:RailwayClient,sandboxId:string,signal?:AbortSignal,maxPages=10000):</code> |
-| `names` | variable | 64 | <code>const sessions:Array&lt;Record&lt;string,unknown&gt;&gt;=&#91;&#93;,tokens=new Set&lt;string&gt;(),names=new Set&lt;string&gt;();</code> |
-| `tokens` | variable | 64 | <code>const sessions:Array&lt;Record&lt;string,unknown&gt;&gt;=&#91;&#93;,tokens=new Set&lt;string&gt;(),names=new Set&lt;string&gt;();</code> |
 | `observeRailwayQuota` | function | 85 | <code>export async function observeRailwayQuota(client:RailwayClient,s:ProviderScope,signal?:AbortSignal):Promise&lt;QuotaObservation&#91;&#93;&gt; {</code> |
-| `observed` | variable | 93 | <code>const evidence=hash({query:quotaQuery,scope:s,response:v}),observed=new Date();</code> |
-| `seen` | variable | 95 | <code>const seen=new Set&lt;string&gt;();</code> |
 | `qualifyRailwayProfileInputs` | function | 110 | <code>export function qualifyRailwayProfileInputs(client:RailwayClient,input:unknown,policies:readonly {scope:ProviderScope;idle_timeout_minutes:number}&#91;&#93;=&#91;&#93;) {</code> |
-| `pending` | function | 118 | <code>const pending=(reason:string,value:unknown)=&gt;({input:value,status:'UNQUALIFIED' as const,reason});</code> |
 | `ProviderPersistenceHooks` | type | 126 | <code>export type ProviderPersistenceHooks=RuntimeProviderPersistenceHooks;</code> |
 | `RailwayAdapterDependencies` | interface | 127 | <code>export interface RailwayAdapterDependencies {</code> |
 | `binding` | method | 131 | <code>archive?:{invoke:RailwayArtifactInvoke;binding(operation:ProviderOperation&lt;'execute'&gt;):Promise&lt;RailwayArchiveBinding&gt;};</code> |
@@ -5321,47 +3915,21 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `reconcileCapturedOutput` | method | 171 | <code>reconcileCapturedOutput(operation:ProviderOperation&lt;'execute'&gt;):Promise&lt;boolean&gt;;</code> |
 | `readCapturedOutput` | method | 172 | <code>readCapturedOutput(scope:ProviderScope,resource:ResourceRef,processRef:string,maxBytes:number):Promise&lt;{</code> |
 | `createRailwayAdapter` | function | 176 | <code>export function createRailwayAdapter(client:RailwayClient,dependencies:RailwayAdapterDependencies):RailwayAdapter {</code> |
-| `capturedOperations` | variable | 177 | <code>const capturedOperations=new Map&lt;string,ProviderOperation&lt;'execute'&gt;&gt;();</code> |
-| `execute` | function | 178 | <code>const execute=async(operation:ProviderOperation,signal=AbortSignal.timeout(client.config.request_timeout_ms)):Promise&lt;ProviderOutcome&gt;=&gt;{</code> |
-| `sealCapturedOutput` | action | 355 | <code>sealCapturedOutput:async(operation:ProviderOperation&lt;'execute'&gt;)=&gt;{</code> |
-| `reconcileCapturedOutput` | action | 373 | <code>reconcileCapturedOutput:async(operation:ProviderOperation&lt;'execute'&gt;)=&gt;{</code> |
-| `readCapturedOutput` | action | 381 | <code>readCapturedOutput:async(s:ProviderScope,resource:ResourceRef,processRef:string,maxBytes:number)=&gt;{</code> |
 | `RailwayRegistrar` | type | 400 | <code>export type RailwayRegistrar=(provider:'railway',factory:(scope:ProviderScope,hooks:ProviderPersistenceHooks)=&gt;ProviderAdapter)=&gt;()=&gt;void;</code> |
 | `registerRailwayProvider` | function | 401 | <code>export function registerRailwayProvider(registrar:RailwayRegistrar,client:RailwayClient,</code> |
 | `reconcileCreate` | function | 405 | <code>export function reconcileCreate(input:unknown):{decision:'ADOPT_CANDIDATE'&#124;'QUARANTINE'&#124;'NO_MATCH';</code> |
-| `baseline` | variable | 411 | <code>const baseline=new Set(v.baseline_ids.map(item=&gt;text(item)));</code> |
-| `seen` | variable | 413 | <code>const seen=new Set&lt;string&gt;(),verified:string&#91;&#93;=&#91;&#93;;let ambiguous=false;</code> |
 | `createComponent` | function | 428 | <code>export function createComponent(context:ComponentContext):Component {</code> |
-| `close` | action | 431 | <code>return {apiVersion:1,close:()=&gt;runtime?.close(),actions:{</code> |
-| `'railway.reconciliation.create'` | action | 432 | <code>'railway.reconciliation.create':input=&gt;reconcileCreate(input),</code> |
-| `'railway.inventory.list'` | action | 433 | <code>'railway.inventory.list':async(input,context)=&gt;{</code> |
-| `'railway.sessions.list'` | action | 439 | <code>'railway.sessions.list':async(input,context)=&gt;{</code> |
-| `'railway.qualification.evaluate'` | action | 445 | <code>'railway.qualification.evaluate':(input,context)=&gt;qualifyRailwayProfileInputs(configuredClient(context),input,runtime?.policies)</code> |
 | `RailwayIsolationTransport` | interface | 452 | <code>export interface RailwayIsolationTransport {</code> |
 | `destroy` | method | 453 | <code>destroy(operation:ProviderOperation&lt;'destroy'&gt;,signal?:AbortSignal):Promise&lt;ProviderOutcome&lt;'destroy'&gt;&gt;;</code> |
 | `observe` | method | 454 | <code>observe(operation:ProviderOperation&lt;'observe'&gt;,signal?:AbortSignal):Promise&lt;ProviderOutcome&lt;'observe'&gt;&gt;;</code> |
 | `createRailwayIsolationTransport` | function | 456 | <code>export function createRailwayIsolationTransport(client:RailwayClient,fixedScope:ProviderScope):RailwayIsolationTransport {</code> |
-| `perform` | function | 458 | <code>const perform=async(operation:ProviderOperation,signal:AbortSignal):Promise&lt;ProviderOutcome&gt;=&gt;{</code> |
-| `checked` | function | 487 | <code>const checked=&lt;K extends 'destroy'&#124;'observe'&gt;(operation:ProviderOperation&lt;K&gt;,outcome:ProviderOutcome):ProviderOutcome&lt;K&gt;=&gt;{</code> |
-| `destroy` | action | 491 | <code>destroy:async(operation,signal)=&gt;checked(operation,await perform(operation,signal??new AbortController().signal)),</code> |
-| `observe` | action | 492 | <code>observe:async(operation,signal)=&gt;checked(operation,await perform(operation,signal??new AbortController().signal)),</code> |
 | `configuredRailwayIsolationTransport` | function | 498 | <code>export function configuredRailwayIsolationTransport(</code> |
 | `RailwayPoolPolicy` | interface | 506 | <code>interface RailwayPoolPolicy {</code> |
 | `railwayRuntimePolicies` | function | 512 | <code>function railwayRuntimePolicies(context:ComponentContext):RailwayPoolPolicy&#91;&#93; {</code> |
-| `seen` | variable | 527 | <code>const seen=new Set&lt;string&gt;();</code> |
 | `railwayRuntimePolicyDigest` | function | 543 | <code>export function railwayRuntimePolicyDigest(policy:Omit&lt;RailwayPoolPolicy,'scope'&gt;&#124;RailwayPoolPolicy):string {</code> |
 | `railwayBaseFromRow` | function | 548 | <code>function railwayBaseFromRow(row:Record&lt;string,unknown&gt;&#124;null,s:ProviderScope,preparation:string):PreparedRailwayBase {</code> |
 | `railwayCredentialResolver` | function | 553 | <code>function railwayCredentialResolver(authority:CredentialAuthority,hooks:ProviderPersistenceHooks):CredentialResolver {</code> |
 | `installRailwayRuntime` | function | 575 | <code>function installRailwayRuntime(context:ComponentContext):{close:()=&gt;Promise&lt;void&gt;;policies:RailwayPoolPolicy&#91;&#93;} {</code> |
-| `sessions` | variable | 589 | <code>const sessions=new RailwaySessionSpool(root);</code> |
-| `resolve` | function | 605 | <code>const resolve=(operation:ProviderOperation&lt;'create'&gt;)=&gt;hooks.resolvePreparation(operation);</code> |
-| `binding` | action | 609 | <code>archive:{invoke:(action,input)=&gt;artifacts.invoke(action,input,hooks.invocation),binding:async operation=&gt;{</code> |
-| `invoke` | action | 609 | <code>archive:{invoke:(action,input)=&gt;artifacts.invoke(action,input,hooks.invocation),binding:async operation=&gt;{</code> |
-| `runtimeProfile` | action | 619 | <code>runtimeProfile:async operation=&gt;{</code> |
-| `body` | object | 635 | <code>const body={schema_version:1,scope:s,preparation_digest:binding.preparation_digest,source,</code> |
-| `allowSeedPreparation` | action | 640 | <code>allowSeedPreparation:async(operation,profile)=&gt;{</code> |
-| `preparedBase` | action | 648 | <code>preparedBase:async(reference,expected)=&gt;{</code> |
-| `close` | action | 656 | <code>return {policies,close:async()=&gt;{unregister();unregisterQuota();unregisterIsolation();unregisterReader();await sessions.detachAll();}};</code> |
 
 ## services/hyperfide/src/providers/reconcile.ts
 
@@ -5372,58 +3940,27 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `Intent` | interface | 19 | <code>export interface Intent {</code> |
 | `deadline` | function | 25 | <code>function deadline(value:unknown,maximum:number):string {</code> |
 | `operation` | function | 30 | <code>function operation&lt;K extends ProviderMethod&gt;(kind:K,scope:ProviderOperation&#91;'scope'&#93;,id:string,deadlineAt:string,resource:ResourceRef&#124;null,</code> |
-| `base` | object | 32 | <code>const base={schema_version:1 as const,kind,scope,deadline_at:deadlineAt,resource,preparation_digest:preparationDigest,parameters,</code> |
 | `intent` | function | 37 | <code>async function intent(client:Pick&lt;PrimaryTransaction,'query'&gt;,organisation:string,id:string,lock=false):Promise&lt;Intent&gt;{</code> |
 | `noActiveWork` | function | 41 | <code>async function noActiveWork(client:PrimaryTransaction,organisation:string,sandbox:string):Promise&lt;void&gt;{</code> |
 | `PreparationSelection` | interface | 45 | <code>export interface PreparationSelection {</code> |
 | `preparationParameters` | function | 48 | <code>export async function preparationParameters(c:PrimaryTransaction,config:DeploymentConfig,value:unknown,invocation:InvocationContext):Promise&lt;ProviderOperation&lt;'create'&gt;&#91;'parameters'&#93;&gt;{</code> |
 | `prepareCreate` | function | 75 | <code>export async function prepareCreate(pool:ProviderDatabase,config:DeploymentConfig,value:unknown):Promise&lt;unknown&gt;{</code> |
 | `prepareCreateTx` | function | 78 | <code>export async function prepareCreateTx(c:PrimaryTransaction,config:DeploymentConfig,value:unknown,invocation:InvocationContext):Promise&lt;unknown&gt;{</code> |
-| `requested` | object | 95 | <code>const requested={SANDBOX:'1',PROVISIONING:'1',CPU_MILLIS:String(op.parameters.resources.cpu_millis),</code> |
 | `destructionPreflight` | function | 114 | <code>export async function destructionPreflight(tx:PrimaryTransaction,pool:ProviderDatabase,input:ProviderDestructionRequest):Promise&lt;ProviderDestructionProof&gt;{</code> |
 | `prepareDestroy` | function | 128 | <code>export async function prepareDestroy(pool:ProviderDatabase,config:DeploymentConfig,value:unknown):Promise&lt;unknown&gt;{</code> |
 | `persistenceHooks` | function | 147 | <code>export function persistenceHooks(pool:ProviderDatabase,organisation:string,id:string):ProviderPersistenceHooks{</code> |
-| `resolveResourceBinding` | action | 150 | <code>resolveResourceBinding:async op=&gt;{const row=await intent(pool,organisation,id);if(op.identity.correlation_id!==id)fail('PROVIDER_SCOPE_MISMATCH','Resource operation differs from durable intent');retur…</code> |
-| `persistOutputArchive` | action | 151 | <code>persistOutputArchive:async()=&gt;fail('PROCESS_LEDGER_REQUIRED','Output archive requires a bound process ledger'),</code> |
-| `persistEarlyProcess` | action | 152 | <code>persistEarlyProcess:async()=&gt;fail('PROCESS_LEDGER_REQUIRED','Process binding requires bound command ledger'),</code> |
-| `claimProcess` | action | 153 | <code>claimProcess:async()=&gt;fail('PROCESS_LEDGER_REQUIRED','Process launch requires a bound remote command ledger'),</code> |
-| `resolveProcess` | action | 154 | <code>resolveProcess:async()=&gt;fail('PROCESS_LEDGER_REQUIRED','Process lookup requires a bound remote command ledger'),</code> |
-| `resolvePreparation` | action | 155 | <code>resolvePreparation:async op=&gt;transaction(pool,async c=&gt;{</code> |
-| `assertResourceBinding` | action | 170 | <code>assertResourceBinding:async op=&gt;{</code> |
-| `assignedBootGeneration` | action | 178 | <code>assignedBootGeneration:async op=&gt;{</code> |
-| `persistEarlyResource` | action | 187 | <code>persistEarlyResource:async(op,nativeId)=&gt;{</code> |
-| `ref` | object | 193 | <code>const ref={native_sandbox_id:nativeId,sandbox_boot_generation:String(row.boot_generation)};</code> |
-| `recordObservation` | action | 212 | <code>recordObservation:async(op,outcome)=&gt;{</code> |
 | `unknownOutcome` | function | 280 | <code>function unknownOutcome(op:ProviderOperation,resource:ResourceRef&#124;null):ProviderOutcome {</code> |
 | `boundedProvider` | function | 286 | <code>export async function boundedProvider&lt;T&gt;(effect:Promise&lt;T&gt;,signal:AbortSignal,deadlineAt:string):Promise&lt;T&gt;{</code> |
-| `stop` | function | 290 | <code>const stop=()=&gt;reject(new FoundationError('PROVIDER_TIMEOUT','Provider outcome requires reconciliation'));</code> |
 | `executeIntent` | function | 295 | <code>export async function executeIntent(pool:ProviderDatabase,config:DeploymentConfig,id:string,signal:AbortSignal):Promise&lt;unknown&gt;{</code> |
 | `reconcileIntent` | function | 322 | <code>export async function reconcileIntent(pool:ProviderDatabase,config:DeploymentConfig,id:string,signal:AbortSignal):Promise&lt;unknown&gt;{</code> |
-| `next` | function | 327 | <code>const next=&lt;K extends ProviderMethod&gt;(kind:K,parameters:unknown,ref:ResourceRef&#124;null)=&gt;</code> |
-| `seen` | variable | 330 | <code>const pages=&#91;&#93;;let cursor:string&#124;null=null;const seen=new Set&lt;string&gt;();</code> |
-| `ref` | object | 365 | <code>const ref={native_sandbox_id:row.native_sandbox_id,sandbox_boot_generation:String(row.boot_generation)};</code> |
 | `ProviderCaptureProof` | type | 370 | <code>export type ProviderCaptureProof=</code> |
 | `CapturedProviderOutput` | interface | 373 | <code>export interface CapturedProviderOutput {</code> |
 | `verifyCapturedProviderOutput` | function | 376 | <code>export function verifyCapturedProviderOutput(result:import('./contract.js').ProcessResult,value:CapturedProviderOutput,maxBytes=16&#42;1024&#42;1024):CapturedProviderOutput{</code> |
-| `bytesDigest` | function | 382 | <code>const bytesDigest=(bytes:Uint8Array)=&gt;'sha256:'+createHash('sha256').update(bytes).digest('hex');</code> |
-| `offsets` | object | 392 | <code>const offsets={stdout:0,stderr:0},hash=createHash('sha256');</code> |
 | `processObservationDisposition` | function | 409 | <code>export function processObservationDisposition(previous:ProviderOutcome&#124;null,next:ProviderOutcome):'ACCEPT'&#124;'IGNORE'&#124;'CONFLICT'{</code> |
 | `BoundProviderRequest` | interface | 416 | <code>export interface BoundProviderRequest {</code> |
 | `processRecord` | function | 420 | <code>function processRecord(value:unknown,op:ProviderOperation&lt;'execute'&gt;):ProviderProcessRecord{</code> |
 | `remoteProcessHooks` | function | 425 | <code>export function remoteProcessHooks(pool:ProviderDatabase,organisation:string,run:string,id:string){</code> |
-| `persistOutputArchive` | action | 427 | <code>persistOutputArchive:async(op:ProviderOperation&lt;'execute'&gt;,value:ProviderOutputArchive):Promise&lt;{archive_id:string;evidence_digest:string}&gt;=&gt;{</code> |
-| `reference` | function | 431 | <code>const reference=(raw:unknown):ProviderArtifactReference=&gt;{</code> |
-| `unique` | variable | 434 | <code>const index=reference(archive.index_reference),segments=archive.segment_references.map(reference),unique=new Map&lt;string,ProviderArtifactReference&gt;();</code> |
-| `binding` | object | 444 | <code>const binding={organisation_id:organisation,run_id:run,remote_operation_id:id,sandbox_id:row.sandbox_id,boot_generation:String(row.boot_generation),process_ref:row.process_record.process_ref,native_pr…</code> |
-| `persistEarlyProcess` | action | 452 | <code>persistEarlyProcess:async(op:ProviderOperation&lt;'execute'&gt;,nativeProcessRef:string):Promise&lt;void&gt;=&gt;{</code> |
-| `claimProcess` | action | 462 | <code>claimProcess:async(op:ProviderOperation&lt;'execute'&gt;,value:ProviderProcessRecord):Promise&lt;{disposition:'NEW'&#124;'EXISTING';record:ProviderProcessRecord}&gt;=&gt;{</code> |
-| `resolveProcess` | action | 472 | <code>resolveProcess:async(op:ProviderOperation,processRef:string):Promise&lt;ProviderProcessRecord&#124;null&gt;=&gt;{</code> |
 | `executeBound` | function | 482 | <code>export async function executeBound(pool:ProviderDatabase,config:DeploymentConfig,value:unknown,signal:AbortSignal):Promise&lt;unknown&gt;{</code> |
-| `unavailable` | function | 509 | <code>const unavailable=async()=&gt;fail('PROVIDER_HOOK_UNAVAILABLE','Remote command cannot create provider resources');</code> |
-| `assertOperation` | function | 511 | <code>const assertOperation=(observed:ProviderOperation)=&gt;{</code> |
-| `record` | function | 519 | <code>const record=async(observedOperation:ProviderOperation,outcome:ProviderOutcome)=&gt;{</code> |
-| `assertResourceBinding` | action | 536 | <code>const adapter=providerAdapter(op.scope,{...remoteProcessHooks(pool,config.organisation_id,run,id),invocation:providerInvocation(pool),resolveResourceBinding:observed=&gt;resolveSandboxBinding(pool,config…</code> |
-| `resolveResourceBinding` | action | 536 | <code>const adapter=providerAdapter(op.scope,{...remoteProcessHooks(pool,config.organisation_id,run,id),invocation:providerInvocation(pool),resolveResourceBinding:observed=&gt;resolveSandboxBinding(pool,config…</code> |
 | `observeKnownSandbox` | function | 567 | <code>export async function observeKnownSandbox(pool:ProviderDatabase,config:DeploymentConfig,value:unknown,signal:AbortSignal):Promise&lt;unknown&gt;{</code> |
 | `readConfirmedAbsence` | function | 582 | <code>export async function readConfirmedAbsence(tx:PrimaryTransaction,input:{organisation_id:string;run_id:string;reservation_id:string}):Promise&lt;{id:string;digest:string;observed_at:string}&#124;null&gt;{</code> |
 | `ProviderIntentCapability` | interface | 588 | <code>export interface ProviderIntentCapability {</code> |
@@ -5441,26 +3978,9 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `isProviderExecutionCapability` | function | 603 | <code>export function isProviderExecutionCapability(value:unknown):value is ProviderExecutionCapability{</code> |
 | `isProviderIntentCapability` | function | 607 | <code>export function isProviderIntentCapability(value:unknown):value is ProviderIntentCapability{</code> |
 | `createComponent` | function | 611 | <code>export function createComponent(context:ComponentContext):Component {</code> |
-| `provisioner` | function | 613 | <code>const provisioner=()=&gt;{if(context.role!=='provisioner')fail('ROLE_FORBIDDEN','Execution requires the provisioner worker');};</code> |
-| `guarded` | function | 614 | <code>const guarded=(fn:(input:unknown,config:DeploymentConfig,database:ProviderDatabase)=&gt;Promise&lt;unknown&gt;)=&gt;async(input:unknown,requestContext:ComponentContext)=&gt;{</code> |
-| `workerAction` | function | 620 | <code>const workerAction=(fn:(worker:ProvisionerWorker,invocation:InvocationContext)=&gt;Promise&lt;unknown&gt;)=&gt;async(input:unknown,requestContext:ComponentContext)=&gt;{</code> |
-| `registerDestructionPreflight` | action | 624 | <code>registerDestructionPreflight:(reader:ProviderDestructionPreflight)=&gt;{if(typeof reader!=='function'&#124;&#124;database.runtime.destructionPreflight)fail('PROVIDER_REGISTRATION_CONFLICT','Destruction custody rea…</code> |
-| `preparationParameters` | action | 625 | <code>preparationParameters:async(tx:PrimaryTransaction,input:unknown,invocation:InvocationContext)=&gt;preparationParameters(tx,await readDeployment(context.env),input,invocation),</code> |
-| `prepareCreateTx` | action | 626 | <code>prepareCreateTx:async(tx:PrimaryTransaction,input:unknown,invocation:InvocationContext)=&gt;prepareCreateTx(tx,await readDeployment(context.env),input,invocation),</code> |
-| `getIntent` | action | 627 | <code>getIntent:async(id:string,invocation:InvocationContext)=&gt;{const c=await readDeployment(context.env),db=bindProviderInvocation(database,c,invocation);const row=await intent(db,c.organisation_id,id);ass…</code> |
-| `registerDestructionPreflight` | action | 629 | <code>registerDestructionPreflight:(reader:ProviderDestructionPreflight)=&gt;{if(typeof reader!=='function'&#124;&#124;database.runtime.destructionPreflight)fail('PROVIDER_REGISTRATION_CONFLICT','Destruction custody rea…</code> |
-| `registerRunnerBindingVerifier` | action | 630 | <code>registerRunnerBindingVerifier:(reader:ProviderRunnerBindingVerifier)=&gt;{if(typeof reader!=='function'&#124;&#124;database.runtime.runnerBindingVerifier)fail('PROVIDER_REGISTRATION_CONFLICT','Runner reader must b…</code> |
-| `executeIntent` | action | 631 | <code>executeIntent:async(id:string,signal:AbortSignal,invocation:InvocationContext)=&gt;{const c=await readDeployment(context.env);return executeIntent(bindProviderInvocation(database,c,invocation,&#91;'PROVISION…</code> |
-| `reconcileIntent` | action | 632 | <code>reconcileIntent:async(id:string,signal:AbortSignal,invocation:InvocationContext)=&gt;{const c=await readDeployment(context.env);return reconcileIntent(bindProviderInvocation(database,c,invocation,&#91;'PROVI…</code> |
-| `executeBound` | action | 633 | <code>executeBound:async(input:unknown,signal:AbortSignal,invocation:InvocationContext)=&gt;{const c=await readDeployment(context.env);return executeBound(bindProviderInvocation(database,c,invocation,&#91;'PROVISI…</code> |
-| `observeKnownSandbox` | action | 634 | <code>observeKnownSandbox:async(input:unknown,signal:AbortSignal,invocation:InvocationContext)=&gt;{const c=await readDeployment(context.env);return observeKnownSandbox(bindProviderInvocation(database,c,invoca…</code> |
-| `'provider.remote.execute-bound'` | action | 641 | <code>'provider.remote.execute-bound':()=&gt;fail('TRUSTED_CAPABILITY_ONLY','Remote commands are admitted only by the trusted runner executor'),</code> |
-| `close` | action | 647 | <code>},close:async()=&gt;{await worker?.stop();}};</code> |
 | `createAccountingComponent` | function | 651 | <code>export function createAccountingComponent(context:ComponentContext):Component {</code> |
 | `SchedulerProofRegistry` | type | 654 | <code>type SchedulerProofRegistry={registerProofReader(source:'provider.absence',reader:typeof readConfirmedAbsence):()=&gt;void};</code> |
 | `registerProofReader` | method | 654 | <code>type SchedulerProofRegistry={registerProofReader(source:'provider.absence',reader:typeof readConfirmedAbsence):()=&gt;void};</code> |
-| `'provider.accounting.describe'` | action | 659 | <code>return{apiVersion:1,actions:{'provider.accounting.describe':input=&gt;{</code> |
-| `close` | action | 662 | <code>}},close:()=&gt;{if(!closed){closed=true;unregister();}}};</code> |
 
 ## services/hyperfide/src/providers/worker.ts
 
@@ -5475,10 +3995,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `PoolAdapterReadiness` | interface | 17 | <code>export interface PoolAdapterReadiness {</code> |
 | `bounded` | function | 21 | <code>function bounded(env:Readonly&lt;NodeJS.ProcessEnv&gt;,name:string,fallback:number,min:number,max:number):number{</code> |
 | `workerSettings` | function | 26 | <code>export function workerSettings(env:Readonly&lt;NodeJS.ProcessEnv&gt;):ProvisionerWorkerSettings{</code> |
-| `settings` | object | 27 | <code>const settings={concurrency:bounded(env,'HYPERFIDE_PROVISIONER_CONCURRENCY',4,1,64),poll_ms:bounded(env,'HYPERFIDE_PROVISIONER_POLL_MS',1000,50,60000),</code> |
 | `poolAdapterReadiness` | function | 34 | <code>export async function poolAdapterReadiness(database:ProviderDatabase,config:DeploymentConfig,invocation:InvocationContext,running:boolean):Promise&lt;PoolAdapterReadiness&#91;&#93;&gt;{</code> |
-| `refuse` | function | 35 | <code>const refuse=async()=&gt;fail('PROVIDER_READINESS_PROBE','Readiness probing cannot persist provider effects');</code> |
-| `hooks` | object | 36 | <code>const hooks:ProviderPersistenceHooks={invocation,persistOutputArchive:refuse,assertResourceBinding:refuse,resolveResourceBinding:refuse,resolvePreparation:refuse,</code> |
 | `ProvisionerWorker` | class | 69 | <code>export class ProvisionerWorker {</code> |
 | `constructor` | method | 73 | <code>constructor(private readonly database:ProviderDatabase,private readonly env:Readonly&lt;NodeJS.ProcessEnv&gt;,private readonly signal:AbortSignal,private readonly driver:ProvisionerWorkerDriver){}</code> |
 | `running` | method | 74 | <code>get running():boolean{return !!this.loop&amp;&amp;!!this.controller&amp;&amp;!this.controller.signal.aborted;}</code> |
@@ -5536,37 +4053,21 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `recoveryReady` | function | 91 | <code>export async function recoveryReady(tx:Pick&lt;RecoveryTransaction,'query'&gt;):Promise&lt;void&gt;{</code> |
 | `lockRun` | function | 98 | <code>export async function lockRun(tx:RecoveryTransaction,scope:RecoveryScope,write=true):Promise&lt;pg.QueryResultRow&gt;{</code> |
 | `recoveryTransaction` | function | 105 | <code>export async function recoveryTransaction&lt;T&gt;(context:ComponentContext,scope:RecoveryScope,body:(tx:RecoveryTransaction)=&gt;Promise&lt;T&gt;,requiresExternalAuthority=false,observation=false):Promise&lt;T&gt;{</code> |
-| `guard` | action | 113 | <code>guard:async tx=&gt;{await (observation?readSemanticDisposition:writeSemanticDisposition)(tx as PrimaryTransaction,scope);await lockEventRun(tx as PrimaryTransaction,scope,observation?'shared':'exclusive'…</code> |
 | `operationReplay` | function | 116 | <code>export async function operationReplay(tx:RecoveryTransaction,scope:RecoveryScope,operationId:string,kind:string,input:unknown):Promise&lt;Record&lt;string,unknown&gt;&#124;null&gt;{</code> |
 | `finishOperation` | function | 128 | <code>export async function finishOperation(tx:RecoveryTransaction,scope:RecoveryScope,id:string,result:Record&lt;string,unknown&gt;,state='APPLIED'):Promise&lt;void&gt;{</code> |
 | `inspectRecoveryHold` | function | 131 | <code>export async function inspectRecoveryHold(tx:Pick&lt;RecoveryTransaction,'query'&gt;,scope:RecoveryScope):Promise&lt;pg.QueryResultRow&#91;&#93;&gt;{</code> |
 | `readControlSnapshot` | function | 136 | <code>export async function readControlSnapshot(tx:Pick&lt;RecoveryTransaction,'query'&gt;,scope:RecoveryScope,events?:RecoveryEvents):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
-| `query` | function | 141 | <code>const query=async(sql:string)=&gt; (await tx.query(sql,&#91;scope.organisation_id,scope.run_id&#93;)).rows;</code> |
 | `inspectSessionRecovery` | function | 162 | <code>export async function inspectSessionRecovery(tx:Pick&lt;RecoveryTransaction,'query'&gt;,scope:RecoveryScope):Promise&lt;Record&lt;string,unknown&gt;&#91;&#93;&gt;{</code> |
 | `reconstructControl` | function | 181 | <code>export async function reconstructControl(pool:pg.Pool,scope:RecoveryScope):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
 | `evaluateOffline` | function | 190 | <code>export function evaluateOffline(input:unknown,now=Date.now(),limits:{mode:'PAUSE'&#124;'BOUNDED_LOCAL';maxOfflineMs:number}={mode:'PAUSE',maxOfflineMs:0}):Record&lt;string,unknown&gt;{</code> |
 | `inspectIntegrationRecovery` | function | 207 | <code>export async function inspectIntegrationRecovery(tx:Pick&lt;RecoveryTransaction,'query'&gt;,scope:RecoveryScope):Promise&lt;{ready:boolean;jobs:pg.QueryResultRow&#91;&#93;;scope_jobs:pg.QueryResultRow&#91;&#93;;preparations:p…</code> |
 | `createRecoveryControlCapability` | function | 216 | <code>export function createRecoveryControlCapability(){</code> |
-| `assertQuiesced` | action | 219 | <code>assertQuiesced:async(tx:RecoveryTransaction,scope:RecoveryScope):Promise&lt;void&gt;=&gt;{</code> |
-| `assertNoNewEffects` | action | 226 | <code>assertNoNewEffects:async(tx:RecoveryTransaction,scope:RecoveryScope):Promise&lt;void&gt;=&gt;{</code> |
 | `supervisorCapability` | function | 235 | <code>export function supervisorCapability(context:ComponentContext):RecoverySupervisor{</code> |
 | `supervisorPresent` | function | 239 | <code>function supervisorPresent(context:ComponentContext):boolean{try{supervisorCapability(context);return true;}catch{return false;}}</code> |
 | `createComponent` | function | 240 | <code>export function createComponent(startup:ComponentContext):Component{</code> |
-| `read` | action | 242 | <code>const snapshots:RecoverySnapshotReader=Object.freeze({read:(tx:RecoveryTransaction,scope:RecoveryScope)=&gt;readControlSnapshot(tx,scope,events)});</code> |
-| `'recovery.control.describe'` | action | 244 | <code>'recovery.control.describe':(input,context)=&gt;{record(input,&#91;&#93;);return {api_version:1,supervision_failure_domains:1,uninterrupted_failover:'UNQUALIFIED',standby_qualification:'ABSENT',uninterrupted_fai…</code> |
-| `'recovery.control.reconstruct'` | action | 247 | <code>'recovery.control.reconstruct':(input,context)=&gt;{const scope=scopeOf(input);return recoveryTransaction(context,scope,tx=&gt;snapshots.read(tx,scope),false,true);},</code> |
-| `'recovery.offline.evaluate'` | action | 248 | <code>'recovery.offline.evaluate':(input,context)=&gt;{</code> |
-| `'recovery.control.adopt'` | action | 253 | <code>'recovery.control.adopt':async(input,context)=&gt;{</code> |
-| `result` | object | 273 | <code>const result={scope,session_id:sessionId,adopted_existing:true,new_attempt_created:false,lease_extended:false,evidence_digest:observed.evidence_digest,observed_at:observed.observed_at};</code> |
-| `'recovery.control.resume'` | action | 277 | <code>'recovery.control.resume':async(input,context)=&gt;{</code> |
-| `result` | object | 302 | <code>const result={resumed:true,scope,state_version:changed.rows&#91;0&#93;!.state_version,reconciled:true,fresh_attempts_required:true};</code> |
 | `AcceptedRunRebindInput` | interface | 309 | <code>export interface AcceptedRunRebindInput {</code> |
 | `AcceptedRunRecoveryIntent` | interface | 314 | <code>export interface AcceptedRunRecoveryIntent extends AcceptedRunRebindInput {intent_digest:string}</code> |
 | `createAcceptedRunRecoveryVerifier` | function | 318 | <code>export function createAcceptedRunRecoveryVerifier(options:{</code> |
-| `prepare` | action | 325 | <code>return Object.freeze({prepare:async(raw:AcceptedRunRebindInput)=&gt;{</code> |
-| `verified` | variable | 344 | <code>const verified=new WeakSet&lt;PrimaryTransaction&gt;();</code> |
-| `verify` | action | 346 | <code>verify:async(tx:PrimaryTransaction):Promise&lt;AcceptedRunRecoveryIntent&gt;=&gt;{</code> |
-| `revokeCompute` | action | 361 | <code>revokeCompute:async(tx:PrimaryTransaction)=&gt;{</code> |
 
 ## services/hyperfide/src/recovery/drills.ts
 
@@ -5582,21 +4083,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `resumable` | function | 22 | <code>function resumable(value:unknown):boolean{</code> |
 | `Observed` | type | 26 | <code>type Observed=Awaited&lt;ReturnType&lt;RecoveryDrillProbe&#91;'execute'&#93;&gt;&gt;;</code> |
 | `completeDrill` | function | 27 | <code>async function completeDrill(gateway:RecoveryGateway,scope:RecoveryScope,id:string,observed:Observed&#124;undefined):Promise&lt;void&gt;{</code> |
-| `guard` | action | 30 | <code>await gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2,guard:async tx=&gt;{await recoveryReady(tx);await lockRun(tx,scope);}},async tx=&gt;{</code> |
-| `unknown` | function | 31 | <code>const unknown=async(limits:string)=&gt;{await tx.query("UPDATE hyperfide.recovery_drill_runs SET state='UNKNOWN',completed_at=clock_timestamp(),limits=$4 WHERE organisation_id=$1 AND run_id=$2 AND operat…</code> |
-| `ids` | function | 34 | <code>const ids=(items:unknown)=&gt;Array.isArray(items)&amp;&amp;items.length&lt;=100000&amp;&amp;items.every(item=&gt;typeof item==='string'&amp;&amp;item.length&gt;0&amp;&amp;item.length&lt;=255)&amp;&amp;new Set(items).size===items.length;</code> |
-| `recovered` | variable | 42 | <code>const recovered=new Set(observed.recovered_ids),lost=observed.acknowledged_ids.filter(item=&gt;!recovered.has(item)).length;</code> |
 | `createComponent` | function | 47 | <code>export function createComponent(startup:ComponentContext):Component{</code> |
-| `lifetime` | variable | 49 | <code>const lifetime=new AbortController(),running=new Set&lt;Promise&lt;void&gt;&gt;();</code> |
-| `running` | variable | 49 | <code>const lifetime=new AbortController(),running=new Set&lt;Promise&lt;void&gt;&gt;();</code> |
-| `close` | action | 51 | <code>return {apiVersion:1,close:async()=&gt;{lifetime.abort();await Promise.allSettled(&#91;...running&#93;);},actions:{</code> |
-| `'recovery.drill.describe'` | action | 52 | <code>'recovery.drill.describe':(input)=&gt;{record(input,&#91;&#93;);return {api_version:1,scenarios:&#91;...SCENARIOS&#93;,rpo_rto_units:'milliseconds',targets:'PROPOSED_UNTIL_MEASURED',rpo_measurement:RPO_MEASUREMENT,</code> |
-| `'recovery.drill.plan'` | action | 56 | <code>'recovery.drill.plan':async(input,context)=&gt;{</code> |
-| `result` | object | 64 | <code>const result={scope,operation_id:id,scenario,state:'PROPOSED',proposed_rpo_ms:rpo,proposed_rto_ms:rto,measured_rpo_ms:null,rpo_measurement:RPO_MEASUREMENT,measured_rto_ms:null,qualified:false};</code> |
-| `'recovery.drill.inspect'` | action | 68 | <code>'recovery.drill.inspect':async(input,context)=&gt;{</code> |
-| `'recovery.drill.execute'` | action | 79 | <code>'recovery.drill.execute':async(input,context)=&gt;{</code> |
-| `'recovery.drill.reconcile'` | action | 105 | <code>'recovery.drill.reconcile':async(input,context)=&gt;{</code> |
-| `'recovery.drill.accept_result'` | action | 116 | <code>'recovery.drill.accept_result':async(input,context)=&gt;{</code> |
 
 ## services/hyperfide/src/recovery/fencing.ts
 
@@ -5631,7 +4118,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `ProviderIsolationCapability` | interface | 48 | <code>export interface ProviderIsolationCapability {</code> |
 | `isolateConfiguredResource` | method | 49 | <code>isolateConfiguredResource(referenceKey:string,operationId:string,authority:InvocationContext&#124;VerifiedIsolationPermit,signal:AbortSignal,journal:IsolationJournal):Promise&lt;WriterIsolationReceipt&gt;;</code> |
 | `bindProviderIsolation` | function | 51 | <code>export function bindProviderIsolation(capability:ProviderIsolationCapability,authority:InvocationContext&#124;VerifiedIsolationPermit):ProviderIsolationBackend {</code> |
-| `isolateConfiguredResource` | action | 53 | <code>return Object.freeze({isolateConfiguredResource:(key:string,id:string,signal:AbortSignal,journal:IsolationJournal)=&gt;capability.isolateConfiguredResource(key,id,authority,signal,journal)});</code> |
 | `JournalDocument` | type | 55 | <code>type JournalDocument={schema_version:1;binding:Binding;authorizations:{authority_digest:string;authority_nonce:string&#124;null}&#91;&#93;;resources:Record&lt;string,IsolationJournalRecord&gt;;completion_receipt?:Extern…</code> |
 | `coreBinding` | function | 56 | <code>function coreBinding(v:Binding){return {deployment_id:v.deployment_id,operation_id:v.operation_id,source_epoch:v.source_epoch,topology_digest:v.topology_digest}}</code> |
 | `fail` | function | 57 | <code>function fail(code:string,message:string):never{throw new FoundationError(code,message)}</code> |
@@ -5651,34 +4137,13 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `withOperation` | method | 107 | <code>async withOperation&lt;T&gt;(binding:Binding,body:(resource:(key:string)=&gt;IsolationJournal,recordCompletion:(receipt:ExternalFenceReceipt)=&gt;Promise&lt;void&gt;)=&gt;Promise&lt;T&gt;):Promise&lt;T&gt;{</code> |
 | `withObservation` | method | 110 | <code>async withObservation&lt;T&gt;(binding:Binding,body:(resource:(key:string)=&gt;WriterObservationJournal)=&gt;Promise&lt;T&gt;):Promise&lt;T&gt;{</code> |
 | `operate` | method | 113 | <code>private async operate&lt;T&gt;(binding:Binding,body:(resource:(key:string)=&gt;IsolationJournal,recordCompletion:(receipt:ExternalFenceReceipt)=&gt;Promise&lt;void&gt;,observations:(key:string)=&gt;WriterObservationJourna…</code> |
-| `document` | object | 125 | <code>let document:JournalDocument={schema_version:1,binding,authorizations:&#91;{authority_digest:binding.authority_digest,authority_nonce:binding.authority_nonce}&#93;,resources:{}};</code> |
-| `save` | function | 143 | <code>const save=async()=&gt;{const text=canonical(document);if(Buffer.byteLength(text)&gt;1048576)fail('EXTERNAL_FENCE_JOURNAL_LIMIT','Fence journal exceeds its bounded record size');const temp=filename+'.'+rand…</code> |
-| `serialize` | function | 144 | <code>const serialize=&lt;R&gt;(fn:()=&gt;Promise&lt;R&gt;):Promise&lt;R&gt;=&gt;{const result=queue.then(()=&gt;{if(!active)fail('EXTERNAL_FENCE_JOURNAL_CLOSED','Fence journal capability has expired');return fn()});queue=result.then…</code> |
-| `resource` | function | 145 | <code>const resource=(key:string):IsolationJournal=&gt;{</code> |
-| `read` | action | 148 | <code>read:()=&gt;serialize(async()=&gt;Object.hasOwn(document.resources,key)?structuredClone(document.resources&#91;key&#93;!):null),</code> |
-| `prepare` | action | 149 | <code>prepare:(value:IsolationJournalBinding)=&gt;serialize(async()=&gt;{</code> |
-| `row` | object | 153 | <code>const row:IsolationJournalRecord={binding:structuredClone(value),state:'PREPARED',receipt:null,observations:&#91;&#93;};document.resources={...document.resources,&#91;key&#93;:row};await save();return {created:true,s…</code> |
-| `record` | action | 155 | <code>record:(outcome:{binding:IsolationJournalBinding;receipt:WriterIsolationReceipt&#124;null;observations:readonly {operation:unknown;outcome:unknown}&#91;&#93;})=&gt;serialize(async()=&gt;{</code> |
-| `observations` | function | 166 | <code>const observations=(key:string):WriterObservationJournal=&gt;{</code> |
-| `recordObservation` | action | 168 | <code>return Object.freeze({read:original.read,recordObservation:(value:WriterObservationJournalEntry)=&gt;serialize(async()=&gt;{</code> |
 | `topology` | function | 196 | <code>function topology(value:ExternalFenceTopology):ExternalFenceTopology{</code> |
-| `covered` | variable | 198 | <code>const references=new Set&lt;string&gt;(),covered=new Set&lt;string&gt;();</code> |
-| `references` | variable | 198 | <code>const references=new Set&lt;string&gt;(),covered=new Set&lt;string&gt;();</code> |
 | `externalFenceTopologyDigest` | function | 207 | <code>export function externalFenceTopologyDigest(config:ExternalFenceTopology):string{return hash(topology(config))}</code> |
 | `createExternalWriterFence` | function | 208 | <code>export function createExternalWriterFence(config:ExternalFenceTopology,providers:ProviderIsolationBackend,legacy:LegacyWriterBackend,journal:FileExternalFenceJournal,authority:ExternalFenceAuthority,o…</code> |
-| `authorize` | function | 212 | <code>const authorize=async(input:{deployment_id:string;operation_id:string;source_epoch:string&#124;null;signal?:AbortSignal})=&gt;{</code> |
-| `expected` | object | 214 | <code>const expected={deployment_id:input.deployment_id,operation_id:input.operation_id,organisation_id:trusted.organisation_id,run_id:trusted.run_id,source_epoch:input.source_epoch,topology_digest:configDi…</code> |
-| `checkLegacy` | function | 228 | <code>const checkLegacy=(v:LegacyWriterReceipt,input:{deployment_id:string;operation_id:string;source_epoch:string&#124;null},isolated:boolean)=&gt;{</code> |
-| `isolate` | action | 233 | <code>return Object.freeze({isolate:async(input:{deployment_id:string;operation_id:string;source_epoch:string&#124;null;signal?:AbortSignal})=&gt;{</code> |
-| `isolate` | function | 240 | <code>const isolate=async(r:ExternalFenceTopology&#91;'resources'&#93;&#91;number&#93;)=&gt;{</code> |
-| `completed` | object | 261 | <code>const completed={deployment_id:input.deployment_id,operation_id:input.operation_id,source_epoch:input.source_epoch,fence_id:input.operation_id,isolated_writer:'topology:'+configDigest.slice(7),observe…</code> |
 | `ExternalFenceObservation` | interface | 267 | <code>export interface ExternalFenceObservation {</code> |
 | `ProviderWriterObservationCapability` | interface | 273 | <code>export interface ProviderWriterObservationCapability {</code> |
 | `observeConfiguredResource` | method | 274 | <code>observeConfiguredResource(referenceKey:string,operationId:string,authority:VerifiedWriterObservationPermit,signal:AbortSignal,journal:WriterObservationJournal):Promise&lt;WriterObservationReceipt&gt;;</code> |
 | `createExternalWriterObserver` | function | 277 | <code>export function createExternalWriterObserver(config:ExternalFenceTopology,providers:ProviderWriterObservationCapability,legacy:Pick&lt;LegacyWriterBackend,'observeIsolation'&gt;,journal:FileExternalFenceJou…</code> |
-| `observe` | action | 281 | <code>return Object.freeze({observe:async(permit:VerifiedWriterObservationPermit,signal:AbortSignal):Promise&lt;ExternalFenceObservation&gt;=&gt;{</code> |
-| `expected` | object | 282 | <code>const expected={deployment_id:trusted.deployment_id,operation_id:permit?.operation_id,organisation_id:trusted.organisation_id,run_id:trusted.run_id,source_epoch:trusted.source_epoch,topology_digest:to…</code> |
-| `authorize` | function | 283 | <code>const authorize=()=&gt;{</code> |
 
 ## services/hyperfide/src/recovery/fencing_service.ts
 
@@ -5696,16 +4161,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `fields` | function | 26 | <code>function fields(value:unknown,required:readonly string&#91;&#93;,optional:readonly string&#91;&#93;=&#91;&#93;,code='EXTERNAL_FENCE_CONFIG_INVALID'):asserts value is Record&lt;string,unknown&gt;{</code> |
 | `configuration` | function | 29 | <code>async function configuration(filename:string&#124;undefined):Promise&lt;FencingConfiguration&gt;{</code> |
 | `startExternalFencingService` | function | 46 | <code>export async function startExternalFencingService(options:ExternalFencingServiceOptions):Promise&lt;ExternalFencingService&gt;{</code> |
-| `journal` | variable | 50 | <code>const journal=new FileExternalFenceJournal(config.journal_directory);</code> |
-| `isolate` | function | 52 | <code>const isolate=async(permit:VerifiedIsolationPermit,signal:AbortSignal):Promise&lt;ExternalFenceReceipt&gt;=&gt;{</code> |
-| `close` | action | 65 | <code>return Object.freeze({address:listener.address,isolate,describe:()=&gt;description,close:()=&gt;listener.close()});</code> |
-| `describe` | action | 65 | <code>return Object.freeze({address:listener.address,isolate,describe:()=&gt;description,close:()=&gt;listener.close()});</code> |
 | `startProviderExternalFencingService` | function | 68 | <code>export async function startProviderExternalFencingService(options:Omit&lt;ExternalFencingServiceOptions,'providers'&gt;&amp;{runtime:Omit&lt;ProviderIsolationRuntime,'env'&#124;'signal'&gt;}):Promise&lt;ExternalFencingServic…</code> |
 | `provider` | function | 72 | <code>function provider(value:unknown):value is ProviderIsolationCapability{return object(value)&amp;&amp;typeof value.isolateConfiguredResource==='function'}</code> |
 | `legacy` | function | 73 | <code>function legacy(value:unknown):value is LegacyWriterBackend{return object(value)&amp;&amp;typeof value.disableAdmission==='function'&amp;&amp;typeof value.observeIsolation==='function'}</code> |
 | `createComponent` | function | 75 | <code>export async function createComponent(context:ComponentContext):Promise&lt;Component&gt;{</code> |
-| `'recovery.fencing.describe'` | action | 82 | <code>return {apiVersion:1,capabilities:{'recovery.external-fencing.v1':service},actions:{'recovery.fencing.describe':input=&gt;{fields(input,&#91;&#93;,&#91;&#93;,'EXTERNAL_FENCE_INPUT_INVALID');return service.describe()}},c…</code> |
-| `close` | action | 82 | <code>return {apiVersion:1,capabilities:{'recovery.external-fencing.v1':service},actions:{'recovery.fencing.describe':input=&gt;{fields(input,&#91;&#93;,&#91;&#93;,'EXTERNAL_FENCE_INPUT_INVALID');return service.describe()}},c…</code> |
 
 ## services/hyperfide/src/recovery/stop.ts
 
@@ -5716,14 +4175,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `ranks` | object | 6 | <code>const ranks:Record&lt;string,number&gt;={PAUSE:2,DRAIN:1,CANCEL:4,STOP:3};</code> |
 | `publicationBlocked` | function | 7 | <code>export async function publicationBlocked(tx:{query:(sql:string,values:unknown&#91;&#93;)=&gt;Promise&lt;{rows:Record&lt;string,unknown&gt;&#91;&#93;}&gt;},org:string,run:string):Promise&lt;boolean&gt;{</code> |
 | `requestScopedControl` | function | 12 | <code>async function requestScopedControl(input:unknown,context:ComponentContext):Promise&lt;unknown&gt;{</code> |
-| `conditions` | object | 25 | <code>const conditions:Record&lt;string,string&gt;={RUN:'TRUE',PACKAGE:'t.feature_package_id=$3',ATTEMPT:'a.id=$3',SANDBOX:'a.sandbox_id=$3'};</code> |
-| `taskConditions` | object | 31 | <code>const taskConditions:Record&lt;string,string&gt;={RUN:'TRUE',PACKAGE:'t.feature_package_id=$3',ATTEMPT:'EXISTS(SELECT 1 FROM hyperfide.attempts a WHERE a.organisation_id=t.organisation_id AND a.run_id=t.run…</code> |
-| `result` | object | 86 | <code>const result={scope,operation_id:id,scope_kind:kind,scope_id:target,mode,generation,accepted_at:accepted,drain_deadline:deadline,fallback_mode:mode==='DRAIN'?fallback:null,admission_blocked:true,compu…</code> |
 | `createComponent` | function | 91 | <code>export function createComponent(_context:ComponentContext):Component{</code> |
-| `'recovery.stop.describe'` | action | 93 | <code>'recovery.stop.describe':(input,context)=&gt;{record(input,&#91;&#93;);return {api_version:1,modes:&#91;...modes&#93;,scope_precedence:'RUN_ENCLOSES_PACKAGE_ATTEMPT_SANDBOX',external_stop_requires:'TRUSTED_IDENTITY_BOUN…</code> |
-| `'recovery.stop.finalize'` | action | 95 | <code>'recovery.stop.finalize':async(input,context)=&gt;{</code> |
-| `result` | object | 116 | <code>const result={...intent,process_stop_complete:receipt.processes_stopped===true,cleanup_complete:complete,stop_complete:complete,evidence_digest:receipt.evidence_digest,observed_at:receipt.observed_at,…</code> |
-| `'recovery.stop.reconcile'` | action | 120 | <code>'recovery.stop.reconcile':async(input,context)=&gt;{</code> |
 
 ## services/hyperfide/src/recovery/workers.ts
 
@@ -5736,27 +4188,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `leaseMs` | function | 10 | <code>function leaseMs(value:unknown):number{if(typeof value!=='number'&#124;&#124;!Number.isInteger(value)&#124;&#124;value&lt;1000&#124;&#124;value&gt;300000)fail('RECOVERY_INPUT_INVALID','lease_ms must be an integer between 1000 and 300000…</code> |
 | `lockRequest` | function | 11 | <code>async function lockRequest(tx:RecoveryTransaction,scope:RecoveryScope,id:string):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
 | `recordInventory` | function | 17 | <code>async function recordInventory(tx:RecoveryTransaction,scope:RecoveryScope,lossId:string,input:unknown):Promise&lt;{observed:Record&lt;string,unknown&gt;&#91;&#93;;surviving:Record&lt;string,unknown&gt;&#91;&#93;}&gt;{</code> |
-| `reported` | variable | 20 | <code>const reported=new Map&lt;string,Record&lt;string,unknown&gt;&gt;();</code> |
-| `entry` | object | 32 | <code>const entry={resource_kind:debt.resource_kind,resource_id:debt.resource_id,observed_state:state,status:absent?'RESOLVED':'RECONCILING'};</code> |
 | `compatibility` | function | 38 | <code>async function compatibility(tx:RecoveryTransaction,scope:RecoveryScope,source:Record&lt;string,unknown&gt;,checkpointId:string,target:Record&lt;string,unknown&gt;):Promise&lt;{reasons:string&#91;&#93;;checkpoint:Record&lt;str…</code> |
 | `lineage` | function | 59 | <code>async function lineage(tx:RecoveryTransaction,scope:RecoveryScope,attempt:string):Promise&lt;{attempt:Record&lt;string,unknown&gt;;requests:Record&lt;string,unknown&gt;&#91;&#93;}&gt;{</code> |
 | `currentAuthority` | function | 67 | <code>async function currentAuthority(tx:RecoveryTransaction,scope:RecoveryScope,attempt:Record&lt;string,unknown&gt;,generation:string,boot:string,session:string):Promise&lt;{reason:string&#124;null;lease?:Record&lt;string…</code> |
 | `createComponent` | function | 80 | <code>export function createComponent(_context:ComponentContext):Component{</code> |
-| `'recovery.worker.describe'` | action | 82 | <code>'recovery.worker.describe':(input,context)=&gt;{record(input,&#91;&#93;);return {api_version:1,loss_revokes_compute:true,accepted_custody_survives:true,unknown_external_effects:'RECONCILE',automatic_replacement:…</code> |
-| `'recovery.worker.loss'` | action | 83 | <code>'recovery.worker.loss':async(input,context)=&gt;{</code> |
-| `result` | object | 112 | <code>const result={scope,attempt_id:attempt,compute_authority:&#91;'CURRENT','EXPIRED'&#93;.includes(String(row.compute_authority))?'REVOKED':row.compute_authority,preserved_submission_custody:custody.rows,qualifi…</code> |
-| `'recovery.worker.restoration.inspect'` | action | 118 | <code>'recovery.worker.restoration.inspect':async(input,context)=&gt;{const value=record(input,&#91;'scope','loss_operation_id'&#93;),scope=scopeOf(value.scope),id=uuid(value.loss_operation_id);return recoveryTransact…</code> |
-| `'recovery.worker.restore'` | action | 120 | <code>'recovery.worker.restore':async(input,context)=&gt;{</code> |
-| `target` | object | 125 | <code>const target={source_object_id:raw.source_object_id,input_packet_digest:digest(raw.input_packet_digest),environment_digest:digest(raw.environment_digest),native_session_id:raw.native_session_id===null…</code> |
-| `common` | object | 139 | <code>const common={request_id:id,task_id:source.task_id,source_attempt:{id:source.id,generation:source.generation,sandbox_id:source.sandbox_id,sandbox_boot_generation:source.sandbox_boot_generation,compute…</code> |
-| `held` | object | 142 | <code>const held={...common,state:'HELD',hold_reason:reasons.join(','),reasons,replacement_attempt:null,replacement_authorized:false,authority:'NONE',publication_authorized:false};</code> |
-| `ready` | object | 150 | <code>const ready={...common,state:'READY',transitions:&#91;String(request.state),'RESTORING','READY'&#93;,hold_reason:null,reasons:&#91;&#93;,</code> |
-| `'recovery.worker.enroll'` | action | 160 | <code>'recovery.worker.enroll':async(input,context)=&gt;{</code> |
-| `result` | object | 184 | <code>const result={input_digest:hash,request_id:id,attempt_id:attempt,attempt_generation:generation,session_id:session,sandbox_id:sandbox,slot_id:slot,sandbox_boot_generation:boot,lease_expires_at:clock.ex…</code> |
-| `'recovery.worker.renew'` | action | 190 | <code>'recovery.worker.renew':async(input,context)=&gt;{</code> |
-| `'recovery.worker.output'` | action | 206 | <code>'recovery.worker.output':async(input,context)=&gt;{</code> |
-| `entry` | object | 221 | <code>const entry={operation_id:operation,input_digest:hash,attempt_id:attempt,attempt_generation:generation,sandbox_boot_generation:boot,session_id:session,kind:value.kind,output_digest:output,disposition,…</code> |
-| `'recovery.worker.inventory'` | action | 227 | <code>'recovery.worker.inventory':(input,context)=&gt;{const scope=scopeOf(input);return recoveryTransaction(context,scope,tx=&gt;capability(context,'24.1','recovery.snapshots.v1',isRecoverySnapshotReader).read(t…</code> |
 
 ## services/hyperfide/src/release/readiness.ts
 
@@ -5770,23 +4205,13 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `values` | function | 25 | <code>function values(v:unknown,min=0,max=100000):unknown&#91;&#93;{if(!Array.isArray(v)&#124;&#124;v.length&lt;min&#124;&#124;v.length&gt;max)invalid('Invalid release inventory list');return v;}</code> |
 | `parse` | function | 26 | <code>function parse(value:unknown):ReleaseInventory{</code> |
 | `validateReadinessInventory` | function | 37 | <code>export function validateReadinessInventory(contract:ReleaseContract,value:unknown,evidence:ReadonlyMap&lt;string,VerifiedReleaseEvidence&gt;):RecordValue{</code> |
-| `used` | variable | 45 | <code>const used=new Set&lt;string&gt;();</code> |
-| `verified` | function | 46 | <code>const verified=(reference:string):VerifiedReleaseEvidence&#124;null=&gt;{</code> |
-| `resources` | variable | 71 | <code>const resources=new Map&lt;string,VerifiedReleaseEvidence&#91;'resources'&#93;&#91;number&#93;&gt;();</code> |
 | `CampaignReference` | interface | 88 | <code>interface CampaignReference{reference:string;evidence_root:string;campaign:string;receipt_id:string;receipt_digest:string;gate_kinds:string&#91;&#93;}</code> |
 | `protectedReleaseFile` | function | 89 | <code>async function protectedReleaseFile(filename:string,maximum:number):Promise&lt;Buffer&gt;{</code> |
 | `checkReleaseCampaign` | function | 130 | <code>export async function checkReleaseCampaign(evidenceRoot:string,campaign:string,receipt:string,context:Pick&lt;ComponentContext,'env'&#124;'signal'&gt;):Promise&lt;RecordValue&gt;{</code> |
 | `loadReleaseAdmissionIndex` | function | 146 | <code>export async function loadReleaseAdmissionIndex(context:Pick&lt;ComponentContext,'env'&gt;,scope:{organisation_id:string;run_id:string}):Promise&lt;CampaignReference&#91;&#93;&gt;{</code> |
 | `trustedEvidence` | function | 156 | <code>async function trustedEvidence(context:ComponentContext,scope:{organisation_id:string;run_id:string},references:string&#91;&#93;):Promise&lt;Map&lt;string,VerifiedReleaseEvidence&gt;&gt;{</code> |
-| `result` | variable | 160 | <code>const result=new Map&lt;string,VerifiedReleaseEvidence&gt;();</code> |
 | `assessReleaseReadiness` | function | 183 | <code>export async function assessReleaseReadiness(input:unknown,context:ComponentContext):Promise&lt;RecordValue&gt;{</code> |
-| `scope` | object | 185 | <code>const scope={organisation_id:i.principal.organisation_id,run_id:i.principal.run_id};</code> |
-| `url` | variable | 190 | <code>const url=new URL('../integration/closure.js',import.meta.url);</code> |
-| `guard` | action | 194 | <code>const observed=await context.resources.gateway.withPrimaryTransaction({signal:i.signal,guard:tx=&gt;i.guard(tx)},async tx=&gt;{</code> |
 | `sealReleaseReadiness` | function | 202 | <code>export async function sealReleaseReadiness(input:unknown,context:ComponentContext):Promise&lt;RecordValue&gt;{</code> |
-| `scope` | object | 204 | <code>const scope={organisation_id:i.principal.organisation_id,run_id:i.principal.run_id};</code> |
-| `record` | object | 209 | <code>const record={schema_version:1,kind:'release_readiness',scope,implementation_revision:inventory.implementation_revision,</code> |
-| `guard` | action | 224 | <code>return context.resources.gateway.withPrimaryTransaction({signal:i.signal,guard:tx=&gt;i.guard(tx)},async tx=&gt;{</code> |
 | `createComponent` | function | 240 | <code>export function createComponent(_context:ComponentContext):Component{</code> |
 | `pinnedCampaignManifest` | function | 244 | <code>export function pinnedCampaignManifest(receipt:unknown,bytes:Uint8Array):RecordValue{</code> |
 
@@ -5807,46 +4232,23 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `array` | function | 25 | <code>function array(value:unknown,min=0,max=100000):unknown&#91;&#93;{if(!Array.isArray(value)&#124;&#124;value.length&lt;min&#124;&#124;value.length&gt;max)invalid('Invalid contract list');return value;}</code> |
 | `task` | function | 26 | <code>function task(value:unknown):ReleaseTask{</code> |
 | `record` | function | 32 | <code>function record(value:unknown,label:string):Record&lt;string,unknown&gt;{if(!object(value))invalid('Invalid '+label);return value;}</code> |
-| `out` | object | 33 | <code>function textRecord(value:unknown,label:string):Record&lt;string,string&gt;{const r=record(value,label),out:Record&lt;string,string&gt;={};for(const&#91;k,v&#93;of Object.entries(r))out&#91;boundedText(k)&#93;=boundedText(v,1024…</code> |
 | `textRecord` | function | 33 | <code>function textRecord(value:unknown,label:string):Record&lt;string,string&gt;{const r=record(value,label),out:Record&lt;string,string&gt;={};for(const&#91;k,v&#93;of Object.entries(r))out&#91;boundedText(k)&#93;=boundedText(v,1024…</code> |
 | `falseFlag` | function | 34 | <code>function falseFlag(value:unknown,label:string):false{if(value!==false)invalid(label+' must not grant authority');return false;}</code> |
 | `reviewStates` | function | 35 | <code>function reviewStates(value:unknown):ReviewStates{</code> |
 | `sourcePin` | function | 46 | <code>function sourcePin(value:unknown):SourcePin{</code> |
 | `parseReleasePack` | function | 52 | <code>export function parseReleasePack(value:unknown):ReleaseContract{</code> |
-| `cases` | object | 54 | <code>const cases:ReleaseContract&#91;'cases'&#93;={};</code> |
-| `native` | object | 56 | <code>const native:Record&lt;string,string&#91;&#93;&gt;={};</code> |
 | `mapping` | function | 61 | <code>function mapping(value:unknown):ClauseMapping{</code> |
 | `validateTraceability` | function | 65 | <code>export function validateTraceability(contract:ReleaseContract,mappings:ClauseMapping&#91;&#93;=contract.mappings):RecordValue{</code> |
-| `pinned` | variable | 67 | <code>const tasks=new Map(contract.tasks.map(t=&gt;&#91;t.id,t&#93;)),cases=Object.keys(contract.cases),mapped=mappings.map(m=&gt;m.id),pinned=new Set(contract.source_pins.map(p=&gt;p.path));</code> |
-| `tasks` | variable | 67 | <code>const tasks=new Map(contract.tasks.map(t=&gt;&#91;t.id,t&#93;)),cases=Object.keys(contract.cases),mapped=mappings.map(m=&gt;m.id),pinned=new Set(contract.source_pins.map(p=&gt;p.path));</code> |
-| `active` | variable | 72 | <code>const referencedCases=new Set&lt;string&gt;(),visited=new Set&lt;string&gt;(),active=new Set&lt;string&gt;();</code> |
-| `referencedCases` | variable | 72 | <code>const referencedCases=new Set&lt;string&gt;(),visited=new Set&lt;string&gt;(),active=new Set&lt;string&gt;();</code> |
-| `visited` | variable | 72 | <code>const referencedCases=new Set&lt;string&gt;(),visited=new Set&lt;string&gt;(),active=new Set&lt;string&gt;();</code> |
-| `visit` | function | 73 | <code>const visit=(name:string):void=&gt;{</code> |
 | `PackSource` | interface | 114 | <code>export interface PackSource{root:string;origin:'IMPLEMENTED_REVISION'&#124;'CONTROLLED'}</code> |
 | `packSource` | function | 116 | <code>export function packSource(env:NodeJS.ProcessEnv=process.env):PackSource{</code> |
 | `publicFile` | function | 121 | <code>async function publicFile(relative:string,root:string):Promise&lt;Buffer&gt;{</code> |
 | `LoadedContract` | type | 127 | <code>type LoadedContract={contract:ReleaseContract;records:{path:string;sha256:string;size:number;content_base64:string}&#91;&#93;};</code> |
 | `loadReleaseContract` | function | 128 | <code>export async function loadReleaseContract(source:PackSource=packSource()):Promise&lt;LoadedContract&gt;{</code> |
 | `snapshotReleaseContract` | function | 132 | <code>export async function snapshotReleaseContract(source:PackSource=packSource()):Promise&lt;LoadedContract&gt;{</code> |
-| `read` | function | 133 | <code>const read=(relative:string):Promise&lt;Buffer&gt;=&gt;publicFile(relative,source.root);</code> |
-| `buffers` | variable | 135 | <code>const buffers=new Map&lt;string,Buffer&gt;();</code> |
-| `caseQualification` | object | 140 | <code>const clauses:string&#91;&#93;=&#91;&#93;,nativeCases:Record&lt;string,string&#91;&#93;&gt;={},taskStatus:Record&lt;string,string&gt;={},caseQualification:Record&lt;string,string&gt;={};let section='',authorized:boolean&#124;null=null;</code> |
-| `nativeCases` | object | 140 | <code>const clauses:string&#91;&#93;=&#91;&#93;,nativeCases:Record&lt;string,string&#91;&#93;&gt;={},taskStatus:Record&lt;string,string&gt;={},caseQualification:Record&lt;string,string&gt;={};let section='',authorized:boolean&#124;null=null;</code> |
-| `taskStatus` | object | 140 | <code>const clauses:string&#91;&#93;=&#91;&#93;,nativeCases:Record&lt;string,string&#91;&#93;&gt;={},taskStatus:Record&lt;string,string&gt;={},caseQualification:Record&lt;string,string&gt;={};let section='',authorized:boolean&#124;null=null;</code> |
-| `cases` | object | 157 | <code>const cases:ReleaseContract&#91;'cases'&#93;={};</code> |
-| `review_states` | object | 165 | <code>const review_states:ReviewStates={</code> |
-| `unsigned` | object | 169 | <code>const unsigned={clauses:clauses.sort(),tasks,cases,native_case_requirements:nativeCases,mappings,source_pins:sourcePins,review_states};</code> |
-| `contract` | object | 170 | <code>const contract:ReleaseContract={...unsigned,contract_digest:contentDigest(unsigned)};</code> |
 | `traceabilityReceipt` | function | 174 | <code>export async function traceabilityReceipt(input:unknown):Promise&lt;RecordValue&gt;{</code> |
-| `receipt` | object | 178 | <code>const receipt={schema_version:1,kind:'traceability_validation',contract_digest:loaded.contract.contract_digest,mapping_digest:contentDigest(loaded.contract.mappings),</code> |
 | `archiveTraceability` | function | 182 | <code>export async function archiveTraceability(input:unknown,context:ComponentContext):Promise&lt;RecordValue&gt;{</code> |
-| `archive` | object | 186 | <code>const archive={schema_version:1,pack_origin:packSource().origin,contract:loaded.contract,validation:receipt,public_records:loaded.records,review_states:loaded.contract.review_states,</code> |
 | `checkReleasePack` | function | 194 | <code>export async function checkReleasePack(input:unknown):Promise&lt;RecordValue&gt;{</code> |
 | `createComponent` | function | 203 | <code>export function createComponent(_context:ComponentContext):Component{</code> |
-| `'release.traceability.contract'` | action | 205 | <code>'release.traceability.contract':async(input)=&gt;{</code> |
-| `'release.traceability.validate'` | action | 211 | <code>'release.traceability.validate':async(input)=&gt;traceabilityReceipt(input),</code> |
-| `'release.traceability.check'` | action | 212 | <code>'release.traceability.check':async(input)=&gt;checkReleasePack(input),</code> |
 
 ## services/hyperfide/src/review/contracts.ts
 
@@ -5860,21 +4262,15 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `ContractDefinition` | interface | 11 | <code>interface ContractDefinition {</code> |
 | `endpoint` | function | 15 | <code>function endpoint(value:unknown):Endpoint{</code> |
 | `definition` | function | 19 | <code>function definition(value:unknown):ContractDefinition{</code> |
-| `result` | object | 23 | <code>const result:ContractDefinition&#91;'facets'&#93;={};</code> |
 | `publishContract` | function | 40 | <code>export async function publishContract(context:ComponentContext,value:unknown):Promise&lt;unknown&gt;{</code> |
 | `GraphCapability` | interface | 65 | <code>interface GraphCapability {traverse(input:unknown,invocation:unknown):Promise&lt;unknown&gt;;status(input:unknown,invocation:unknown):Promise&lt;unknown&gt;}</code> |
-| `status` | method | 65 | <code>interface GraphCapability {traverse(input:unknown,invocation:unknown):Promise&lt;unknown&gt;;status(input:unknown,invocation:unknown):Promise&lt;unknown&gt;}</code> |
 | `traverse` | method | 65 | <code>interface GraphCapability {traverse(input:unknown,invocation:unknown):Promise&lt;unknown&gt;;status(input:unknown,invocation:unknown):Promise&lt;unknown&gt;}</code> |
+| `status` | method | 65 | <code>interface GraphCapability {traverse(input:unknown,invocation:unknown):Promise&lt;unknown&gt;;status(input:unknown,invocation:unknown):Promise&lt;unknown&gt;}</code> |
 | `graphCapability` | function | 66 | <code>function graphCapability(value:unknown):value is GraphCapability{</code> |
 | `analyseContractImpact` | function | 69 | <code>export async function analyseContractImpact(context:ComponentContext,value:unknown):Promise&lt;unknown&gt;{</code> |
-| `consumers` | variable | 83 | <code>const consumers=new Map&lt;string,AffectedConsumer&gt;();</code> |
-| `declare` | function | 84 | <code>const declare=(consumer:Endpoint,origin:ConsumerOrigin)=&gt;{</code> |
-| `producers` | object | 132 | <code>const producers={baseline:data.before.definition.producer,candidate:data.after.definition.producer};</code> |
 | `ContractCoverageBinding` | interface | 146 | <code>export interface ContractCoverageBinding {repository_id:string;source_object_id:string;candidate_digest?:string;input_manifest_digest?:string}</code> |
 | `inspectContractCoverage` | function | 147 | <code>export async function inspectContractCoverage(db:ReviewDb,binding:ReviewScope,contractIds:string&#91;&#93;,source:ContractCoverageBinding):Promise&lt;unknown&gt;{</code> |
-| `seen` | variable | 165 | <code>const expected=&#91;...new Set(contract.rows&#91;0&#93;!.definition.scenario_templates.flatMap(scenario=&gt;scenario.assertion_ids))&#93;,seen=new Set&lt;string&gt;(),admitted:Array&lt;Record&lt;string,unknown&gt;&gt;=&#91;&#93;;</code> |
 | `createComponent` | function | 191 | <code>export function createComponent(_context:ComponentContext):Component{</code> |
-| `guarded` | function | 192 | <code>const guarded=(fn:(ctx:ComponentContext,input:unknown)=&gt;Promise&lt;unknown&gt;)=&gt;async(input:unknown,ctx:ComponentContext)=&gt;{try{return await fn(ctx,input);}catch(error){throw reviewError(error);}};</code> |
 
 ## services/hyperfide/src/review/coverage.ts
 
@@ -5901,10 +4297,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `ReviewGateway` | interface | 70 | <code>interface ReviewGateway {</code> |
 | `withPrimaryTransaction` | method | 71 | <code>withPrimaryTransaction&lt;T&gt;(options:{timeoutMs:number;signal:AbortSignal;guard:(db:ReviewDb)=&gt;Promise&lt;void&gt;},</code> |
 | `authorizeReview` | function | 74 | <code>export function authorizeReview(context:ComponentContext,binding:ReviewScope,roles?:readonly string&#91;&#93;):</code> |
-| `actual` | object | 81 | <code>const actual={organisation_id:uuid(invocation.principal.organisation_id),run_id:uuid(invocation.principal.run_id)};</code> |
 | `lockReviewDisposition` | function | 91 | <code>export async function lockReviewDisposition(db:ReviewDb,binding:ReviewScope,exclusive=false):Promise&lt;void&gt;{</code> |
 | `transaction` | function | 95 | <code>export async function transaction&lt;T&gt;(context:ComponentContext,binding:ReviewScope,</code> |
-| `guard` | action | 100 | <code>guard:async db=&gt;{await lockReviewDisposition(db,binding,exclusive);await trusted.invocation.guard(db);}},async db=&gt;{</code> |
 | `reviewError` | function | 112 | <code>export function reviewError(error:unknown):FoundationError{</code> |
 | `Watcher` | interface | 119 | <code>interface Watcher {watcher_id:string;reviewer_session_id:string;rubric_digest:string;review_class:string;path_prefixes:string&#91;&#93;}</code> |
 | `WatcherPolicy` | interface | 120 | <code>interface WatcherPolicy {revision:string;mode:'ALL_COMMITS'&#124;'SPECIALIST';watchers:Watcher&#91;&#93;}</code> |
@@ -5914,21 +4308,15 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `repositoryConfig` | function | 171 | <code>async function repositoryConfig(env:Readonly&lt;NodeJS.ProcessEnv&gt;,repositoryId:string):Promise&lt;RepositoryConfig&gt;{</code> |
 | `git` | function | 189 | <code>async function git(repository:string,args:string&#91;&#93;,acceptable:number&#91;&#93;=&#91;0&#93;):Promise&lt;string&gt;{</code> |
 | `heads` | function | 203 | <code>async function heads(config:RepositoryConfig):Promise&lt;Record&lt;string,string&gt;&gt;{</code> |
-| `result` | object | 204 | <code>const result:Record&lt;string,string&gt;={};</code> |
 | `Commit` | interface | 208 | <code>interface Commit {source_object_id:string;tree_object_id:string;parent_objects:string&#91;&#93;;changed_paths:string&#91;&#93;;attribution:Record&lt;string,unknown&gt;}</code> |
 | `discoverReviewCommits` | function | 209 | <code>export async function discoverReviewCommits(context:ComponentContext,value:unknown):Promise&lt;unknown&gt;{</code> |
-| `known` | variable | 223 | <code>const known=new Set(existing.rows.map(row=&gt;row.source_object_id));</code> |
-| `taskKeys` | variable | 226 | <code>const taskKeys=new Set(tasks.rows.map(task=&gt;task.task_key));</code> |
 | `dependencyDigest` | function | 285 | <code>export async function dependencyDigest(db:ReviewDb,binding:ReviewScope):Promise&lt;string&gt;{</code> |
 | `relevantContracts` | function | 290 | <code>export async function relevantContracts(db:ReviewDb,binding:ReviewScope,repositories:string&#91;&#93;):Promise&lt;Array&lt;{id:string;revision:string;criteria_digest:string;definition:Record&lt;string,unknown&gt;}&gt;&gt;{</code> |
 | `reviewTaskVersions` | function | 302 | <code>export async function reviewTaskVersions(db:ReviewDb,binding:ReviewScope,sources:unknown&#91;&#93;):Promise&lt;Array&lt;Record&lt;string,unknown&gt;&gt;&gt;{</code> |
 | `reviewInputCurrent` | function | 306 | <code>export async function reviewInputCurrent(db:ReviewDb,binding:ReviewScope,snapshot:Record&lt;string,unknown&gt;):Promise&lt;boolean&gt;{</code> |
 | `ReviewCoverageSummary` | interface | 339 | <code>export interface ReviewCoverageSummary {</code> |
 | `inspectReviewCoverage` | function | 344 | <code>export async function inspectReviewCoverage(db:ReviewDb,binding:ReviewScope,query:ReviewCoverageQuery):Promise&lt;ReviewCoverageSummary&gt;{</code> |
-| `freshness` | variable | 370 | <code>const freshness=new Map&lt;string,boolean&gt;();</code> |
-| `result` | object | 389 | <code>missing,receipt_ids:receipts,limitations:&#91;...new Set(limitations)&#93;,input_bindings:(()=&gt;{const row=rows.rows.find(row=&gt;row.snapshot&amp;&amp;row.input_manifest_digest===query.input_manifest_digest&amp;&amp;freshness.g…</code> |
 | `createComponent` | function | 391 | <code>export function createComponent(_context:ComponentContext):Component{</code> |
-| `guarded` | function | 392 | <code>const guarded=(fn:(context:ComponentContext,input:unknown)=&gt;Promise&lt;unknown&gt;)=&gt;</code> |
 | `ReviewControl` | interface | 407 | <code>export interface ReviewControl {</code> |
 | `assertReviewExecutionAllowed` | function | 411 | <code>export async function assertReviewExecutionAllowed(context:ComponentContext,db:ReviewDb,binding:ReviewScope,</code> |
 | `reviewControlMatches` | function | 434 | <code>export async function reviewControlMatches(db:ReviewDb,binding:ReviewScope,control:ReviewControl,</code> |
@@ -5944,7 +4332,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `Source` | interface | 7 | <code>interface Source {repository_id:string;source_object_id:string}</code> |
 | `sources` | function | 8 | <code>function sources(value:unknown):Source&#91;&#93;{</code> |
 | `snapshot` | function | 14 | <code>async function snapshot(db:ReviewDb,binding:ReviewScope,candidateDigest:string,value:unknown,context?:ComponentContext):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
-| `result` | object | 49 | <code>const result={schema_version:2,task_versions:await reviewTaskVersions(db,binding,sourceSet),task_attribution_complete:await reviewAttributionComplete(db,binding,sourceSet),candidate_digest:candidateDi…</code> |
 | `buildReviewSnapshot` | function | 62 | <code>export async function buildReviewSnapshot(db:ReviewDb,binding:ReviewScope,candidateDigest:string,value:unknown,context?:ComponentContext):Promise&lt;Record&lt;string,unknown&gt;&gt;{return snapshot(db,binding,can…</code> |
 | `bindReviewInputs` | function | 63 | <code>export async function bindReviewInputs(context:ComponentContext,value:unknown):Promise&lt;unknown&gt;{</code> |
 | `Observation` | interface | 94 | <code>interface Observation {evidence_id:string;origin_task_id:string;origin_attempt_id:string;contract_id:string&#124;null;failure_fingerprint:string;summary:string;severity:string}</code> |
@@ -5953,12 +4340,9 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `REVIEW_CERTIFICATION` | object | 111 | <code>export const REVIEW_CERTIFICATION={certifies_correctness:false,decision_model_role:'ADVISORY_RISK_RANK_ONLY',coverage_authority:'ASSIGNED_INDEPENDENT_WATCHER_RECEIPT'};</code> |
 | `refuseDecisionCertification` | function | 112 | <code>function refuseDecisionCertification(value:unknown):void{</code> |
 | `submitReviewReceipt` | function | 116 | <code>export async function submitReviewReceipt(context:ComponentContext,value:unknown):Promise&lt;unknown&gt;{</code> |
-| `evidenceById` | variable | 160 | <code>const evidenceById=new Map(evidence.rows.map(row=&gt;&#91;row.id,row&#93;));</code> |
 | `claimReviewObligation` | function | 188 | <code>export async function claimReviewObligation(context:ComponentContext,value:unknown):Promise&lt;unknown&gt;{</code> |
 | `reconcileReviewInputs` | function | 208 | <code>export async function reconcileReviewInputs(db:ReviewDb,binding:ReviewScope,afterId:string&#124;null=null,limit=100):Promise&lt;unknown&gt;{</code> |
-| `cache` | variable | 213 | <code>const cache=new Map&lt;string,boolean&gt;(),changed:string&#91;&#93;=&#91;&#93;;</code> |
 | `createComponent` | function | 222 | <code>export function createComponent(_context:ComponentContext):Component{</code> |
-| `guarded` | function | 223 | <code>const guarded=(fn:(ctx:ComponentContext,input:unknown)=&gt;Promise&lt;unknown&gt;)=&gt;async(input:unknown,ctx:ComponentContext)=&gt;{try{return await fn(ctx,input);}catch(error){throw reviewError(error);}};</code> |
 | `fenceReviewObligations` | function | 248 | <code>export async function fenceReviewObligations(db:ReviewDb,binding:ReviewScope,control:ReviewControl):Promise&lt;unknown&gt;{</code> |
 | `renewReviewObligation` | function | 262 | <code>export async function renewReviewObligation(context:ComponentContext,value:unknown):Promise&lt;unknown&gt;{</code> |
 
@@ -5982,7 +4366,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `projectionGuidance` | function | 60 | <code>function projectionGuidance(value:unknown):Data&#91;&#93;{</code> |
 | `uncertainGuidance` | function | 71 | <code>function uncertainGuidance(rows:Data&#91;&#93;):Data&#91;&#93;{</code> |
 | `planReproduction` | function | 76 | <code>export async function planReproduction(ctx:ComponentContext,value:unknown):Promise&lt;unknown&gt;{</code> |
-| `snapshot` | object | 106 | <code>const snapshot:Data={...current,plan_id:planId,variant:index===0?'ORIGINAL':'REPAIRED',candidate_input_manifest_digest:candidateInput,</code> |
 | `lockJob` | function | 121 | <code>async function lockJob(db:ReviewDb,binding:ReviewScope,id:string):Promise&lt;Data&gt;{</code> |
 | `assertCausalRepairCustody` | function | 126 | <code>async function assertCausalRepairCustody(db:ReviewDb,binding:ReviewScope,causalId:string,record:Data):Promise&lt;void&gt;{</code> |
 | `currentJob` | function | 132 | <code>async function currentJob(db:ReviewDb,binding:ReviewScope,job:Data):Promise&lt;void&gt;{</code> |
@@ -5990,34 +4373,20 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `ownerJob` | function | 169 | <code>function ownerJob(ctx:ComponentContext,binding:ReviewScope,job:Data,generation:string):void{</code> |
 | `bytesDigest` | function | 174 | <code>function bytesDigest(bytes:Buffer):string{return 'sha256:'+createHash('sha256').update(bytes).digest('hex');}</code> |
 | `upload` | function | 175 | <code>async function upload(ctx:ComponentContext,binding:ReviewScope,bytes:Buffer):Promise&lt;Data&gt;{</code> |
-| `common` | object | 177 | <code>const store=capability&lt;ArtifactStore&gt;(ctx,'15.2','artifact.store.v1',&#91;'invoke'&#93;),common={...binding,retention_class:'RUN',retention_until:null,retention_hold:false},chunks:Data&#91;&#93;=&#91;&#93;;</code> |
 | `artifactRefCurrent` | function | 192 | <code>async function artifactRefCurrent(db:ReviewDb,binding:ReviewScope,ref:Data):Promise&lt;boolean&gt;{</code> |
 | `captured` | function | 201 | <code>function captured(value:unknown):Buffer{</code> |
 | `renewReproduction` | function | 209 | <code>export async function renewReproduction(ctx:ComponentContext,value:unknown):Promise&lt;unknown&gt;{</code> |
 | `ReproductionJobInputRequest` | interface | 228 | <code>export interface ReproductionJobInputRequest {</code> |
 | `ReproductionExpectedInputs` | interface | 231 | <code>export interface ReproductionExpectedInputs {</code> |
 | `readReproductionJobInputs` | function | 247 | <code>export async function readReproductionJobInputs(tx:PrimaryTransaction,invocation:InvocationContext,request:ReproductionJobInputRequest):Promise&lt;ReproductionExpectedInputs&gt;{</code> |
-| `binding` | object | 249 | <code>const p=invocation.principal,binding={organisation_id:uuid(p.organisation_id),run_id:uuid(p.run_id)};</code> |
-| `roles` | object | 258 | <code>const snapshot=job.snapshot,roles:Data={};</code> |
 | `measuredReproductionInputs` | function | 273 | <code>async function measuredReproductionInputs(ctx:ComponentContext,db:ReviewDb,binding:ReviewScope,job:Data):Promise&lt;Data&gt;{</code> |
-| `roles` | object | 279 | <code>const validation=observed?.input_validation,roles:Data={};</code> |
 | `executeReproduction` | function | 285 | <code>export async function executeReproduction(ctx:ComponentContext,value:unknown):Promise&lt;unknown&gt;{</code> |
-| `measuredJob` | object | 313 | <code>const measuredJob={...job,runner_session_id:registered.session_id};</code> |
-| `leaseAbort` | variable | 322 | <code>const leaseAbort=new AbortController(),signal=AbortSignal.any(&#91;trusted.invocation.signal,leaseAbort.signal&#93;);</code> |
-| `physicalMetadata` | object | 346 | <code>const physicalMetadata={...physical,input_validation:prepared.inputValidation,requested_cwd:'.',verified_workspace_path:prepared.job.workspace_path,stdout:{digest:out.content_digest,size_bytes:String(…</code> |
-| `receiptBody` | object | 353 | <code>const receiptBody={schema_version:1,job_id:id,lease_generation:generation,candidate_digest:prepared.job.candidate_digest,input_manifest_digest:prepared.job.input_manifest_digest,</code> |
-| `result` | object | 375 | <code>const result={...receiptBody,receipt_artifact:receiptArtifact,evidence_ids:&#91;evidenceId&#93;};</code> |
-| `body` | object | 387 | <code>function receiptManifestDigest(result:Data):string{const body={...result};delete body.evidence_ids;delete body.receipt_artifact;return hash(body);}</code> |
 | `receiptManifestDigest` | function | 387 | <code>function receiptManifestDigest(result:Data):string{const body={...result};delete body.evidence_ids;delete body.receipt_artifact;return hash(body);}</code> |
 | `inspectReproduction` | function | 388 | <code>export async function inspectReproduction(db:ReviewDb,binding:ReviewScope,planId:string):Promise&lt;unknown&gt;{</code> |
-| `results` | object | 397 | <code>const results:Data={};</code> |
-| `receiptBytes` | object | 415 | <code>const receiptBytes={...result};delete receiptBytes.evidence_ids;delete receiptBytes.receipt_artifact;</code> |
 | `fenceReproductionJobs` | function | 439 | <code>export async function fenceReproductionJobs(db:ReviewDb,binding:ReviewScope,control:ReviewControl):Promise&lt;unknown&gt;{</code> |
 | `integratedSource` | function | 453 | <code>async function integratedSource(db:ReviewDb,binding:ReviewScope,record:Data,registry:Data,operationId:string,candidateDigest:string):Promise&lt;Data&gt;{</code> |
 | `planCurrentSourceReproduction` | function | 465 | <code>export async function planCurrentSourceReproduction(ctx:ComponentContext,value:unknown):Promise&lt;unknown&gt;{</code> |
-| `snapshot` | object | 491 | <code>const snapshot:Data={...current,plan_id:planId,plan_kind:'CURRENT_SOURCE',variant:'REPAIRED',causal_plan_id:causalId,historical_original_job_id:original.job_id,historical_original_receipt_id:original.…</code> |
 | `createComponent` | function | 506 | <code>export function createComponent(context:ComponentContext):Component{</code> |
-| `guarded` | function | 508 | <code>const guarded=(fn:(ctx:ComponentContext,input:unknown)=&gt;Promise&lt;unknown&gt;)=&gt;async(input:unknown,ctx:ComponentContext)=&gt;{try{return await fn(ctx,input);}catch(error){throw reviewError(error);}};</code> |
 
 ## services/hyperfide/src/runner/bridge.ts
 
@@ -6047,12 +4416,12 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `isResources` | function | 80 | <code>const isResources=(v:unknown):v is Resources=&gt;object(v)&amp;&amp;typeof v.assertJobReservation==='function'&amp;&amp;typeof v.readJobAllocation==='function';</code> |
 | `isProvider` | function | 81 | <code>const isProvider=(v:unknown):v is ProviderExecution=&gt;object(v)&amp;&amp;typeof v.executeBound==='function'&amp;&amp;typeof v.registerRunnerBindingVerifier==='function';</code> |
 | `RunnerPreparation` | interface | 82 | <code>export interface RunnerPreparation {prepare(tx:PrimaryTransaction,i:InvocationContext,plan:RunnerPreparationPlan):Promise&lt;RunnerRemotePermit&gt;;execute(permit:RunnerRemotePermit,signal:AbortSignal):Prom…</code> |
-| `assertJobAdmission` | method | 82 | <code>export interface RunnerPreparation {prepare(tx:PrimaryTransaction,i:InvocationContext,plan:RunnerPreparationPlan):Promise&lt;RunnerRemotePermit&gt;;execute(permit:RunnerRemotePermit,signal:AbortSignal):Prom…</code> |
-| `execute` | method | 82 | <code>export interface RunnerPreparation {prepare(tx:PrimaryTransaction,i:InvocationContext,plan:RunnerPreparationPlan):Promise&lt;RunnerRemotePermit&gt;;execute(permit:RunnerRemotePermit,signal:AbortSignal):Prom…</code> |
 | `prepare` | method | 82 | <code>export interface RunnerPreparation {prepare(tx:PrimaryTransaction,i:InvocationContext,plan:RunnerPreparationPlan):Promise&lt;RunnerRemotePermit&gt;;execute(permit:RunnerRemotePermit,signal:AbortSignal):Prom…</code> |
-| `readReceipt` | method | 84 | <code>verifyReceipt(bytes:Buffer,plan:PreparationReceiptPlan):VerifiedPreparationReceipt;recordReceipt(tx:PrimaryTransaction,i:InvocationContext,input:{operation_id:string;receipt_base64:string}):Promise&lt;Re…</code> |
-| `recordReceipt` | method | 84 | <code>verifyReceipt(bytes:Buffer,plan:PreparationReceiptPlan):VerifiedPreparationReceipt;recordReceipt(tx:PrimaryTransaction,i:InvocationContext,input:{operation_id:string;receipt_base64:string}):Promise&lt;Re…</code> |
+| `execute` | method | 82 | <code>export interface RunnerPreparation {prepare(tx:PrimaryTransaction,i:InvocationContext,plan:RunnerPreparationPlan):Promise&lt;RunnerRemotePermit&gt;;execute(permit:RunnerRemotePermit,signal:AbortSignal):Prom…</code> |
+| `assertJobAdmission` | method | 82 | <code>export interface RunnerPreparation {prepare(tx:PrimaryTransaction,i:InvocationContext,plan:RunnerPreparationPlan):Promise&lt;RunnerRemotePermit&gt;;execute(permit:RunnerRemotePermit,signal:AbortSignal):Prom…</code> |
 | `verifyReceipt` | method | 84 | <code>verifyReceipt(bytes:Buffer,plan:PreparationReceiptPlan):VerifiedPreparationReceipt;recordReceipt(tx:PrimaryTransaction,i:InvocationContext,input:{operation_id:string;receipt_base64:string}):Promise&lt;Re…</code> |
+| `recordReceipt` | method | 84 | <code>verifyReceipt(bytes:Buffer,plan:PreparationReceiptPlan):VerifiedPreparationReceipt;recordReceipt(tx:PrimaryTransaction,i:InvocationContext,input:{operation_id:string;receipt_base64:string}):Promise&lt;Re…</code> |
+| `readReceipt` | method | 84 | <code>verifyReceipt(bytes:Buffer,plan:PreparationReceiptPlan):VerifiedPreparationReceipt;recordReceipt(tx:PrimaryTransaction,i:InvocationContext,input:{operation_id:string;receipt_base64:string}):Promise&lt;Re…</code> |
 | `requireRunnerPreparation` | function | 85 | <code>export function requireRunnerPreparation(ctx:ComponentContext):RunnerPreparation{return ctx.dependencies.require('12.4','runner.preparation.v1',(v:unknown):v is RunnerPreparation=&gt;object(v)&amp;&amp;typeof v.…</code> |
 | `requireRunnerRemote` | function | 86 | <code>export function requireRunnerRemote(ctx:ComponentContext):RunnerRemote {</code> |
 | `runnerCanonical` | function | 89 | <code>export function runnerCanonical(v:unknown):string {</code> |
@@ -6063,9 +4432,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `readRunnerBinding` | function | 105 | <code>export async function readRunnerBinding(tx:PrimaryTransaction,scope:{organisation_id:string;run_id:string;session_id:string}):Promise&lt;Binding&gt; {</code> |
 | `readRunnerPreparationBinding` | function | 122 | <code>export async function readRunnerPreparationBinding(tx:PrimaryTransaction,scope:{organisation_id:string;run_id:string;session_id:string}):Promise&lt;Binding&gt; {</code> |
 | `readRunnerReadiness` | function | 140 | <code>export async function readRunnerReadiness(tx:PrimaryTransaction,r:Binding):Promise&lt;Record&lt;string,any&gt;&gt; {</code> |
-| `request` | object | 141 | <code>const request={organisation_id:r.organisation_id,run_id:r.run_id,sandbox_id:r.sandbox_id,boot_generation:r.boot_generation,slot_id:r.slot_id,boot_preparation_digest:String(r.boot_preparation_digest),p…</code> |
 | `observe` | function | 145 | <code>async function observe(tx:PrimaryTransaction,v:Record&lt;string,unknown&gt;,i:InvocationContext):Promise&lt;unknown&gt; {</code> |
-| `readinessRequest` | object | 154 | <code>const readinessRequest={organisation_id:p.organisation_id,run_id:p.run_id,sandbox_id:p.sandbox_id!,boot_generation:p.boot_generation!,slot_id:v.slot_id,boot_preparation_digest:String(seed.preparation_…</code> |
 | `RunnerJobNamespace` | type | 166 | <code>export type RunnerJobNamespace='QUALIFICATION'&#124;'REPRODUCTION'&#124;'CANDIDATE'&#124;'CHECKPOINT'&#124;'PREWARM';</code> |
 | `RunnerPreparationJobBinding` | interface | 167 | <code>export interface RunnerPreparationJobBinding {</code> |
 | `RunnerPreparationAdmission` | interface | 170 | <code>export interface RunnerPreparationAdmission {</code> |
@@ -6074,44 +4441,16 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `RunnerExpectedInputs` | interface | 178 | <code>export interface RunnerExpectedInputs {</code> |
 | `RunnerInputReader` | type | 188 | <code>export type RunnerInputReader=(tx:PrimaryTransaction,i:InvocationContext,request:RunnerEnvironmentRequest)=&gt;Promise&lt;RunnerExpectedInputs&#124;null&gt;;</code> |
 | `verifyEnvironment` | function | 189 | <code>async function verifyEnvironment(tx:PrimaryTransaction,i:InvocationContext,v:RunnerEnvironmentRequest,</code> |
-| `descriptor` | object | 214 | <code>const descriptor={status:'VERIFIED',namespace,job_id:v.job_id,lease_generation:expected.lease_generation??null,</code> |
 | `createComponent` | function | 229 | <code>export async function createComponent(ctx:ComponentContext):Promise&lt;Component&gt; {</code> |
-| `readers` | variable | 231 | <code>const readers=new Map&lt;RunnerJobNamespace,RunnerInputReader&gt;();</code> |
-| `admissionReaders` | variable | 232 | <code>const admissionReaders=new Map&lt;RunnerJobNamespace,RunnerPreparationAdmissionReader&gt;();</code> |
-| `registerPreparationAdmissionReader` | action | 234 | <code>registerPreparationAdmissionReader:(namespace:RunnerJobNamespace,reader:RunnerPreparationAdmissionReader)=&gt;{</code> |
-| `admitPreparation` | action | 238 | <code>admitPreparation:async(tx:PrimaryTransaction,i:InvocationContext,request:RunnerPreparationPlan)=&gt;{</code> |
-| `verify` | action | 244 | <code>},verify:(tx:PrimaryTransaction,i:InvocationContext,v:RunnerEnvironmentRequest)=&gt;verifyEnvironment(tx,i,v,readers),</code> |
-| `registerInputReader` | action | 245 | <code>registerInputReader:(namespace:RunnerJobNamespace,reader:RunnerInputReader)=&gt;{</code> |
-| `lookupSlot` | action | 249 | <code>const registry=Object.freeze({lookup:readRunnerBinding,lookupSlot:async(tx:PrimaryTransaction,v:{organisation_id:string;run_id:string;sandbox_id:string;slot_id:string;boot_generation:string;preparatio…</code> |
-| `lookupSandbox` | action | 256 | <code>},lookupPreparation:readRunnerPreparationBinding,lookupSandbox:async(tx:PrimaryTransaction,v:{organisation_id:string;run_id:string;sandbox_id:string;boot_generation:string})=&gt;{</code> |
-| `verifyBinding` | action | 259 | <code>verifyBinding:async(tx:PrimaryTransaction,v:Record&lt;string,unknown&gt;)=&gt;{try{const r=await readRunnerBinding(tx,v as any);return {evidence_digest:r.observation_digest,observed_at:new Date(r.db_now).toISO…</code> |
-| `'runner.registry.observe'` | action | 261 | <code>'runner.registry.observe':(v,context)=&gt;identityTransaction(context,(tx,i)=&gt;{if(!object(v))fail('INVALID_REQUEST','Object required');return observe(tx as PrimaryTransaction,v,i);}),</code> |
-| `'runner.registry.prepare'` | action | 262 | <code>'runner.registry.prepare':(v,context)=&gt;identityTransaction(context,async(tx,i)=&gt;{</code> |
-| `closure` | variable | 274 | <code>const closure=new Set&lt;string&gt;();for(const module of item.sealing.module_closure){if(!object(module)&#124;&#124;!absolute(module.path)&#124;&#124;!digest(module.digest)&#124;&#124;closure.has(module.path))fail('INVALID_REQUEST','Ex…</code> |
-| `'runner.registry.describe'` | action | 289 | <code>'runner.registry.describe':async(_v,context)=&gt;{const i=invocationOf(context);return {protocol_version:1,organisation_id:i.principal.organisation_id,run_id:i.principal.run_id,authority:'OBSERVATION_ONL…</code> |
 | `approvedRecipePolicy` | function | 292 | <code>async function approvedRecipePolicy(ctx:ComponentContext,tx:PrimaryTransaction,i:InvocationContext,target?:Binding):Promise&lt;{digest:string;recipes:Record&lt;string,any&gt;}&gt; {</code> |
 | `permits` | variable | 306 | <code>const permits=new WeakMap&lt;object,{context:ComponentContext;plan:RunnerRemotePlan;binding:Binding;principal:Principal;invocation:InvocationContext;digest:string}&gt;();</code> |
 | `validatePlan` | function | 307 | <code>function validatePlan(plan:RunnerRemotePlan):void {</code> |
 | `runnerResultSigningBytes` | function | 311 | <code>export function runnerResultSigningBytes(org:string,run:string,op:string,plan:string,result:string):Buffer{return Buffer.from(&#96;HYPERFIDE-RUNNER-RESULT-V1&#92;n${org}&#92;n${run}&#92;n${op}&#92;n${plan}&#92;n${result}&#92;n&#96;)…</code> |
 | `resolveRunnerCapturedReference` | function | 315 | <code>export async function resolveRunnerCapturedReference(store:ArtifactStoreCapability,i:InvocationContext,ref:unknown):Promise&lt;CapturedBytes&gt; {</code> |
-| `scope` | object | 318 | <code>const scope={organisation_id:i.principal.organisation_id,run_id:i.principal.run_id};</code> |
-| `observe` | function | 319 | <code>const observe=async(action:string,id:string,expectedDigest:string,expectedSize?:string):Promise&lt;Record&lt;string,any&gt;&gt;=&gt;{</code> |
-| `objectBytes` | function | 324 | <code>const objectBytes=async(id:string,wanted:string,size:string):Promise&lt;Buffer&gt;=&gt;{</code> |
 | `decodeResult` | function | 348 | <code>async function decodeResult(row:Record&lt;string,any&gt;,store:ArtifactStoreCapability,i:InvocationContext,plan:RunnerRemotePlan):Promise&lt;RunnerRemoteResult&gt; {</code> |
 | `createRemoteComponent` | function | 372 | <code>export async function createRemoteComponent(ctx:ComponentContext):Promise&lt;Component&gt; {</code> |
-| `prepare` | action | 375 | <code>prepare:async(tx:PrimaryTransaction,i:InvocationContext,request:RunnerRemotePlan)=&gt;{</code> |
-| `recover` | action | 400 | <code>recover:async(tx:PrimaryTransaction,i:InvocationContext,plan:RunnerRemotePlan)=&gt;{</code> |
-| `execute` | action | 406 | <code>execute:async(permit:RunnerRemotePermit,signal:AbortSignal)=&gt;{</code> |
-| `cancel` | function | 420 | <code>await new Promise&lt;void&gt;((resolve,reject)=&gt;{const timer=setTimeout(done,250);function done(){signal.removeEventListener('abort',cancel);resolve();}function cancel(){clearTimeout(timer);reject(new Error…</code> |
 | `done` | function | 420 | <code>await new Promise&lt;void&gt;((resolve,reject)=&gt;{const timer=setTimeout(done,250);function done(){signal.removeEventListener('abort',cancel);resolve();}function cancel(){clearTimeout(timer);reject(new Error…</code> |
-| `assertPreparationJobAdmission` | function | 424 | <code>const assertPreparationJobAdmission=async(tx:PrimaryTransaction,i:InvocationContext,request:RunnerPreparationPlan):Promise&lt;void&gt;=&gt;{</code> |
-| `prepare` | action | 431 | <code>prepare:async(tx:PrimaryTransaction,i:InvocationContext,request:RunnerPreparationPlan)=&gt;{</code> |
-| `roles` | variable | 441 | <code>const roles=new Set&lt;string&gt;();for(const ref of request.staging){if(!object(ref)&#124;&#124;typeof ref.role!=='string'&#124;&#124;!ref.role&#124;&#124;ref.role.length&gt;128&#124;&#124;roles.has(ref.role)&#124;&#124;!uuid(ref.artifact_id)&#124;&#124;!&#91;'object','ma…</code> |
-| `trustedContext` | object | 456 | <code>const trustedContext:RunnerStagingReference={role:'readiness-context',artifact_id:recipe.readiness_context.artifact_id,storage_kind:'object',digest:recipe.readiness_context.digest,size_bytes:recipe.re…</code> |
-| `environment` | object | 465 | <code>const environment={LANG:'C.UTF-8',LC_ALL:'C.UTF-8'},plan:RunnerRemotePlan={operation_id:request.operation_id,session_id:request.session_id,repository_id:request.repository_id,reservation_id:request.re…</code> |
-| `plan` | object | 465 | <code>const environment={LANG:'C.UTF-8',LC_ALL:'C.UTF-8'},plan:RunnerRemotePlan={operation_id:request.operation_id,session_id:request.session_id,repository_id:request.repository_id,reservation_id:request.re…</code> |
-| `packet` | object | 471 | <code>const packet={job_class:'PREPARATION',preparation_request:structuredClone(request),request:plan,binding,allocation:pins},pin=hash(runnerCanonical(packet));</code> |
-| `'runner.job.claim'` | action | 480 | <code>'runner.job.claim':(v,context)=&gt;identityTransaction(context,async(tx,i)=&gt;{</code> |
+| `cancel` | function | 420 | <code>await new Promise&lt;void&gt;((resolve,reject)=&gt;{const timer=setTimeout(done,250);function done(){signal.removeEventListener('abort',cancel);resolve();}function cancel(){clearTimeout(timer);reject(new Error…</code> |
 
 ## services/hyperfide/src/runner/capture.ts
 
@@ -6123,14 +4462,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `putChunk` | method | 19 | <code>putChunk(i:InvocationContext,input:unknown):Promise&lt;Record&lt;string,unknown&gt;&gt;;</code> |
 | `isRunnerCaptureCapability` | function | 22 | <code>export function isRunnerCaptureCapability(v:unknown):v is RunnerCaptureCapability{return object(v)&amp;&amp;typeof v.putChunk==='function'&amp;&amp;typeof v.assertPublicationAllowed==='function';}</code> |
 | `stored` | function | 24 | <code>async function stored(store:ArtifactStoreCapability,i:InvocationContext,part:Buffer):Promise&lt;{artifact_id:string;digest:string}&gt;{</code> |
-| `scope` | object | 25 | <code>const scope={organisation_id:i.principal.organisation_id,run_id:i.principal.run_id},value=hash(part);</code> |
 | `createComponent` | function | 31 | <code>export function createComponent(ctx:ComponentContext):Component{</code> |
-| `guard` | action | 35 | <code>const transact=&lt;T&gt;(i:InvocationContext,op:(tx:PrimaryTransaction)=&gt;Promise&lt;T&gt;):Promise&lt;T&gt;=&gt;g.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal:i.signal,guard:tx=&gt;i.guard(tx)},tx=&gt;op(tx as Pri…</code> |
-| `transact` | function | 35 | <code>const transact=&lt;T&gt;(i:InvocationContext,op:(tx:PrimaryTransaction)=&gt;Promise&lt;T&gt;):Promise&lt;T&gt;=&gt;g.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal:i.signal,guard:tx=&gt;i.guard(tx)},tx=&gt;op(tx as Pri…</code> |
-| `putChunk` | function | 36 | <code>const putChunk=async(i:InvocationContext,v:unknown):Promise&lt;Record&lt;string,unknown&gt;&gt;=&gt;{</code> |
-| `scope` | object | 43 | <code>const p=i.principal,scope={organisation_id:p.organisation_id,run_id:p.run_id};</code> |
-| `act` | function | 78 | <code>const act=(op:(tx:PrimaryTransaction,i:InvocationContext,v:unknown)=&gt;Promise&lt;unknown&gt;)=&gt;(v:unknown,context:ComponentContext)=&gt;identityTransaction(context,(tx,i)=&gt;op(tx as unknown as PrimaryTransaction…</code> |
-| `'runner.capture.put'` | action | 84 | <code>'runner.capture.put':(v:unknown,context:ComponentContext)=&gt;putChunk(invocationOf(context),v),</code> |
 
 ## services/hyperfide/src/runner/dispatch.ts
 
@@ -6148,13 +4480,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `isRunnerDispatch` | function | 30 | <code>export function isRunnerDispatch(v:unknown):v is RunnerDispatch {</code> |
 | `requireRunnerDispatch` | function | 33 | <code>export function requireRunnerDispatch(ctx:ComponentContext):RunnerDispatch {</code> |
 | `createComponent` | function | 37 | <code>export function createComponent(ctx:ComponentContext):Component {</code> |
-| `registerPlanReader` | action | 41 | <code>registerPlanReader:(next:RunnerPlanReader)=&gt;{</code> |
-| `describe` | action | 45 | <code>describe:():ReturnType&lt;RunnerDispatch&#91;'describe'&#93;&gt;=&gt;({route_ready:!!reader&amp;&amp;uuid(consumer),status:reader&amp;&amp;uuid(consumer)?'READY':'NOT_READY',launch_authority:false,</code> |
-| `consume` | action | 47 | <code>consume:async(tx:PrimaryTransaction,i:InvocationContext,input:{event_id:string;attempt_count:string})=&gt;{</code> |
-| `scope` | object | 53 | <code>const scope={organisation_id:i.principal.organisation_id,run_id:i.principal.run_id};</code> |
-| `claim` | object | 54 | <code>const claim={...scope,event_id:input.event_id,consumer_id:consumer,attempt_count:input.attempt_count};</code> |
-| `'runner.dispatch.describe'` | action | 82 | <code>'runner.dispatch.describe':()=&gt;cap.describe(),</code> |
-| `'runner.dispatch.consume'` | action | 83 | <code>'runner.dispatch.consume':(v,context)=&gt;identityTransaction(context,(tx,i)=&gt;{</code> |
 
 ## services/hyperfide/src/runner/executor.ts
 
@@ -6183,43 +4508,23 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `configuration` | function | 57 | <code>async function configuration(ctx:ComponentContext):Promise&lt;{signers:Signer&#91;&#93;;concurrency:number}&gt;{</code> |
 | `currentSigner` | function | 71 | <code>function currentSigner(row:Record&lt;string,any&gt;&#124;undefined,s:Signer):row is Record&lt;string,any&gt;{</code> |
 | `authenticate` | function | 74 | <code>async function authenticate(authority:IdentityAuthority,signer:Signer,run:string,epoch:string,input:BoundProviderRequest,signal:AbortSignal):Promise&lt;InvocationContext&gt;{</code> |
-| `proof` | object | 77 | <code>const proof={id:signer.credential_id,time:String(Math.floor(Date.now()/1000)),nonce:randomUUID()};</code> |
 | `boundRequest` | function | 84 | <code>function boundRequest(binding:Record&lt;string,any&gt;,operation_id:string,argv:string&#91;&#93;,timeout_ms:number):BoundProviderRequest{</code> |
 | `jobRequest` | function | 88 | <code>function jobRequest(row:Job):BoundProviderRequest{</code> |
 | `decodeNative` | function | 93 | <code>function decodeNative(captured:CapturedProviderOutput):{raw:Buffer;digest:string;receipt:Record&lt;string,any&gt;}{</code> |
 | `capturedItem` | function | 101 | <code>function capturedItem(value:unknown):{base64:string;digest:string;size_bytes:string;complete:boolean;bytes:Buffer}{</code> |
 | `validateReceipt` | function | 106 | <code>function validateReceipt(row:Job,value:Record&lt;string,any&gt;):void{</code> |
-| `expected` | object | 108 | <code>const expected:Record&lt;string,unknown&gt;={operation_id:row.operation_id,organisation_id:row.organisation_id,run_id:row.run_id,session_id:row.session_id,repository_id:p.repository_id,sandbox_id:b.sandbox_…</code> |
 | `storeBytes` | function | 118 | <code>async function storeBytes(store:ArtifactStoreCapability,i:InvocationContext,bytes:Buffer):Promise&lt;ObjectReference&gt;{</code> |
-| `scope` | object | 119 | <code>const scope={organisation_id:i.principal.organisation_id,run_id:i.principal.run_id},chunks:Record&lt;string,unknown&gt;&#91;&#93;=&#91;&#93;;let offset=0;</code> |
 | `persistableResult` | function | 130 | <code>async function persistableResult(store:ArtifactStoreCapability,i:InvocationContext,row:Job,provider:ProviderResult,decoded:ReturnType&lt;typeof decodeNative&gt;):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
 | `wait` | function | 138 | <code>async function wait(ms:number,signal:AbortSignal):Promise&lt;void&gt;{</code> |
-| `cancel` | function | 139 | <code>if(signal.aborted)return;await new Promise&lt;void&gt;(resolve=&gt;{const timer=setTimeout(done,ms);function done(){signal.removeEventListener('abort',cancel);resolve();}function cancel(){clearTimeout(timer);d…</code> |
 | `done` | function | 139 | <code>if(signal.aborted)return;await new Promise&lt;void&gt;(resolve=&gt;{const timer=setTimeout(done,ms);function done(){signal.removeEventListener('abort',cancel);resolve();}function cancel(){clearTimeout(timer);d…</code> |
+| `cancel` | function | 139 | <code>if(signal.aborted)return;await new Promise&lt;void&gt;(resolve=&gt;{const timer=setTimeout(done,ms);function done(){signal.removeEventListener('abort',cancel);resolve();}function cancel(){clearTimeout(timer);d…</code> |
 | `retainedControlBinding` | function | 143 | <code>async function retainedControlBinding(tx:PrimaryTransaction,i:InvocationContext,session_id:string,launch_id:string):Promise&lt;Record&lt;string,any&gt;&gt;{</code> |
 | `controlRequest` | function | 155 | <code>function controlRequest(binding:Record&lt;string,any&gt;,input:NativeRunnerRequest):BoundProviderRequest{</code> |
-| `target` | object | 156 | <code>const target={state_dir:binding.state_dir,launch_id:binding.launch_id,attempt_id:binding.attempt_id,attempt_generation:String(binding.attempt_generation),sandbox_id:binding.sandbox_id,boot_id:binding.…</code> |
 | `NativeControlTarget` | interface | 159 | <code>export interface NativeControlTarget {readonly launch_id:string;readonly attempt_id:string;readonly attempt_generation:string;readonly sandbox_id:string;readonly boot_id:string;readonly boot_generatio…</code> |
 | `CONTROL_STATUS` | object | 162 | <code>const CONTROL_STATUS:Record&lt;string,readonly string&#91;&#93;&gt;={'runner.observe':&#91;'RUNNING','CONFIRMED_STOPPED','UNKNOWN','PAUSED','DRAINING','DRAINED','CANCELLED','UNRESOLVED'&#93;,'runner.stop':&#91;'CONFIRMED_STOPP…</code> |
 | `validateControlCleanup` | function | 163 | <code>function validateControlCleanup(receipt:Record&lt;string,unknown&gt;,action:NativeControlAction):void{</code> |
 | `validateNativeControlReceipt` | function | 171 | <code>export function validateNativeControlReceipt(value:unknown,target:NativeControlTarget,command_id?:string,action?:NativeControlAction):Record&lt;string,unknown&gt;{</code> |
 | `createComponent` | function | 188 | <code>export async function createComponent(ctx:ComponentContext):Promise&lt;Component&gt;{</code> |
-| `controller` | variable | 193 | <code>const config=await configuration(ctx),g=gatewayOf(ctx),controller=new AbortController(),signal=AbortSignal.any(&#91;ctx.signal,controller.signal&#93;);</code> |
-| `retainedRequests` | variable | 196 | <code>const retainedRequests=new WeakMap&lt;object,{invocation:InvocationContext;input:NativeRunnerRequest}&gt;();</code> |
-| `next` | function | 199 | <code>async function next(s:Signer):Promise&lt;Job&#124;null&gt;{return g.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal},async tx=&gt;{</code> |
-| `claim` | function | 204 | <code>async function claim(row:Job,s:Signer,i:InvocationContext):Promise&lt;string&#124;null&gt;{</code> |
-| `guard` | action | 205 | <code>return g.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal,guard:tx=&gt;i.guard(tx)},async tx=&gt;{</code> |
-| `execute` | function | 225 | <code>async function execute(row:Job,s:Signer):Promise&lt;void&gt;{</code> |
-| `guard` | action | 233 | <code>await g.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal,guard:tx=&gt;i.guard(tx)},async tx=&gt;{</code> |
-| `worker` | function | 247 | <code>async function worker(index:number):Promise&lt;void&gt;{let cursor=index;while(!signal.aborted){let found=false;</code> |
-| `invokeNativeRunner` | action | 252 | <code>const native:NativeRunnerCapability=Object.freeze({invokeNativeRunner:async(i:InvocationContext,input:NativeRunnerRequest,requestedSignal:AbortSignal)=&gt;{</code> |
-| `guard` | action | 256 | <code>const b=await g.withPrimaryTransaction&lt;Record&lt;string,any&gt;&gt;({timeoutMs:5000,signal:controlSignal,guard:tx=&gt;i.guard(tx)},async tx=&gt;{</code> |
-| `target` | object | 263 | <code>const target={state_dir:b.state_dir,launch_id:b.launch_id,attempt_id:b.attempt_id,attempt_generation:String(b.attempt_generation),sandbox_id:b.sandbox_id,boot_id:b.boot_id,boot_generation:String(b.boo…</code> |
-| `authenticatePlacementProbe` | action | 273 | <code>},authenticatePlacementProbe:async(i:InvocationContext,input:{probe_id:string},requestedSignal:AbortSignal)=&gt;{</code> |
-| `guard` | action | 287 | <code>const request=await g.withPrimaryTransaction&lt;BoundProviderRequest&gt;({timeoutMs:5000,signal:probeSignal,guard:tx=&gt;i.guard(tx)},async tx=&gt;{</code> |
-| `expected` | object | 292 | <code>const expected={component:i.payload.component,action:i.payload.action,payload_digest:i.operation.payload_digest,operation_id:i.operation.operation_id,credential_id:i.principal.credential_id,run_id:i.p…</code> |
-| `'runner.executor.describe'` | action | 320 | <code>return {apiVersion:1,capabilities:{'runner.native.v1':native},actions:{'runner.executor.describe':async(_input,context)=&gt;{assertInvocation(context.invocation);await authority.authorize(context.invocat…</code> |
-| `close` | action | 320 | <code>return {apiVersion:1,capabilities:{'runner.native.v1':native},actions:{'runner.executor.describe':async(_input,context)=&gt;{assertInvocation(context.invocation);await authority.authorize(context.invocat…</code> |
 
 ## services/hyperfide/src/runner/preparation_receipts.ts
 
@@ -6280,9 +4585,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `authorizeRunnerControl` | function | 82 | <code>export async function authorizeRunnerControl(tx:PrimaryTransaction,i:InvocationContext,v:unknown):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
 | `captures` | function | 98 | <code>async function captures(tx:PrimaryTransaction,s:{organisation_id:string;run_id:string},command:string):Promise&lt;Record&lt;string,any&gt;&#91;&#93;&gt;{</code> |
 | `outputsDurable` | function | 101 | <code>async function outputsDurable(tx:PrimaryTransaction,s:{organisation_id:string;run_id:string},row:Record&lt;string,any&gt;):Promise&lt;string&#91;&#93;&gt;{</code> |
-| `complete` | variable | 102 | <code>const complete=new Set((await captures(tx,s,row.command_id)).filter(c=&gt;c.state==='COMPLETE').map(c=&gt;c.name));</code> |
 | `reportRunnerControl` | function | 108 | <code>export async function reportRunnerControl(tx:PrimaryTransaction,i:InvocationContext,v:unknown):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
-| `report` | object | 124 | <code>const report={outcome:v.outcome,termination:v.termination,remaining_descendants:v.remaining_descendants,cleanup_complete:v.cleanup_complete,cleanup_debt:v.cleanup_debt,credential_revocation:v.credenti…</code> |
 | `inspectRunnerControl` | function | 131 | <code>export async function inspectRunnerControl(tx:PrimaryTransaction,i:InvocationContext,v:unknown):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
 | `registerRunnerWorkspace` | function | 142 | <code>export async function registerRunnerWorkspace(tx:PrimaryTransaction,i:InvocationContext,v:unknown):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
 | `leaseRunnerWorkspace` | function | 150 | <code>export async function leaseRunnerWorkspace(tx:PrimaryTransaction,i:InvocationContext,v:unknown):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
@@ -6298,7 +4601,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `ExecutionMode` | type | 13 | <code>export type ExecutionMode='ACTIVE'&#124;'PAUSE'&#124;'DRAIN'&#124;'STOP';</code> |
 | `ExecutionControl` | interface | 14 | <code>export interface ExecutionControl {</code> |
 | `applyExecutionControl` | function | 17 | <code>export async function applyExecutionControl(tx:PrimaryTransaction,scope:SchedulerScope,input:ExecutionControl):Promise&lt;unknown&gt;{</code> |
-| `strength` | object | 45 | <code>const strength={ACTIVE:0,DRAIN:1,PAUSE:2,STOP:3};</code> |
 | `ExecutionTarget` | interface | 57 | <code>export interface ExecutionTarget {</code> |
 | `admissionTimes` | function | 62 | <code>async function admissionTimes(tx:PrimaryTransaction,scope:SchedulerScope,target:ExecutionTarget):Promise&lt;string&#91;&#93;&gt;{</code> |
 | `assertNoExecutionHold` | function | 78 | <code>export async function assertNoExecutionHold(tx:PrimaryTransaction,scope:SchedulerScope,target:ExecutionTarget):Promise&lt;void&gt;{</code> |
@@ -6307,9 +4609,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `packetResources` | function | 116 | <code>export function packetResources(value:unknown):PacketResourceRequirements {</code> |
 | `packetPolicyResources` | function | 125 | <code>export function packetPolicyResources(packet:unknown):PacketResourceRequirements {</code> |
 | `approvedDimensions` | function | 139 | <code>export async function approvedDimensions(tx:PrimaryTransaction,scope:SchedulerScope,pool_id:string,</code> |
-| `required` | object | 142 | <code>const required:Record&lt;string,string&gt;={CPU_MILLIS:String(requirements.cpu_millis),MEMORY_BYTES:requirements.memory_bytes,DISK_BYTES:requirements.disk_bytes};</code> |
 | `approvedPhysicalDimensions` | function | 172 | <code>export async function approvedPhysicalDimensions(tx:PrimaryTransaction,scope:SchedulerScope,pool_id:string,resources:unknown,warm_spare=false):Promise&lt;CapacityDimension&#91;&#93;&gt;{</code> |
-| `required` | object | 174 | <code>const required:Record&lt;string,string&gt;={SANDBOX:'1',CPU_MILLIS:String(boundedInteger(input.cpu_millis,'profile cpu_millis',1,Number.MAX_SAFE_INTEGER)),MEMORY_BYTES:decimal(input.memory_bytes,'profile me…</code> |
 | `requireProofRegistry` | function | 185 | <code>export async function requireProofRegistry(tx:PrimaryTransaction,scope:SchedulerScope,task:{</code> |
 | `SchedulerScope` | interface | 198 | <code>export interface SchedulerScope {organisation_id:string;run_id:string}</code> |
 | `SchedulerActor` | interface | 199 | <code>export interface SchedulerActor {session_id:string;leader_generation:string;package_generation?:string}</code> |
@@ -6319,7 +4619,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `fail` | function | 210 | <code>export function fail(code:string,message:string):never{throw new FoundationError(code,message);}</code> |
 | `object` | function | 211 | <code>export function object(value:unknown):Record&lt;string,unknown&gt;{</code> |
 | `fields` | function | 215 | <code>export function fields(value:unknown,required:readonly string&#91;&#93;,optional:readonly string&#91;&#93;=&#91;&#93;):Record&lt;string,unknown&gt;{</code> |
-| `allowed` | variable | 216 | <code>const item=object(value),allowed=new Set(&#91;...required,...optional&#93;);</code> |
 | `uuid` | function | 221 | <code>export function uuid(value:unknown,label:string):string{</code> |
 | `decimal` | function | 224 | <code>export function decimal(value:unknown,label:string,zero=false):string{</code> |
 | `digest` | function | 229 | <code>export function digest(value:unknown,label:string):string{</code> |
@@ -6327,10 +4626,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `canonical` | function | 236 | <code>export function canonical(value:unknown):string{</code> |
 | `requestDigest` | function | 243 | <code>export function requestDigest(value:unknown):string{</code> |
 | `gatewayFor` | function | 246 | <code>export function gatewayFor(context:ComponentContext,continuation?:(tx:PrimaryTransaction)=&gt;Promise&lt;unknown&gt;):Pick&lt;TransactionGateway,'withPrimaryTransaction'&gt;{</code> |
-| `withPrimaryTransaction` | action | 250 | <code>return {withPrimaryTransaction:async &lt;T&gt;(options:Parameters&lt;TransactionGateway&#91;'withPrimaryTransaction'&#93;&gt;&#91;0&#93;,operation:(tx:PrimaryTransaction)=&gt;Promise&lt;T&gt;&#124;T):Promise&lt;T&gt;=&gt;{</code> |
-| `guard` | action | 251 | <code>return gateway.withPrimaryTransaction({...options,guard:async tx=&gt;{</code> |
-| `scope` | object | 257 | <code>const scope={organisation_id:invocation.principal.organisation_id,run_id:invocation.principal.run_id};</code> |
-| `payload` | object | 259 | <code>const payload={payload_digest:invocation.operation.payload_digest};</code> |
 | `invocationFor` | function | 268 | <code>export function invocationFor(context:ComponentContext):InvocationContext {</code> |
 | `actorFor` | function | 271 | <code>export function actorFor(context:ComponentContext,scope:SchedulerScope,request:Record&lt;string,unknown&gt;):SchedulerActor{</code> |
 | `dispatchRecipients` | function | 281 | <code>export function dispatchRecipients(context:ComponentContext,kind:'dispatch'&#124;'native'='dispatch'):{consumer_ids:string&#91;&#93;}{</code> |
@@ -6339,31 +4634,25 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `recordOutcome` | function | 307 | <code>export async function recordOutcome(tx:PrimaryTransaction,scope:SchedulerScope,principal:string,</code> |
 | `dimensions` | function | 313 | <code>export function dimensions(value:unknown):CapacityDimension&#91;&#93;{</code> |
 | `reserveCapacity` | function | 321 | <code>export async function reserveCapacity(tx:PrimaryTransaction,input:CapacityRequest):Promise&lt;unknown&#91;&#93;&gt;{</code> |
-| `immutable` | object | 324 | <code>const immutable={attempt_id:input.attempt_id??null,dimensions:demand,expires_at:String(input.expires_at)};</code> |
 | `declaredScopes` | function | 365 | <code>function declaredScopes(definition:unknown):string&#91;&#93;{</code> |
 | `lockScopes` | function | 383 | <code>async function lockScopes(tx:PrimaryTransaction,scope:SchedulerScope,paths:string&#91;&#93;):Promise&lt;void&gt;{</code> |
-| `locks` | variable | 384 | <code>const locks=new Map&lt;string,boolean&gt;();</code> |
 | `overlap` | function | 399 | <code>const overlap=(a:string,b:string)=&gt;a==='.'&#124;&#124;b==='.'&#124;&#124;a===b&#124;&#124;a.startsWith(b+'/')&#124;&#124;b.startsWith(a+'/');</code> |
 | `ClaimRequest` | interface | 400 | <code>export interface ClaimRequest extends SchedulerScope {</code> |
 | `parseClaim` | function | 405 | <code>export function parseClaim(value:unknown):ClaimRequest{</code> |
 | `requireMilestone` | function | 425 | <code>export async function requireMilestone(tx:PrimaryTransaction,scope:SchedulerScope,task_id:string,</code> |
 | `requireTaskBarriers` | function | 448 | <code>export async function requireTaskBarriers(tx:PrimaryTransaction,scope:SchedulerScope,task_id:string,wave:number):Promise&lt;void&gt;{</code> |
 | `requirePacketAdmission` | function | 471 | <code>export async function requirePacketAdmission(tx:PrimaryTransaction,input:ClaimRequest,task:{</code> |
-| `pins` | object | 477 | <code>const pins={organisation_id:input.organisation_id,run_id:input.run_id,authority_epoch:input.authority_epoch,task_id:input.task_id,</code> |
 | `jobPolicy` | function | 489 | <code>export async function jobPolicy(tx:PrimaryTransaction,scope:SchedulerScope,task_id:string,operation:'ADMISSION'&#124;'ADVANCE'='ADVANCE'):Promise&lt;PacketResourceRequirements&gt;{</code> |
 | `allocateReservations` | function | 504 | <code>export async function allocateReservations(tx:PrimaryTransaction,input:SchedulerScope&amp;{reservation_ids:string&#91;&#93;}):Promise&lt;void&gt;{</code> |
 | `assertJobReservation` | function | 522 | <code>export async function assertJobReservation(tx:PrimaryTransaction,input:SchedulerScope&amp;{</code> |
 | `validateResourceVector` | function | 546 | <code>export async function validateResourceVector(tx:PrimaryTransaction,input:SchedulerScope&amp;{</code> |
 | `JobAllocation` | interface | 561 | <code>export interface JobAllocation extends SchedulerScope {</code> |
 | `bindJobReservation` | function | 566 | <code>export async function bindJobReservation(tx:PrimaryTransaction,input:SchedulerScope&amp;{</code> |
-| `roles` | object | 588 | <code>const roles:Record&lt;string,string&#91;&#93;&gt;={BUILD:&#91;'WORKER'&#93;,TEST:&#91;'VERIFIER'&#93;,REVIEW:&#91;'VERIFIER','COMMIT_WATCHER'&#93;,INDEX:&#91;'INDEXER'&#93;,INTEGRATION:&#91;'INTEGRATOR'&#93;,PREPARATION:&#91;'WORKER','INDEXER','VERIFIER'&#93;};</code> |
 | `readJobAllocation` | function | 602 | <code>export async function readJobAllocation(tx:PrimaryTransaction,input:SchedulerScope&amp;{reservation_id:string}):Promise&lt;JobAllocation&gt;{</code> |
 | `JobLeaseRequest` | interface | 616 | <code>export interface JobLeaseRequest extends SchedulerScope {</code> |
 | `renewJobAllocation` | function | 619 | <code>export async function renewJobAllocation(tx:PrimaryTransaction,input:JobLeaseRequest&amp;{lease_ms:number}):Promise&lt;{</code> |
 | `releaseJobAllocation` | function | 639 | <code>export async function releaseJobAllocation(tx:PrimaryTransaction,input:JobLeaseRequest):Promise&lt;unknown&gt;{</code> |
 | `claimTask` | function | 655 | <code>export async function claimTask(tx:PrimaryTransaction,input:ClaimRequest,actor:SchedulerActor,recipients:{consumer_ids:string&#91;&#93;}):Promise&lt;unknown&gt;{</code> |
-| `token` | object | 753 | <code>const token:ComputeToken={organisation_id:input.organisation_id,run_id:input.run_id,task_id:input.task_id,</code> |
-| `result` | object | 757 | <code>const result={token,lease_expires_at:expires,reservations:allocated.rows};</code> |
 | `SandboxResourceVector` | interface | 764 | <code>export interface SandboxResourceVector {cpu_millis:string;memory_bytes:string;disk_bytes:string}</code> |
 | `SandboxExecutor` | interface | 765 | <code>export interface SandboxExecutor extends SchedulerScope {sandbox_id:string;sandbox_boot_generation:string;slot_id:string}</code> |
 | `SandboxBudgetQualification` | interface | 766 | <code>export interface SandboxBudgetQualification {</code> |
@@ -6377,7 +4666,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `releaseSandboxCharges` | function | 850 | <code>export async function releaseSandboxCharges(tx:PrimaryTransaction,scope:SchedulerScope,request_ids:string&#91;&#93;):Promise&lt;void&gt;{</code> |
 | `inspectSandboxCharge` | function | 864 | <code>export async function inspectSandboxCharge(tx:PrimaryTransaction,input:SchedulerScope&amp;{request_id:string}):Promise&lt;Record&lt;string,unknown&gt;&#124;null&gt;{</code> |
 | `createComponent` | function | 869 | <code>export function createComponent(context:ComponentContext):Component{</code> |
-| `'scheduler.claim'` | action | 871 | <code>'scheduler.claim':async (value,context)=&gt;{</code> |
 
 ## services/hyperfide/src/scheduler/dispatch.ts
 
@@ -6395,18 +4683,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `close` | method | 39 | <code>close():void{this.reader=undefined;}</code> |
 | `reconcile` | method | 40 | <code>async reconcile(tx:PrimaryTransaction,scope:SchedulerScope,request_id:string):Promise&lt;unknown&gt;{</code> |
 | `ensureDispatch` | function | 89 | <code>export async function ensureDispatch(tx:PrimaryTransaction,token:ComputeToken,request:string,recipients:{consumer_ids:string&#91;&#93;}):Promise&lt;unknown&gt;{</code> |
-| `scope` | object | 90 | <code>assertPrimaryTransaction(tx);const scope={organisation_id:token.organisation_id,run_id:token.run_id};</code> |
-| `payload` | object | 115 | <code>const operation=randomUUID(),event=randomUUID(),payload={command_id:operation,token,packet_digest:authority.input_packet_digest};</code> |
 | `consumeDispatchEvent` | function | 125 | <code>export async function consumeDispatchEvent(tx:PrimaryTransaction,input:SchedulerScope&amp;{event_id:string;consumer_id:string;native_recipients:{consumer_ids:string&#91;&#93;}}):Promise&lt;Awaited&lt;ReturnType&lt;typeof…</code> |
 | `createComponent` | function | 140 | <code>export function createComponent(_startup:ComponentContext):Component{</code> |
-| `reconciler` | variable | 141 | <code>const reconciler=new DispatchReconciler();</code> |
-| `close` | action | 144 | <code>close:()=&gt;reconciler.close(),actions:{</code> |
-| `'scheduler.dispatch.consume'` | action | 145 | <code>'scheduler.dispatch.consume':async(value,context)=&gt;{</code> |
-| `scope` | object | 148 | <code>const scope={organisation_id:invocation.principal.organisation_id,run_id:invocation.principal.run_id};</code> |
-| `'scheduler.dispatch.ensure'` | action | 163 | <code>'scheduler.dispatch.ensure':async(value,context)=&gt;{</code> |
-| `scope` | object | 165 | <code>const token=parseComputeToken(input.token),scope={organisation_id:token.organisation_id,run_id:token.run_id};</code> |
-| `'scheduler.dispatch.reconcile'` | action | 180 | <code>'scheduler.dispatch.reconcile':async(value,context)=&gt;{</code> |
-| `scope` | object | 182 | <code>const scope={organisation_id:uuid(input.organisation_id,'organisation_id'),run_id:uuid(input.run_id,'run_id')};</code> |
 
 ## services/hyperfide/src/scheduler/leases.ts
 
@@ -6417,24 +4695,15 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `ComputeAuthority` | interface | 12 | <code>export interface ComputeAuthority extends ComputeToken {</code> |
 | `parseComputeToken` | function | 16 | <code>export function parseComputeToken(value:unknown):ComputeToken{</code> |
 | `assertCurrentCompute` | function | 26 | <code>export async function assertCurrentCompute(tx:PrimaryTransaction,token:ComputeToken,</code> |
-| `scope` | object | 29 | <code>const scope={organisation_id:token.organisation_id,run_id:token.run_id};</code> |
 | `requireWorker` | function | 94 | <code>async function requireWorker(tx:PrimaryTransaction,token:ComputeToken,context:ComponentContext):Promise&lt;void&gt;{</code> |
 | `renewCompute` | function | 106 | <code>export async function renewCompute(tx:PrimaryTransaction,token:ComputeToken,lease_ms:number):Promise&lt;unknown&gt;{</code> |
 | `releaseCompute` | function | 122 | <code>export async function releaseCompute(tx:PrimaryTransaction,token:ComputeToken,</code> |
 | `lockComputeFenceTargets` | function | 142 | <code>export async function lockComputeFenceTargets(tx:PrimaryTransaction,tokens:readonly ComputeToken&#91;&#93;):Promise&lt;void&gt;{</code> |
-| `scopes` | variable | 146 | <code>const scopes=new Map(ordered.map(token=&gt;&#91;token.organisation_id+':'+token.run_id,token&#93;));</code> |
-| `pools` | variable | 148 | <code>const pools=new Set&lt;string&gt;();</code> |
 | `ComputeFenceOptions` | interface | 159 | <code>export interface ComputeFenceOptions {</code> |
 | `fenceCompute` | function | 162 | <code>export async function fenceCompute(tx:PrimaryTransaction,token:ComputeToken,options:ComputeFenceOptions):Promise&lt;unknown&gt;{</code> |
-| `result` | object | 203 | <code>const result={token,fenced:true,compute_authority:authority,reason:options.reason,resource_disposition:'RELEASE_PENDING',termination_confirmed:false};</code> |
 | `expireCompute` | function | 207 | <code>export async function expireCompute(tx:PrimaryTransaction,scope:SchedulerScope,actor:SchedulerActor,</code> |
 | `revokeRunForRecovery` | function | 228 | <code>export async function revokeRunForRecovery(tx:PrimaryTransaction,input:SchedulerScope&amp;{</code> |
 | `createComponent` | function | 253 | <code>export function createComponent(context:ComponentContext):Component{</code> |
-| `'scheduler.lease.renew'` | action | 255 | <code>'scheduler.lease.renew':async (value,context)=&gt;{</code> |
-| `'scheduler.compute.cancel'` | action | 262 | <code>'scheduler.compute.cancel':async (value,context)=&gt;{</code> |
-| `result` | object | 274 | <code>const result={token,cancel_requested:true,termination_confirmed:false,resource_disposition:'RELEASE_PENDING'};</code> |
-| `'scheduler.compute.expire'` | action | 280 | <code>'scheduler.compute.expire':async (value,context)=&gt;{</code> |
-| `scope` | object | 282 | <code>const scope={organisation_id:uuid(input.organisation_id,'organisation_id'),run_id:uuid(input.run_id,'run_id')};</code> |
 
 ## services/hyperfide/src/scheduler/resources.ts
 
@@ -6445,9 +4714,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `EligibleTask` | interface | 17 | <code>export interface EligibleTask {</code> |
 | `EligibleResult` | interface | 22 | <code>export interface EligibleResult {</code> |
 | `eligibleTasks` | function | 26 | <code>export async function eligibleTasks(tx:PrimaryTransaction,input:SchedulerScope&amp;{pool_id:string;profile_id?:string;limit?:number;preparation?:boolean},invocation?:InvocationContext):Promise&lt;EligibleRes…</code> |
-| `result` | object | 43 | <code>const result:EligibleResult={availability:'AVAILABLE',authority:'CANDIDATE_DISCOVERY',observed_at:current.observed_at,</code> |
 | `eligibleDemand` | function | 96 | <code>export async function eligibleDemand(tx:PrimaryTransaction,input:SchedulerScope&amp;{</code> |
-| `actor` | object | 111 | <code>const actor:SchedulerActor={session_id:invocation.principal.actor_id,leader_generation:leadership.rows&#91;0&#93;.generation};</code> |
 | `QuiescenceReceipt` | interface | 158 | <code>export interface QuiescenceReceipt {id:string;digest:string;observed_at:string}</code> |
 | `ProofReader` | type | 159 | <code>export type ProofReader=(tx:PrimaryTransaction,input:SchedulerScope&amp;{reservation_id:string})=&gt;Promise&lt;QuiescenceReceipt&#124;null&gt;;</code> |
 | `DynamicCapacityRequest` | interface | 160 | <code>export interface DynamicCapacityRequest extends CapacityRequest {pool_id:string}</code> |
@@ -6455,8 +4722,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `REASONS` | variable | 162 | <code>const REASONS=new Set(&#91;'CAPACITY','MODEL','REVIEW','BUILD','PROVIDER_RATE','EXCLUSIVE_SERVICE'&#93;);</code> |
 | `scopeOf` | function | 163 | <code>function scopeOf(input:Record&lt;string,unknown&gt;):SchedulerScope{</code> |
 | `reserveDynamic` | function | 167 | <code>export async function reserveDynamic(tx:PrimaryTransaction,input:DynamicCapacityRequest):Promise&lt;unknown&gt;{</code> |
-| `immutable` | object | 170 | <code>const immutable={pool_id:input.pool_id,attempt_id:input.attempt_id??null,dimensions:demand,expires_at:String(input.expires_at)};</code> |
-| `result` | object | 210 | <code>const result={reservations,rate_receipts:rates};</code> |
 | `WAIT_FOR` | object | 215 | <code>const WAIT_FOR:Record&lt;string,string&gt;={MODEL_RATE:'MODEL',API_RATE:'PROVIDER_RATE',PROVISION_RATE:'PROVIDER_RATE',</code> |
 | `AdmissionLimit` | interface | 217 | <code>export interface AdmissionLimit {</code> |
 | `limitingResource` | function | 222 | <code>export async function limitingResource(tx:PrimaryTransaction,input:SchedulerScope&amp;{pool_id:string;dimensions:CapacityDimension&#91;&#93;;request_id?:string}):Promise&lt;AdmissionLimit&#124;null&gt;{</code> |
@@ -6469,15 +4734,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `release` | method | 295 | <code>async release(tx:PrimaryTransaction,input:SchedulerScope&amp;{reservation_ids:string&#91;&#93;}):Promise&lt;unknown&gt;{</code> |
 | `requireQueueActor` | function | 364 | <code>async function requireQueueActor(tx:PrimaryTransaction,scope:SchedulerScope,actor:SchedulerActor,</code> |
 | `createComponent` | function | 375 | <code>export function createComponent(_startup:ComponentContext):Component{</code> |
-| `scheduler` | variable | 376 | <code>const scheduler=new ResourceScheduler();</code> |
-| `close` | action | 379 | <code>return {apiVersion:1,capabilities:{'scheduler.resources.v1':capability},close:()=&gt;scheduler.close(),actions:{</code> |
-| `'scheduler.resources.eligible'` | action | 380 | <code>'scheduler.resources.eligible':async(value,context)=&gt;{</code> |
-| `'scheduler.resources.demand'` | action | 388 | <code>'scheduler.resources.demand':async(value,context)=&gt;{</code> |
-| `'scheduler.resources.queue'` | action | 394 | <code>'scheduler.resources.queue':async(value,context)=&gt;{</code> |
-| `result` | object | 442 | <code>const result={waiter_id:id,replayed:false,wait_reason:reason};await recordOutcome(tx,scope,actor.session_id,'scheduler.resource.queue',request,input,result);return result;</code> |
-| `'scheduler.resources.admit'` | action | 445 | <code>'scheduler.resources.admit':async(value,context)=&gt;{</code> |
-| `'scheduler.resources.inspect'` | action | 514 | <code>'scheduler.resources.inspect':async(value,context)=&gt;{</code> |
-| `'scheduler.resources.release'` | action | 534 | <code>'scheduler.resources.release':async(value,context)=&gt;{</code> |
 
 ## services/hyperfide/src/spec/bootstrap.ts
 
@@ -6490,21 +4746,14 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `exact` | function | 23 | <code>function exact(value:unknown,keys:string&#91;&#93;):Record&lt;string,unknown&gt;{</code> |
 | `name` | function | 28 | <code>function name(value:unknown):value is string{return typeof value==='string'&amp;&amp;value.length&gt;=1&amp;&amp;value.length&lt;=255&amp;&amp;value.trim().length&gt;0&amp;&amp;!/&#91;&#92;x00-&#92;x1f&#93;/.test(value);}</code> |
 | `remote` | function | 29 | <code>function remote(value:unknown):value is string{</code> |
-| `url` | variable | 32 | <code>try{const url=new URL(value);return &#91;'https:','http:','ssh:','git:'&#93;.includes(url.protocol)&amp;&amp;!!url.hostname&amp;&amp;!url.password&amp;&amp;(!url.username&#124;&#124;url.protocol==='ssh:'&amp;&amp;url.username==='git');}catch{return f…</code> |
 | `validateBootstrapMetadata` | function | 34 | <code>export function validateBootstrapMetadata(value:unknown,scope:SpecScope):BootstrapMetadata{</code> |
-| `repositories` | variable | 41 | <code>const repositories=new Set&lt;string&gt;();let objects=0;</code> |
-| `seen` | variable | 48 | <code>repositories.add(repo.id);const seen=new Set&lt;string&gt;();</code> |
 | `verifySources` | function | 63 | <code>async function verifySources(metadata:BootstrapMetadata):Promise&lt;void&gt;{</code> |
-| `env` | object | 64 | <code>const env:NodeJS.ProcessEnv={};</code> |
-| `git` | function | 72 | <code>const git=async(args:string&#91;&#93;,maxBuffer=65536)=&gt;execute('/usr/bin/git',&#91;'-C',root,...args&#93;,{env,timeout:15000,maxBuffer,encoding:'buffer'});</code> |
 | `metadataTransaction` | function | 89 | <code>async function metadataTransaction(client:SpecTransaction,scope:SpecScope,metadata:BootstrapMetadata):Promise&lt;void&gt;{</code> |
 | `bootstrapAcceptedIntent` | function | 113 | <code>export async function bootstrapAcceptedIntent(pool:pg.Pool,scope:SpecScope,rawMetadata:unknown,input:unknown):Promise&lt;unknown&gt;{</code> |
 | `BootstrapQuery` | interface | 138 | <code>export interface BootstrapQuery {query(text:string,values?:unknown&#91;&#93;):Promise&lt;{rows:Record&lt;string,any&gt;&#91;&#93;;rowCount:number&#124;null}&gt;}</code> |
 | `query` | method | 138 | <code>export interface BootstrapQuery {query(text:string,values?:unknown&#91;&#93;):Promise&lt;{rows:Record&lt;string,any&gt;&#91;&#93;;rowCount:number&#124;null}&gt;}</code> |
 | `AcceptedBootstrapPins` | interface | 139 | <code>export interface AcceptedBootstrapPins {organisation_id:string;run_id:string;authority_epoch:string;accepted_revision_digest:string}</code> |
 | `assertAcceptedBootstrap` | function | 140 | <code>export async function assertAcceptedBootstrap(tx:BootstrapQuery,pins:AcceptedBootstrapPins):Promise&lt;{</code> |
-| `accepted` | object | 164 | <code>const accepted={schema_version:1,source_digest:row.source_digest,repositories:document.repositories,</code> |
-| `sections` | variable | 172 | <code>const sections=new Map(tasks.map(section=&gt;&#91;section.name.slice(5),section&#93;));</code> |
 | `bootstrapAcceptedIntentWithGateway` | function | 187 | <code>export async function bootstrapAcceptedIntentWithGateway(</code> |
 
 ## services/hyperfide/src/spec/dependencies.ts
@@ -6538,29 +4787,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `assertPins` | function | 78 | <code>function assertPins(run:Record&lt;string,any&gt;,input:Record&lt;string,unknown&gt;):void{</code> |
 | `declared` | function | 84 | <code>function declared(task:Task):unknown{return taskFields(task).requires?.value??&#91;&#93;;}</code> |
 | `referenceRuns` | function | 85 | <code>function referenceRuns(tasks:Task&#91;&#93;,organisation_id:string):string&#91;&#93;{</code> |
-| `result` | variable | 86 | <code>const result=new Set&lt;string&gt;();</code> |
 | `validateGraph` | function | 93 | <code>async function validateGraph(tx:Tx,scope:DependencyScope,input:PlanPins,proposed?:Task&#91;&#93;):Promise&lt;DependencyReport&gt;{</code> |
-| `discovered` | variable | 99 | <code>const snapshots=new Map&lt;string,Snapshot&gt;(&#91;&#91;scope.run_id,first&#93;&#93;),queue=&#91;scope.run_id&#93;,discovered=new Set&lt;string&gt;(&#91;scope.run_id&#93;);</code> |
-| `snapshots` | variable | 99 | <code>const snapshots=new Map&lt;string,Snapshot&gt;(&#91;&#91;scope.run_id,first&#93;&#93;),queue=&#91;scope.run_id&#93;,discovered=new Set&lt;string&gt;(&#91;scope.run_id&#93;);</code> |
-| `summary` | object | 114 | <code>const summary={qualified_revision:0,integrated_target:0,cross_feature:0,cross_run:0,cross_repository:0};</code> |
-| `adjacency` | variable | 115 | <code>const adjacency=new Map&lt;string,string&#91;&#93;&gt;(),nodes=new Map&lt;string,Task&gt;(),taskIndex=new Map&lt;string,Task&#91;&#93;&gt;(),keyIndex=new Map&lt;string,Task&#91;&#93;&gt;();</code> |
-| `keyIndex` | variable | 115 | <code>const adjacency=new Map&lt;string,string&#91;&#93;&gt;(),nodes=new Map&lt;string,Task&gt;(),taskIndex=new Map&lt;string,Task&#91;&#93;&gt;(),keyIndex=new Map&lt;string,Task&#91;&#93;&gt;();</code> |
-| `nodes` | variable | 115 | <code>const adjacency=new Map&lt;string,string&#91;&#93;&gt;(),nodes=new Map&lt;string,Task&gt;(),taskIndex=new Map&lt;string,Task&#91;&#93;&gt;(),keyIndex=new Map&lt;string,Task&#91;&#93;&gt;();</code> |
-| `taskIndex` | variable | 115 | <code>const adjacency=new Map&lt;string,string&#91;&#93;&gt;(),nodes=new Map&lt;string,Task&gt;(),taskIndex=new Map&lt;string,Task&#91;&#93;&gt;(),keyIndex=new Map&lt;string,Task&#91;&#93;&gt;();</code> |
-| `located` | function | 116 | <code>const located=(code:string,task:Task,key:string,target?:string,extra:Partial&lt;DependencyDiagnostic&gt;={}):DependencyDiagnostic=&gt;({code,run_id:task.run_id,task_key:task.task_key,</code> |
-| `diagnostic` | function | 119 | <code>const diagnostic=(code:string,task:Task,target?:string,key='requires',path?:string&#91;&#93;,extra:Partial&lt;DependencyDiagnostic&gt;={})=&gt;{</code> |
-| `advise` | function | 123 | <code>const advise=(code:string,task:Task,key:string,target?:string,extra:Partial&lt;DependencyDiagnostic&gt;={})=&gt;{</code> |
-| `pinnedRepositories` | variable | 126 | <code>const pinnedRepositories=new Map&lt;string,Map&lt;string,string&gt;&gt;();</code> |
-| `repositoryPin` | function | 127 | <code>const repositoryPin=async(run_id:string,repository_id:string):Promise&lt;string&#124;undefined&gt;=&gt;{</code> |
-| `localEdges` | variable | 138 | <code>const fields=taskFields(task),raw=declared(task),localEdges=new Set&lt;string&gt;();</code> |
-| `reaches` | function | 215 | <code>const reaches=(from:string,to:string):boolean&#124;undefined=&gt;{</code> |
-| `seen` | variable | 217 | <code>const seen=new Set&lt;string&gt;(&#91;from&#93;),stack=&#91;from&#93;;</code> |
-| `ordered` | function | 226 | <code>const ordered=(a:Task,b:Task):boolean&#124;undefined=&gt;{</code> |
-| `claims` | variable | 233 | <code>const claims=new Map&lt;string,Task&#91;&#93;&gt;();</code> |
-| `pairs` | variable | 236 | <code>const pairs=new Map&lt;string,{a:Task;b:Task;path:string}&gt;();</code> |
-| `expectedBindings` | variable | 283 | <code>const expectedBindings=new Map(edges.map(edge=&gt;&#91;&#91;edge.task_id,edge.predecessor_run_id,edge.predecessor_task_id,edge.milestone,edge.source_spec_generation&#93;.join(':'),edge&#93;));</code> |
-| `colors` | variable | 295 | <code>const colors=new Map&lt;string,number&gt;();</code> |
-| `active` | variable | 298 | <code>const stack:{key:string;next:number}&#91;&#93;=&#91;{key:start,next:0}&#93;,active=new Map&lt;string,number&gt;(&#91;&#91;start,0&#93;&#93;);colors.set(start,1);</code> |
 | `validateProposedDependencies` | function | 313 | <code>export async function validateProposedDependencies(tx:Tx,scope:DependencyScope,input:PlanPins,tasks:ProposedDependencyTask&#91;&#93;):Promise&lt;DependencyReport&gt;{</code> |
 | `validateDependencies` | function | 316 | <code>export async function validateDependencies(tx:Tx,scope:DependencyScope,input:PlanPins):Promise&lt;DependencyReport&gt;{</code> |
 | `AdmissionOptions` | interface | 324 | <code>export interface AdmissionOptions {exempt_task_ids?:readonly string&#91;&#93;}</code> |
@@ -6568,8 +4795,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `resolveTask` | function | 341 | <code>export async function resolveTask(tx:Tx,scope:DependencyScope,input:unknown):Promise&lt;unknown&gt;{</code> |
 | `structuralFrontier` | function | 350 | <code>export async function structuralFrontier(tx:Tx,scope:DependencyScope,input:unknown):Promise&lt;unknown&gt;{</code> |
 | `createComponent` | function | 363 | <code>export function createComponent(_startup:ComponentContext):Component{</code> |
-| `read` | function | 364 | <code>const read=(handler:(tx:Tx,scope:DependencyScope,input:unknown)=&gt;Promise&lt;unknown&gt;)=&gt;async(input:unknown,ctx:ComponentContext)=&gt;</code> |
-| `'spec.dependencies.admit'` | action | 369 | <code>'spec.dependencies.admit':async(input,ctx)=&gt;specTransaction(ctx,'WRITE',async(tx,i)=&gt;{</code> |
 
 ## services/hyperfide/src/spec/import.ts
 
@@ -6594,16 +4819,12 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `stripComment` | function | 54 | <code>function stripComment(line:string):string {</code> |
 | `safeNumbers` | function | 65 | <code>function safeNumbers(value:unknown):void{</code> |
 | `parseKvx` | function | 71 | <code>export function parseKvx(source:string):KvxDocument {</code> |
-| `seen` | variable | 73 | <code>const sections:KvxSection&#91;&#93;=&#91;&#93;,seen=new Set&lt;string&gt;();</code> |
-| `counts` | object | 75 | <code>const counts={sections:0,fields:0,tasks:0,requirements:0,criteria:0,acceptances:0};</code> |
 | `specScope` | function | 101 | <code>export function specScope(context:ComponentContext):SpecScope{</code> |
 | `validateImport` | function | 109 | <code>export function validateImport(value:unknown,scope:SpecScope):ImportEnvelope{</code> |
-| `repos` | variable | 120 | <code>const repos=new Set&lt;string&gt;();</code> |
 | `readPinnedSource` | function | 140 | <code>export async function readPinnedSource(root:string,source:ImportEnvelope&#91;'source'&#93;):Promise&lt;{bytes:Buffer;text:string}&gt;{</code> |
 | `StoredIntent` | interface | 175 | <code>export interface StoredIntent {</code> |
 | `value` | function | 179 | <code>function value(section:KvxSection,key:string):unknown{return section.fields&#91;key&#93;?.value;}</code> |
 | `taskDefinitions` | function | 180 | <code>export function taskDefinitions(parsed:KvxDocument):{section:KvxSection;key:string;feature_key:string;declared_wave:unknown;wave:number;package_key:string}&#91;&#93;{</code> |
-| `features` | variable | 181 | <code>const features=new Set(parsed.sections.filter(section=&gt;section.name.startsWith('feature.')).map(section=&gt;section.name.slice(8)));</code> |
 | `SpecTransaction` | interface | 196 | <code>export interface SpecTransaction {query&lt;Row extends pg.QueryResultRow = pg.QueryResultRow&gt;(text:string,values?:unknown&#91;&#93;):Promise&lt;pg.QueryResult&lt;Row&gt;&gt;}</code> |
 | `query` | method | 196 | <code>export interface SpecTransaction {query&lt;Row extends pg.QueryResultRow = pg.QueryResultRow&gt;(text:string,values?:unknown&#91;&#93;):Promise&lt;pg.QueryResult&lt;Row&gt;&gt;}</code> |
 | `primary` | function | 197 | <code>async function primary(client:SpecTransaction):Promise&lt;void&gt;{</code> |
@@ -6612,22 +4833,14 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `loadPinnedRun` | function | 206 | <code>export async function loadPinnedRun(client:SpecTransaction,scope:SpecScope):Promise&lt;PinnedRun&gt;{</code> |
 | `summary` | function | 213 | <code>function summary(run:PinnedRun):unknown{</code> |
 | `prepareAcceptedIntent` | function | 218 | <code>export async function prepareAcceptedIntent(scope:SpecScope,raw:unknown,rawSource?:Buffer){</code> |
-| `accepted` | object | 224 | <code>const accepted={schema_version:1,source_digest:digest(source.bytes),repositories:&#91;...input.repositories&#93;.sort((a,b)=&gt;a.repository_id.localeCompare(b.repository_id)),</code> |
-| `document` | object | 227 | <code>const document:StoredIntent={...accepted,schema_version:1,revision_digest,parsed,runtime_wave_offset:tasks.some(task=&gt;task.declared_wave===0)?1:0};</code> |
 | `importRunTransaction` | function | 231 | <code>export async function importRunTransaction(client:SpecTransaction,scope:SpecScope,raw:unknown):Promise&lt;unknown&gt;{</code> |
-| `packages` | variable | 265 | <code>const packages=new Map&lt;string,string&gt;();</code> |
-| `definition` | object | 272 | <code>const definition={schema_version:1,section:task.section,feature_key:task.feature_key,declared_wave:task.declared_wave,</code> |
 | `importRun` | function | 281 | <code>export async function importRun(pool:pg.Pool,scope:SpecScope,raw:unknown):Promise&lt;unknown&gt;{</code> |
 | `scoped` | function | 294 | <code>function scoped(input:unknown,scope:SpecScope,names:string&#91;&#93;):Record&lt;string,unknown&gt;{</code> |
 | `current` | function | 297 | <code>function current(run:PinnedRun,input:Record&lt;string,unknown&gt;):void{</code> |
 | `exportProjection` | function | 301 | <code>export async function exportProjection(pool:SpecTransaction,scope:SpecScope,input:unknown):Promise&lt;unknown&gt;{</code> |
-| `cursor` | object | 317 | <code>const cursor={spec_generation:run.spec_generation,state_version:run.state_version,offset_bytes:String(end)};</code> |
 | `specTransaction` | function | 324 | <code>export async function specTransaction&lt;T&gt;(context:ComponentContext,mode:'READ'&#124;'WRITE',body:(tx:AuthorityTransaction,invocation:InvocationContext)=&gt;Promise&lt;T&gt;):Promise&lt;T&gt;{</code> |
-| `scope` | object | 325 | <code>const invocation=invocationOf(context),scope={organisation_id:invocation.principal.organisation_id,run_id:invocation.principal.run_id};</code> |
-| `guard` | action | 326 | <code>return gatewayOf(context).withPrimaryTransaction({timeoutMs:30000,maxRetries:2,signal:invocation.signal,guard:async tx=&gt;{</code> |
 | `authenticatedScope` | function | 332 | <code>async function authenticatedScope(tx:AuthorityTransaction,context:ComponentContext,i:InvocationContext):Promise&lt;SpecScope&gt;{</code> |
 | `createComponent` | function | 338 | <code>export function createComponent(_startup:ComponentContext):Component{</code> |
-| `action` | function | 339 | <code>const action=(write:boolean,execute:(tx:SpecTransaction,scope:SpecScope,input:unknown)=&gt;Promise&lt;unknown&gt;)=&gt;</code> |
 
 ## services/hyperfide/src/spec/obligations.ts
 
@@ -6647,29 +4860,13 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `safeArtifact` | function | 42 | <code>function safeArtifact(value:string):boolean{</code> |
 | `pins` | function | 46 | <code>function pins(value:ProofPins):void{</code> |
 | `validateProofPolicy` | function | 51 | <code>export function validateProofPolicy(value:unknown):ProofPolicy{</code> |
-| `checks` | variable | 65 | <code>const checks=new Set&lt;string&gt;();</code> |
-| `clauses` | variable | 77 | <code>const clauses=new Set&lt;string&gt;(),usedChecks=new Set&lt;string&gt;();</code> |
-| `usedChecks` | variable | 77 | <code>const clauses=new Set&lt;string&gt;(),usedChecks=new Set&lt;string&gt;();</code> |
 | `obligations` | function | 93 | <code>function obligations(policy:ProofPolicy,registry_digest:string):ProofObligations{</code> |
 | `loadProofObligations` | function | 98 | <code>export async function loadProofObligations(db:PrimaryClient,scope:ProofPins):Promise&lt;ProofObligations&gt;{</code> |
 | `clauseCoverage` | function | 120 | <code>function clauseCoverage(policy:ProofPolicy,definition:unknown,intent:StoredIntent):void{</code> |
-| `sections` | variable | 125 | <code>const sections=new Map(intent.parsed.sections.map(section=&gt;&#91;section.name,section&#93;));</code> |
-| `explicit` | variable | 128 | <code>const explicit=new Map&lt;string,Set&lt;string&gt;&gt;();</code> |
-| `associated` | variable | 132 | <code>const associated=new Set&lt;string&gt;();</code> |
-| `required` | variable | 142 | <code>const required=new Set&lt;string&gt;(declared===undefined?&#91;...explicit.values()&#93;.flatMap(values=&gt;&#91;...values&#93;):declared as string&#91;&#93;);</code> |
-| `actual` | variable | 143 | <code>const actual=new Set(policy.clauses.flatMap(clause=&gt;clause.acceptance_ids));</code> |
 | `acceptedProofAuthority` | function | 156 | <code>async function acceptedProofAuthority(policy:ProofPolicy,definition:unknown,intent:StoredIntent):Promise&lt;void&gt;{</code> |
-| `sections` | variable | 159 | <code>const fields=definition.section.fields,sections=new Map(intent.parsed.sections.map(section=&gt;&#91;section.name,section&#93;));</code> |
-| `value` | function | 160 | <code>const value=(name:string,key:string):unknown=&gt;sections.get(name)?.fields&#91;key&#93;?.value;</code> |
-| `taskValue` | function | 161 | <code>const taskValue=(key:string):unknown=&gt;object(fields&#91;key&#93;)?fields&#91;key&#93;.value:undefined;</code> |
-| `expected` | object | 170 | <code>const expected={id:check.id,...Object.fromEntries(&#91;'argv','executable_digest','timeout_ms','required_artifacts','input_keys'&#93;.map(key=&gt;&#91;key,accepted.fields&#91;key&#93;?.value&#93;))};</code> |
-| `required` | variable | 194 | <code>const required=new Set&lt;string&gt;();</code> |
 | `operatingMaximum` | function | 206 | <code>function operatingMaximum(context:ComponentContext):number{</code> |
 | `registerProofPolicy` | function | 212 | <code>export async function registerProofPolicy(client:PrimaryClient,scope:{organisation_id:string;run_id:string},input:unknown,allowReview=false,maximumMs=259200000):Promise&lt;ProofObligations&gt;{</code> |
-| `pin` | object | 214 | <code>const pin:ProofPins={organisation_id:scope.organisation_id,run_id:String(request.run_id),task_id:String(request.task_id),</code> |
 | `createComponent` | function | 251 | <code>export function createComponent(_startup:ComponentContext):Component{</code> |
-| `action` | function | 252 | <code>const action=(review:boolean)=&gt;async(input:unknown,context:ComponentContext):Promise&lt;unknown&gt;=&gt;specTransaction(context,'WRITE',async(tx,invocation)=&gt;{</code> |
-| `'spec.proof.inspect'` | action | 260 | <code>'spec.proof.inspect':async(input,context)=&gt;specTransaction(context,'READ',async(tx,invocation)=&gt;{</code> |
 
 ## services/hyperfide/src/spec/revisions.ts
 
@@ -6690,26 +4887,13 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `globals` | function | 55 | <code>function globals(document:StoredIntent):unknown{</code> |
 | `ids` | function | 58 | <code>function ids(section:KvxSection&#124;undefined,key:string):string&#91;&#93;{</code> |
 | `criteriaIntent` | function | 65 | <code>function criteriaIntent(document:StoredIntent,section:KvxSection&#124;undefined):string{</code> |
-| `sections` | variable | 66 | <code>const sections=new Map(document.parsed.sections.map(item=&gt;&#91;item.name,item&#93;));</code> |
 | `analyse` | function | 74 | <code>async function analyse(tx:Tx,scope:SpecScope,input:unknown,storedSource?:Buffer):Promise&lt;InternalAnalysis&gt;{</code> |
-| `priorByKey` | variable | 86 | <code>const priorByKey=new Map(priorTasks.map(task=&gt;&#91;task.task_key,task&#93;));</code> |
-| `proposedByKey` | variable | 87 | <code>const proposedByKey=new Map(prepared.tasks.map(task=&gt;&#91;task.key,task&#93;));</code> |
-| `note` | function | 89 | <code>const note=(code:string,key?:string)=&gt;{if(diagnostics.length&lt;128)diagnostics.push({code,...(key?{task_key:key}:{})});};</code> |
-| `union` | function | 106 | <code>const union=(sections:(KvxSection&#124;undefined)&#91;&#93;,key:string)=&gt;new Set(sections.flatMap(section=&gt;ids(section,key)));</code> |
-| `after` | variable | 114 | <code>const after=new Set(ids(task.section,key));if(ids(old.definition.section,key).some(id=&gt;!after.has(id)))note(code,task.key);</code> |
-| `affected` | variable | 126 | <code>const affected=new Set(&#91;...changed,...retired&#93;.map(key=&gt;priorByKey.get(key)!.id));</code> |
-| `reverse` | variable | 129 | <code>const reverse=new Map&lt;string,Set&lt;string&gt;&gt;();</code> |
-| `add` | function | 130 | <code>const add=(predecessor:string,dependent:string)=&gt;{if(!reverse.has(predecessor))reverse.set(predecessor,new Set());reverse.get(predecessor)!.add(dependent);};</code> |
-| `planByFeatureKey` | variable | 132 | <code>const planByFeatureKey=new Map(prepared.tasks.map(task=&gt;&#91;task.feature_key+'&#92;0'+task.key,task&#93;));</code> |
-| `existingIds` | variable | 151 | <code>const existingIds=new Set(records.rows.map(task=&gt;task.id as string));</code> |
-| `history` | variable | 174 | <code>const history=new Map(active.map(task=&gt;&#91;task.id as string,task.custody_history as number&#93;));</code> |
 | `validateSpecAmendment` | function | 185 | <code>export async function validateSpecAmendment(tx:Tx,scope:SpecScope,input:unknown):Promise&lt;AmendmentAnalysis&gt;{</code> |
 | `bounded` | function | 188 | <code>function bounded(result:AmendmentAnalysis):unknown{</code> |
 | `scopeOf` | function | 196 | <code>async function scopeOf(tx:Tx,context:ComponentContext,invocation:InvocationContext):Promise&lt;SpecScope&gt;{</code> |
 | `actorOf` | function | 201 | <code>function actorOf(invocation:InvocationContext):{actor_id:string;role:string;credential_id:string}{</code> |
 | `decide` | function | 204 | <code>async function decide(tx:Tx,scope:SpecScope,amendment_id:string,record:Record&lt;string,unknown&gt;):Promise&lt;Record&lt;string,unknown&gt;&gt;{</code> |
 | `record` | function | 211 | <code>async function record(tx:Tx,scope:SpecScope,invocation:InvocationContext,analysis:InternalAnalysis):Promise&lt;unknown&gt;{</code> |
-| `proposal` | object | 214 | <code>const proposal={schema_version:1,request:analysis.request,source_content:analysis.prepared.source.text,revision_digest:analysis.prepared.revision_digest,</code> |
 | `AdmitRequest` | interface | 228 | <code>interface AdmitRequest {run_id:string;amendment_id:string;proposal_digest:string;revalidate_task_ids:string&#91;&#93;;justification:string;proof_policies:{task_key:string;policy:unknown}&#91;&#93;}</code> |
 | `admitRequestOf` | function | 229 | <code>function admitRequestOf(input:unknown,scope:SpecScope):AdmitRequest{</code> |
 | `ValidityCapability` | interface | 241 | <code>interface ValidityCapability {invalidateAcceptedSpec(db:Tx,scope:{organisation_id:string;run_id:string},taskIds:string&#91;&#93;,reason:string):Promise&lt;number&gt;}</code> |
@@ -6717,14 +4901,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `isValidity` | function | 242 | <code>const isValidity=(value:unknown):value is ValidityCapability=&gt;object(value)&amp;&amp;typeof value.invalidateAcceptedSpec==='function';</code> |
 | `proofDeadline` | function | 243 | <code>function proofDeadline(context:ComponentContext):number{</code> |
 | `admit` | function | 252 | <code>async function admit(tx:Tx,context:ComponentContext,invocation:InvocationContext,scope:SpecScope,input:unknown):Promise&lt;unknown&gt;{</code> |
-| `base` | object | 266 | <code>const base={spec_revision_id:analysis.request.base_spec_revision_id,spec_generation:analysis.request.base_spec_generation,state_version:analysis.request.state_version};</code> |
-| `required` | variable | 271 | <code>const revalidation=analysis.result.impact.revalidation,required=new Set(revalidation.map(task=&gt;task.task_id));</code> |
-| `records` | variable | 288 | <code>const records=new Map(analysis.records.map(task=&gt;&#91;task.id as string,task&#93;));</code> |
-| `definition` | object | 307 | <code>const definition={...old.definition,section:{...section,fields:Object.fromEntries(Object.entries(section.fields).filter((&#91;key&#93;)=&gt;key!=='requires'))},</code> |
-| `explicit` | variable | 312 | <code>const explicit=new Map(request.proof_policies.map(item=&gt;&#91;item.task_key,item.policy&#93;));</code> |
 | `createComponent` | function | 351 | <code>export function createComponent(_startup:ComponentContext):Component{</code> |
-| `action` | function | 352 | <code>const action=(persist:boolean)=&gt;async(input:unknown,context:ComponentContext)=&gt;specTransaction(context,persist?'WRITE':'READ',async(tx,invocation)=&gt;{</code> |
-| `'spec.amendment.admit'` | action | 359 | <code>'spec.amendment.admit':async(input:unknown,context:ComponentContext)=&gt;specTransaction(context,'WRITE',async(tx,invocation)=&gt;{</code> |
 
 ## services/hyperfide/src/storage/authority_journal.ts
 
@@ -6756,8 +4933,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `selfIdentity` | function | 49 | <code>async function selfIdentity():Promise&lt;ProcessIdentity&gt;{</code> |
 | `documentDigest` | function | 54 | <code>function documentDigest(document:Document):string{const {document_digest:_,...body}=document;return hash(body)}</code> |
 | `validate` | function | 55 | <code>function validate(document:Document,deployment:string):void{</code> |
-| `epochs` | variable | 57 | <code>let previous=hash({deployment_id:deployment,initial:true}),epoch:string&#124;null=null;const operations=new Set&lt;string&gt;(),epochs=new Set&lt;string&gt;();</code> |
-| `operations` | variable | 57 | <code>let previous=hash({deployment_id:deployment,initial:true}),epoch:string&#124;null=null;const operations=new Set&lt;string&gt;(),epochs=new Set&lt;string&gt;();</code> |
 | `FileExternalAuthorityJournal` | class | 73 | <code>export class FileExternalAuthorityJournal implements ExternalAuthorityJournal {</code> |
 | `constructor` | method | 74 | <code>constructor(private readonly directory:string,private readonly verifyCommitted:VerifyCommittedAuthority){</code> |
 | `root` | method | 77 | <code>private async root():Promise&lt;fs.FileHandle&gt;{</code> |
@@ -6765,13 +4940,9 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `write` | method | 94 | <code>private async write(root:fs.FileHandle,document:Document):Promise&lt;void&gt;{</code> |
 | `lock` | method | 102 | <code>private async lock&lt;T&gt;(root:fs.FileHandle,deployment:string,body:()=&gt;Promise&lt;T&gt;):Promise&lt;T&gt;{</code> |
 | `attestation` | method | 130 | <code>private attestation(document:Document):ExternalAuthorityAttestation{</code> |
-| `expires` | variable | 132 | <code>const observed=new Date(),expires=new Date(observed.getTime()+10000);</code> |
-| `observed` | variable | 132 | <code>const observed=new Date(),expires=new Date(observed.getTime()+10000);</code> |
 | `current` | method | 135 | <code>async current(input:{deployment_id:string;signal?:AbortSignal}):Promise&lt;ExternalAuthorityAttestation&gt;{</code> |
 | `prepareActivation` | method | 139 | <code>async prepareActivation(input:AuthorityJournalPreparation):Promise&lt;PreparedAuthorityActivation&gt;{</code> |
 | `publishCommitted` | method | 163 | <code>async publishCommitted(input:AuthorityJournalPublication):Promise&lt;ExternalAuthorityAttestation&gt;{</code> |
-| `body` | object | 178 | <code>const body={operation_id:input.operation_id,previous_epoch:input.expected_previous_epoch,database_predecessor_epoch:databasePrevious,epoch:input.epoch,sequence,fence_evidence_digest:proof.evidence_dig…</code> |
-| `record` | object | 179 | <code>const record={...body,head_digest:hash(body)};document.history.push(record);document.epoch=input.epoch;document.sequence=sequence;document.head_digest=record.head_digest;document.state='ACTIVE';docume…</code> |
 
 ## services/hyperfide/src/storage/dispositions.ts
 
@@ -6796,11 +4967,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `digest` | function | 15 | <code>const digest=(value:string)=&gt;'sha256:'+createHash('sha256').update(value).digest('hex');</code> |
 | `discoverMigrations` | function | 16 | <code>export async function discoverMigrations(directory=DIRECTORY):Promise&lt;readonly MigrationDefinition&#91;&#93;&gt;{</code> |
 | `assertMigrationSource` | function | 36 | <code>export function assertMigrationSource(sql:string):void{</code> |
-| `inspect` | function | 38 | <code>const inspect=()=&gt;{</code> |
 | `Applied` | interface | 64 | <code>interface Applied {version:number;name:string;checksum:string}</code> |
 | `inspectHistory` | function | 65 | <code>function inspectHistory(files:readonly MigrationDefinition&#91;&#93;,rows:Applied&#91;&#93;):MigrationDefinition&#91;&#93;{</code> |
-| `known` | variable | 66 | <code>const known=new Map(files.map(row=&gt;&#91;row.version,row&#93;));</code> |
-| `applied` | variable | 72 | <code>const applied=new Set(rows.map(row=&gt;row.version)),highest=Math.max(0,...applied);</code> |
 | `history` | function | 77 | <code>async function history(session:QuerySession):Promise&lt;Applied&#91;&#93;&gt;{</code> |
 | `isolationPostflight` | function | 81 | <code>async function isolationPostflight(session:QuerySession):Promise&lt;void&gt;{</code> |
 | `MigrationCoordinator` | class | 87 | <code>export class MigrationCoordinator {</code> |
@@ -6821,23 +4989,9 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `activate` | method | 190 | <code>async activate(input:{operation_id:string;expected_previous_epoch:string&#124;null},fencer:ExternalWriterFence,options:TransactionOptions={},journal=this.journal):Promise&lt;{epoch:string;replayed:boolean}&gt;{</code> |
 | `activateRestored` | method | 195 | <code>async activateRestored(input:{operation_id:string;expected_external_epoch:string;expected_database_epoch:string&#124;null},fencer:ExternalWriterFence,options:TransactionOptions={},journal=this.journal):Pro…</code> |
 | `activateInternal` | method | 200 | <code>private async activateInternal(operationId:string,externalPrevious:string&#124;null,databasePrevious:string&#124;null,restore:boolean,fencer:ExternalWriterFence,options:TransactionOptions,journal?:ExternalAutho…</code> |
-| `remaining` | function | 205 | <code>const remaining=()=&gt;{const ms=Math.floor(deadline-performance.now());if(ms&lt;1)throw new StorageError('TX_TIMEOUT','Authority activation deadline expired');return ms;};</code> |
-| `wait` | function | 206 | <code>const wait=&lt;T&gt;(promise:Promise&lt;T&gt;)=&gt;bounded(promise,deadline,options.signal);</code> |
-| `lookup` | object | 207 | <code>const lookup={deployment_id:this.deploymentId,operation_id:operationId,expected_previous_epoch:externalPrevious,database_predecessor_epoch:databasePrevious,...(options.signal?{signal:options.signal}:{…</code> |
-| `publish` | function | 208 | <code>const publish=async(epoch:string):Promise&lt;void&gt;=&gt;{</code> |
 | `inspectDurability` | function | 246 | <code>export async function inspectDurability(resources:ServiceResources):Promise&lt;unknown&gt;{</code> |
 | `assertRuntimePrivileges` | function | 256 | <code>export async function assertRuntimePrivileges(resources:ServiceResources):Promise&lt;void&gt;{</code> |
 | `createComponent` | function | 264 | <code>export async function createComponent(context:ComponentContext):Promise&lt;Component&gt;{</code> |
-| `migrations` | variable | 265 | <code>const migrations=new MigrationCoordinator(context.resources);</code> |
-| `store` | function | 282 | <code>const store=()=&gt;{if(!deployment)throw new FoundationError('AUTHORITY_CONFIG_INVALID','Deployment identity is not configured');return new AuthorityStore(context.resources,deployment,journal);};</code> |
-| `activate` | action | 284 | <code>activate:(input:{operation_id:string;expected_previous_epoch:string&#124;null},fencer:ExternalWriterFence,options:TransactionOptions={})=&gt;store().activate(input,fencer,options),</code> |
-| `activateRestored` | action | 285 | <code>activateRestored:(input:{operation_id:string;expected_external_epoch:string;expected_database_epoch:string&#124;null},fencer:ExternalWriterFence,options:TransactionOptions={})=&gt;store().activateRestored(inp…</code> |
-| `assertCurrent` | action | 286 | <code>assertCurrent:(tx:PrimaryTransaction,scope:AuthorityScope)=&gt;store().assertCurrent(tx,scope),</code> |
-| `assertExternalCurrent` | action | 287 | <code>assertExternalCurrent:(options:{timeoutMs?:number;signal?:AbortSignal}={})=&gt;{</code> |
-| `'storage.migrations.inspect'` | action | 293 | <code>'storage.migrations.inspect':async()=&gt;migrations.inspect(),</code> |
-| `'storage.migrations.apply'` | action | 294 | <code>'storage.migrations.apply':async input=&gt;{</code> |
-| `'storage.durability.inspect'` | action | 301 | <code>'storage.durability.inspect':async()=&gt;inspectDurability(context.resources)</code> |
-| `assertReady` | action | 302 | <code>},capabilities:Object.freeze({'storage.authority.v1':authority,'storage.migrations.v1':Object.freeze({inspect:migrations.inspect.bind(migrations),assertReady:(version:number,name:string,checksum:strin…</code> |
 
 ## services/hyperfide/src/storage/recovery_probes.ts
 
@@ -6856,15 +5010,12 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `count` | function | 59 | <code>const count=(value:unknown):value is number=&gt;Number.isSafeInteger(value)&amp;&amp;Number(value)&gt;=0&amp;&amp;Number(value)&lt;=100000;</code> |
 | `reconciliationOf` | function | 61 | <code>export function reconciliationOf(value:unknown):DrillReconciliation&#124;null{</code> |
 | `createPostgresRecoveryProbe` | function | 73 | <code>export function createPostgresRecoveryProbe(_resources:ServiceResources,env:Readonly&lt;NodeJS.ProcessEnv&gt;){</code> |
-| `execute` | action | 74 | <code>return Object.freeze({execute:async(input:ProbeInput):Promise&lt;PostgresDrillResult&gt;=&gt;{</code> |
-| `payload` | object | 88 | <code>const payload={schema_version:1,scope:profile.scope,scenario:input.scenario,organisation_id:input.organisation_id,run_id:input.run_id,operation_id:input.operation_id,source_epoch:input.source_epoch,ev…</code> |
-| `abort` | function | 93 | <code>const abort=()=&gt;{if(aborted)return;aborted=true;child.kill('SIGTERM');force=setTimeout(()=&gt;child.kill('SIGKILL'),10000);force.unref();};</code> |
 | `LocalScenario` | type | 130 | <code>type LocalScenario='OBJECT'&#124;'GIT'&#124;'AUTH'&#124;'FULL_DISK'&#124;'PROVIDER';</code> |
 | `Cleanup` | interface | 141 | <code>interface Cleanup {complete:boolean;root_absent:boolean;processes_absent:boolean}</code> |
 | `LocalOutcome` | interface | 142 | <code>interface LocalOutcome {status:'RECOVERED'&#124;'FAILED';recovery_epoch:string&#124;null;acknowledged_ids:string&#91;&#93;;recovered_ids:string&#91;&#93;;reconciliation:DrillReconciliation&#124;null;limits?:string}</code> |
 | `LocalContext` | interface | 143 | <code>interface LocalContext {root:string;input:ProbeInput;save(name:string,value:unknown):Promise&lt;void&gt;;defer(step:()=&gt;Promise&lt;boolean&gt;):void}</code> |
-| `defer` | method | 143 | <code>interface LocalContext {root:string;input:ProbeInput;save(name:string,value:unknown):Promise&lt;void&gt;;defer(step:()=&gt;Promise&lt;boolean&gt;):void}</code> |
 | `save` | method | 143 | <code>interface LocalContext {root:string;input:ProbeInput;save(name:string,value:unknown):Promise&lt;void&gt;;defer(step:()=&gt;Promise&lt;boolean&gt;):void}</code> |
+| `defer` | method | 143 | <code>interface LocalContext {root:string;input:ProbeInput;save(name:string,value:unknown):Promise&lt;void&gt;;defer(step:()=&gt;Promise&lt;boolean&gt;):void}</code> |
 | `sha` | function | 144 | <code>const sha=(bytes:Buffer&#124;string)=&gt;createHash('sha256').update(bytes).digest('hex');</code> |
 | `SAFE_ENV` | object | 145 | <code>const SAFE_ENV={PATH:'/usr/bin:/bin:/usr/sbin:/sbin',LANG:'C.UTF-8'};</code> |
 | `run` | function | 146 | <code>function run(file:string,args:string&#91;&#93;,options:{cwd?:string;input?:string&#124;undefined;env?:NodeJS.ProcessEnv}={}):Promise&lt;{code:number&#124;null;stdout:string;stderr:string}&gt;{</code> |
@@ -6880,50 +5031,12 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `staleWorkers` | function | 173 | <code>async function staleWorkers(fence:EpochFence,stale:string&#91;&#93;,current:string,write:(epoch:string)=&gt;Promise&lt;void&gt;){</code> |
 | `reconciliation` | function | 179 | <code>function reconciliation(scenario:LocalScenario,mechanism:string,workers:{presented:number;fenced:number;current_accepted:boolean},effects:DrillReconciliation&#91;'external_effects'&#93;):DrillReconciliation{</code> |
 | `objectDrill` | function | 183 | <code>async function objectDrill(ctx:LocalContext):Promise&lt;LocalOutcome&gt;{</code> |
-| `fence` | variable | 186 | <code>const fence=new EpochFence(path.join(ctx.root,'store-epoch')),pre=randomUUID();await fence.init(pre);</code> |
-| `put` | function | 187 | <code>const put=async(directory:string,bytes:Buffer)=&gt;{const id=sha(bytes);await durable(path.join(directory,id),bytes);return id;};</code> |
-| `index` | object | 188 | <code>const index:Record&lt;string,'COMMITTED'&#124;'PENDING'&gt;={},acknowledged:string&#91;&#93;=&#91;&#93;;</code> |
-| `scan` | function | 197 | <code>const scan=async()=&gt;{</code> |
 | `gitDrill` | function | 225 | <code>async function gitDrill(ctx:LocalContext):Promise&lt;LocalOutcome&gt;{</code> |
-| `env` | object | 226 | <code>const env={...SAFE_ENV,HOME:ctx.root,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_TERMINAL_PROMPT:'0',</code> |
-| `git` | function | 231 | <code>const git=async(cwd:string,args:string&#91;&#93;,input?:string,allow=false)=&gt;{const result=await run('/usr/bin/git',args,{cwd,env,input});log.push({args,code:result.code,stderr:result.stderr.slice(0,512)});if…</code> |
-| `commit` | function | 235 | <code>const commit=async(cwd:string,message:string,parent?:string)=&gt;(await git(cwd,&#91;'commit-tree',tree,...(parent?&#91;'-p',parent&#93;:&#91;&#93;),'-m',message&#93;)).stdout.trim();</code> |
-| `blob` | function | 236 | <code>const blob=async(cwd:string,value:string)=&gt;(await git(cwd,&#91;'hash-object','-w','--stdin'&#93;,value)).stdout.trim();</code> |
-| `fence` | variable | 239 | <code>const fence=new EpochFence(path.join(ctx.root,'git-epoch')),pre=randomUUID();await fence.init(pre);</code> |
-| `refs` | function | 241 | <code>const refs=async(cwd:string)=&gt;(await git(cwd,&#91;'for-each-ref','--format=%(refname)@%(objectname)','refs/heads','refs/tags'&#93;)).stdout.trim().split('&#92;n').filter(Boolean);</code> |
-| `known` | variable | 266 | <code>const known=new Set(&#91;...acknowledged.map(item=&gt;item.split('@')&#91;0&#93;),...intents.map(item=&gt;item.ref)&#93;);</code> |
-| `update` | function | 270 | <code>const update=async(epochBlob:string)=&gt;{</code> |
-| `workers` | object | 275 | <code>const workers={presented:1,fenced:staleAccepted?0:1,current_accepted:currentAccepted};</code> |
 | `authDrill` | function | 281 | <code>async function authDrill(ctx:LocalContext):Promise&lt;LocalOutcome&gt;{</code> |
-| `revoked` | variable | 284 | <code>let trust={epoch:pre,key:first.publicKey};const revoked=new Set&lt;string&gt;();</code> |
-| `trust` | object | 284 | <code>let trust={epoch:pre,key:first.publicKey};const revoked=new Set&lt;string&gt;();</code> |
-| `issue` | function | 285 | <code>const issue=(key:KeyObject,epoch:string,ttl:number)=&gt;{</code> |
-| `check` | function | 289 | <code>const check=(token:string):string=&gt;{</code> |
-| `accept` | function | 296 | <code>const accept=async(operation:string,token:string)=&gt;{const verdict=check(token);if(verdict==='VALID')await durable(journal,JSON.stringify({operation})+'&#92;n','a');return verdict;};</code> |
-| `journalled` | function | 297 | <code>const journalled=async()=&gt;new Set((await fs.readFile(journal,'utf8')).split('&#92;n').filter(Boolean).map(line=&gt;JSON.parse(line).operation as string));</code> |
-| `workers` | object | 312 | <code>const workers={presented:staleTokens.length,fenced:staleVerdicts.filter(v=&gt;v!=='VALID').length,current_accepted:currentVerdict==='VALID'};</code> |
 | `fullDiskDrill` | function | 319 | <code>async function fullDiskDrill(ctx:LocalContext):Promise&lt;LocalOutcome&gt;{</code> |
-| `mountinfo` | function | 326 | <code>const mountinfo=async()=&gt;(await fs.readFile('/proc/self/mountinfo','utf8')).split('&#92;n').some(line=&gt;line.split(' ')&#91;4&#93;===volume);</code> |
-| `fence` | variable | 330 | <code>const fence=new EpochFence(path.join(ctx.root,'volume-epoch')),pre=randomUUID();await fence.init(pre);</code> |
-| `payload` | function | 331 | <code>const payload=(id:string)=&gt;Buffer.from(('record:'+id+'&#92;n').repeat(24));</code> |
-| `write` | function | 332 | <code>const write=async(id:string)=&gt;{try{await durable(path.join(records,id),payload(id));return 'WRITTEN';}catch(error){if((error as NodeJS.ErrnoException).code==='ENOSPC')return 'ENOSPC';throw error;}};</code> |
-| `intact` | function | 348 | <code>const intact=async(id:string)=&gt;{try{return (await fs.readFile(path.join(records,id))).equals(payload(id));}catch{return false;}};</code> |
 | `providerDrill` | function | 356 | <code>async function providerDrill(ctx:LocalContext):Promise&lt;LocalOutcome&gt;{</code> |
-| `inventory` | variable | 357 | <code>const inventory=new Map&lt;string,{id:string;idempotency_key:string}&gt;();let mode:'UP'&#124;'DOWN'&#124;'APPLY_THEN_FAIL'='UP';</code> |
-| `reply` | function | 361 | <code>const reply=(code:number,value?:unknown)=&gt;{res.writeHead(code,{'content-type':'application/json'});res.end(value===undefined?'':JSON.stringify(value));};</code> |
-| `call` | function | 377 | <code>const call=async(method:string,url:string,body?:unknown)=&gt;{const response=await fetch(url,{method,headers:{'content-type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)}),signa…</code> |
-| `list` | function | 378 | <code>const list=async()=&gt;{const response=await call('GET',base);must(response.status===200,'Provider inventory unavailable');return response.value as {id:string;idempotency_key:string}&#91;&#93;;};</code> |
-| `fence` | variable | 379 | <code>const fence=new EpochFence(path.join(ctx.root,'provider-epoch')),pre=randomUUID();await fence.init(pre);</code> |
-| `intents` | variable | 380 | <code>const intents=new Map&lt;string,'ACKNOWLEDGED'&#124;'UNKNOWN'&gt;();</code> |
-| `create` | function | 381 | <code>const create=async(key:string)=&gt;{const response=await call('POST',base,{idempotency_key:key});intents.set(key,&#91;200,201&#93;.includes(response.status)?'ACKNOWLEDGED':'UNKNOWN');return response.status;};</code> |
 | `runLocalDrill` | function | 407 | <code>async function runLocalDrill(profile:Profile,input:ProbeInput,scenario:LocalScenario):Promise&lt;DrillProbeResult&gt;{</code> |
-| `save` | function | 411 | <code>const save=async(name:string,value:unknown)=&gt;{await durable(path.join(directory,name),JSON.stringify(value,null,2)+'&#92;n');};</code> |
-| `started` | variable | 413 | <code>const started=new Date(),begin=process.hrtime.bigint(),deferred:(()=&gt;Promise&lt;boolean&gt;)&#91;&#93;=&#91;&#93;;</code> |
-| `defer` | action | 418 | <code>outcome=await LOCAL_PRODUCERS&#91;scenario&#93;({root,input,save,defer:step=&gt;{deferred.push(step);}});</code> |
-| `cleanup` | object | 426 | <code>const cleanup:Cleanup={complete:false,root_absent:await absent(root),processes_absent:processesAbsent};cleanup.complete=cleanup.root_absent&amp;&amp;processesAbsent;</code> |
 | `createRecoveryProbe` | function | 440 | <code>export function createRecoveryProbe(resources:ServiceResources,env:Readonly&lt;NodeJS.ProcessEnv&gt;){</code> |
-| `ready` | action | 443 | <code>ready:async():Promise&lt;void&gt;=&gt;{await loadProfile(env);},</code> |
-| `execute` | action | 444 | <code>execute:async(input:ProbeInput):Promise&lt;DrillProbeResult&gt;=&gt;{</code> |
 
 ## services/hyperfide/src/storage/replicas.ts
 
@@ -6949,20 +5062,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `constructor` | method | 55 | <code>constructor(private readonly resources:ServiceResources,private readonly reader:ExecutionPacketReader,env:Readonly&lt;NodeJS.ProcessEnv&gt;){</code> |
 | `topology` | method | 59 | <code>private async topology(session:QuerySession,scope:Scope):Promise&lt;Topology&gt;{</code> |
 | `admit` | method | 69 | <code>private async admit(invocation:InvocationContext,deadline:number,digest:string):Promise&lt;Topology&gt;{</code> |
-| `guard` | action | 71 | <code>return this.resources.gateway.withPrimaryTransaction({timeoutMs:remaining(deadline),signal:invocation.signal,guard:async tx=&gt;{await readSemanticDisposition(tx,scope);await invocation.guard(tx);}},asyn…</code> |
 | `validate` | method | 87 | <code>private validate(value:unknown,scope:Scope,digest:string,current:Topology):CausalBarrier{</code> |
 | `mint` | method | 105 | <code>async mint(digest:string,invocation:InvocationContext,options:{timeoutMs?:number}={}):Promise&lt;CausalBarrier&gt;{</code> |
-| `unsigned` | object | 113 | <code>const now=Date.now(),unsigned={schema_version:1 as const,deployment_id:this.deployment,...topology,organisation_id:scope.organisation_id,run_id:scope.run_id,digest,lsn:position,issued_at:new Date(now)…</code> |
 | `validatePins` | method | 117 | <code>private validatePins(record:unknown,options:PacketReadOptions):void{</code> |
 | `read` | method | 126 | <code>async read(options:PacketReadOptions,invocation:InvocationContext):Promise&lt;unknown&gt;{</code> |
-| `packetInput` | object | 133 | <code>const packetInput={organisation_id:scope.organisation_id,run_id:scope.run_id,digest:options.digest};</code> |
-| `query` | action | 156 | <code>query:async&lt;R extends pg.QueryResultRow=pg.QueryResultRow&gt;(text:string,values?:readonly unknown&#91;&#93;):Promise&lt;pg.QueryResult&lt;R&gt;&gt;=&gt;{if(!valid)throw new StorageError('TX_CLOSED','Packet snapshot expired');…</code> |
-| `remainingMs` | action | 157 | <code>remainingMs:()=&gt;session.remainingMs(),signal:session.signal</code> |
 | `createComponent` | function | 186 | <code>export function createComponent(context:ComponentContext):Component{</code> |
-| `snapshots` | variable | 188 | <code>const snapshots=new PacketSnapshots(context.resources,reader,context.env);</code> |
-| `invocation` | function | 189 | <code>const invocation=(ctx:ComponentContext):InvocationContext=&gt;{const i=(ctx as ComponentContext&amp;{invocation?:InvocationContext}).invocation;assertInvocation(i);return i;};</code> |
-| `'storage.packet.barrier'` | action | 191 | <code>'storage.packet.barrier':async(input,ctx)=&gt;{exact(input,&#91;'digest'&#93;);if(typeof input.digest!=='string')throw new FoundationError('INVALID_REQUEST','Digest is required');return snapshots.mint(input.dige…</code> |
-| `'storage.packet.read'` | action | 192 | <code>'storage.packet.read':async(input,ctx)=&gt;{if(!object(input)&#124;&#124;Object.keys(input).some(key=&gt;!&#91;'digest','barrier','timeoutMs','waitMs','preferReplica','expected_graph_manifest_digest'&#93;.includes(key))&#124;&#124;typ…</code> |
 
 ## services/hyperfide/src/storage/runtime.ts
 
@@ -6975,16 +5079,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `constructor` | method | 16 | <code>constructor(private readonly config:StorageConfig,private readonly maxQueued:number,private readonly shutdown:AbortSignal){}</code> |
 | `raw` | method | 17 | <code>raw():pg.Pool{return this.pool??=createStoragePool(this.config);}</code> |
 | `permit` | method | 18 | <code>private async permit(deadline:number,signal?:AbortSignal):Promise&lt;()=&gt;void&gt;{</code> |
-| `released` | function | 20 | <code>const released=()=&gt;{let done=false;return ()=&gt;{if(done)return;done=true;this.active--;this.drain();};};</code> |
-| `remove` | function | 25 | <code>const remove=()=&gt;{const index=this.queue.indexOf(waiter);if(index&gt;=0)this.queue.splice(index,1);};</code> |
-| `abort` | function | 26 | <code>const abort=()=&gt;{remove();waiter.cleanup();reject(new StorageError('TX_TIMEOUT','Database queue wait cancelled'));};</code> |
-| `cleanup` | action | 28 | <code>waiter={resolve,reject,cleanup:()=&gt;{clearTimeout(timer);signal?.removeEventListener('abort',abort);this.shutdown.removeEventListener('abort',abort);}};</code> |
 | `drain` | method | 34 | <code>private drain():void{</code> |
 | `acquire` | method | 40 | <code>async acquire(deadline:number,signal?:AbortSignal):Promise&lt;DatabaseLease&gt;{</code> |
-| `controller` | variable | 48 | <code>const controller=new AbortController();</code> |
-| `abort` | function | 50 | <code>const abort=()=&gt;{controller.abort();release(true);};</code> |
-| `release` | function | 52 | <code>const release=(destroy=false)=&gt;{if(done)return;done=true;clearTimeout(timer);</code> |
-| `lease` | object | 55 | <code>const lease:DatabaseLease={client,signal:controller.signal,release};</code> |
 | `facade` | method | 65 | <code>facade():pg.Pool{</code> |
 | `get` | method | 68 | <code>get(target,key){</code> |
 | `get` | method | 73 | <code>get(client,property){</code> |
@@ -7010,21 +5106,15 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `commitMode` | method | 175 | <code>commitMode():'on'&#124;'remote_apply'{</code> |
 | `acquirePrimary` | method | 179 | <code>acquirePrimary(deadline:number,signal?:AbortSignal):Promise&lt;DatabaseLease&gt;{return this.pool('primary').acquire(deadline,signal);}</code> |
 | `session` | method | 180 | <code>private session(lease:DatabaseLease,deadline:number,readonly=false):QuerySession{</code> |
-| `query` | action | 183 | <code>query:async&lt;R extends pg.QueryResultRow=pg.QueryResultRow&gt;(text:string,values?:readonly unknown&#91;&#93;)=&gt;{</code> |
-| `remainingMs` | action | 187 | <code>},remainingMs:()=&gt;Math.max(0,Math.floor(deadline-performance.now())),signal:lease.signal</code> |
 | `connection` | method | 192 | <code>private async connection&lt;T&gt;(kind:'migration'&#124;'listener',options:{timeoutMs?:number;signal?:AbortSignal},operation:(session:QuerySession)=&gt;Promise&lt;T&gt;&#124;T):Promise&lt;T&gt;{</code> |
 | `withReplicaConnection` | method | 198 | <code>async withReplicaConnection&lt;T&gt;(options:{timeoutMs?:number;signal?:AbortSignal},operation:(session:QuerySession)=&gt;Promise&lt;T&gt;&#124;T):Promise&lt;T&gt;{</code> |
 | `withMigrationConnection` | method | 211 | <code>withMigrationConnection&lt;T&gt;(options:{timeoutMs?:number;signal?:AbortSignal},operation:(session:QuerySession)=&gt;Promise&lt;T&gt;&#124;T):Promise&lt;T&gt;{return this.connection('migration',options,operation);}</code> |
 | `withListener` | method | 212 | <code>async withListener&lt;T&gt;(options:{timeoutMs?:number;signal?:AbortSignal},operation:(session:ListenerSession)=&gt;Promise&lt;T&gt;&#124;T):Promise&lt;T&gt;{</code> |
-| `subscriptions` | variable | 215 | <code>const base=this.session(lease,deadline),subscriptions=new Set&lt;(event:{channel:string;payload?:string&#124;undefined;processId:number})=&gt;void&gt;();</code> |
-| `onNotification` | action | 216 | <code>const session:ListenerSession=Object.freeze({...base,onNotification:(listener:(event:{channel:string;payload?:string&#124;undefined;processId:number})=&gt;void)=&gt;{</code> |
-| `guarded` | function | 218 | <code>const guarded=(event:{channel:string;payload?:string&#124;undefined;processId:number})=&gt;{try{listener(event);}catch{lease.release(true);}};</code> |
 | `observe` | method | 226 | <code>async observe&lt;T&gt;(options:ObservationOptions,operation:(session:QuerySession)=&gt;Promise&lt;T&gt;&#124;T):Promise&lt;{value:T;route:'primary'&#124;'replica';observedAt:string}&gt;{</code> |
 | `describe` | method | 238 | <code>describe():unknown{</code> |
 | `close` | method | 243 | <code>async close():Promise&lt;void&gt;{</code> |
 | `createResourceContainer` | function | 248 | <code>export function createResourceContainer(context:{role:ServiceRole;env:Readonly&lt;NodeJS.ProcessEnv&gt;;signal:AbortSignal}):ResourceContainer{</code> |
 | `createComponent` | function | 251 | <code>export function createComponent(context:{resources:ServiceResources}){</code> |
-| `'storage.runtime.describe'` | action | 253 | <code>'storage.runtime.describe':async()=&gt;context.resources.describe()</code> |
 
 ## services/hyperfide/src/storage/schema.ts
 
@@ -7037,24 +5127,17 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `SchemaInspection` | interface | 26 | <code>export interface SchemaInspection {</code> |
 | `bounded` | function | 30 | <code>function bounded(env:Readonly&lt;NodeJS.ProcessEnv&gt;,name:string,fallback:number,min:number,max:number):number {</code> |
 | `storageConfig` | function | 37 | <code>export function storageConfig(env:Readonly&lt;NodeJS.ProcessEnv&gt;):StorageConfig {</code> |
-| `url` | variable | 51 | <code>const url=new URL(validationURL);</code> |
-| `allowed` | variable | 55 | <code>const allowed=new Set(&#91;'host','port','sslmode','sslrootcert','sslcert','sslkey','sslpassword'&#93;);</code> |
-| `seen` | variable | 56 | <code>const seen=new Set&lt;string&gt;();</code> |
 | `createStoragePool` | function | 69 | <code>export function createStoragePool(config:StorageConfig):pg.Pool {</code> |
-| `pool` | variable | 76 | <code>const pool=new pg.Pool({connectionString:config.connectionString,max:config.max,</code> |
 | `bindStoragePool` | function | 89 | <code>export function bindStoragePool(provider:(env:Readonly&lt;NodeJS.ProcessEnv&gt;)=&gt;pg.Pool):()=&gt;void{</code> |
 | `getPool` | function | 96 | <code>export function getPool(env:Readonly&lt;NodeJS.ProcessEnv&gt;):pg.Pool {</code> |
 | `closePool` | function | 105 | <code>export async function closePool():Promise&lt;void&gt;{</code> |
 | `migration` | function | 109 | <code>async function migration():Promise&lt;{sql:string;checksum:string}&gt;{</code> |
-| `filename` | variable | 110 | <code>const filename=new URL('../../migrations/0001-authority.sql',import.meta.url),info=await fs.lstat(filename);</code> |
 | `databaseError` | function | 116 | <code>export function databaseError(error:unknown):FoundationError{</code> |
-| `categories` | object | 120 | <code>const categories:Record&lt;string,string&gt;={</code> |
 | `tablesOf` | function | 128 | <code>async function tablesOf(client:pg.Pool&#124;pg.PoolClient):Promise&lt;string&#91;&#93;&gt;{</code> |
 | `bootstrapAuthoritySchema` | function | 134 | <code>export async function bootstrapAuthoritySchema(pool:pg.Pool):Promise&lt;SchemaReceipt&gt;{</code> |
 | `inspectAuthoritySchema` | function | 143 | <code>export async function inspectAuthoritySchema(pool:pg.Pool):Promise&lt;SchemaInspection&gt;{</code> |
 | `empty` | function | 159 | <code>function empty(input:unknown):void{</code> |
 | `createComponent` | function | 162 | <code>export function createComponent(context:ComponentContext):Component{</code> |
-| `guarded` | function | 163 | <code>const guarded=(operation:(input:unknown)=&gt;unknown&#124;Promise&lt;unknown&gt;)=&gt;async(input:unknown):Promise&lt;unknown&gt;=&gt;{</code> |
 
 ## services/hyperfide/src/storage/transactions.ts
 
@@ -7081,22 +5164,16 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `deadlineFrom` | function | 30 | <code>export function deadlineFrom(timeoutMs=5000):number {</code> |
 | `codeOf` | function | 35 | <code>function codeOf(error:unknown):string {</code> |
 | `bounded` | function | 38 | <code>export async function bounded&lt;T&gt;(promise:Promise&lt;T&gt;,deadline:number,signal?:AbortSignal):Promise&lt;T&gt;{</code> |
-| `limit` | variable | 46 | <code>const limit=new Promise&lt;never&gt;((_resolve,reject)=&gt;{</code> |
 | `assertTransactionStatement` | function | 55 | <code>export function assertTransactionStatement(sql:string):void{</code> |
 | `CopyConnection` | interface | 87 | <code>interface CopyConnection {sendCopyFromChunk(chunk:Buffer):void;endCopyFrom():void}</code> |
-| `endCopyFrom` | method | 87 | <code>interface CopyConnection {sendCopyFromChunk(chunk:Buffer):void;endCopyFrom():void}</code> |
 | `sendCopyFromChunk` | method | 87 | <code>interface CopyConnection {sendCopyFromChunk(chunk:Buffer):void;endCopyFrom():void}</code> |
+| `endCopyFrom` | method | 87 | <code>interface CopyConnection {sendCopyFromChunk(chunk:Buffer):void;endCopyFrom():void}</code> |
 | `BoundedCopyInput` | class | 88 | <code>class BoundedCopyInput extends pg.Query {</code> |
 | `constructor` | method | 89 | <code>constructor(sql:string,private readonly bytes:Buffer){super(sql);}</code> |
 | `handleCopyInResponse` | method | 90 | <code>handleCopyInResponse(connection:CopyConnection):void{</code> |
 | `TransactionGateway` | class | 95 | <code>export class TransactionGateway {</code> |
 | `constructor` | method | 96 | <code>constructor(private readonly source:PrimaryConnectionSource){}</code> |
 | `withPrimaryTransaction` | method | 97 | <code>async withPrimaryTransaction&lt;T&gt;(options:TransactionOptions,operation:(tx:PrimaryTransaction)=&gt;Promise&lt;T&gt;&#124;T):Promise&lt;T&gt;{</code> |
-| `query` | action | 118 | <code>query:async&lt;R extends pg.QueryResultRow=pg.QueryResultRow&gt;(text:string,values?:readonly unknown&#91;&#93;):Promise&lt;pg.QueryResult&lt;R&gt;&gt;=&gt;{</code> |
-| `copyFrom` | action | 124 | <code>copyFrom:async(sql:string,bytes:Uint8Array):Promise&lt;{rowCount:number}&gt;=&gt;{</code> |
-| `query` | variable | 129 | <code>const query=new BoundedCopyInput(sql,Buffer.from(bytes));</code> |
-| `result` | variable | 130 | <code>const result=new Promise&lt;{rowCount:number}&gt;((resolve,reject)=&gt;{</code> |
-| `remainingMs` | action | 136 | <code>remainingMs:()=&gt;Math.max(0,Math.floor(deadline-performance.now())),signal:lease.signal</code> |
 
 ## services/hyperfide/src/supervisory-host.ts
 
@@ -7110,11 +5187,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `privateFile` | function | 40 | <code>async function privateFile(file:string,max:number,executable:boolean):Promise&lt;{bytes:Buffer&#124;null}&gt;{</code> |
 | `SupervisoryLaunch` | interface | 53 | <code>export interface SupervisoryLaunch {python:string;script:string;config:string;config_sha256:string;argv:string&#91;&#93;;env:Record&lt;string,string&gt;}</code> |
 | `prepareSupervisoryHost` | function | 54 | <code>export async function prepareSupervisoryHost(args:readonly string&#91;&#93;,env:Readonly&lt;NodeJS.ProcessEnv&gt;):Promise&lt;SupervisoryLaunch&gt;{</code> |
-| `childEnv` | object | 68 | <code>const childEnv:Record&lt;string,string&gt;={PATH:'/usr/bin:/bin',LANG:'C.UTF-8'};</code> |
 | `supervisoryHostCommand` | function | 72 | <code>export async function supervisoryHostCommand(args:readonly string&#91;&#93;,env:Readonly&lt;NodeJS.ProcessEnv&gt;,signal:AbortSignal):Promise&lt;number&gt;{</code> |
-| `forward` | function | 76 | <code>const forward=()=&gt;{child.kill('SIGTERM');};</code> |
-| `controller` | variable | 83 | <code>const controller=new AbortController(),stop=()=&gt;controller.abort();process.on('SIGTERM',stop);process.on('SIGINT',stop);</code> |
-| `stop` | function | 83 | <code>const controller=new AbortController(),stop=()=&gt;controller.abort();process.on('SIGTERM',stop);process.on('SIGINT',stop);</code> |
 
 ## services/hyperfide/src/transport/http.ts
 
@@ -7129,26 +5202,16 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `status` | function | 11 | <code>function status(code:string):number{if(code.includes('TOO_LARGE'))return 413;if(code==='ADMISSION_BUSY')return 429;if(code==='OUTCOME_UNKNOWN')return 504;if(code==='SHUTTING_DOWN')return 503;if(&#91;'AUTH…</code> |
 | `send` | function | 12 | <code>function send(res:ServerResponse,v:unknown,limit:number,code=200):void{if(res.destroyed&#124;&#124;res.writableEnded)return;let text:string;try{text=JSON.stringify(v,(_key,value:unknown)=&gt;{if(&#91;'undefined','func…</code> |
 | `startHttpTransport` | function | 13 | <code>export async function startHttpTransport(o:HttpTransportOptions):Promise&lt;HttpTransport&gt;{</code> |
-| `controllers` | variable | 17 | <code>let accepting=true,active=0;const requests=new Set&lt;Promise&lt;void&gt;&gt;(),controllers=new Set&lt;AbortController&gt;();</code> |
-| `requests` | variable | 17 | <code>let accepting=true,active=0;const requests=new Set&lt;Promise&lt;void&gt;&gt;(),controllers=new Set&lt;AbortController&gt;();</code> |
-| `handle` | function | 20 | <code>async function handle(req:IncomingMessage,res:ServerResponse):Promise&lt;void&gt;{</code> |
 | `abort` | function | 22 | <code>active++;const controller=new AbortController();controllers.add(controller);const abort=():void=&gt;controller.abort(),disconnected=():void=&gt;{if(!res.writableEnded)abort();};o.signal.addEventListener('ab…</code> |
-| `controller` | variable | 22 | <code>active++;const controller=new AbortController();controllers.add(controller);const abort=():void=&gt;controller.abort(),disconnected=():void=&gt;{if(!res.writableEnded)abort();};o.signal.addEventListener('ab…</code> |
 | `disconnected` | function | 22 | <code>active++;const controller=new AbortController();controllers.add(controller);const abort=():void=&gt;controller.abort(),disconnected=():void=&gt;{if(!res.writableEnded)abort();};o.signal.addEventListener('ab…</code> |
 | `error` | function | 33 | <code>await new Promise&lt;void&gt;((resolve,reject)=&gt;{const error=(e:Error):void=&gt;{server.removeListener('listening',ready);reject(e);},ready=():void=&gt;{server.removeListener('error',error);resolve();};server.onc…</code> |
 | `ready` | function | 33 | <code>await new Promise&lt;void&gt;((resolve,reject)=&gt;{const error=(e:Error):void=&gt;{server.removeListener('listening',ready);reject(e);},ready=():void=&gt;{server.removeListener('error',error);resolve();};server.onc…</code> |
-| `close` | function | 35 | <code>let cleanup:Promise&lt;void&gt;&#124;undefined;const close=():Promise&lt;void&gt;=&gt;cleanup??=(async()=&gt;{accepting=false;const closed=new Promise&lt;void&gt;(resolve=&gt;server.close(()=&gt;resolve()));for(const c of controllers)c…</code> |
-| `closed` | variable | 35 | <code>let cleanup:Promise&lt;void&gt;&#124;undefined;const close=():Promise&lt;void&gt;=&gt;cleanup??=(async()=&gt;{accepting=false;const closed=new Promise&lt;void&gt;(resolve=&gt;server.close(()=&gt;resolve()));for(const c of controllers)c…</code> |
-| `onAbort` | function | 35 | <code>let cleanup:Promise&lt;void&gt;&#124;undefined;const close=():Promise&lt;void&gt;=&gt;cleanup??=(async()=&gt;{accepting=false;const closed=new Promise&lt;void&gt;(resolve=&gt;server.close(()=&gt;resolve()));for(const c of controllers)c…</code> |
 | `ServiceClientConfiguration` | interface | 40 | <code>export interface ServiceClientConfiguration {</code> |
 | `ServiceCommand` | interface | 45 | <code>export interface ServiceCommand {readonly operation:import('./protocol.js').Operation;readonly payloadBytes:Buffer}</code> |
 | `ServiceResponse` | type | 46 | <code>export type ServiceResponse={transport:'RESPONSE';status:number;body:unknown;operation_id:string}&#124;{transport:'UNKNOWN';operation_id:string;reason:string};</code> |
 | `ServiceClient` | interface | 47 | <code>export interface ServiceClient {invoke(invocation:InvocationContext,command:ServiceCommand):Promise&lt;ServiceResponse&gt;}</code> |
 | `invoke` | method | 47 | <code>export interface ServiceClient {invoke(invocation:InvocationContext,command:ServiceCommand):Promise&lt;ServiceResponse&gt;}</code> |
 | `createServiceClient` | function | 48 | <code>export async function createServiceClient(config:ServiceClientConfiguration,gateway:import('../identity/enrollment.js').IdentityGateway):Promise&lt;ServiceClient&gt;{</code> |
-| `invoke` | action | 58 | <code>return Object.freeze({invoke:async(invocation:InvocationContext,command:ServiceCommand):Promise&lt;ServiceResponse&gt;=&gt;{</code> |
-| `item` | object | 69 | <code>const item={id:trusted.credentialId,time:String(Math.floor(Date.now()/1000)),nonce:randomUUID()};</code> |
-| `finish` | function | 73 | <code>const finish=(result:ServiceResponse):void=&gt;{if(settled)return;settled=true;active--;resolve(result);};</code> |
 
 ## services/hyperfide/src/transport/isolation.ts
 
@@ -7174,31 +5237,12 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `parseIsolationFenceReceipt` | function | 47 | <code>export function parseIsolationFenceReceipt(value:unknown):IsolationFenceReceipt{</code> |
 | `tlsFile` | function | 58 | <code>async function tlsFile(filename:string,secret:boolean):Promise&lt;Buffer&gt;{</code> |
 | `abortable` | function | 70 | <code>function abortable&lt;T&gt;(operation:Promise&lt;T&gt;,signal:AbortSignal):Promise&lt;T&gt;{</code> |
-| `abort` | function | 72 | <code>const abort=():void=&gt;reject(new FoundationError('ISOLATION_OUTCOME_UNKNOWN','Isolation interrupted; reconcile original operation'));</code> |
 | `errorCode` | function | 78 | <code>function errorCode(error:unknown):string{</code> |
 | `respond` | function | 81 | <code>function respond(res:ServerResponse,status:number,outcome:'SUCCEEDED'&#124;'REJECTED'&#124;'UNKNOWN',permitDigest:string&#124;null,detail:unknown):void{</code> |
 | `headers` | function | 88 | <code>function headers(req:IncomingMessage,origin:string):void{</code> |
-| `allowed` | variable | 89 | <code>const seen=new Set&lt;string&gt;(),allowed=new Set(&#91;'host','content-type','content-length','connection','user-agent','accept'&#93;);</code> |
-| `seen` | variable | 89 | <code>const seen=new Set&lt;string&gt;(),allowed=new Set(&#91;'host','content-type','content-length','connection','user-agent','accept'&#93;);</code> |
 | `startIsolationHttpTransport` | function | 97 | <code>export async function startIsolationHttpTransport(options:IsolationHttpTransportOptions):Promise&lt;IsolationHttpTransport&gt;{</code> |
-| `controllers` | variable | 104 | <code>const controllers=new Set&lt;AbortController&gt;(),requests=new Set&lt;Promise&lt;void&gt;&gt;(),dispatches=new Set&lt;Promise&lt;IsolationFenceReceipt&gt;&gt;();</code> |
-| `dispatches` | variable | 104 | <code>const controllers=new Set&lt;AbortController&gt;(),requests=new Set&lt;Promise&lt;void&gt;&gt;(),dispatches=new Set&lt;Promise&lt;IsolationFenceReceipt&gt;&gt;();</code> |
-| `requests` | variable | 104 | <code>const controllers=new Set&lt;AbortController&gt;(),requests=new Set&lt;Promise&lt;void&gt;&gt;(),dispatches=new Set&lt;Promise&lt;IsolationFenceReceipt&gt;&gt;();</code> |
-| `handle` | function | 111 | <code>async function handle(req:IncomingMessage,res:ServerResponse):Promise&lt;void&gt;{</code> |
-| `controller` | variable | 115 | <code>const controller=new AbortController();controllers.add(controller);</code> |
-| `abort` | function | 116 | <code>const abort=():void=&gt;{controller.abort();req.destroy();};</code> |
-| `disconnected` | function | 117 | <code>const disconnected=():void=&gt;{if(!res.writableEnded)controller.abort();};</code> |
-| `settled` | function | 142 | <code>const settled=():void=&gt;{dispatches.delete(operation);controllers.delete(controller);active--;};</code> |
-| `error` | function | 158 | <code>const error=(value:Error):void=&gt;{server.removeListener('listening',ready);reject(value);};</code> |
-| `ready` | function | 159 | <code>const ready=():void=&gt;{server.removeListener('error',error);resolve();};</code> |
-| `close` | function | 163 | <code>const close=():Promise&lt;void&gt;=&gt;closing??=(async()=&gt;{</code> |
-| `closed` | variable | 165 | <code>const closed=new Promise&lt;void&gt;(resolve=&gt;server.close(()=&gt;resolve()));</code> |
-| `onAbort` | function | 176 | <code>const onAbort=():void=&gt;{void close().catch(()=&gt;{});};</code> |
 | `requestedBindings` | function | 184 | <code>function requestedBindings(serialized:string):{deployment_id:string;operation_id:string;source_epoch:string&#124;null}{</code> |
 | `createIsolationHttpClient` | function | 193 | <code>export async function createIsolationHttpClient(options:IsolationHttpClientOptions):Promise&lt;IsolationHttpClient&gt;{</code> |
-| `isolate` | action | 196 | <code>return Object.freeze({isolate:async(permitEnvelope:string,signal:AbortSignal):Promise&lt;IsolationHttpResult&gt;=&gt;{</code> |
-| `unknown` | function | 207 | <code>const unknown=():IsolationHttpResult=&gt;({outcome:'UNKNOWN',code:'ISOLATION_OUTCOME_UNKNOWN'});</code> |
-| `finish` | function | 208 | <code>const finish=(value:IsolationHttpResult):void=&gt;{if(settled)return;settled=true;active--;resolve(Object.freeze(value));};</code> |
 
 ## services/hyperfide/src/transport/protocol.ts
 
@@ -7223,17 +5267,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `base64` | function | 51 | <code>export function base64(value: unknown, size?: number): Buffer {</code> |
 | `frozen` | function | 59 | <code>export function frozen&lt;T&gt;(value: T, depth = 0): T {</code> |
 | `strictJSON` | function | 68 | <code>export function strictJSON(bytes: Buffer, limit = MAX_BODY_BYTES): unknown {</code> |
-| `whitespace` | function | 74 | <code>const whitespace = (): void =&gt; { while (/&#91; &#92;r&#92;n&#92;t&#93;/.test(text&#91;offset&#93; ?? '&#92;0')) offset++; };</code> |
-| `string` | function | 75 | <code>const string = (): string =&gt; {</code> |
-| `parse` | function | 87 | <code>const parse = (depth: number): unknown =&gt; {</code> |
-| `keys` | variable | 94 | <code>const result = Object.create(null) as Record&lt;string, unknown&gt;, keys = new Set&lt;string&gt;();</code> |
 | `canonicalOrigin` | function | 126 | <code>export function canonicalOrigin(value: unknown): string {</code> |
 | `envelope` | function | 135 | <code>function envelope(raw: Buffer): DecodedRequest&lt;unknown&gt; {</code> |
 | `decodeInvoke` | function | 151 | <code>export function decodeInvoke(raw: Buffer): DecodedRequest&lt;InvokePayload&gt; {</code> |
 | `decodeEnrollment` | function | 167 | <code>export function decodeEnrollment(raw: Buffer): DecodedRequest&lt;EnrollmentPayload&gt; {</code> |
 | `proof` | function | 175 | <code>export function proof(headers: readonly string&#91;&#93;, enrollment = false): Proof {</code> |
-| `found` | variable | 176 | <code>const found = new Map&lt;string, string&gt;();</code> |
-| `allowed` | variable | 183 | <code>const allowed = new Set(&#91;'hf-request-time','hf-request-nonce','hf-request-signature',</code> |
 | `enrollmentSecret` | function | 197 | <code>export function enrollmentSecret(headers: readonly string&#91;&#93;): Buffer {</code> |
 | `signingBytes` | function | 202 | <code>export function signingBytes(origin: string, endpoint: '/v1/invoke' &#124; '/v1/enroll', item: Omit&lt;Proof,'signature'&gt;, body: Buffer): Buffer {</code> |
 | `verifyProof` | function | 206 | <code>export function verifyProof(publicKey: string, item: Proof, origin: string, endpoint: '/v1/invoke' &#124; '/v1/enroll', body: Buffer): void {</code> |
@@ -7264,31 +5302,12 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `parseWriterObservation` | function | 48 | <code>export function parseWriterObservation(value:unknown):WriterObservation{</code> |
 | `tlsFile` | function | 64 | <code>async function tlsFile(filename:string,secret:boolean):Promise&lt;Buffer&gt;{</code> |
 | `abortable` | function | 76 | <code>function abortable&lt;T&gt;(operation:Promise&lt;T&gt;,signal:AbortSignal):Promise&lt;T&gt;{</code> |
-| `abort` | function | 78 | <code>const abort=():void=&gt;reject(new FoundationError('WRITER_OBSERVATION_OUTCOME_UNKNOWN','WriterObservation interrupted; reconcile original operation'));</code> |
 | `errorCode` | function | 84 | <code>function errorCode(error:unknown):string{</code> |
 | `respond` | function | 87 | <code>function respond(res:ServerResponse,status:number,outcome:'OBSERVED'&#124;'REJECTED'&#124;'UNKNOWN',permitDigest:string&#124;null,detail:unknown):void{</code> |
 | `headers` | function | 94 | <code>function headers(req:IncomingMessage,origin:string):void{</code> |
-| `allowed` | variable | 95 | <code>const seen=new Set&lt;string&gt;(),allowed=new Set(&#91;'host','content-type','content-length','connection','user-agent','accept'&#93;);</code> |
-| `seen` | variable | 95 | <code>const seen=new Set&lt;string&gt;(),allowed=new Set(&#91;'host','content-type','content-length','connection','user-agent','accept'&#93;);</code> |
 | `startWriterObservationHttpTransport` | function | 103 | <code>export async function startWriterObservationHttpTransport(options:WriterObservationHttpTransportOptions):Promise&lt;WriterObservationHttpTransport&gt;{</code> |
-| `controllers` | variable | 110 | <code>const controllers=new Set&lt;AbortController&gt;(),requests=new Set&lt;Promise&lt;void&gt;&gt;(),dispatches=new Set&lt;Promise&lt;WriterObservation&gt;&gt;();</code> |
-| `dispatches` | variable | 110 | <code>const controllers=new Set&lt;AbortController&gt;(),requests=new Set&lt;Promise&lt;void&gt;&gt;(),dispatches=new Set&lt;Promise&lt;WriterObservation&gt;&gt;();</code> |
-| `requests` | variable | 110 | <code>const controllers=new Set&lt;AbortController&gt;(),requests=new Set&lt;Promise&lt;void&gt;&gt;(),dispatches=new Set&lt;Promise&lt;WriterObservation&gt;&gt;();</code> |
-| `handle` | function | 117 | <code>async function handle(req:IncomingMessage,res:ServerResponse):Promise&lt;void&gt;{</code> |
-| `controller` | variable | 121 | <code>const controller=new AbortController();controllers.add(controller);</code> |
-| `abort` | function | 122 | <code>const abort=():void=&gt;{controller.abort();req.destroy();};</code> |
-| `disconnected` | function | 123 | <code>const disconnected=():void=&gt;{if(!res.writableEnded)controller.abort();};</code> |
-| `settled` | function | 148 | <code>const settled=():void=&gt;{dispatches.delete(operation);controllers.delete(controller);active--;};</code> |
-| `error` | function | 164 | <code>const error=(value:Error):void=&gt;{server.removeListener('listening',ready);reject(value);};</code> |
-| `ready` | function | 165 | <code>const ready=():void=&gt;{server.removeListener('error',error);resolve();};</code> |
-| `close` | function | 169 | <code>const close=():Promise&lt;void&gt;=&gt;closing??=(async()=&gt;{</code> |
-| `closed` | variable | 171 | <code>const closed=new Promise&lt;void&gt;(resolve=&gt;server.close(()=&gt;resolve()));</code> |
-| `onAbort` | function | 182 | <code>const onAbort=():void=&gt;{void close().catch(()=&gt;{});};</code> |
 | `requestedBindings` | function | 190 | <code>function requestedBindings(serialized:string):{deployment_id:string;operation_id:string;source_epoch:string&#124;null;topology_digest:string;resource_count:number}{</code> |
 | `createWriterObservationHttpClient` | function | 199 | <code>export async function createWriterObservationHttpClient(options:WriterObservationHttpClientOptions):Promise&lt;WriterObservationHttpClient&gt;{</code> |
-| `observe` | action | 202 | <code>return Object.freeze({observe:async(permitEnvelope:string,signal:AbortSignal):Promise&lt;WriterObservationHttpResult&gt;=&gt;{</code> |
-| `unknown` | function | 213 | <code>const unknown=():WriterObservationHttpResult=&gt;({outcome:'UNKNOWN',code:'WRITER_OBSERVATION_OUTCOME_UNKNOWN'});</code> |
-| `finish` | function | 214 | <code>const finish=(value:WriterObservationHttpResult):void=&gt;{if(settled)return;settled=true;active--;resolve(Object.freeze(value));};</code> |
 
 ## spec/hyperfide/tools/render_native.py
 
@@ -7297,7 +5316,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | Indexed name | Kind | Line | Source declaration |
 | --- | --- | ---: | --- |
 | `render` | function | 22 | <code>def render(root, mode):</code> |
-| `field` | function | 94 | <code>def field(key, value):</code> |
 | `main` | function | 130 | <code>def main():</code> |
 
 ## spec/hyperfide/tools/validate_pack.py
@@ -7308,8 +5326,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | --- | --- | ---: | --- |
 | `InvalidKVX` | class | 25 | <code>class InvalidKVX(ValueError):</code> |
 | `strict_json` | function | 29 | <code>def strict_json(text: str):</code> |
-| `unique_pairs` | function | 30 | <code>def unique_pairs(pairs):</code> |
-| `invalid_constant` | function | 38 | <code>def invalid_constant(value):</code> |
 | `parse_kvx` | function | 44 | <code>def parse_kvx(text: str) -&gt; dict:</code> |
 | `workflow_errors` | function | 74 | <code>def workflow_errors(root: Path, mode: str) -&gt; list&#91;str&#93;:</code> |
 | `dependency_errors` | function | 90 | <code>def dependency_errors(tasks: dict) -&gt; list&#91;str&#93;:</code> |
@@ -7319,11 +5335,9 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `__init__` | method | 301 | <code>def __init__(self, root: Path, output: Path, publication_policy: Path &#124; None = None, mode: str = 'draft'):</code> |
 | `public_files` | method | 311 | <code>def public_files(self, pattern: str):</code> |
 | `validate_privacy` | method | 324 | <code>def validate_privacy(self) -&gt; None:</code> |
-| `GET /category` | route | 336 | <code>category = item.get('category', f'local-policy-{number}')</code> |
 | `needed` | method | 367 | <code>def needed(self, relative: str) -&gt; Path &#124; None:</code> |
 | `run` | method | 380 | <code>def run(self) -&gt; dict:</code> |
 | `validate_spec` | method | 456 | <code>def validate_spec(self, sections: dict) -&gt; set:</code> |
-| `follows` | function | 545 | <code>def follows(task_id, predecessor):</code> |
 | `validate_traceability` | method | 571 | <code>def validate_traceability(self, sections: dict, cases: set) -&gt; None:</code> |
 | `validate_markdown_and_diagrams` | method | 623 | <code>def validate_markdown_and_diagrams(self) -&gt; None:</code> |
 | `validate_whitespace` | method | 659 | <code>def validate_whitespace(self) -&gt; None:</code> |
@@ -7363,14 +5377,12 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `validate_file` | function | 49 | <code>static const char &#42;validate_file(const char &#42;root, const char &#42;path,</code> |
 | `get_paths` | function | 78 | <code>static int get_paths(const char &#42;json, char paths&#91;AH_FILES&#93;&#91;4096&#93;,</code> |
 | `answer_health_append` | function | 103 | <code>void answer_health_append(StrBuf &#42;out, Cg &#42;cg, const char &#42;answer) {</code> |
-| `wh` | variable | 159 | <code>WatchHealth wh = {0};</code> |
 | `answer_health_json` | function | 239 | <code>char &#42;answer_health_json(Cg &#42;cg, const char &#42;answer) {</code> |
 | `answer_health_query_budget` | function | 254 | <code>int answer_health_query_budget(int requested) {</code> |
 | `replace_number` | function | 261 | <code>static char &#42;replace_number(const char &#42;json, const char &#42;key, long value) {</code> |
 | `final_tokens` | function | 277 | <code>static char &#42;final_tokens(char &#42;json) {</code> |
 | `answer_health_json_limit` | function | 287 | <code>char &#42;answer_health_json_limit(Cg &#42;cg, const char &#42;answer, size_t max_bytes) {</code> |
 | `answer_health_status` | function | 415 | <code>int answer_health_status(Cg &#42;cg, bool json) {</code> |
-| `call` | variable | 421 | <code>StatusCall call = { cg }; char &#42;base = NULL;</code> |
 | `answer_health_text` | function | 429 | <code>void answer_health_text(Cg &#42;cg) {</code> |
 | `answer_health_capture_begin` | function | 448 | <code>void answer_health_capture_begin(AnswerCapture &#42;cap, size_t max_bytes) {</code> |
 | `answer_health_capture_end` | function | 464 | <code>void answer_health_capture_end(AnswerCapture &#42;cap, Cg &#42;cg) {</code> |
@@ -7423,7 +5435,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `ast_column` | function | 218 | <code>int ast_column(TSNode node) { return (int)ts_node_start_point(node).column; }</code> |
 | `ast_walk` | function | 222 | <code>void ast_walk(AstContext &#42;ctx, TSNode root, AstVisitFn visit, void &#42;user) {</code> |
 | `ast_try_parse_ex` | function | 259 | <code>bool ast_try_parse_ex(const char &#42;language, const char &#42;path,</code> |
-| `ctx` | variable | 272 | <code>AstContext ctx = { .language = language, .path = path, .source = source,</code> |
 | `ast_try_parse` | function | 329 | <code>bool ast_try_parse(const char &#42;language, const char &#42;path, const char &#42;source,</code> |
 
 ## src/ast.h
@@ -7484,11 +5495,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `preceding_comment` | function | 352 | <code>static char &#42;preceding_comment(AstContext &#42;c, TSNode n) {</code> |
 | `py_decorators` | function | 365 | <code>static TSNode py_decorators(TSNode n) {</code> |
 | `walk` | function | 370 | <code>static void walk(DynWalk &#42;w, TSNode n, unsigned depth) {</code> |
-| `nested` | variable | 531 | <code>DynWalk nested = {w-&gt;ctx, child_owner};</code> |
 | `extract` | function | 549 | <code>static void extract(AstContext &#42;ctx) {</code> |
-| `w` | variable | 550 | <code>DynWalk w = {ctx, -1};</code> |
 | `ast_dynamic_register` | function | 554 | <code>void ast_dynamic_register(void) {</code> |
-| `adapters` | variable | 555 | <code>static const AstAdapter adapters&#91;&#93; = {</code> |
 
 ## src/ast_extended.c
 
@@ -7513,14 +5521,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `add_symbol` | function | 48 | <code>static void add_symbol(AstContext &#42;c, TSNode whole, TSNode id,</code> |
 | `add_ref` | function | 68 | <code>static void add_ref(AstContext &#42;c, TSNode node, TSNode id,</code> |
 | `terraform_reference` | function | 81 | <code>static void terraform_reference(AstContext &#42;c, TSNode expression, int owner) {</code> |
-| `base` | variable | 86 | <code>TSNode base={0},instance={0};</code> |
 | `simple_id` | function | 138 | <code>static TSNode simple_id(TSNode node) {</code> |
 | `visit` | function | 149 | <code>static bool visit(AstContext &#42;c, TSNode n, void &#42;unused) {</code> |
-| `id` | variable | 153 | <code>TSNode id={0},sig={0}; const char &#42;kind=NULL;</code> |
 | `extract` | function | 260 | <code>static void extract(AstContext &#42;ctx) {</code> |
-| `state` | variable | 267 | <code>ExtendedState state={0};</code> |
 | `ast_extended_register` | function | 271 | <code>void ast_extended_register(void) {</code> |
-| `adapters` | variable | 272 | <code>static const AstAdapter adapters&#91;&#93;={</code> |
 
 ## src/ast_managed.c
 
@@ -7545,19 +5549,14 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `decl_kind` | function | 60 | <code>static const char &#42;decl_kind(const char &#42;lang, const char &#42;t) {</code> |
 | `callable` | function | 84 | <code>static bool callable(const char &#42;kind) {</code> |
 | `body_node` | function | 89 | <code>static TSNode body_node(TSNode n) {</code> |
-| `names` | variable | 92 | <code>const char &#42;names&#91;&#93; = {"class_body", "function_body", "block", "enum_body",</code> |
 | `name_node` | function | 102 | <code>static TSNode name_node(TSNode n) {</code> |
 | `first_type_params` | function | 119 | <code>static char &#42;first_type_params(AstContext &#42;c, TSNode n) {</code> |
 | `body_node` | function | 125 | <code>static TSNode body_node(TSNode n);</code> |
 | `result_type` | function | 127 | <code>static char &#42;result_type(AstContext &#42;c, TSNode n) {</code> |
-| `fields` | variable | 128 | <code>const char &#42;fields&#91;&#93; = {"return_type", "returns", "type"};</code> |
 | `relation_leaf` | function | 159 | <code>static void relation_leaf(AstContext &#42;c, int owner, TSNode n, const char &#42;kind) {</code> |
 | `relation` | function | 170 | <code>static void relation(AstContext &#42;c, int owner, TSNode n, const char &#42;kind,</code> |
 | `type_relations` | function | 185 | <code>static void type_relations(AstContext &#42;c, TSNode n, int owner) {</code> |
-| `fields` | variable | 186 | <code>const char &#42;fields&#91;&#93; = {"superclass", "interfaces", "extend", "derive", "class"};</code> |
-| `types` | variable | 192 | <code>const char &#42;types&#91;&#93; = {"superclass", "super_interfaces", "extends_interfaces",</code> |
 | `symbol_metadata` | function | 213 | <code>static void symbol_metadata(AstContext &#42;c, TSNode n, SemSymbol &#42;s) {</code> |
-| `levels` | variable | 246 | <code>const char &#42;levels&#91;&#93; = {"public", "protected", "private", "internal", "fileprivate"};</code> |
 | `parameter_identity` | function | 256 | <code>static char &#42;parameter_identity(const char &#42;signature) {</code> |
 | `add_symbol` | function | 273 | <code>static int add_symbol(AstContext &#42;c, TSNode n, const char &#42;kind, int parent) {</code> |
 | `call_type` | function | 332 | <code>static bool call_type(const char &#42;lang, const char &#42;t) {</code> |
@@ -7568,9 +5567,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `add_type_reference` | function | 465 | <code>static void add_type_reference(AstContext &#42;c, TSNode n, int owner) {</code> |
 | `visit` | function | 490 | <code>static void visit(Managed &#42;m, TSNode n, int parent, unsigned depth) {</code> |
 | `extract` | function | 545 | <code>static void extract(AstContext &#42;c) {</code> |
-| `m` | variable | 546 | <code>Managed m = {.ctx = c};</code> |
 | `ast_managed_register` | function | 550 | <code>void ast_managed_register(void) {</code> |
-| `adapters` | variable | 551 | <code>static const AstAdapter adapters&#91;&#93; = {</code> |
 
 ## src/ast_mixed.c
 
@@ -7592,7 +5589,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `lines_end` | function | 39 | <code>static void lines_end(MixedLines &#42;m) {</code> |
 | `line_pos` | function | 42 | <code>static void line_pos(const MixedLines &#42;m,size_t byte,int &#42;line,int &#42;column) {</code> |
 | `span_bytes` | function | 51 | <code>static SemSpan span_bytes(const AstContext &#42;c, size_t lo, size_t hi) {</code> |
-| `s` | variable | 52 | <code>SemSpan s = {.line=1, .end_line=1};</code> |
 | `span_node` | function | 72 | <code>static SemSpan span_node(AstContext &#42;c, TSNode n) {</code> |
 | `eq` | function | 80 | <code>static bool eq(const char &#42;a, const char &#42;b) { return strcmp(a,b)==0; }</code> |
 | `decl` | function | 81 | <code>static void decl(AstContext &#42;c,const char &#42;name,const char &#42;kind,size_t lo,size_t hi,int owner);</code> |
@@ -7600,12 +5596,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `identify` | function | 83 | <code>static void identify(AstContext &#42;c,const char &#42;prefix) {</code> |
 | `node_name` | function | 89 | <code>static char &#42;node_name(AstContext &#42;c, TSNode n) {</code> |
 | `add_symbol` | function | 110 | <code>static int add_symbol(AstContext &#42;c, TSNode n, const char &#42;kind, int parent) {</code> |
-| `facts` | variable | 133 | <code>static const struct {const char &#42;field,&#42;kind;} facts&#91;&#93;={</code> |
 | `add_ref` | function | 148 | <code>static void add_ref(AstContext &#42;c, TSNode n, TSNode name, const char &#42;kind,int owner) {</code> |
 | `MixedOwners` | typedef | 157 | <code>typedef struct {</code> |
 | `grammar_visit` | function | 163 | <code>static bool grammar_visit(AstContext &#42;c, TSNode n, void &#42;unused) {</code> |
 | `grammar_extract` | function | 246 | <code>static void grammar_extract(AstContext &#42;c) {</code> |
-| `owners` | variable | 247 | <code>MixedOwners owners={.cobol_paragraph=-1};</code> |
 | `at` | function | 253 | <code>static bool at(const AstContext &#42;c,size_t p,const char &#42;s) {</code> |
 | `until` | function | 256 | <code>static size_t until(const AstContext &#42;c,size_t p,char end) {</code> |
 | `attr` | function | 263 | <code>static char &#42;attr(const AstContext &#42;c,size_t a,size_t b,const char &#42;key,size_t &#42;site) {</code> |
@@ -7613,18 +5607,15 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `ref` | function | 290 | <code>static void ref(AstContext &#42;c,const char &#42;text,const char &#42;kind,size_t lo,size_t hi,int owner,const char &#42;why) {</code> |
 | `embedded_fallback` | function | 296 | <code>static void embedded_fallback(AstContext &#42;c,size_t a,size_t b) {</code> |
 | `parse_embedded` | function | 320 | <code>static void parse_embedded(AstContext &#42;c,const char &#42;language,size_t a,size_t b) {</code> |
-| `sub` | variable | 322 | <code>ParseResult sub={0};</code> |
 | `MixedLiteralTarget` | typedef | 366 | <code>typedef struct {const char &#42;kind,&#42;name;int id;} MixedLiteralTarget;</code> |
 | `literal_target_cmp` | function | 367 | <code>static int literal_target_cmp(const void &#42;a,const void &#42;b) {</code> |
 | `link_local_literals` | function | 372 | <code>static void link_local_literals(AstContext &#42;c,const char &#42;lang) {</code> |
-| `key` | variable | 390 | <code>MixedLiteralTarget key={mapping?"statement":call?"function":"query",ref-&gt;text,-1};</code> |
 | `markup_extract` | function | 410 | <code>static void markup_extract(AstContext &#42;c) {</code> |
 | `boundary` | function | 506 | <code>static bool boundary(const AstContext &#42;c,size_t p,size_t n) {</code> |
 | `delphi_extract` | function | 510 | <code>static void delphi_extract(AstContext &#42;c) {</code> |
 | `text_extract` | function | 566 | <code>static void text_extract(AstContext &#42;c) {</code> |
 | `file_only` | function | 612 | <code>static void file_only(AstContext &#42;c) {</code> |
 | `ast_mixed_register` | function | 618 | <code>void ast_mixed_register(void) {</code> |
-| `a` | variable | 619 | <code>static const AstAdapter a&#91;&#93;={</code> |
 
 ## src/ast_systems.c
 
@@ -7661,7 +5652,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `extract_node` | function | 308 | <code>static void extract_node(AstContext &#42;ctx, TSNode n, int owner, int depth) {</code> |
 | `systems_extract` | function | 550 | <code>static void systems_extract(AstContext &#42;ctx) {</code> |
 | `ast_systems_register` | function | 554 | <code>void ast_systems_register(void) {</code> |
-| `adapters` | variable | 555 | <code>static const AstAdapter adapters&#91;&#93;={</code> |
 
 ## src/ast_web.c
 
@@ -7675,7 +5665,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `is` | function | 14 | <code>static bool is(TSNode n, const char &#42;type) {</code> |
 | `WebChildren` | typedef | 17 | <code>typedef struct { TSTreeCursor cursor; bool valid; } WebChildren;</code> |
 | `children` | function | 18 | <code>static WebChildren children(TSNode parent) {</code> |
-| `it` | variable | 19 | <code>WebChildren it = { .cursor=ts_tree_cursor_new(parent) };</code> |
 | `next_named` | function | 23 | <code>static bool next_named(WebChildren &#42;it, TSNode &#42;out) {</code> |
 | `children_done` | function | 31 | <code>static void children_done(WebChildren &#42;it) { ts_tree_cursor_delete(&amp;it-&gt;cursor); }</code> |
 | `argument_at` | function | 32 | <code>static TSNode argument_at(TSNode args, unsigned wanted) {</code> |
@@ -7687,8 +5676,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `contains_word` | function | 73 | <code>static bool contains_word(const char &#42;s, const char &#42;word) {</code> |
 | `decorator_target` | function | 81 | <code>static char &#42;decorator_target(AstContext &#42;c, TSNode decorator) {</code> |
 | `symbol` | function | 89 | <code>static int symbol(AstContext &#42;c, TSNode n, TSNode name, const char &#42;kind,</code> |
-| `mods` | variable | 116 | <code>static const char &#42;mods&#91;&#93;={"async","static","abstract","readonly","override","declare"};</code> |
-| `modbuf` | variable | 117 | <code>char modbuf&#91;96&#93;={0};</code> |
 | `bare_call_boundary` | function | 164 | <code>static const char &#42;bare_call_boundary(AstContext &#42;c, TSNode site, const char &#42;name) {</code> |
 | `reference` | function | 190 | <code>static void reference(AstContext &#42;c, TSNode site, TSNode name, const char &#42;kind,</code> |
 | `binding` | function | 205 | <code>static void binding(AstContext &#42;c, TSNode site, const char &#42;module,</code> |
@@ -7704,13 +5691,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `declaration_count` | function | 353 | <code>static int declaration_count(AstContext &#42;c, TSNode root,</code> |
 | `imported_receiver` | function | 372 | <code>static bool imported_receiver(AstContext &#42;c, const char &#42;receiver) {</code> |
 | `channel_fact` | function | 380 | <code>static void channel_fact(AstContext &#42;c, TSNode n, TSNode fn,</code> |
-| `methods` | variable | 429 | <code>static const char &#42;methods&#91;&#93;={"GET","POST","PUT","PATCH","DELETE","HEAD","OPTIONS"};</code> |
-| `methods` | variable | 442 | <code>static const char &#42;methods&#91;&#93;={"get","post","put","patch","delete","head","options"};</code> |
 | `call_arity` | function | 455 | <code>static int call_arity(TSNode args) {</code> |
 | `visit` | function | 468 | <code>static void visit(AstContext &#42;c, TSNode n, int owner, int depth) {</code> |
 | `extract` | function | 633 | <code>static void extract(AstContext &#42;c) { visit(c,c-&gt;root,-1,0); }</code> |
 | `ast_web_register` | function | 634 | <code>void ast_web_register(void) {</code> |
-| `adapters` | variable | 635 | <code>static const AstAdapter adapters&#91;&#93; = {</code> |
 
 ## src/cg.h
 
@@ -8269,7 +6253,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `Tag` | typedef | 101 | <code>typedef struct</code> |
 | `tags_load` | function | 107 | <code>static int tags_load(const char &#42;tree, Tag &#42;&#42;out)</code> |
 | `version_source` | function | 147 | <code>static const char &#42;version_source(const char &#42;tree, char &#42;path, size_t cap)</code> |
-| `CANDIDATES` | variable | 149 | <code>static const char &#42;CANDIDATES&#91;&#93; = {"src/cg.h", "VERSION", "package.json", NULL};</code> |
 | `version_parse` | function | 166 | <code>static void version_parse(const char &#42;src, const char &#42;body, char &#42;out, size_t cap)</code> |
 | `version_at` | function | 196 | <code>static void version_at(const char &#42;tree, const char &#42;src, const char &#42;rev,</code> |
 | `version_now` | function | 217 | <code>static void version_now(const char &#42;tree, const char &#42;src, char &#42;out, size_t cap)</code> |
@@ -8345,10 +6328,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `num` | function | 164 | <code>static const char &#42;num(long n, char &#42;buf) {          /&#42; 39334 -&gt; "39,334" &#42;/</code> |
 | `starts_ci` | function | 177 | <code>static bool starts_ci(const char &#42;s, const char &#42;pre) {</code> |
 | `strip_leader` | function | 182 | <code>static void strip_leader(const char &#42;&#42;p, int &#42;ll) {</code> |
-| `LEAD` | variable | 183 | <code>static const char &#42;LEAD&#91;&#93; = { "/&#42;&#42;", "/&#42;!", "/&#42;", "&#42;/", "///", "//!",</code> |
 | `has_alnum` | function | 204 | <code>static bool has_alnum(const char &#42;p, int ll) {</code> |
 | `boilerplate` | function | 210 | <code>static bool boilerplate(const char &#42;p, int ll) {</code> |
-| `B` | variable | 211 | <code>static const char &#42;B&#91;&#93; = { "copyright", "spdx-", "(c)", "©",</code> |
 | `sentence` | function | 222 | <code>static char &#42;sentence(const char &#42;s, int max) {</code> |
 | `purpose_of` | function | 250 | <code>static char &#42;purpose_of(const char &#42;body, int max) {</code> |
 | `md_title` | function | 279 | <code>static char &#42;md_title(const char &#42;body) {</code> |
@@ -8357,7 +6338,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `clean_sig` | function | 340 | <code>static char &#42;clean_sig(const char &#42;sig) {</code> |
 | `cm_skipped` | function | 364 | <code>static bool cm_skipped(const Map &#42;m, const char &#42;path) {</code> |
 | `cm_fixture` | function | 371 | <code>static bool cm_fixture(const char &#42;path) {</code> |
-| `D` | variable | 372 | <code>static const char &#42;D&#91;&#93; = { "fixtures/", "__fixtures__/", "testdata/",</code> |
 | `cm_test` | function | 381 | <code>static bool cm_test(const char &#42;path) {</code> |
 | `top_dir` | function | 386 | <code>static void top_dir(const char &#42;path, char &#42;out, size_t cap) {</code> |
 | `mod_dir` | function | 392 | <code>static void mod_dir(const char &#42;path, char &#42;out, size_t cap) {</code> |
@@ -8366,7 +6346,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `fn_top` | function | 411 | <code>static void fn_top(sqlite3_context &#42;c, int n, sqlite3_value &#42;&#42;v) {</code> |
 | `fn_mod` | function | 418 | <code>static void fn_mod(sqlite3_context &#42;c, int n, sqlite3_value &#42;&#42;v) {</code> |
 | `cm_functions` | function | 426 | <code>static void cm_functions(Map &#42;m, bool on) {</code> |
-| `F` | variable | 430 | <code>} F&#91;&#93; = { { "cm_skip", fn_skip }, { "cm_test", fn_test },</code> |
 | `cm_prep` | function | 440 | <code>static sqlite3_stmt &#42;cm_prep(Map &#42;m, const char &#42;alias, const char &#42;head,</code> |
 | `col` | function | 451 | <code>static const char &#42;col(sqlite3_stmt &#42;st, int i) {</code> |
 | `byid_cmp` | function | 456 | <code>static int byid_cmp(const void &#42;a, const void &#42;b) {</code> |
@@ -8376,7 +6355,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `tree_read` | function | 501 | <code>static char &#42;tree_read(Map &#42;m, const char &#42;rel) {</code> |
 | `load_files` | function | 509 | <code>static void load_files(Map &#42;m) {</code> |
 | `load_name` | function | 566 | <code>static void load_name(Map &#42;m) {</code> |
-| `MANI` | variable | 597 | <code>static const char &#42;MANI&#91;&#93; = { "Cargo.toml", "pyproject.toml", NULL };</code> |
 | `lang_cmp` | function | 626 | <code>static int lang_cmp(const void &#42;a, const void &#42;b) {</code> |
 | `load_langs` | function | 633 | <code>static void load_langs(Map &#42;m) {</code> |
 | `dir_of` | function | 656 | <code>static void dir_of(const char &#42;path, char &#42;out, size_t cap) {</code> |
@@ -8384,8 +6362,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `make_targets` | function | 677 | <code>static void make_targets(const char &#42;body, StrBuf &#42;b) {</code> |
 | `load_builds` | function | 711 | <code>static void load_builds(Map &#42;m) {</code> |
 | `dir_purpose` | function | 780 | <code>static char &#42;dir_purpose(Map &#42;m, const char &#42;dir) {</code> |
-| `RD` | variable | 781 | <code>static const char &#42;RD&#91;&#93; = { "README.md", "README", "readme.md",</code> |
-| `IDX` | variable | 802 | <code>static const char &#42;IDX&#91;&#93; = { "index", "__init__", "mod", "lib", "doc",</code> |
 | `dir_get` | function | 812 | <code>static CmDir &#42;dir_get(Map &#42;m, const char &#42;path, int depth) {</code> |
 | `dir_cmp` | function | 821 | <code>static int dir_cmp(const void &#42;a, const void &#42;b) {</code> |
 | `load_layout` | function | 825 | <code>static void load_layout(Map &#42;m) {</code> |
@@ -8394,7 +6370,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `word_ok` | function | 934 | <code>static bool word_ok(const char &#42;s, int n) {</code> |
 | `cmd_push` | function | 943 | <code>static void cmd_push(StrBuf &#42;b, int &#42;n, char seen&#91;&#93;&#91;48&#93;, const char &#42;s, int len) {</code> |
 | `scan_commands` | function | 956 | <code>static int scan_commands(const char &#42;body, StrBuf &#42;b) {</code> |
-| `VAR` | variable | 959 | <code>static const char &#42;VAR&#91;&#93; = { "cmd", "command", "sub", "subcmd", "verb",</code> |
 | `load_entries` | function | 1002 | <code>static void load_entries(Map &#42;m) {</code> |
 | `modfile_cmp` | function | 1099 | <code>static int modfile_cmp(const void &#42;a, const void &#42;b) {</code> |
 | `mod_cmp` | function | 1106 | <code>static int mod_cmp(const void &#42;a, const void &#42;b) {</code> |
@@ -8407,14 +6382,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `script_purpose` | function | 1285 | <code>static char &#42;script_purpose(Map &#42;m, const char &#42;path) {</code> |
 | `tdir_lookup` | function | 1307 | <code>static CmTestDir &#42;tdir_lookup(Map &#42;m, const char &#42;path) {</code> |
 | `fixture_root` | function | 1314 | <code>static void fixture_root(const char &#42;path, char &#42;out, size_t cap) {</code> |
-| `D` | variable | 1315 | <code>static const char &#42;D&#91;&#93; = { "fixtures/", "__fixtures__/", "testdata/",</code> |
 | `tfile_cmp` | function | 1327 | <code>static int tfile_cmp(const void &#42;a, const void &#42;b) {</code> |
 | `tdir_cmp` | function | 1333 | <code>static int tdir_cmp(const void &#42;a, const void &#42;b) {</code> |
 | `load_tests` | function | 1337 | <code>static void load_tests(Map &#42;m) {</code> |
 | `add_ptr` | function | 1449 | <code>static void add_ptr(Map &#42;m, const char &#42;path, const char &#42;what) {</code> |
 | `load_pointers` | function | 1456 | <code>static void load_pointers(Map &#42;m) {</code> |
-| `AG` | variable | 1480 | <code>static const struct { const char &#42;path, &#42;what; } AG&#91;&#93; = {</code> |
-| `SK` | variable | 1500 | <code>const char &#42;SK&#91;&#93; = { skd, ".claude/skills/", NULL };</code> |
 | `kept` | function | 1557 | <code>static bool kept(const Cut &#42;c) { return !c-&gt;drop; }</code> |
 | `md_section_omitted` | function | 1559 | <code>static void md_section_omitted(StrBuf &#42;b, const char &#42;what) {</code> |
 | `omit_add` | function | 1563 | <code>static void omit_add(StrBuf &#42;o, long n, const char &#42;one, const char &#42;many) {</code> |
@@ -8439,7 +6411,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | Indexed name | Kind | Line | Source declaration |
 | --- | --- | ---: | --- |
 | `hyperfide_environment_aliases` | function | 35 | <code>int hyperfide_environment_aliases(void) {</code> |
-| `names` | variable | 36 | <code>static const char &#42;names&#91;&#93;&#91;3&#93; = {</code> |
 | `names_metadata` | function | 121 | <code>static char &#42;names_metadata(const char &#42;filename) {</code> |
 | `names_migration_selects_canonical` | function | 126 | <code>static bool names_migration_selects_canonical(const char &#42;root,const char &#42;legacy) {</code> |
 | `config_selected_path` | function | 153 | <code>static void config_selected_path(const char &#42;root,char &#42;out,size_t capacity) {</code> |
@@ -8453,8 +6424,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `cfg_index_dotted` | function | 297 | <code>static int cfg_index_dotted(const char &#42;dotted) {</code> |
 | `cfg_known_section` | function | 305 | <code>static bool cfg_known_section(const char &#42;section) {</code> |
 | `cfg_parse_bool` | function | 312 | <code>static int cfg_parse_bool(const char &#42;v) {</code> |
-| `T` | variable | 313 | <code>static const char &#42;T&#91;&#93; = { "true", "yes", "on", "1", NULL };</code> |
-| `F` | variable | 314 | <code>static const char &#42;F&#91;&#93; = { "false", "no", "off", "0", NULL };</code> |
 | `config_parse_workers` | function | 320 | <code>int config_parse_workers(const char &#42;v) {</code> |
 | `config_parse_walk` | function | 334 | <code>int config_parse_walk(const char &#42;v) {</code> |
 | `walk_name` | function | 343 | <code>static const char &#42;walk_name(int w) {</code> |
@@ -8466,7 +6435,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `cfg_file_name` | function | 560 | <code>static const char &#42;cfg_file_name(const CgConfig &#42;c) {</code> |
 | `config_file_name` | function | 564 | <code>const char &#42;config_file_name(const char &#42;root) {</code> |
 | `config_load` | function | 568 | <code>const CgConfig &#42;config_load(const char &#42;root) {</code> |
-| `is` | variable | 580 | <code>CfgIssues is = {0};</code> |
 | `config_auto_sync` | function | 598 | <code>bool config_auto_sync(const char &#42;root) { return config_load(root)-&gt;sync_auto; }</code> |
 | `config_spec_rel` | function | 599 | <code>const char &#42;config_spec_rel(const char &#42;root) {</code> |
 | `config_context_rel` | function | 602 | <code>const char &#42;config_context_rel(const char &#42;root) {</code> |
@@ -8494,13 +6462,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `config_find_spec_root` | function | 701 | <code>int config_find_spec_root(const char &#42;start, char &#42;out, size_t cap) {</code> |
 | `cfg_issues_json` | function | 720 | <code>static void cfg_issues_json(const CgConfig &#42;c, const CfgIssues &#42;is,</code> |
 | `config_check` | function | 743 | <code>int config_check(const char &#42;root, StrBuf &#42;text, StrBuf &#42;json) {</code> |
-| `is` | variable | 745 | <code>CfgIssues is = {0};</code> |
 | `cfg_core_warning` | function | 759 | <code>static void cfg_core_warning(const char &#42;root, char &#42;out, size_t cap) {</code> |
 | `cfg_root` | function | 778 | <code>static void cfg_root(char &#42;out, size_t cap) {</code> |
 | `cfg_value` | function | 789 | <code>static const char &#42;cfg_value(const CgConfig &#42;c, int i) {</code> |
 | `cfg_setting_json` | function | 810 | <code>static void cfg_setting_json(const CgConfig &#42;c, int i, StrBuf &#42;b) {</code> |
 | `cfg_list` | function | 848 | <code>static int cfg_list(const char &#42;root, bool json) {</code> |
-| `is` | variable | 850 | <code>CfgIssues is = {0};</code> |
 | `cfg_init` | function | 885 | <code>static int cfg_init(const char &#42;root) {</code> |
 | `cfg_get` | function | 902 | <code>static int cfg_get(const char &#42;root, const char &#42;dotted, bool json) {</code> |
 | `cfg_set` | function | 922 | <code>static int cfg_set(const char &#42;root, const char &#42;dotted, const char &#42;value) {</code> |
@@ -8541,9 +6507,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `carries` | function | 362 | <code>static bool carries(Cg &#42;cg, const char &#42;base_head, const ConflictBranch &#42;a,</code> |
 | `merge_base` | function | 369 | <code>static int merge_base(Cg &#42;cg, const char &#42;a, const char &#42;b, char &#42;out,</code> |
 | `conflicts_compute` | function | 384 | <code>int conflicts_compute(Cg &#42;cg, const char &#42;base, const char &#42;base_head,</code> |
-| `l` | variable | 389 | <code>FList l = {0};</code> |
-| `pair` | variable | 422 | <code>char &#42;pair&#91;2&#93; = { (char &#42;)x-&gt;b-&gt;name, (char &#42;)y-&gt;b-&gt;name };</code> |
-| `pair` | variable | 504 | <code>char &#42;pair&#91;2&#93; = { (char &#42;)x-&gt;b-&gt;name, (char &#42;)y-&gt;b-&gt;name };</code> |
 | `conflicts_free` | function | 548 | <code>void conflicts_free(ProjectionFinding &#42;f, int n) {</code> |
 | `branch_csv` | function | 559 | <code>static char &#42;branch_csv(const ProjectionFinding &#42;f) {</code> |
 | `branches_json_csv` | function | 568 | <code>static void branches_json_csv(StrBuf &#42;b, const char &#42;csv) {</code> |
@@ -8568,7 +6531,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `path_exists` | function | 261 | <code>static bool path_exists(const char &#42;base, const char &#42;name) {</code> |
 | `is_project_dir` | function | 268 | <code>static bool is_project_dir(const char &#42;base) {</code> |
 | `cg_is_boundary` | function | 278 | <code>bool cg_is_boundary(const char &#42;dir) {</code> |
-| `MARKERS` | variable | 279 | <code>static const char &#42;MARKERS&#91;&#93; = {</code> |
 | `git_file_at` | function | 290 | <code>static bool git_file_at(const char &#42;dir) {</code> |
 | `cg_find_project_at` | function | 297 | <code>int cg_find_project_at(const char &#42;start, char &#42;root, char &#42;shared,</code> |
 | `cg_find_root_at` | function | 346 | <code>int cg_find_root_at(const char &#42;start, char &#42;out, size_t cap) {</code> |
@@ -8582,8 +6544,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `body_fts_state` | function | 505 | <code>static int body_fts_state(Cg &#42;cg) {</code> |
 | `db_fts_create` | function | 518 | <code>static int db_fts_create(Cg &#42;cg) {</code> |
 | `cg_schema_upgrade` | function | 569 | <code>int cg_schema_upgrade(Cg &#42;cg) {</code> |
-| `V18` | variable | 583 | <code>static const char &#42;V18&#91;&#93;&#91;2&#93; = {</code> |
-| `V16` | variable | 663 | <code>static const char &#42;V16&#91;&#93; = {</code> |
 | `cg_close` | function | 717 | <code>void cg_close(Cg &#42;cg) {</code> |
 | `cg_prep` | function | 722 | <code>sqlite3_stmt &#42;cg_prep(Cg &#42;cg, const char &#42;sql) {</code> |
 | `busy_rc` | function | 731 | <code>static bool busy_rc(int rc) {</code> |
@@ -8610,8 +6570,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `docs_defaults` | function | 56 | <code>static int docs_defaults(char &#42;&#42;&#42;out, const char &#42;&#42;items, int n) {</code> |
 | `docs_tasks_qualified` | function | 63 | <code>static bool docs_tasks_qualified(const Kvx &#42;spec) {</code> |
 | `docs_project_open` | function | 83 | <code>static int docs_project_open(Cg &#42;cg, DocsProject &#42;p) {</code> |
-| `a` | variable | 137 | <code>const char &#42;a&#91;&#93; = { "user", "developer" };</code> |
-| `t` | variable | 142 | <code>const char &#42;t&#91;&#93; = { "README.md", "docs/&#42;&#42;", "CONTRIBUTING.md",</code> |
 | `docs_suffix` | function | 153 | <code>static bool docs_suffix(const char &#42;name) {</code> |
 | `docs_inventory_walk` | function | 159 | <code>static void docs_inventory_walk(const char &#42;root, const char &#42;rel, int depth,</code> |
 | `docs_inventory` | function | 196 | <code>static int docs_inventory(const DocsProject &#42;p, StrBuf &#42;text, StrBuf &#42;json) {</code> |
@@ -8629,20 +6587,12 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `docs_call_evidence` | function | 464 | <code>static int docs_call_evidence(void &#42;v) {</code> |
 | `docs_append_capture` | function | 477 | <code>static void docs_append_capture(StrBuf &#42;packet, StrBuf &#42;ledger,</code> |
 | `docs_packet` | function | 506 | <code>static int docs_packet(Cg &#42;cg, bool json) {</code> |
-| `tracev` | variable | 558 | <code>char &#42;tracev&#91;&#93; = { "trace" };</code> |
-| `trace` | variable | 559 | <code>DocsSpecCall trace = { 1, tracev, false };</code> |
-| `statusv` | variable | 562 | <code>char &#42;statusv&#91;&#93; = { "status" };</code> |
-| `status` | variable | 563 | <code>DocsSpecCall status = { 1, statusv, false };</code> |
-| `titles` | variable | 566 | <code>const char &#42;titles&#91;&#93; = { "Snapshot changelog", "Changed public surface",</code> |
-| `sources` | variable | 569 | <code>const char &#42;sources&#91;&#93; = { "cg changelog", "cg changes", "cg routes",</code> |
-| `call` | variable | 572 | <code>DocsCall call = { cg, i, p.feature };</code> |
 | `DocsCheck` | typedef | 638 | <code>typedef struct { int errors; int checks; StrBuf report; } DocsCheck;</code> |
 | `docs_check_say` | function | 640 | <code>static void docs_check_say(DocsCheck &#42;c, bool ok, const char &#42;fmt, ...) {</code> |
 | `docs_allowed_system_path` | function | 653 | <code>static bool docs_allowed_system_path(const DocsProject &#42;p, const char &#42;path) {</code> |
 | `docs_check_links` | function | 663 | <code>static int docs_check_links(const DocsProject &#42;p, const char &#42;doc,</code> |
 | `docs_claim_evidence` | function | 712 | <code>static bool docs_claim_evidence(const DocsProject &#42;p, const char &#42;evidence,</code> |
 | `docs_check_claims` | function | 724 | <code>static int docs_check_claims(DocsProject &#42;p, DocsCheck &#42;c) {</code> |
-| `coverage_keys` | variable | 737 | <code>const char &#42;coverage_keys&#91;&#93; = { "user", "developer", "release_or_migration" };</code> |
 | `docs_check` | function | 817 | <code>static int docs_check(Cg &#42;cg, bool json) {</code> |
 | `docs_trace` | function | 883 | <code>static int docs_trace(Cg &#42;cg, bool json) {</code> |
 | `docs_call_check` | function | 944 | <code>static int docs_call_check(void &#42;v) { return docs_check((Cg &#42;)v, false); }</code> |
@@ -8666,7 +6616,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `drift_exempt` | function | 141 | <code>static bool drift_exempt(const char &#42;tree, const char &#42;path) {</code> |
 | `drift_in_touches` | function | 153 | <code>static bool drift_in_touches(const char &#42;path, char &#42;&#42;touches, int nt) {</code> |
 | `drift_public` | function | 162 | <code>static bool drift_public(const char &#42;path, const char &#42;name, const char &#42;kind,</code> |
-| `KINDS` | variable | 164 | <code>static const char &#42;KINDS&#91;&#93; = { "function", "method", "class", "struct",</code> |
 | `drift_spec_check` | function | 181 | <code>int drift_spec_check(Cg &#42;cg, const char &#42;tree, const char &#42;base,</code> |
 | `drift_print` | function | 263 | <code>void drift_print(const char &#42;report_json) {</code> |
 | `drift_collision_predict` | function | 295 | <code>bool drift_collision_predict(Cg &#42;cg, const char &#42;feature, const char &#42;a,</code> |
@@ -8684,7 +6633,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `coverage_check` | function | 727 | <code>int coverage_check(Cg &#42;cg, const char &#42;feature, StrBuf &#42;out) {</code> |
 | `coverage_print` | function | 798 | <code>void coverage_print(const char &#42;report_json, const char &#42;feature) {</code> |
 | `drift_summary` | function | 818 | <code>int drift_summary(Cg &#42;cg, const char &#42;feature, StrBuf &#42;text, StrBuf &#42;json) {</code> |
-| `KINDS` | variable | 819 | <code>static const char &#42;KINDS&#91;&#93; = { "drift.spec", "drift.interface",</code> |
 
 ## src/drivers.c
 
@@ -8694,25 +6642,13 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | --- | --- | ---: | --- |
 | `split_into` | function | 29 | <code>static int split_into(const char &#42;s, char &#42;&#42;av, int n, int cap) {</code> |
 | `subst` | function | 46 | <code>static char &#42;subst(const char &#42;tmpl, const DriverSpec &#42;d, const char &#42;pf,</code> |
-| `NAMES` | variable | 48 | <code>static const char &#42;NAMES&#91;&#93; = { "PROMPT_FILE", "TASK", "ROOT", "AGENT",</code> |
-| `vals` | variable | 50 | <code>const char &#42;vals&#91;&#93; = { pf, task, root, agent,</code> |
 | `driver_argv` | function | 74 | <code>int driver_argv(const DriverSpec &#42;d, const char &#42;root, const char &#42;promptfile,</code> |
 | `raw_num` | function | 116 | <code>static double raw_num(const char &#42;obj, const char &#42;key, double dflt) {</code> |
 | `raw_true` | function | 123 | <code>static bool raw_true(const char &#42;obj, const char &#42;key) {</code> |
 | `tool_detail` | function | 132 | <code>static char &#42;tool_detail(const char &#42;input) {</code> |
-| `KEYS` | variable | 133 | <code>static const char &#42;KEYS&#91;&#93; = { "command", "file_path", "path", "pattern",</code> |
 | `emit_usage` | function | 142 | <code>static void emit_usage(DriverEventFn fn, void &#42;ud, const char &#42;usage,</code> |
-| `e` | variable | 145 | <code>DriverEvent e = { .kind = "usage", .cost = cost, .turns = turns };</code> |
 | `parse_claude` | function | 157 | <code>static int parse_claude(const char &#42;line, const char &#42;type, DriverEventFn fn,</code> |
-| `e` | variable | 164 | <code>DriverEvent e = { .kind = "session", .session = sid, .text = model };</code> |
-| `e` | variable | 179 | <code>DriverEvent e = { .kind = "text", .text = t };</code> |
-| `e` | variable | 188 | <code>DriverEvent e = { .kind = "tool", .tool = name, .text = det };</code> |
-| `e` | variable | 205 | <code>DriverEvent e = { .kind = "result", .subtype = sub, .session = sid,</code> |
 | `parse_codex` | function | 225 | <code>static int parse_codex(const char &#42;line, const char &#42;type, DriverEventFn fn,</code> |
-| `e` | variable | 231 | <code>DriverEvent e = { .kind = "session", .session = tid };</code> |
-| `e` | variable | 244 | <code>DriverEvent e = { .kind = "text", .text = t };</code> |
-| `e` | variable | 263 | <code>DriverEvent e = { .kind = "tool", .tool = tool ? tool : it,</code> |
-| `e` | variable | 279 | <code>DriverEvent e = { .kind = "result", .subtype = "error", .text = msg,</code> |
 | `driver_stream_parse` | function | 288 | <code>int driver_stream_parse(const char &#42;line, DriverEventFn fn, void &#42;ud) {</code> |
 | `wall_ms` | function | 302 | <code>static long wall_ms(void) {</code> |
 | `driver_tap_init` | function | 308 | <code>void driver_tap_init(DriverTap &#42;t, const char &#42;log, const char &#42;agent,</code> |
@@ -8722,13 +6658,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `clip` | function | 327 | <code>static void clip(StrBuf &#42;b, const char &#42;key, const char &#42;v) {</code> |
 | `tap_on` | function | 343 | <code>static void tap_on(const DriverEvent &#42;e, void &#42;ud) {</code> |
 | `driver_tap_poll` | function | 401 | <code>int driver_tap_poll(DriverTap &#42;t) {</code> |
-| `c` | variable | 410 | <code>TapCtx c = { t, &amp;batch, 0 };</code> |
 | `driver_steer` | function | 448 | <code>long driver_steer(Cg &#42;cg, const char &#42;agent, const char &#42;message) {</code> |
 | `SteerAcc` | typedef | 461 | <code>typedef struct { StrBuf &#42;b; long last; int n; } SteerAcc;</code> |
 | `steer_add` | function | 463 | <code>static int steer_add(const EventRow &#42;e, void &#42;ud) {</code> |
 | `driver_steer_take` | function | 477 | <code>char &#42;driver_steer_take(Cg &#42;cg, const char &#42;agent, const char &#42;via) {</code> |
-| `a` | variable | 485 | <code>SteerAcc a = { &amp;body, since, 0 };</code> |
-| `e` | variable | 498 | <code>EventRow e = {0};</code> |
 
 ## src/events.c
 
@@ -8764,8 +6697,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `EvRing` | typedef | 402 | <code>typedef struct { long &#42;v; long cap; long n; } EvRing;</code> |
 | `ev_ring_add` | function | 404 | <code>static int ev_ring_add(const EventRow &#42;e, void &#42;ud) {</code> |
 | `cmd_events` | function | 411 | <code>int cmd_events(Cg &#42;cg, int argc, char &#42;&#42;argv, bool json) {</code> |
-| `r` | variable | 452 | <code>EvRing r = { xmalloc(sizeof(long) &#42; (size_t)limit), limit, 0 };</code> |
-| `ts` | variable | 475 | <code>struct timespec ts = { 0, 100 &#42; 1000 &#42; 1000 };</code> |
 
 ## src/files.c
 
@@ -8806,8 +6737,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `dirorder_cmp` | function | 448 | <code>static int dirorder_cmp(const void &#42;a, const void &#42;b) {</code> |
 | `dirs_emit` | function | 457 | <code>static void dirs_emit(DirMap &#42;m, int parent, int &#42;order, int &#42;no) {</code> |
 | `files_dirs` | function | 473 | <code>static int files_dirs(Cg &#42;cg, const QueryFilter &#42;f, const char &#42;prefix,</code> |
-| `m` | variable | 488 | <code>DirMap m = {0};</code> |
-| `top` | variable | 489 | <code>DirAgg top = {0};</code> |
 | `files_glob` | function | 582 | <code>static int files_glob(Cg &#42;cg, const QueryFilter &#42;f, const char &#42;pat,</code> |
 | `files_words` | function | 601 | <code>static int files_words(Cg &#42;cg, const QueryFilter &#42;f, const char &#42;pat,</code> |
 | `is_dir_path` | function | 651 | <code>static bool is_dir_path(Cg &#42;cg, const char &#42;p) {</code> |
@@ -8840,17 +6769,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `cap_count` | function | 196 | <code>static void cap_count(Hierarchy &#42;h, const Kvx &#42;wf, const char &#42;sec,</code> |
 | `role_caps_section` | function | 210 | <code>static void role_caps_section(Hierarchy &#42;h, const Kvx &#42;wf, int r,</code> |
 | `hier_role_caps` | function | 216 | <code>void hier_role_caps(const Kvx &#42;wf, Hierarchy &#42;h) {</code> |
-| `MAXES` | variable | 222 | <code>long MAXES&#91;FLEET_ROLES&#93; = { 1, hier_per_wave(h) ? 0 : 2, 0 };</code> |
-| `WALLS` | variable | 223 | <code>static const long WALLS&#91;FLEET_ROLES&#93;   = { 3600, 3600, 7200 };</code> |
-| `RETRIES` | variable | 224 | <code>static const long RETRIES&#91;FLEET_ROLES&#93; = { 0, 1, 2 };</code> |
-| `STALLS` | variable | 225 | <code>static const long STALLS&#91;FLEET_ROLES&#93;  = { 1800, 1800, 900 };</code> |
 | `role_caps_section` | function | 266 | <code>static void role_caps_section(Hierarchy &#42;h, const Kvx &#42;wf, int r,</code> |
 | `role_reset` | function | 320 | <code>static void role_reset(char &#42;&#42;slot, const char &#42;v) {</code> |
 | `hier_old_shape` | function | 330 | <code>static void hier_old_shape(Hierarchy &#42;h, bool set&#91;FLEET_ROLES&#93;&#91;4&#93;) {</code> |
 | `hier_load` | function | 357 | <code>bool hier_load(const Kvx &#42;wf, Hierarchy &#42;h) {</code> |
-| `set` | variable | 386 | <code>bool set&#91;FLEET_ROLES&#93;&#91;4&#93; = { { false } };</code> |
-| `slot` | variable | 397 | <code>char &#42;&#42;slot&#91;4&#93; = { &amp;r-&gt;title, &amp;r-&gt;agent, &amp;r-&gt;branch, &amp;r-&gt;base };</code> |
-| `KEYS` | variable | 398 | <code>static const char &#42;KEYS&#91;4&#93; = { "title", "agent", "branch", "base" };</code> |
 | `hier_free` | function | 411 | <code>void hier_free(Hierarchy &#42;h) {</code> |
 | `hier_expand` | function | 426 | <code>void hier_expand(const Hierarchy &#42;h, const char &#42;tmpl, const char &#42;feature,</code> |
 | `hier_per_task` | function | 431 | <code>bool hier_per_task(const Hierarchy &#42;h) {</code> |
@@ -8882,7 +6804,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `Lifecycle` | typedef | 1339 | <code>typedef struct {</code> |
 | `lifecycle_close` | function | 1351 | <code>static void lifecycle_close(Lifecycle &#42;c) {</code> |
 | `fleet_merge_lock` | function | 1359 | <code>int fleet_merge_lock(const char &#42;shared, const char &#42;feature, long wait_ms) {</code> |
-| `ts` | variable | 1369 | <code>struct timespec ts = { 0, 50 &#42; 1000 &#42; 1000 };</code> |
 | `fleet_merge_unlock` | function | 1376 | <code>void fleet_merge_unlock(int fd) {</code> |
 | `lifecycle_merge_lock` | function | 1383 | <code>static int lifecycle_merge_lock(Lifecycle &#42;c) {</code> |
 | `lifecycle_open` | function | 1393 | <code>static int lifecycle_open(Cg &#42;cg, const char &#42;feature_ov, Lifecycle &#42;c) {</code> |
@@ -8916,11 +6837,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `fleet_feature_land` | function | 2156 | <code>int fleet_feature_land(Cg &#42;cg, const char &#42;feature_ov, bool no_pr, bool json) {</code> |
 | `names_wave_or_task` | function | 2168 | <code>static bool names_wave_or_task(const char &#42;s) {</code> |
 | `fleet_land` | function | 2175 | <code>int fleet_land(Cg &#42;cg, const char &#42;what, const char &#42;feature_ov, bool no_pr,</code> |
-| `names` | variable | 2321 | <code>const char &#42;names&#91;2&#93; = { "test", "lint" };</code> |
-| `cmds` | variable | 2322 | <code>const char &#42;cmds&#91;2&#93; = { c.h.test_gate, c.h.lint_gate };</code> |
-| `gate_ms` | variable | 2323 | <code>long gate_ms&#91;2&#93; = { 0, 0 };</code> |
-| `gate_rc` | variable | 2324 | <code>int gate_rc&#91;2&#93; = { 0, 0 };</code> |
-| `gate_ran` | variable | 2325 | <code>bool gate_ran&#91;2&#93; = { false, false };</code> |
 | `find_gh` | function | 2423 | <code>static bool find_gh(char &#42;out, size_t cap) {</code> |
 | `run_in` | function | 2429 | <code>static int run_in(const char &#42;tree, const char &#42;cmd, StrBuf &#42;out) {</code> |
 | `write_pr_body` | function | 2457 | <code>static void write_pr_body(Cg &#42;cg, const Lifecycle &#42;c, const char &#42;branch,</code> |
@@ -8930,9 +6846,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `fleet_checkpoint` | function | 2738 | <code>int fleet_checkpoint(Cg &#42;cg, bool dry_run, bool json) {</code> |
 | `ProjRebuild` | typedef | 2921 | <code>typedef struct { Cg &#42;cg; } ProjRebuild;</code> |
 | `proj_rebuild_run` | function | 2923 | <code>static int proj_rebuild_run(void &#42;ctx) {</code> |
-| `av` | variable | 2927 | <code>char &#42;av&#91;&#93; = { "build", "--wait", "3000", NULL };</code> |
 | `fleet_projection_rebuild` | function | 2931 | <code>int fleet_projection_rebuild(Cg &#42;cg, char &#42;line, size_t cap) {</code> |
-| `r` | variable | 2937 | <code>ProjRebuild r = { cg };</code> |
 | `git_lines` | function | 2949 | <code>static int git_lines(const char &#42;tree, const char &#42;args, char &#42;&#42;&#42;out,</code> |
 | `sync_base` | function | 2972 | <code>static void sync_base(Cg &#42;cg, const char &#42;branch, const char &#42;flag, char &#42;out,</code> |
 | `fleet_sync` | function | 2993 | <code>int fleet_sync(Cg &#42;cg, int argc, char &#42;&#42;argv, bool json) {</code> |
@@ -8996,11 +6910,9 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `SpecCall` | typedef | 29 | <code>typedef struct { int argc; char &#42;&#42;argv; bool json; } SpecCall;</code> |
 | `call_spec` | function | 31 | <code>static int call_spec(void &#42;v) {</code> |
 | `spec_sub` | function | 44 | <code>static int spec_sub(char &#42;&#42;out, bool json, int argc, ...) {</code> |
-| `c` | variable | 50 | <code>SpecCall c = { argc, argv, json };</code> |
 | `has_spec_repo` | function | 54 | <code>static bool has_spec_repo(const char &#42;root) {</code> |
 | `lease_touches_overlap` | function | 63 | <code>static bool lease_touches_overlap(const char &#42;a, const char &#42;b) {</code> |
 | `cmd_check` | function | 81 | <code>int cmd_check(Cg &#42;cg, bool json, bool strict)</code> |
-| `flagged` | variable | 164 | <code>bool flagged&#91;MAXL&#93; = { false };</code> |
 | `active_task_json` | function | 318 | <code>static char &#42;active_task_json(bool &#42;is_current) {</code> |
 | `brief_cap_body` | function | 332 | <code>static void brief_cap_body(Memory &#42;m) {</code> |
 | `brief_memories` | function | 346 | <code>static int brief_memories(Cg &#42;cg, const char &#42;task_json, Memory &#42;&#42;out) {</code> |
@@ -9013,7 +6925,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `guard_collect` | function | 661 | <code>static void guard_collect(JevFinding &#42;&#42;v, int &#42;n, int &#42;cap, const char &#42;kind,</code> |
 | `guard_decision_rank` | function | 681 | <code>static int guard_decision_rank(JevFinding &#42;v, int n) {</code> |
 | `cmd_guard` | function | 726 | <code>int cmd_guard(Cg &#42;cg, int npath, char &#42;&#42;pathv, bool json, bool strict)</code> |
-| `gs` | variable | 765 | <code>GuardStale gs = { pathv, npath, cg-&gt;root, {0}, {0}, 0 };</code> |
 | `cmd_review` | function | 883 | <code>int cmd_review(Cg &#42;cg, bool json)</code> |
 | `cmd_hook_install_git` | function | 1054 | <code>static int cmd_hook_install_git(Cg &#42;cg, const char &#42;bin);</code> |
 | `write_exec` | function | 1056 | <code>static int write_exec(const char &#42;path, const char &#42;body) {</code> |
@@ -9023,12 +6934,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `hook_edited_path` | function | 1199 | <code>static char &#42;hook_edited_path(const char &#42;payload) {</code> |
 | `HookGuard` | typedef | 1210 | <code>typedef struct { Cg &#42;cg; char &#42;path; bool json; } HookGuard;</code> |
 | `hook_guard_call` | function | 1212 | <code>static int hook_guard_call(void &#42;u) {</code> |
-| `v` | variable | 1214 | <code>char &#42;v&#91;1&#93; = { h-&gt;path };</code> |
 | `HOOK_MAX_LINES` | macro | 1218 | <code>#define HOOK_MAX_LINES 24</code> |
 | `cmd_hook_post_edit` | function | 1227 | <code>int cmd_hook_post_edit(Cg &#42;cg, const SysInfo &#42;si, bool json) {</code> |
-| `o` | variable | 1232 | <code>IndexOpts o = {0};</code> |
-| `paths` | variable | 1236 | <code>const char &#42;paths&#91;1&#93; = { path };</code> |
-| `hg` | variable | 1255 | <code>HookGuard hg = { cg, path, json };</code> |
 | `SA_MAXTOK` | macro | 1317 | <code>#define SA_MAXTOK 128</code> |
 | `SA_MAXSEG` | macro | 1318 | <code>#define SA_MAXSEG 32</code> |
 | `SaSeg` | typedef | 1320 | <code>typedef struct {</code> |
@@ -9047,7 +6954,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `sa_fd` | function | 1528 | <code>static void sa_fd(SaCtx &#42;x, SaSeg &#42;s, int a, SaList &#42;l) {</code> |
 | `sa_files_line` | function | 1572 | <code>static void sa_files_line(SaCtx &#42;x, const SaList &#42;l) {</code> |
 | `sa_grep` | function | 1593 | <code>static void sa_grep(SaCtx &#42;x, SaSeg &#42;s, int a, const SaList &#42;prev,</code> |
-| `ARGLONG` | variable | 1598 | <code>static const char &#42;ARGLONG&#91;&#93; = { "--regexp", "--file", "--max-count",</code> |
 | `sa_prefix_word` | function | 1726 | <code>static bool sa_prefix_word(const char &#42;w) {</code> |
 | `shell_advice_for` | function | 1732 | <code>char &#42;shell_advice_for(const char &#42;root, const char &#42;cwd, const char &#42;cmd) {</code> |
 | `sa_env_off` | function | 1887 | <code>static bool sa_env_off(void) {</code> |
@@ -9072,14 +6978,12 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `work_revision_store` | function | 2442 | <code>static void work_revision_store(Cg &#42;cg, const char &#42;revision, long created,</code> |
 | `work_revision_create` | function | 2486 | <code>static bool work_revision_create(Cg &#42;cg, const char &#42;task, long event_id,</code> |
 | `work_open` | function | 2534 | <code>int work_open(Cg &#42;cg, const char &#42;task, bool json) {</code> |
-| `call` | variable | 2552 | <code>WorkCapture call = { cg, focus };</code> |
 | `work_workspace_delta` | function | 2601 | <code>static void work_workspace_delta(Cg &#42;cg, StrBuf &#42;b, const char &#42;revision,</code> |
 | `packet_list` | function | 2625 | <code>static int packet_list(const char &#42;packet, const char &#42;key, char &#42;&#42;&#42;out);</code> |
 | `list_free` | function | 2626 | <code>static void list_free(char &#42;&#42;v, int n);</code> |
 | `packet_scope` | function | 2627 | <code>static long packet_scope(Cg &#42;cg);</code> |
 | `work_upstream_delta` | function | 2632 | <code>static int work_upstream_delta(Cg &#42;cg, const char &#42;task, long since_s,</code> |
 | `work_update` | function | 2705 | <code>int work_update(Cg &#42;cg, const char &#42;revision, bool json) {</code> |
-| `call` | variable | 2734 | <code>WorkCapture call = { cg, NULL };</code> |
 | `work_supplied_evidence` | function | 2795 | <code>static const char &#42;work_supplied_evidence(const char &#42;clause, int n,</code> |
 | `work_recorded_evidence` | function | 2804 | <code>static char &#42;work_recorded_evidence(Cg &#42;cg, const char &#42;task,</code> |
 | `work_close` | function | 2843 | <code>int work_close(Cg &#42;cg, const char &#42;requested, int nevidence, char &#42;&#42;evidence,</code> |
@@ -9092,9 +6996,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `PacketPart` | typedef | 3111 | <code>typedef struct { const char &#42;name; StrBuf b; bool must; } PacketPart;</code> |
 | `packet_assemble` | function | 3116 | <code>static int packet_assemble(PacketPart &#42;parts, int n, int budget, StrBuf &#42;out) {</code> |
 | `task_packet_build` | function | 3145 | <code>int task_packet_build(Cg &#42;cg, const char &#42;tag, int budget, StrBuf &#42;out) {</code> |
-| `parts` | variable | 3163 | <code>PacketPart parts&#91;P_N&#93; = {</code> |
 | `manager_packet_build` | function | 3300 | <code>int manager_packet_build(Cg &#42;cg, const char &#42;feature, int budget, StrBuf &#42;out) {</code> |
-| `parts` | variable | 3302 | <code>PacketPart parts&#91;M_N&#93; = {</code> |
 
 ## src/graph.c
 
@@ -9132,10 +7034,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `find_symbols_all` | function | 469 | <code>static int find_symbols_all(Cg &#42;cg, const char &#42;q, SymRow &#42;out, int cap) {</code> |
 | `RESOLVE_MAX_DEFS` | macro | 508 | <code>#define RESOLVE_MAX_DEFS 64</code> |
 | `rank_path_penalized` | function | 512 | <code>static bool rank_path_penalized(const char &#42;path) {</code> |
-| `SEGS` | variable | 513 | <code>static const char &#42;SEGS&#91;&#93; = { "test", "tests", "__tests__", "fixtures",</code> |
 | `path_depth` | function | 533 | <code>static int path_depth(const char &#42;p) {</code> |
 | `module_matches` | function | 545 | <code>static bool module_matches(const char &#42;module, const char &#42;cand_path) {</code> |
-| `EXTS` | variable | 550 | <code>static const char &#42;EXTS&#91;&#93; = { "js", "jsx", "ts", "tsx", "mjs", "cjs",</code> |
 | `resolve_best` | function | 584 | <code>static int resolve_best(Cg &#42;cg, long from_fid, const char &#42;from_path,</code> |
 | `qf_keep` | function | 637 | <code>static int qf_keep(const Cg &#42;cg, SymRow &#42;v, int n) {</code> |
 | `callers_of` | function | 651 | <code>static int callers_of(Cg &#42;cg, const SymRow &#42;def, SymRow &#42;out, int cap) {</code> |
@@ -9164,9 +7064,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `signature_identity` | function | 1132 | <code>static void signature_identity(const char &#42;sig, char &#42;out, size_t cap) {</code> |
 | `signature_static` | function | 1151 | <code>static bool signature_static(const char &#42;sig) {</code> |
 | `prototype_matches` | function | 1162 | <code>static bool prototype_matches(Cg &#42;cg, const SymRow &#42;decl, const SymRow &#42;def) {</code> |
-| `qn` | variable | 1175 | <code>char qn&#91;2&#93;&#91;512&#93; = {{0}}, scope&#91;2&#93;&#91;256&#93; = {{0}};</code> |
-| `found` | variable | 1176 | <code>bool found&#91;2&#93; = {false, false}, complete&#91;2&#93; = {true, true};</code> |
-| `ids` | variable | 1177 | <code>long ids&#91;2&#93; = {decl-&gt;id, def-&gt;id};</code> |
 | `declaration_has_definition` | function | 1204 | <code>static bool declaration_has_definition(Cg &#42;cg, const SymRow &#42;decl) {</code> |
 | `rank_query` | function | 1219 | <code>static int rank_query(Cg &#42;cg, const char &#42;q, SymRow &#42;out, int cap,</code> |
 | `structured_query` | function | 1385 | <code>static int structured_query(Cg &#42;cg, const char &#42;q, SymRow &#42;out, int cap,</code> |
@@ -9183,7 +7080,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `filehit_put` | function | 1553 | <code>static void filehit_put(Cg &#42;cg, StrBuf &#42;b, const FileHit &#42;f, bool json) {</code> |
 | `cmd_search` | function | 1574 | <code>int cmd_search(Cg &#42;cg, const char &#42;q, int limit, bool json) {</code> |
 | `cmd_symbol` | function | 1629 | <code>int cmd_symbol(Cg &#42;cg, const char &#42;name, bool json) {</code> |
-| `d` | variable | 1642 | <code>SymDoc d = {0};</code> |
 | `INode` | typedef | 1683 | <code>typedef struct { char name&#91;256&#93;; char via&#91;256&#93;; int depth; SymRow loc; } INode;</code> |
 | `inode_seen` | function | 1685 | <code>static bool inode_seen(INode &#42;v, int n, const char &#42;name) {</code> |
 | `IMPACT_CAP` | macro | 1691 | <code>#define IMPACT_CAP 400</code> |
@@ -9198,7 +7094,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `anch_stale_cb` | function | 2157 | <code>static void anch_stale_cb(void &#42;u, const char &#42;path, int line,</code> |
 | `DOC_VIA_DECL` | macro | 2181 | <code>#define DOC_VIA_DECL &#92;</code> |
 | `cmd_anchors` | function | 2186 | <code>int cmd_anchors(Cg &#42;cg, bool stale_only, bool unc_only, bool json) {</code> |
-| `as` | variable | 2201 | <code>AnchStale as = { unc_only ? NULL : &amp;stx, unc_only ? NULL : &amp;sjs, 0 };</code> |
 | `CTX_TAIL` | macro | 2307 | <code>#define CTX_TAIL 96</code> |
 | `CTX_MARK` | macro | 2309 | <code>#define CTX_MARK 16</code> |
 | `ctx_tail` | function | 2311 | <code>static void ctx_tail(StrBuf &#42;b, int budget, int omitted, bool json) {</code> |
@@ -9211,24 +7106,19 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `CTX_OPEN_MAX` | macro | 2708 | <code>#define CTX_OPEN_MAX 60           /&#42; opening lines one hit may grow to &#42;/</code> |
 | `CTX_MIN_BUDGET` | macro | 2711 | <code>#define CTX_MIN_BUDGET 64</code> |
 | `cmd_context` | function | 2713 | <code>int cmd_context(Cg &#42;cg, const char &#42;q, int budget, int limit, bool json) {</code> |
-| `d` | variable | 2798 | <code>SymDoc d = {0};</code> |
 | `symbols_at_position` | function | 3128 | <code>static int symbols_at_position(Cg &#42;cg, const char &#42;path, int line,</code> |
 | `graph_symbol_at` | function | 3147 | <code>int graph_symbol_at(Cg &#42;cg, const char &#42;path, int line, char &#42;name,</code> |
 | `cmd_show` | function | 3158 | <code>int cmd_show(Cg &#42;cg, const char &#42;name, bool full, bool json) {</code> |
 | `TEST_PATH_SQL` | macro | 3223 | <code>#define TEST_PATH_SQL &#92;</code> |
 | `graph_path_is_test` | function | 3230 | <code>bool graph_path_is_test(const char &#42;path) {</code> |
-| `PROSE` | variable | 3238 | <code>static const char &#42;PROSE&#91;&#93; = { ".md", ".kvx", ".txt", ".json", ".yml",</code> |
 | `tests_for_symbol` | function | 3266 | <code>static int tests_for_symbol(Cg &#42;cg, const char &#42;name, StrBuf &#42;b, bool json,</code> |
 | `graph_task_focus` | function | 3295 | <code>char &#42;graph_task_focus(Cg &#42;cg, const char &#42;task_packet) {</code> |
 | `cmd_test_impact` | function | 3321 | <code>int cmd_test_impact(Cg &#42;cg, const char &#42;name, bool json) {</code> |
 | `cmd_why` | function | 3380 | <code>int cmd_why(Cg &#42;cg, const char &#42;name, bool json) {</code> |
 | `path_is_header` | function | 3485 | <code>static bool path_is_header(const char &#42;path) {</code> |
 | `lang_family` | function | 3495 | <code>static const char &#42;lang_family(const char &#42;path) {</code> |
-| `C` | variable | 3498 | <code>static const char &#42;C&#91;&#93; = { ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hh", NULL };</code> |
-| `JS` | variable | 3499 | <code>static const char &#42;JS&#91;&#93; = { ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", NULL };</code> |
 | `edges_prefer_impl` | function | 3505 | <code>static int edges_prefer_impl(Cg &#42;cg, SymRow &#42;e, int n, bool callers,</code> |
 | `graph_symbol_brief` | function | 3531 | <code>int graph_symbol_brief(Cg &#42;cg, const char &#42;name, int snippet_lines,</code> |
-| `d` | variable | 3556 | <code>SymDoc d = {0};</code> |
 | `graph_glob_symbols` | function | 3619 | <code>int graph_glob_symbols(Cg &#42;cg, const char &#42;glob, int max_files, int max_syms,</code> |
 | `graph_neighbors` | function | 3653 | <code>int graph_neighbors(Cg &#42;cg, const char &#42;name, char &#42;&#42;&#42;out) {</code> |
 
@@ -9318,7 +7208,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `help_command` | function | 1430 | <code>int help_command(const char &#42;name) {</code> |
 | `help_all` | function | 1443 | <code>static void help_all(void) {</code> |
 | `json_list` | function | 1455 | <code>static void json_list(StrBuf &#42;b, const char &#42;list, char sep) {</code> |
-| `stop` | variable | 1459 | <code>char stop&#91;2&#93; = { sep, 0 };</code> |
 | `json_flags` | function | 1472 | <code>static void json_flags(StrBuf &#42;b, const char &#42;flags) {</code> |
 | `help_json` | function | 1495 | <code>static void help_json(void) {</code> |
 | `help_usage` | function | 1561 | <code>void help_usage(const char &#42;name) {</code> |
@@ -9339,7 +7228,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `hf_advisory_fields` | function | 23 | <code>static int hf_advisory_fields(const char &#42;json,const char &#42;const &#42;names,char values&#91;&#93;&#91;32&#93;,size_t count){</code> |
 | `hf_advisory_error` | function | 52 | <code>static int hf_advisory_error(FILE &#42;output,const char &#42;code,const char &#42;message){</code> |
 | `hf_component_21_4` | function | 57 | <code>int hf_component_21_4(const char &#42;action,const char &#42;request_json,FILE &#42;output){</code> |
-| `names` | variable | 72 | <code>static const char &#42;const names&#91;&#93;={"purpose","phase"};char values&#91;2&#93;&#91;32&#93;;char resolved&#91;64&#93;;</code> |
 
 ## src/hyperfide/advisory.h
 
@@ -9368,49 +7256,25 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `source_allowed` | function | 32 | <code>static int source_allowed(const char &#42;source) {</code> |
 | `log_run` | function | 51 | <code>static int log_run(const char &#42;cwd, const char &#42;temporary, int &#42;sequence,</code> |
 | `git_run` | function | 61 | <code>static int git_run(const char &#42;cwd, const char &#42;temporary, int &#42;seq,</code> |
-| `extra` | variable | 89 | <code>char &#42;extra&#91;&#93; = {"GIT_LFS_SKIP_SMUDGE=0", NULL};</code> |
 | `file_digest` | function | 94 | <code>static int file_digest(const char &#42;directory, const char &#42;path,</code> |
 | `parse_repositories` | function | 105 | <code>static int parse_repositories(const char &#42;raw, HpRepository &#42;&#42;out, int &#42;count) {</code> |
-| `keys` | variable | 112 | <code>static const char &#42;const keys&#91;&#93; = {"id", "url", "commit", "submodules",</code> |
 | `parse_locks` | function | 151 | <code>static int parse_locks(const char &#42;raw, HpLock &#42;&#42;out, int &#42;count,</code> |
-| `keys` | variable | 159 | <code>static const char &#42;const keys&#91;&#93; = {"repository", "path", "digest"};</code> |
 | `commands_free` | function | 185 | <code>static void commands_free(HpCommand &#42;items, int count) {</code> |
 | `parse_commands` | function | 195 | <code>static int parse_commands(const char &#42;raw, HpCommand &#42;&#42;out, int &#42;count,</code> |
-| `keys` | variable | 203 | <code>static const char &#42;const keys&#91;&#93; = {"repository", "argv", "timeout_seconds"};</code> |
 | `verify_git_head` | function | 251 | <code>static int verify_git_head(const char &#42;repo, const char &#42;temporary, int &#42;seq,</code> |
-| `argv` | variable | 254 | <code>char &#42;argv&#91;&#93; = {"rev-parse", "--verify", "HEAD", NULL};</code> |
 | `git_output` | function | 269 | <code>static char &#42;git_output(const char &#42;repo, const char &#42;temporary, int &#42;sequence,</code> |
 | `submodule_pin` | function | 306 | <code>static int submodule_pin(const char &#42;pins, const char &#42;path,</code> |
-| `keys` | variable | 308 | <code>static const char &#42;const keys&#91;&#93; = {"path", "commit"};</code> |
 | `materialize_modules` | function | 330 | <code>static int materialize_modules(const char &#42;repo, const char &#42;prefix,</code> |
-| `args` | variable | 335 | <code>char &#42;args&#91;&#93; = {"ls-tree", "-r", "-z", "HEAD", NULL};</code> |
-| `config_args` | variable | 368 | <code>char &#42;config_args&#91;&#93; = {"config",</code> |
-| `url_args` | variable | 404 | <code>char &#42;url_args&#91;&#93; = {"config", "--file", ".gitmodules", "--get", key, NULL};</code> |
-| `update` | variable | 416 | <code>char &#42;update&#91;&#93; = {"submodule", "update",     "--init", "--checkout",</code> |
 | `verify_modules` | function | 441 | <code>static int verify_modules(const char &#42;repo, const char &#42;pins,</code> |
-| `diff` | variable | 460 | <code>char &#42;diff&#91;&#93; = {"diff", "--quiet", "--exit-code", "HEAD", "--", NULL};</code> |
 | `git_metadata_digest` | function | 468 | <code>static int git_metadata_digest(const char &#42;repo, const char &#42;temporary,</code> |
-| `args` | variable | 489 | <code>char &#42;args&#91;&#93; = {"rev-parse", "--absolute-git-dir", NULL};</code> |
-| `files` | variable | 523 | <code>const char &#42;files&#91;&#93; = {"index", "config", "info/attributes", "info/grafts"};</code> |
 | `verify_locks` | function | 554 | <code>static int verify_locks(const char &#42;temporary, HpLock &#42;locks, int count,</code> |
 | `parse_cache_paths` | function | 567 | <code>static int parse_cache_paths(const char &#42;raw, HpLock &#42;&#42;out, int &#42;count,</code> |
-| `keys` | variable | 575 | <code>static const char &#42;const keys&#91;&#93; = {"repository", "path"};</code> |
-| `unsafe` | variable | 587 | <code>const char &#42;unsafe&#91;&#93; = {".env", ".npmrc", ".netrc",  ".ssh",</code> |
 | `copy_file_at` | function | 613 | <code>static int copy_file_at(int source_root, const char &#42;source_relative,</code> |
 | `read_manifest_at` | function | 702 | <code>static char &#42;read_manifest_at(int root, const char &#42;name) {</code> |
 | `cache_manifest` | function | 737 | <code>static int cache_manifest(int fd, HpLock &#42;paths, int count, const char &#42;key,</code> |
-| `keys` | variable | 742 | <code>static const char &#42;const keys&#91;&#93; = {"schema_version", "cache_key", "files"};</code> |
-| `filekeys` | variable | 753 | <code>static const char &#42;const filekeys&#91;&#93; = {"repository", "path", "digest"};</code> |
 | `cache_capture` | function | 783 | <code>static int cache_capture(int cache, const char &#42;cachehex, const char &#42;key,</code> |
 | `materialize` | function | 862 | <code>static int materialize(const char &#42;action, const char &#42;request,</code> |
-| `keys` | variable | 864 | <code>static const char &#42;const keys&#91;&#93; = {"schema_version",   "workspace",</code> |
-| `clone` | variable | 936 | <code>char &#42;clone&#91;&#93; = {"clone", "--no-checkout", "--no-hardlinks",</code> |
-| `checkout` | variable | 945 | <code>char &#42;checkout&#91;&#93; = {"checkout", "--detach", "--force", repos&#91;i&#93;.commit,</code> |
-| `install` | variable | 959 | <code>char &#42;install&#91;&#93; = {"lfs",           "install",     "--local",</code> |
-| `tracked` | variable | 1019 | <code>char &#42;tracked&#91;&#93; = {"ls-files", "--error-unmatch", "--", caches&#91;i&#93;.path,</code> |
-| `diff` | variable | 1093 | <code>char &#42;diff&#91;&#93; = {"-c",</code> |
 | `reap_orphans` | function | 1232 | <code>static void reap_orphans(void) {</code> |
-| `pause` | variable | 1241 | <code>struct timespec pause = {0, 10 &#42; 1000 &#42; 1000};</code> |
 | `hf_component_11_2` | function | 1246 | <code>int hf_component_11_2(const char &#42;action, const char &#42;request, FILE &#42;output) {</code> |
 
 ## src/hyperfide/branding.c
@@ -9451,13 +7315,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `cpu_limit` | function | 98 | <code>static int cpu_limit(const char &#42;text,unsigned long long &#42;quota,unsigned long long &#42;period,int &#42;finite){</code> |
 | `remaining` | function | 101 | <code>static int remaining(const char &#42;root,unsigned long long &#42;cpu,unsigned long long &#42;memory){</code> |
 | `resources` | function | 111 | <code>static int resources(const HfJson &#42;j,int object,const char &#42;name,unsigned long long out&#91;3&#93;){</code> |
-| `keys` | variable | 112 | <code>static const char &#42;keys&#91;&#93;={"cpu_millis","memory_bytes","disk_bytes"};int t=hf_json_field(j,object,name);if(t&lt;0&#124;&#124;!hf_json_only(j,t,keys,3))return 0;for(int k=0;k&lt;3;k++)if(!decimal_at(j,t,keys&#91;k&#93;,&amp;out&#91;k…</code> |
 | `parsed` | function | 114 | <code>static int parsed(HfBudgetHandle &#42;h,const HfJson &#42;config,const HfJson &#42;wrapper,char root&#91;4096&#93;){</code> |
-| `ck` | variable | 115 | <code>const char &#42;ck&#91;&#93;={"schema_version","backend","organisation_id","run_id","sandbox_id","boot_id","boot_generation","delegated_root","cpu_controller","memory_controller","slots","disk_quota"};</code> |
-| `wk` | variable | 116 | <code>const char &#42;wk&#91;&#93;={"charge","boot_id","uid","gid"};</code> |
-| `qk` | variable | 117 | <code>const char &#42;qk&#91;&#93;={"charge_id","generation","request_id","organisation_id","run_id","sandbox_id","sandbox_boot_generation","slot_id","attempt_id","job_kind","resources","usable_limits","qualification_i…</code> |
-| `fields` | variable | 120 | <code>const char &#42;fields&#91;&#93;={"organisation_id","run_id","sandbox_id"};for(int k=0;k&lt;3;k++)if(!hf_json_get(config,fields&#91;k&#93;,expected,sizeof expected)&#124;&#124;!hf_uuid_valid(expected)&#124;&#124;!string_at(wrapper,charge,field…</code> |
-| `sk` | variable | 128 | <code>const char &#42;sk&#91;&#93;={"slot_id","uid","gid"};for(int t=slots+1;t&lt;config-&gt;tokens&#91;slots&#93;.next;t=config-&gt;tokens&#91;t&#93;.next){unsigned long long uid=0,gid=0;if(!hf_json_only(config,t,sk,3)&#124;&#124;!string_at(config,t,"s…</code> |
 | `swap_unavailable_safe` | function | 132 | <code>static int swap_unavailable_safe(void);</code> |
 | `hf_budget_prepare` | function | 133 | <code>int hf_budget_prepare(const char &#42;config_path,const char &#42;authenticated_charge_json,HfBudgetHandle &#42;h){</code> |
 | `swap_unavailable_safe` | function | 162 | <code>static int swap_unavailable_safe(void){</code> |
@@ -9502,7 +7360,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `relative_dir` | function | 207 | <code>static int relative_dir(int root, const char &#42;path) {</code> |
 | `skipws` | function | 226 | <code>static const char &#42;skipws(const char &#42;p) {</code> |
 | `parse_string` | function | 233 | <code>static char &#42;parse_string(const char &#42;&#42;pp) {</code> |
-| `b` | variable | 237 | <code>Buf b = {0};</code> |
 | `freeobj` | function | 271 | <code>static void freeobj(Obj &#42;o) {</code> |
 | `parse` | function | 275 | <code>static int parse(const char &#42;p, Obj &#42;o) {</code> |
 | `get` | function | 318 | <code>static const char &#42;get(Obj &#42;o, const char &#42;k) {</code> |
@@ -9515,7 +7372,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `quoted` | function | 373 | <code>static int quoted(Buf &#42;b, const char &#42;s) {</code> |
 | `field` | function | 390 | <code>static int field(Buf &#42;b, const char &#42;k, const char &#42;v, int &#42;first) {</code> |
 | `command` | function | 396 | <code>static int command(int dir, const char &#42;const &#42;args, Buf &#42;out, int outputfd) {</code> |
-| `temp` | variable | 451 | <code>Buf temp = {0};</code> |
 | `GIT` | macro | 464 | <code>#define GIT(dir, out, ...) command(dir, (const char &#42;const&#91;&#93;){__VA_ARGS__, NULL}, out, -1)</code> |
 | `gittext` | function | 465 | <code>static int gittext(int dir, Buf &#42;b, const char &#42;a, const char &#42;c) {</code> |
 | `sensitive` | function | 472 | <code>static int sensitive(const char &#42;path) {</code> |
@@ -9523,41 +7379,23 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `cmpname` | function | 500 | <code>static int cmpname(const void &#42;a, const void &#42;b) {</code> |
 | `addrecord` | function | 503 | <code>static int addrecord(Buf &#42;b, const char &#42;path, unsigned kind, unsigned mode, const void &#42;data,</code> |
 | `collect` | function | 512 | <code>static int collect(int repo, int dir, const char &#42;prefix, Buf &#42;tracked, Buf &#42;tree,</code> |
-| `data` | variable | 604 | <code>Buf data = {0};</code> |
 | `filebuf` | function | 642 | <code>static int filebuf(int dir, const char &#42;name, Buf &#42;b) {</code> |
 | `cleanup` | function | 655 | <code>static int cleanup(int dir, const char &#42;name) {</code> |
 | `putfile` | function | 672 | <code>static int putfile(int dir, const char &#42;name, const void &#42;data, size_t n, unsigned mode) {</code> |
 | `metadata` | function | 680 | <code>static int metadata(Obj &#42;o, const char &#42;head, unsigned rootmode, Buf &#42;meta) {</code> |
-| `ids` | variable | 681 | <code>const char &#42;ids&#91;&#93; = {"organisation_id", "run_id", "repository_id", "task_id", "attempt_id",</code> |
-| `digs` | variable | 686 | <code>const char &#42;digs&#91;&#93; = {"preparation_digest", "dependency_digest", "summary_digest",</code> |
-| `refs` | variable | 713 | <code>const char &#42;refs&#91;&#93; = {"instruction_cursor", "native_support", "native_session_ref", NULL};</code> |
 | `Parts` | typedef | 724 | <code>typedef struct {</code> |
 | `partsdrop` | function | 727 | <code>static void partsdrop(Parts &#42;p) {</code> |
 | `unpack` | function | 733 | <code>static int unpack(Buf &#42;b, Parts &#42;p) {</code> |
-| `dest` | variable | 746 | <code>Buf &#42;dest&#91;&#93; = {&amp;p-&gt;meta, &amp;p-&gt;bundle, &amp;p-&gt;patch, &amp;p-&gt;tree};</code> |
 | `capsule` | function | 755 | <code>static int capsule(int spool, const char &#42;digest, Buf &#42;b, Parts &#42;p) {</code> |
 | `capture` | function | 768 | <code>static int capture(Obj &#42;o, int root, int spool, FILE &#42;out) {</code> |
-| `keys` | variable | 769 | <code>const char &#42;keys&#91;&#93; = {"candidate_path",</code> |
-| `p` | variable | 814 | <code>Parts p = {0};</code> |
-| `head` | variable | 815 | <code>Buf head = {0}, branch = {0}, tracked = {0}, again = {0}, check = {0}, full = {0};</code> |
-| `old` | variable | 910 | <code>Buf old = {0};</code> |
 | `base64` | function | 945 | <code>static void base64(FILE &#42;out, const unsigned char &#42;p, size_t n) {</code> |
 | `inspect_export` | function | 958 | <code>static int inspect_export(Obj &#42;o, int spool, FILE &#42;out, int exporting) {</code> |
-| `keys` | variable | 959 | <code>const char &#42;keys&#91;&#93; = {"checkpoint_digest", "offset", "length", NULL};</code> |
-| `full` | variable | 964 | <code>Buf full = {0};</code> |
-| `p` | variable | 965 | <code>Parts p = {0};</code> |
 | `parentfd` | function | 997 | <code>static int parentfd(int root, const char &#42;path, char &#42;&#42;leaf) {</code> |
 | `clearwork` | function | 1016 | <code>static int clearwork(int fd) {</code> |
 | `flush_git_tree` | function | 1034 | <code>static int flush_git_tree(int dir, unsigned depth) {</code> |
 | `restore_tree` | function | 1070 | <code>static int restore_tree(int dir, Buf &#42;tree) {</code> |
-| `paths` | variable | 1073 | <code>Buf paths = {0};</code> |
 | `restore` | function | 1184 | <code>static int restore(Obj &#42;o, int root, int spool, FILE &#42;out) {</code> |
-| `keys` | variable | 1185 | <code>const char &#42;keys&#91;&#93; = {"checkpoint_digest", "candidate_path", "repository_id",</code> |
-| `full` | variable | 1192 | <code>Buf full = {0}, head = {0};</code> |
-| `p` | variable | 1193 | <code>Parts p = {0};</code> |
-| `meta` | variable | 1194 | <code>Obj meta = {0};</code> |
 | `hf_component_15_1` | function | 1299 | <code>int hf_component_15_1(const char &#42;action, const char &#42;request, FILE &#42;out) {</code> |
-| `o` | variable | 1301 | <code>Obj o = {0};</code> |
 
 ## src/hyperfide/client.c
 
@@ -9583,10 +7421,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `hf_read25` | function | 118 | <code>static char &#42;hf_read25(const char &#42;filename,size_t &#42;length){</code> |
 | `hf_load_transport25` | function | 125 | <code>static int hf_load_transport25(HfTransportConfig &#42;config,FILE &#42;err){</code> |
 | `hf_invoke_config25` | function | 131 | <code>static int hf_invoke_config25(const HfTransportConfig &#42;supplied,const char &#42;payload,const char &#42;operation,const char &#42;idempotency,const char &#42;correlation,const char &#42;causation,FILE &#42;out,FILE &#42;err){</code> |
-| `response` | variable | 138 | <code>HfHttpResponse response={0};int completed=hf_transport_post(&amp;config,0,body,NULL,NULL,&amp;response);free(body);</code> |
 | `hf_remaining25` | function | 152 | <code>static long hf_remaining25(const struct timespec &#42;start,long budget){</code> |
 | `hf_client_decision_invoke` | function | 157 | <code>int hf_client_decision_invoke(HfDecisionPurpose purpose,HfDecisionPhase phase,const char &#42;input,</code> |
-| `purposes` | variable | 159 | <code>static const char &#42;const purposes&#91;&#93;={NULL,"guard","readiness","triage","memory","recap"};</code> |
 | `hf_invoke25` | function | 193 | <code>static int hf_invoke25(const char &#42;payload,const char &#42;operation,const char &#42;idempotency,const char &#42;correlation,const char &#42;causation,FILE &#42;out,FILE &#42;err){</code> |
 | `HfRoute25` | typedef | 196 | <code>typedef struct {const char &#42;command,&#42;subcommand,&#42;component,&#42;action;} HfRoute25;</code> |
 | `hf_routes25` | variable | 197 | <code>static const HfRoute25 hf_routes25&#91;&#93;={</code> |
@@ -9596,14 +7432,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `hf_mcp_allowed25` | function | 309 | <code>static int hf_mcp_allowed25(const HfMcpPolicy25 &#42;policy,const char &#42;name){</code> |
 | `hf_mcp_known25` | function | 314 | <code>static int hf_mcp_known25(const char &#42;name){</code> |
 | `hf_mcp_policy25` | function | 319 | <code>static int hf_mcp_policy25(HfMcpPolicy25 &#42;policy){</code> |
-| `allowed` | variable | 324 | <code>const char &#42;const allowed&#91;&#93;={"schema_version","allowed_tools","bootstrap_catalog","target_session_id","run_id","target_role"};int64_t version=0;</code> |
 | `hf_mcp_subject25` | function | 351 | <code>static int hf_mcp_subject25(const HfMcpPolicy25 &#42;policy,HfTransportConfig &#42;config,FILE &#42;err){</code> |
 | `hf_rpc_error25` | function | 367 | <code>static void hf_rpc_error25(FILE &#42;out,const char &#42;id,int code,const char &#42;message){</code> |
 | `hf_rpc_tools25` | function | 371 | <code>static void hf_rpc_tools25(FILE &#42;out,const char &#42;id,const HfMcpPolicy25 &#42;policy){</code> |
 | `hf_arg_string25` | function | 382 | <code>static int hf_arg_string25(const HfJson &#42;j,int args,const char &#42;name,char &#42;out,size_t capacity){</code> |
 | `hf_rpc_call25` | function | 385 | <code>static void hf_rpc_call25(HfJson &#42;j,FILE &#42;out,const char &#42;id,const HfMcpPolicy25 &#42;policy){</code> |
-| `allowed` | variable | 399 | <code>const char &#42;const allowed&#91;&#93;={"payload","operation_id","idempotency_key","correlation_id","causation_id"};</code> |
-| `allowed` | variable | 406 | <code>const char &#42;const allowed&#91;&#93;={"run_id","input","operation_id","idempotency_key","correlation_id","causation_id","expected_version","authority"};</code> |
 | `hf_rpc_line25` | function | 432 | <code>static void hf_rpc_line25(const char &#42;line,FILE &#42;out,const HfMcpPolicy25 &#42;policy){</code> |
 | `hf_client_mcp25` | function | 447 | <code>static int hf_client_mcp25(FILE &#42;out,FILE &#42;err){</code> |
 
@@ -9637,7 +7470,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `failure` | function | 112 | <code>static int failure(const char &#42;code, const char &#42;message) {</code> |
 | `request_decode` | function | 117 | <code>static int request_decode(const char &#42;encoded,char &#42;out,size_t &#42;length) {</code> |
 | `main` | function | 133 | <code>int main(int argc, char &#42;&#42;argv) {</code> |
-| `input` | variable | 156 | <code>struct pollfd input={STDIN_FILENO,POLLIN,0};char extra;</code> |
 
 ## src/hyperfide/components.h
 
@@ -9670,13 +7502,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `get` | function | 32 | <code>static int get(Field &#42;fs,int n,const char &#42;key,char &#42;out,size_t size){return string(field(fs,n,key),out,size);}</code> |
 | `integer` | function | 33 | <code>static int integer(Field &#42;f,unsigned long long max,unsigned long long &#42;out){if(!f&#124;&#124;!f-&gt;len&#124;&#124;f-&gt;len&gt;20&#124;&#124;(f-&gt;len&gt;1&amp;&amp;&#42;f-&gt;start=='0'))return 0;unsigned long long v=0;for(size_t i=0;i&lt;f-&gt;len;i++){if(!isdig…</code> |
 | `decimal` | function | 34 | <code>static int decimal(const char &#42;s,unsigned long long &#42;out){if(!&#42;s&#124;&#124;strlen(s)&gt;20&#124;&#124;(s&#91;0&#93;=='0'&amp;&amp;s&#91;1&#93;))return 0;Field f={"",s,strlen(s)};return integer(&amp;f,~0ULL,out);}</code> |
-| `f` | variable | 34 | <code>static int decimal(const char &#42;s,unsigned long long &#42;out){if(!&#42;s&#124;&#124;strlen(s)&gt;20&#124;&#124;(s&#91;0&#93;=='0'&amp;&amp;s&#91;1&#93;))return 0;Field f={"",s,strlen(s)};return integer(&amp;f,~0ULL,out);}</code> |
 | `is_null` | function | 35 | <code>static int is_null(Field &#42;f){return f&amp;&amp;f-&gt;len==4&amp;&amp;!memcmp(f-&gt;start,"null",4);}</code> |
 | `hf_connector_resume_qualified` | function | 36 | <code>extern int hf_connector_resume_qualified(const char &#42;,char &#42;,size_t);</code> |
 | `Observation` | typedef | 39 | <code>typedef struct {const char &#42;state;HfProcessIdentity seen;int have;char kernel_boot&#91;64&#93;;} Observation;</code> |
 | `observe` | function | 40 | <code>static void observe(pid_t pid,const char &#42;boot,unsigned long long start,Observation &#42;o){</code> |
 | `pipe_observe` | function | 50 | <code>static const char &#42;pipe_observe(int fd,int &#42;pending){</code> |
-| `p` | variable | 53 | <code>struct pollfd p={fd,POLLOUT,0};if(poll(&amp;p,1,0)&lt;0)return NULL;</code> |
 | `handoff_bound` | function | 59 | <code>static const char &#42;handoff_bound(const char &#42;doc,const char &#42;want,const char &#42;connector,const char &#42;native,const char &#42;fresh,const char &#42;source,const char &#42;configuration,const char &#42;checkpoint,char &#42;c…</code> |
 | `opt` | function | 72 | <code>static void opt(FILE &#42;o,const char &#42;s){if(s&amp;&amp;&#42;s)quoted(o,s);else fputs("null",o);}</code> |
 | `hf_component_13_3` | function | 73 | <code>int hf_component_13_3(const char &#42;action,const char &#42;json,FILE &#42;out){</code> |
@@ -9703,8 +7533,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `absdir` | function | 48 | <code>static int absdir(const char &#42;s){struct stat st;return &#42;s=='/'&amp;&amp;!strstr(s,"/../")&amp;&amp;!strstr(s,"/./")&amp;&amp;stat(s,&amp;st)==0&amp;&amp;S_ISDIR(st.st_mode);}</code> |
 | `millis` | function | 49 | <code>static long millis(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&amp;t);return t.tv_sec&#42;1000+t.tv_nsec/1000000;}</code> |
 | `capture` | function | 51 | <code>static int capture(const char &#42;exe,char &#42;const argv&#91;&#93;,const char &#42;codex_home,char &#42;buf,size_t cap){int pipefd&#91;2&#93;;if(&#42;exe!='/'&#124;&#124;pipe2(pipefd,O_CLOEXEC&#124;O_NONBLOCK))return 0;pid_t pid=fork();if(pid&lt;0){cl…</code> |
-| `fd` | variable | 51 | <code>static int capture(const char &#42;exe,char &#42;const argv&#91;&#93;,const char &#42;codex_home,char &#42;buf,size_t cap){int pipefd&#91;2&#93;;if(&#42;exe!='/'&#124;&#124;pipe2(pipefd,O_CLOEXEC&#124;O_NONBLOCK))return 0;pid_t pid=fork();if(pid&lt;0){cl…</code> |
-| `argv` | variable | 52 | <code>static int version(const char &#42;exe,char &#42;buf,size_t cap){char &#42;const argv&#91;&#93;={(char&#42;)exe,"--version",NULL};return capture(exe,argv,NULL,buf,cap);}</code> |
 | `version` | function | 52 | <code>static int version(const char &#42;exe,char &#42;buf,size_t cap){char &#42;const argv&#91;&#93;={(char&#42;)exe,"--version",NULL};return capture(exe,argv,NULL,buf,cap);}</code> |
 | `AuthProfile` | typedef | 53 | <code>typedef struct {</code> |
 | `raw` | function | 57 | <code>static int raw(Field &#42;f,const char &#42;value){return f&amp;&amp;f-&gt;len==strlen(value)&amp;&amp;!memcmp(f-&gt;start,value,f-&gt;len);}</code> |
@@ -9715,7 +7543,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `member_string` | function | 96 | <code>static int member_string(const char &#42;json,const char &#42;key,char &#42;dst,size_t cap){Field f;return member(json,key,&amp;f)&amp;&amp;string(&amp;f,dst,cap);}</code> |
 | `field_text` | function | 97 | <code>static char &#42;field_text(Field &#42;f){return f?strndup(f-&gt;start,f-&gt;len):NULL;}</code> |
 | `array_has` | function | 98 | <code>static int array_has(Field &#42;f,const char &#42;const &#42;names){if(!f&#124;&#124;&#42;f-&gt;start!='&#91;')return 0;char &#42;a=field_text(f);if(!a)return 0;const char &#42;p=space(a+1);int found=0;</code> |
-| `e` | variable | 99 | <code>while(&#42;p&amp;&amp;&#42;p!='&#93;'){const char &#42;q=skip(p,0);if(!q)break;if(&#42;p=='"'){Field e={"",p,(size_t)(q-p)};char v&#91;256&#93;;if(string(&amp;e,v,sizeof v))for(const char &#42;const &#42;n=names;&#42;n;n++)if(!strcmp(v,&#42;n))found=1;}p=s…</code> |
 | `slurp` | function | 100 | <code>static long slurp(const char &#42;filename,char &#42;buf,size_t cap,int trusted){int fd=open(filename,O_RDONLY&#124;O_CLOEXEC&#124;O_NOFOLLOW);if(fd&lt;0)return -1;struct stat st;</code> |
 | `hexdigest` | function | 103 | <code>static void hexdigest(const unsigned char &#42;h,char out&#91;80&#93;){strcpy(out,"sha256:");for(int i=0;i&lt;32;i++)sprintf(out+7+2&#42;i,"%02x",h&#91;i&#93;);}</code> |
 | `bytes_sha` | function | 104 | <code>static int bytes_sha(const void &#42;data,size_t len,char out&#91;80&#93;){unsigned char h&#91;32&#93;;unsigned size=0;if(EVP_Digest(data,len,h,&amp;size,EVP_sha256(),NULL)!=1&#124;&#124;size!=32)return 0;hexdigest(h,out);return 1;}</code> |
@@ -9723,7 +7550,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `toml_get` | function | 109 | <code>static int toml_get(const char &#42;text,const char &#42;key,char &#42;out,size_t cap){size_t k=strlen(key);</code> |
 | `Resolution` | typedef | 113 | <code>typedef struct {int found;char model&#91;255&#93;,provider&#91;255&#93;,path&#91;4096&#93;,config_digest&#91;80&#93;;} Resolution;</code> |
 | `resolve_alias` | function | 117 | <code>static int resolve_alias(const char &#42;name,const char &#42;alias,const char &#42;home,Resolution &#42;r){</code> |
-| `flags` | variable | 134 | <code>const char &#42;flags&#91;&#93;&#91;2&#93;={{"CLAUDE_CODE_USE_BEDROCK","bedrock"},{"CLAUDE_CODE_USE_VERTEX","vertex"},{"CLAUDE_CODE_USE_FOUNDRY","foundry"}};</code> |
 | `resolution_json` | function | 138 | <code>static void resolution_json(FILE &#42;o,const Resolution &#42;r){fputs("{&#92;"source&#92;":",o);quoted(o,r-&gt;found?"cli-config":"auth-profile");fputs(",&#92;"config_path&#92;":",o);if(r-&gt;found)quoted(o,r-&gt;path);else fputs("n…</code> |
 | `CAP_NAMES` | variable | 144 | <code>static const char &#42;const CAP_NAMES&#91;CAP_COUNT&#93;={"launch","input","output","steer","cancel","child_registration","resume"};</code> |
 | `Receipt` | typedef | 145 | <code>typedef struct {char digest&#91;80&#93;,observed_model&#91;255&#93;,observed_provider&#91;255&#93;,caps&#91;CAP_COUNT&#93;&#91;16&#93;;} Receipt;</code> |
@@ -9736,12 +7562,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `dispatch_qualified` | function | 175 | <code>static int dispatch_qualified(const Receipt &#42;r,int resume){return cap_is(r,CAP_LAUNCH,"QUALIFIED")&amp;&amp;cap_is(r,CAP_INPUT,"QUALIFIED")&amp;&amp;cap_is(r,CAP_OUTPUT,"QUALIFIED")&amp;&amp;cap_is(r,CAP_CANCEL,"QUALIFIED")&amp;…</code> |
 | `resume_receipt` | function | 176 | <code>static int resume_receipt(const AuthProfile &#42;a,Receipt &#42;r){return a-&gt;explicit_resume&amp;&amp;receipt(a,r)&amp;&amp;cap_is(r,CAP_RESUME,"QUALIFIED");}</code> |
 | `hf_connector_resume_qualified` | function | 177 | <code>int hf_connector_resume_qualified(const char &#42;connector,char &#42;out,size_t size){</code> |
-| `a` | variable | 179 | <code>AuthProfile a={0};Receipt r;char actual&#91;256&#93;,expected&#91;256&#93;;</code> |
 | `hf_component_13_1` | function | 185 | <code>int hf_component_13_1(const char &#42;action,const char &#42;json,FILE &#42;out){</code> |
-| `profile` | variable | 190 | <code>AuthProfile profile={0};</code> |
-| `delegation` | variable | 231 | <code>else{char cv&#91;64&#93;;Field tools;static const char &#42;const delegation&#91;&#93;={"Agent","Task","Workflow",NULL};</code> |
-| `argv` | variable | 249 | <code>char &#42;const argv&#91;&#93;={(char&#42;)exe,"--disable","multi_agent","--disable","multi_agent_v2","--disable","multi_agent_v2_dynamic_tools","-c","agents.enabled=false","features","list",NULL};</code> |
-| `features` | variable | 251 | <code>static const char &#42;const features&#91;&#93;={"multi_agent","multi_agent_v2","multi_agent_v2_dynamic_tools"};</code> |
 
 ## src/hyperfide/control.c
 
@@ -9756,18 +7577,15 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `ControlPolicy` | typedef | 34 | <code>typedef struct {int64_t grace_ms,drain_ms;int stop_at_deadline;} ControlPolicy;</code> |
 | `wall_ms` | function | 36 | <code>static long long wall_ms(void){struct timespec t;clock_gettime(CLOCK_REALTIME,&amp;t);return (long long)t.tv_sec&#42;1000LL+t.tv_nsec/1000000;}</code> |
 | `pause_ms` | function | 37 | <code>static void pause_ms(long ms){struct timespec t={ms/1000,(ms%1000)&#42;1000000L};while(nanosleep(&amp;t,&amp;t)&amp;&amp;errno==EINTR){}}</code> |
-| `t` | variable | 37 | <code>static void pause_ms(long ms){struct timespec t={ms/1000,(ms%1000)&#42;1000000L};while(nanosleep(&amp;t,&amp;t)&amp;&amp;errno==EINTR){}}</code> |
 | `secure_state` | function | 38 | <code>static int secure_state(const char &#42;state){struct stat st;return state&amp;&amp;state&#91;0&#93;=='/'&amp;&amp;!lstat(state,&amp;st)&amp;&amp;S_ISDIR(st.st_mode)&amp;&amp;st.st_uid==geteuid()&amp;&amp;!(st.st_mode&amp;077)&amp;&amp;geteuid()==0;}</code> |
 | `text_at` | function | 39 | <code>static int text_at(const HfJson &#42;j,int object,const char &#42;key,char &#42;out,size_t n){return hf_json_string(j,hf_json_field(j,object,key),out,n);}</code> |
 | `load_config` | function | 40 | <code>static int load_config(const char &#42;path,const char &#42;state,ControlConfig &#42;c){</code> |
 | `request_config` | function | 50 | <code>static int request_config(const HfJson &#42;j,const char &#42;state,ControlConfig &#42;c){</code> |
 | `service` | function | 54 | <code>static int service(const ControlConfig &#42;c,const char &#42;action,const char &#42;input,HfJson &#42;j,int &#42;result,char &#42;&#42;body,char code&#91;96&#93;){</code> |
-| `r` | variable | 59 | <code>HfHttpResponse r={0};int sent=hf_supervisor_call(c-&gt;transport,0,payload,operation,idempotency,correlation,NULL,NULL,NULL,&amp;r);free(payload);</code> |
 | `hf_runner_control_api` | function | 64 | <code>int hf_runner_control_api(const char &#42;config_path,const char &#42;component,const char &#42;action,const char &#42;input,HfHttpResponse &#42;response){</code> |
 | `ledger` | function | 75 | <code>static sqlite3 &#42;ledger(const char &#42;state){</code> |
 | `exec_bind` | function | 90 | <code>static int exec_bind(sqlite3 &#42;db,const char &#42;sql,const char &#42;const &#42;text,int count){</code> |
 | `refuse` | function | 95 | <code>static int refuse(sqlite3 &#42;db,FILE &#42;out,const char &#42;command,const char &#42;code){</code> |
-| `v` | variable | 96 | <code>if(db&amp;&amp;command&amp;&amp;hf_uuid_valid(command)){char at&#91;32&#93;;snprintf(at,sizeof at,"%lld",(long long)time(NULL));const char &#42;v&#91;&#93;={command,code,at};exec_bind(db,"INSERT INTO refusals(command,code,at) VALUES(?,?…</code> |
 | `hf_runner_admission_closed` | function | 99 | <code>int hf_runner_admission_closed(const char &#42;state,uid_t uid){</code> |
 | `launch_update` | function | 106 | <code>static int launch_update(const char &#42;state,const char &#42;launch,uid_t uid,const char &#42;value){</code> |
 | `launch_row` | function | 113 | <code>static int launch_row(const char &#42;state,const char &#42;launch,char slot&#91;37&#93;,uid_t &#42;uid,char identity&#91;2048&#93;){</code> |
@@ -9779,15 +7597,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `jobs_active` | function | 149 | <code>static int jobs_active(const char &#42;state,uid_t uid){</code> |
 | `fd_digest` | function | 155 | <code>static int fd_digest(int fd,char out&#91;72&#93;,unsigned long long &#42;size){</code> |
 | `credential_dir` | function | 163 | <code>static int credential_dir(const ControlConfig &#42;c,const char &#42;slot){</code> |
-| `parts` | variable | 164 | <code>int fd=open(c-&gt;slots,O_RDONLY&#124;O_DIRECTORY&#124;O_CLOEXEC&#124;O_NOFOLLOW);const char &#42;parts&#91;&#93;={slot,"home",".hyperfide","credentials"};</code> |
 | `revoke_credentials` | function | 169 | <code>static int revoke_credentials(sqlite3 &#42;db,const ControlConfig &#42;c,const char &#42;slot,const char &#42;command){</code> |
-| `v` | variable | 180 | <code>const char &#42;v&#91;&#93;={command,e-&gt;d_name,&#42;digest?digest:NULL,removed?"REVOKED":"UNRESOLVED"};</code> |
 | `credential_residue` | function | 186 | <code>static int credential_residue(const ControlConfig &#42;c,const char &#42;slot){</code> |
 | `output_path` | function | 191 | <code>static int output_path(const char &#42;state,const char &#42;launch,const char &#42;name,char path&#91;4200&#93;){</code> |
 | `record_outputs` | function | 198 | <code>static void record_outputs(sqlite3 &#42;db,const char &#42;state,const char &#42;launch,const char &#42;command,const HfJson &#42;a,int list){</code> |
-| `v` | variable | 203 | <code>char sz&#91;32&#93;;snprintf(sz,sizeof sz,"%llu",size);const char &#42;v&#91;&#93;={command,name,path,durable?digest:NULL,durable?sz:NULL,durable?"1":"0"};</code> |
 | `capture_outputs` | function | 208 | <code>static int capture_outputs(sqlite3 &#42;db,const ControlConfig &#42;c,const char &#42;command){</code> |
-| `v` | variable | 227 | <code>if(same&amp;&amp;strlen(receipt)==71){const char &#42;v&#91;&#93;={receipt,command,names&#91;k&#93;};exec_bind(db,"UPDATE outputs SET capture_receipt=? WHERE command=? AND name=?",v,3);}else all=0;</code> |
 | `policy_of` | function | 231 | <code>static int policy_of(const HfJson &#42;a,int r,ControlPolicy &#42;p){</code> |
 | `mode_of` | function | 236 | <code>static const char &#42;mode_of(const char &#42;action){return !strcmp(action,"runner.pause")?"PAUSE":!strcmp(action,"runner.drain")?"DRAIN":!strcmp(action,"runner.cancel")?"CANCEL":!strcmp(action,"runner.stop…</code> |
 | `starting_phase` | function | 237 | <code>static const char &#42;starting_phase(const char &#42;action){return !strcmp(action,"runner.pause")?"PAUSING":!strcmp(action,"runner.drain")?"DRAINING":!strcmp(action,"runner.cancel")?"CANCELLING":!strcmp(act…</code> |
@@ -9799,35 +7613,20 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `load_command` | function | 256 | <code>static int load_command(sqlite3 &#42;db,const char &#42;id,Control &#42;x){</code> |
 | `free_control` | function | 264 | <code>static void free_control(Control &#42;x){free(x-&gt;authority);free(x-&gt;a);x-&gt;authority=NULL;x-&gt;a=NULL;}</code> |
 | `set_phase` | function | 265 | <code>static int set_phase(sqlite3 &#42;db,const Control &#42;x){char at&#91;32&#93;;snprintf(at,sizeof at,"%lld",(long long)time(NULL));const char &#42;v&#91;&#93;={x-&gt;phase,at,x-&gt;command};return exec_bind(db,"UPDATE commands SET pha…</code> |
-| `v` | variable | 265 | <code>static int set_phase(sqlite3 &#42;db,const Control &#42;x){char at&#91;32&#93;;snprintf(at,sizeof at,"%lld",(long long)time(NULL));const char &#42;v&#91;&#93;={x-&gt;phase,at,x-&gt;command};return exec_bind(db,"UPDATE commands SET pha…</code> |
 | `render` | function | 268 | <code>static char &#42;render(sqlite3 &#42;db,Control &#42;x,const ControlConfig &#42;c){</code> |
-| `k` | variable | 273 | <code>if(&#42;x-&gt;identity)fputs(x-&gt;identity,out);else{fputc('{',out);const char &#42;k&#91;&#93;={"attempt_id","attempt_generation","sandbox_id","boot_id","boot_generation"};for(unsigned i=0;i&lt;5;++i){char v&#91;128&#93;="";text_at…</code> |
-| `ak` | variable | 276 | <code>const char &#42;ak&#91;&#93;={"authority_epoch","attempt_generation","boot_generation"};for(unsigned i=0;i&lt;3;++i){char v&#91;64&#93;="";text_at(x-&gt;a,x-&gt;r,ak&#91;i&#93;,v,sizeof v);fprintf(out,",&#92;"%s&#92;":",ak&#91;i&#93;);hf_json_write_stri…</code> |
 | `DEBT` | macro | 282 | <code>#define DEBT(...) do{int w=snprintf(debt+used,sizeof debt-used,"%s&#92;"",used?",":"");if(w&gt;0&amp;&amp;(size_t)w&lt;sizeof debt-used)used+=(size_t)w;w=snprintf(debt+used,sizeof debt-used,__VA_ARGS__);if(w&gt;0&amp;&amp;(size_t…</code> |
 | `report` | function | 306 | <code>static int report(sqlite3 &#42;db,const ControlConfig &#42;c,const Control &#42;x,const char &#42;receipt){</code> |
-| `v` | variable | 312 | <code>if(!ok){char reason&#91;128&#93;,at&#91;32&#93;;snprintf(reason,sizeof reason,"%s:%s",sent==0?"REPORT_REFUSED":"REPORT_UNDELIVERED",code);snprintf(at,sizeof at,"%lld",(long long)time(NULL));const char &#42;v&#91;&#93;={x-&gt;comman…</code> |
-| `v` | variable | 315 | <code>const char &#42;v&#91;&#93;={ok?"1":"0",x-&gt;command};exec_bind(db,"UPDATE commands SET report_delivered=? WHERE id=?",v,2);return ok;</code> |
 | `store_receipt` | function | 317 | <code>static int store_receipt(sqlite3 &#42;db,const Control &#42;x,const char &#42;receipt){char digest&#91;72&#93;="sha256:";hf_sha256_bytes(receipt,strlen(receipt),digest+7);const char &#42;v&#91;&#93;={receipt,digest,x-&gt;command};retur…</code> |
-| `v` | variable | 317 | <code>static int store_receipt(sqlite3 &#42;db,const Control &#42;x,const char &#42;receipt){char digest&#91;72&#93;="sha256:";hf_sha256_bytes(receipt,strlen(receipt),digest+7);const char &#42;v&#91;&#93;={receipt,digest,x-&gt;command};retur…</code> |
 | `execute` | function | 320 | <code>static void execute(sqlite3 &#42;db,const ControlConfig &#42;c,Control &#42;x,const char &#42;request){</code> |
-| `v` | variable | 326 | <code>if(alive&gt;0&amp;&amp;freeze(x-&gt;uid,0)){launch_update(x-&gt;state,x-&gt;launch,x-&gt;uid,"RUNNING");const char &#42;v&#91;&#93;={x-&gt;launch};exec_bind(db,"UPDATE fences SET admission_closed=0,input_closed=0,mode='RESUME',updated=uni…</code> |
 | `broker_alive` | function | 350 | <code>static int broker_alive(const HfRunnerBinding &#42;b){HfProcessIdentity broker;return b&amp;&amp;hf_process_identity(b-&gt;broker_pid,&amp;broker)&amp;&amp;broker.start_time==b-&gt;broker_start&amp;&amp;!strcmp(broker.os_boot_id,b-&gt;os_boo…</code> |
 | `settle` | function | 353 | <code>static char &#42;settle(sqlite3 &#42;db,const ControlConfig &#42;c,Control &#42;x){</code> |
 | `finish` | function | 359 | <code>static int finish(sqlite3 &#42;db,const ControlConfig &#42;c,Control &#42;x,FILE &#42;out,int replayed){</code> |
 | `verify_authority` | function | 364 | <code>static int verify_authority(const HfJson &#42;a,int r,const char &#42;command,const char &#42;action,const char &#42;launch,const char &#42;identity,const ControlConfig &#42;c,long long &#42;fence){</code> |
-| `k` | variable | 369 | <code>if(ok&amp;&amp;identity&amp;&amp;&#42;identity){ok=hf_json_parse(id,identity);const char &#42;k&#91;&#93;={"attempt_id","attempt_generation","sandbox_id","boot_id","boot_generation"};for(unsigned i=0;ok&amp;&amp;i&lt;5;++i)ok=hf_json_get(id,k&#91;…</code> |
 | `control_command` | function | 374 | <code>static int control_command(const char &#42;action,const char &#42;request,FILE &#42;out){</code> |
-| `f` | variable | 400 | <code>const char &#42;v&#91;&#93;={x.slot,uid_text,command};exec_bind(db,"UPDATE commands SET slot=?,uid=? WHERE id=?",v,3);const char &#42;f&#91;&#93;={uid_text,launch};exec_bind(db,"UPDATE fences SET uid=? WHERE launch=?",f,2);}</code> |
-| `v` | variable | 400 | <code>const char &#42;v&#91;&#93;={x.slot,uid_text,command};exec_bind(db,"UPDATE commands SET slot=?,uid=? WHERE id=?",v,3);const char &#42;f&#91;&#93;={uid_text,launch};exec_bind(db,"UPDATE fences SET uid=? WHERE launch=?",f,2);}</code> |
-| `cv` | variable | 422 | <code>const char &#42;cv&#91;&#93;={command,action,launch,uid_text,slot,fence_text,raw,starting_phase(action),at,at};</code> |
-| `fv` | variable | 423 | <code>const char &#42;fv&#91;&#93;={launch,uid_text,mode_of(action),command,fence_text,closes?"1":"0",closes?"1":"0",publication?"1":"0",at};</code> |
 | `observe` | function | 436 | <code>static int observe(const char &#42;request,FILE &#42;out){</code> |
 | `slot_release` | function | 460 | <code>static int slot_release(const char &#42;request,FILE &#42;out){</code> |
 | `BLOCK` | macro | 479 | <code>#define BLOCK(s) do{int w=snprintf(blocking+used,sizeof blocking-used,"%s&#92;"%s&#92;"",used?",":"",s);if(w&gt;0&amp;&amp;(size_t)w&lt;sizeof blocking-used)used+=(size_t)w;}while(0)</code> |
-| `v` | variable | 492 | <code>if(reusable){reusable=c&amp;&amp;slot_state(c,x.slot,x.uid,"READY");launch_update(state,launch,x.uid,"STOPPED");const char &#42;v&#91;&#93;={launch};exec_bind(db,"UPDATE fences SET admission_closed=0,input_closed=0,updat…</code> |
 | `reconcile` | function | 501 | <code>static int reconcile(const char &#42;request,FILE &#42;out){</code> |
-| `keys` | variable | 513 | <code>if(w&amp;&amp;id&amp;&amp;row==1&amp;&amp;hf_json_parse(id,identity)){fprintf(w,"{&#92;"state_dir&#92;":");hf_json_write_string(w,state);fprintf(w,",&#92;"launch_id&#92;":&#92;"%s&#92;",&#92;"command_id&#92;":&#92;"%s&#92;"",x.launch,x.command);const char &#42;keys&#91;&#93;=…</code> |
-| `v` | variable | 539 | <code>char uid_text&#91;32&#93;,at&#91;32&#93;;snprintf(uid_text,sizeof uid_text,"%lu",(unsigned long)uids&#91;k&#93;);snprintf(at,sizeof at,"%lld",(long long)time(NULL));const char &#42;v&#91;&#93;={ops&#91;k&#93;,uid_text,"EXECUTOR_DISCONNECTED",re…</code> |
 | `stage` | function | 550 | <code>static int stage(const char &#42;request,FILE &#42;out){</code> |
 | `hf_component_12_4` | function | 561 | <code>int hf_component_12_4(const char &#42;action,const char &#42;request,FILE &#42;out) {</code> |
 
@@ -9861,35 +7660,17 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `fd_hash` | function | 34 | <code>static int fd_hash(int fd,char out&#91;65&#93;){</code> |
 | `no_processes` | function | 40 | <code>static int no_processes(uid_t uid,HfProcessIdentity &#42;list,size_t &#42;count){</code> |
 | `terminate_uid` | function | 46 | <code>static int terminate_uid(uid_t uid){</code> |
-| `delay` | variable | 47 | <code>struct timespec delay={.tv_nsec=10000000};</code> |
 | `trusted_environment` | function | 53 | <code>static int trusted_environment(const char &#42;config_path){</code> |
-| `allowed` | variable | 56 | <code>const char &#42;allowed&#91;&#93;={"HF_PREPARATION_WORKSPACE_ROOT","HF_PREPARATION_BASE_ROOT","HF_PREPARATION_MANIFEST_ROOT","HF_READINESS_MODULE_PATH","HF_READINESS_MODULE_DIGEST","HF_READINESS_NODE_EXECUTABLE",…</code> |
 | `MeasuredSource` | typedef | 62 | <code>typedef struct {char commit&#91;65&#93;,tree&#91;65&#93;,state&#91;72&#93;,workspace&#91;72&#93;;} MeasuredSource;</code> |
 | `readiness_unprivileged` | function | 63 | <code>static int readiness_unprivileged(const HfJson &#42;job,int result,MeasuredSource &#42;measured){</code> |
 | `readiness` | function | 88 | <code>static int readiness(const HfJson &#42;job,int result,const char &#42;config_path,MeasuredSource &#42;measured,</code> |
-| `actual` | variable | 107 | <code>MeasuredSource actual={0};int good=readiness_unprivileged(job,result,&amp;actual);</code> |
-| `fd` | variable | 119 | <code>if(!finished){struct pollfd fd={descriptor&#91;0&#93;,POLLIN,0};(void)poll(&amp;fd,1,10);}</code> |
 | `EnvEntry` | typedef | 129 | <code>typedef struct {char &#42;key,&#42;value;} EnvEntry;</code> |
 | `compare_env` | function | 130 | <code>static int compare_env(const void &#42;a,const void &#42;b){return strcmp(((const EnvEntry&#42;)a)-&gt;key,((const EnvEntry&#42;)b)-&gt;key);}</code> |
 | `environment` | function | 131 | <code>static int environment(const HfJson &#42;j,int plan,EnvEntry entries&#91;64&#93;,int &#42;count,char digest&#91;65&#93;){</code> |
 | `job_database` | function | 141 | <code>static sqlite3 &#42;job_database(const char &#42;state){</code> |
 | `captured` | function | 148 | <code>static void captured(FILE &#42;out,const unsigned char &#42;bytes,size_t n,int complete){</code> |
 | `preparation_placement` | function | 154 | <code>static int preparation_placement(const char &#42;config){</code> |
-| `response` | variable | 155 | <code>HfHttpResponse response={0};HfJson &#42;j=malloc(sizeof &#42;j);int ok=j&amp;&amp;hf_runner_control_api(config,"1.1","placement.runner.authorize","{&#92;"runner_action&#92;":&#92;"runner.preparation.execute&#92;"}",&amp;response)&amp;&amp;respo…</code> |
 | `hf_runner_job_execute` | function | 162 | <code>int hf_runner_job_execute(const char &#42;request,FILE &#42;out){</code> |
-| `keys` | variable | 163 | <code>HfJson &#42;input=malloc(sizeof &#42;input),&#42;job=malloc(sizeof &#42;job);char config&#91;4096&#93;,operation&#91;37&#93;;const char &#42;keys&#91;&#93;={"config_path","operation_id"};HfHttpResponse response={0};</code> |
-| `response` | variable | 163 | <code>HfJson &#42;input=malloc(sizeof &#42;input),&#42;job=malloc(sizeof &#42;job);char config&#91;4096&#93;,operation&#91;37&#93;;const char &#42;keys&#91;&#93;={"config_path","operation_id"};HfHttpResponse response={0};</code> |
-| `measured` | variable | 178 | <code>HfProcessIdentity owned&#91;1024&#93;;size_t owned_count=0;MeasuredSource measured={0};</code> |
-| `env` | variable | 184 | <code>int array=hf_json_field(job,plan,"argv");char &#42;&#42;argv=NULL;int argc=0,binary=-1;char executable&#91;65&#93;,environment_digest&#91;65&#93;;EnvEntry env&#91;64&#93;={0};int env_count=0;</code> |
-| `process_limit` | variable | 215 | <code>struct rlimit process_limit={512,512},file_limit={512,512};if(setrlimit(RLIMIT_NPROC,&amp;process_limit)&#124;&#124;setrlimit(RLIMIT_NOFILE,&amp;file_limit))_exit(125);</code> |
-| `wait_ready` | variable | 226 | <code>{char ready=0;struct pollfd wait_ready={dropped&#91;0&#93;,POLLIN,0};int polled=poll(&amp;wait_ready,1,(int)((deadline-mono())/1000000LL&gt;10000?10000:(deadline-mono())/1000000LL));</code> |
-| `eof` | variable | 232 | <code>unsigned char &#42;stdout_bytes=malloc(JOB_STREAM_LIMIT),&#42;stderr_bytes=malloc(JOB_STREAM_LIMIT);size_t sizes&#91;2&#93;={0,0};int eof&#91;2&#93;={0,0},timed_out=0,interrupted=0,truncated=0,exit_code=-1,signal_number=0,fi…</code> |
-| `sizes` | variable | 232 | <code>unsigned char &#42;stdout_bytes=malloc(JOB_STREAM_LIMIT),&#42;stderr_bytes=malloc(JOB_STREAM_LIMIT);size_t sizes&#91;2&#93;={0,0};int eof&#91;2&#93;={0,0},timed_out=0,interrupted=0,truncated=0,exit_code=-1,signal_number=0,fi…</code> |
-| `fds` | variable | 241 | <code>struct pollfd fds&#91;&#93;={{pipes_out&#91;0&#93;,POLLIN,0},{pipes_err&#91;0&#93;,POLLIN,0},{input_open?pipes_in&#91;1&#93;:-1,POLLOUT,0}};int polled=poll(fds,3,20);if(polled&lt;0&amp;&amp;errno!=EINTR){interrupted=1;terminate_uid((uid_t)uid)…</code> |
-| `scope_fields` | variable | 253 | <code>const char &#42;scope_fields&#91;&#93;={"session_id","organisation_id","run_id","repository_id","sandbox_id","boot_id","boot_generation","slot_id","slot_generation","provider","external_sandbox_id"};</code> |
-| `pins` | variable | 259 | <code>const char &#42;pins&#91;&#93;={"source_digest","policy_digest"};for(unsigned k=0;k&lt;2;++k){char value&#91;72&#93;;string_at(job,plan,pins&#91;k&#93;,value,sizeof value);fputc(',',writer);hf_json_write_string(writer,pins&#91;k&#93;);fput…</code> |
-| `names` | variable | 271 | <code>const char &#42;names&#91;&#93;={"stage_root","context_path","out_root","diagnostics_root","workspace_path","node_path","recipe_path"};const char &#42;values&#91;&#93;={stage.stage_root,stage.context_path,stage.out_root,stag…</code> |
-| `values` | variable | 271 | <code>const char &#42;names&#91;&#93;={"stage_root","context_path","out_root","diagnostics_root","workspace_path","node_path","recipe_path"};const char &#42;values&#91;&#93;={stage.stage_root,stage.context_path,stage.out_root,stag…</code> |
 
 ## src/hyperfide/launch.c
 
@@ -9904,17 +7685,12 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `decimal` | function | 36 | <code>static int decimal(const char &#42;s) {</code> |
 | `secure_directory` | function | 40 | <code>static int secure_directory(const char &#42;path) {</code> |
 | `load_config` | function | 49 | <code>static int load_config(const char &#42;path,RunnerConfig &#42;c) {</code> |
-| `keys` | variable | 51 | <code>const char &#42;keys&#91;&#93;={"transport_config","state_dir","slot_root","connector_plan_path","organisation_id","run_id","sandbox_id","boot_id","boot_generation","consumer_id","readiness_env_path","preparation…</code> |
 | `api` | function | 61 | <code>static int api(const RunnerConfig &#42;c,const char &#42;component,const char &#42;action,const char &#42;input,HfHttpResponse &#42;response) {</code> |
 | `result_json` | function | 68 | <code>static int result_json(HfHttpResponse &#42;r,HfJson &#42;j) {</code> |
 | `placement` | function | 71 | <code>static int placement(const RunnerConfig &#42;c,const char &#42;action,const char &#42;job,const char &#42;tool) {</code> |
-| `response` | variable | 72 | <code>char input&#91;256&#93;;snprintf(input,sizeof input,"{&#92;"runner_action&#92;":&#92;"%s&#92;"}",action);HfHttpResponse response={0};HfJson &#42;j=malloc(sizeof &#42;j);int ok=0;</code> |
 | `atstring` | function | 81 | <code>static int atstring(const HfJson &#42;j,int o,const char &#42;key,char &#42;out,size_t n){return hf_json_string(j,hf_json_field(j,o,key),out,n);}</code> |
 | `parse_packet` | function | 83 | <code>static int parse_packet(const RunnerConfig &#42;c,const HfJson &#42;j,int r,Instruction &#42;i,long long started) {</code> |
-| `names` | variable | 86 | <code>const char &#42;names&#91;&#93;={"organisation_id","run_id","sandbox_id","boot_id","sandbox_boot_generation"};</code> |
-| `expected` | variable | 87 | <code>const char &#42;expected&#91;&#93;={c-&gt;organisation,c-&gt;run,c-&gt;sandbox,c-&gt;boot,c-&gt;generation};</code> |
 | `fetch_instruction` | function | 104 | <code>static int fetch_instruction(const RunnerConfig &#42;c,const char &#42;event,Instruction &#42;i) {</code> |
-| `response` | variable | 108 | <code>HfHttpResponse response={0};HfJson &#42;j=malloc(sizeof &#42;j);int ok=0;</code> |
 | `ledger` | function | 112 | <code>static sqlite3 &#42;ledger(const RunnerConfig &#42;c) {</code> |
 | `frame_reserve` | function | 124 | <code>static int frame_reserve(sqlite3 &#42;db,const char &#42;id,const char &#42;launch,const char &#42;digest){</code> |
 | `queue_ack` | function | 132 | <code>static int queue_ack(sqlite3 &#42;db,const RunnerConfig &#42;c,const Instruction &#42;i,int version,const char &#42;state,const HfProcessIdentity &#42;process) {</code> |
@@ -9922,14 +7698,12 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `HF_EVENT_DATA_LIMIT` | macro | 146 | <code>#define HF_EVENT_DATA_LIMIT 16384</code> |
 | `queue_event` | function | 147 | <code>static int queue_event(sqlite3 &#42;db,const RunnerConfig &#42;c,const char &#42;launch,const char &#42;command,const char &#42;kind,const char &#42;data) {</code> |
 | `flush_outbox` | function | 163 | <code>static int flush_outbox(sqlite3 &#42;db,const RunnerConfig &#42;c,const char &#42;command,const char &#42;launch,int limit,int &#42;acks,int &#42;events) {</code> |
-| `response` | variable | 173 | <code>HfHttpResponse response={0};HfJson &#42;j=malloc(sizeof &#42;j);</code> |
 | `undelivered` | function | 183 | <code>static long long undelivered(sqlite3 &#42;db,const char &#42;command,const char &#42;launch) {</code> |
 | `launch_lock` | function | 191 | <code>static int launch_lock(const char &#42;state,const char &#42;launch,int create,int &#42;held) {</code> |
 | `broker_owner` | function | 199 | <code>static int broker_owner(const char &#42;state,const char &#42;launch) {</code> |
 | `input_permitted` | function | 202 | <code>static int input_permitted(sqlite3 &#42;db,const char &#42;launch) {</code> |
 | `uid_processes` | function | 207 | <code>static int uid_processes(uid_t uid,HfProcessIdentity &#42;list,size_t capacity) {</code> |
 | `slot_identity` | function | 212 | <code>static int slot_identity(const RunnerConfig &#42;c,Instruction &#42;i) {</code> |
-| `names` | variable | 217 | <code>const char &#42;names&#91;&#93;={"worktree","build","home","tmp","sessions","logs"};</code> |
 | `hash_fd` | function | 221 | <code>static int hash_fd(int fd,char digest&#91;65&#93;) {</code> |
 | `read_plan` | function | 227 | <code>static int read_plan(const RunnerConfig &#42;c,const Instruction &#42;i,HfJson &#42;j,char &#42;&#42;source,char &#42;&#42;&#42;argv,int &#42;binary) {</code> |
 | `free_argv` | function | 240 | <code>static void free_argv(char &#42;&#42;argv){if(argv){for(int k=0;argv&#91;k&#93;;++k)free(argv&#91;k&#93;);free(argv);}}</code> |
@@ -9938,31 +7712,20 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `receive_packet` | function | 243 | <code>static char &#42;receive_packet(int fd){uint32_t wire;if(!transfer(fd,&amp;wire,4,0))return NULL;size_t n=ntohl(wire);if(!n&#124;&#124;n&gt;HF_BODY_LIMIT)return NULL;char &#42;data=malloc(n+1);if(!data)return NULL;if(!transfe…</code> |
 | `socket_path` | function | 244 | <code>static int socket_path(const char &#42;state,const char &#42;launch,char path&#91;108&#93;){return hf_uuid_valid(launch)&amp;&amp;snprintf(path,108,"%s/%s.sock",state,launch)&lt;108;}</code> |
 | `hf_launch_rpc` | function | 245 | <code>int hf_launch_rpc(const char &#42;state,const char &#42;action,const char &#42;payload,FILE &#42;output) {</code> |
-| `addr` | variable | 247 | <code>int fd=socket(AF_UNIX,SOCK_STREAM&#124;SOCK_CLOEXEC,0);struct sockaddr_un addr={.sun_family=AF_UNIX};snprintf(addr.sun_path,sizeof addr.sun_path,"%s",path);struct timeval timeout={.tv_sec=10};</code> |
-| `timeout` | variable | 247 | <code>int fd=socket(AF_UNIX,SOCK_STREAM&#124;SOCK_CLOEXEC,0);struct sockaddr_un addr={.sun_family=AF_UNIX};snprintf(addr.sun_path,sizeof addr.sun_path,"%s",path);struct timeval timeout={.tv_sec=10};</code> |
 | `state_update` | function | 256 | <code>static void state_update(sqlite3 &#42;db,const char &#42;launch,const char &#42;state,int exit_code) {</code> |
 | `stop_uid` | function | 259 | <code>static int stop_uid(uid_t uid) {</code> |
-| `delay` | variable | 262 | <code>struct timespec delay={.tv_nsec=100000000};nanosleep(&amp;delay,NULL);</code> |
 | `hf_slot_owner` | function | 268 | <code>int hf_slot_owner(uid_t uid,const char &#42;owner) {</code> |
 | `hf_slot_control_lock` | function | 273 | <code>int hf_slot_control_lock(uid_t uid,const char &#42;owner) {</code> |
 | `hf_slot_watchdog` | function | 279 | <code>pid_t hf_slot_watchdog(uid_t uid,long long deadline,int &#42;writer,const char &#42;owner) {</code> |
-| `item` | variable | 294 | <code>struct pollfd item={3,POLLIN,0};int n=poll(&amp;item,1,milliseconds);</code> |
 | `hf_slot_watchdog_finish` | function | 302 | <code>int hf_slot_watchdog_finish(pid_t guard,int &#42;writer) {</code> |
 | `broker_observation` | function | 307 | <code>static char &#42;broker_observation(const RunnerConfig &#42;c,const Instruction &#42;i,const HfProcessIdentity &#42;broker,const HfProcessIdentity &#42;agent,const char &#42;state,int exit_code,const char &#42;command,int ipc_cl…</code> |
 | `spool_json` | function | 314 | <code>static void spool_json(FILE &#42;out,const RunnerConfig &#42;c,const char &#42;launch,const char &#42;suffix,unsigned long long observed) {</code> |
 | `terminal_data` | function | 321 | <code>static char &#42;terminal_data(const RunnerConfig &#42;c,const Instruction &#42;i,const char &#42;state,int exit_code,unsigned long long out_bytes,unsigned long long err_bytes,const char &#42;stopped_by) {</code> |
 | `append_log` | function | 328 | <code>static int append_log(int fd,const void &#42;data,size_t n){const char &#42;p=data;while(n){ssize_t w=write(fd,p,n);if(w&lt;0&amp;&amp;errno==EINTR)continue;if(w&lt;=0)return 0;p+=w;n-=(size_t)w;}return 1;}</code> |
 | `broker` | function | 329 | <code>static void broker(const RunnerConfig &#42;c,const Instruction &#42;i,HfJson &#42;plan,char &#42;&#42;argv,int binary,int ready) {</code> |
-| `address` | variable | 336 | <code>server=socket(AF_UNIX,SOCK_STREAM&#124;SOCK_CLOEXEC&#124;SOCK_NONBLOCK,0);struct sockaddr_un address={.sun_family=AF_UNIX};snprintf(address.sun_path,sizeof address.sun_path,"%s",socketname);</code> |
-| `allowed` | variable | 348 | <code>int env=hf_json_field(plan,0,"environment");const char &#42;allowed&#91;&#93;={"CODEX_HOME","CLAUDE_CONFIG_DIR","SSL_CERT_FILE","NODE_EXTRA_CA_CERTS"};</code> |
-| `fds` | variable | 377 | <code>struct pollfd fds&#91;&#93;={{server,POLLIN,0},{output&#91;0&#93;,POLLIN,0},{error&#91;0&#93;,POLLIN,0}};int polled=poll(fds,3,200);if(polled&lt;0&amp;&amp;errno!=EINTR){state="UNCERTAIN";break;}</code> |
-| `timeout` | variable | 387 | <code>int client=accept4(server,NULL,NULL,SOCK_CLOEXEC);if(client&lt;0)continue;struct ucred peer;socklen_t peer_size=sizeof peer;struct timeval timeout={.tv_sec=3};setsockopt(client,SOL_SOCKET,SO_RCVTIMEO,&amp;ti…</code> |
-| `ids` | variable | 391 | <code>const char &#42;ids&#91;&#93;={"attempt_id","attempt_generation","sandbox_id","boot_id","boot_generation"};const char &#42;values&#91;&#93;={i-&gt;attempt,i-&gt;attempt_generation,c-&gt;sandbox,c-&gt;boot,c-&gt;generation};</code> |
-| `values` | variable | 391 | <code>const char &#42;ids&#91;&#93;={"attempt_id","attempt_generation","sandbox_id","boot_id","boot_generation"};const char &#42;values&#91;&#93;={i-&gt;attempt,i-&gt;attempt_generation,c-&gt;sandbox,c-&gt;boot,c-&gt;generation};</code> |
 | `refuse` | function | 418 | <code>static int refuse(FILE &#42;out,const char &#42;code){last_refusal=code;return hf_native_error(out,code);}</code> |
 | `fenced` | function | 419 | <code>static int fenced(sqlite3 &#42;db,const char &#42;launch) {</code> |
 | `launch_start` | function | 423 | <code>static int launch_start(const RunnerConfig &#42;c,Instruction &#42;i,FILE &#42;out) {</code> |
-| `pollfd` | variable | 456 | <code>struct pollfd pollfd={ready&#91;0&#93;,POLLIN,0};char status='F';if(child&gt;0&amp;&amp;poll(&amp;pollfd,1,10000)&gt;0&amp;&amp;read(ready&#91;0&#93;,&amp;status,1)!=1)status='F';close(ready&#91;0&#93;);</code> |
 | `LaunchRow` | typedef | 464 | <code>typedef struct {char launch&#91;37&#93;,command&#91;37&#93;,state&#91;32&#93;,broker_start&#91;32&#93;,agent_start&#91;32&#93;,os_boot&#91;37&#93;,identity&#91;2048&#93;;long long uid,gid,broker_pid,agent_pid;} LaunchRow;</code> |
 | `ReconcileStats` | typedef | 465 | <code>typedef struct {int adopted,orphaned,lost,not_spawned,uncertain;} ReconcileStats;</code> |
 | `ack_instruction` | function | 466 | <code>static int ack_instruction(sqlite3 &#42;db,const char &#42;launch,const char &#42;command,Instruction &#42;i,int &#42;version) {</code> |
@@ -9976,24 +7739,12 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `deliver_control` | function | 548 | <code>static void deliver_control(const RunnerConfig &#42;c,const Instruction &#42;i,ServeStats &#42;st) {</code> |
 | `process_instruction` | function | 583 | <code>static void process_instruction(const RunnerConfig &#42;c,Instruction &#42;i,ServeStats &#42;st) {</code> |
 | `poll_once` | function | 600 | <code>static int poll_once(const RunnerConfig &#42;c,ServeStats &#42;st) {</code> |
-| `response` | variable | 602 | <code>long long started=monotonic_ns();HfHttpResponse response={0};HfJson &#42;j=malloc(sizeof &#42;j);int ok=j&amp;&amp;api(c,"6.3","instructions.runner.poll",input,&amp;response)&amp;&amp;result_json(&amp;response,j);</code> |
-| `expected` | variable | 604 | <code>const char &#42;names&#91;&#93;={"organisation_id","run_id","consumer_id","sandbox_id","boot_id","boot_generation"};const char &#42;expected&#91;&#93;={c-&gt;organisation,c-&gt;run,c-&gt;consumer,c-&gt;sandbox,c-&gt;boot,c-&gt;generation};</code> |
-| `names` | variable | 604 | <code>const char &#42;names&#91;&#93;={"organisation_id","run_id","consumer_id","sandbox_id","boot_id","boot_generation"};const char &#42;expected&#91;&#93;={c-&gt;organisation,c-&gt;run,c-&gt;consumer,c-&gt;sandbox,c-&gt;boot,c-&gt;generation};</code> |
 | `serve_signal` | function | 618 | <code>static void serve_signal(int signal_number){(void)signal_number;serve_stop=1;}</code> |
-| `d` | variable | 619 | <code>static void pause_ms(long long ms,long long end){while(ms&gt;0&amp;&amp;!serve_stop&amp;&amp;monotonic_ns()&lt;end){struct timespec d={0,(ms&gt;50?50:ms)&#42;1000000L};nanosleep(&amp;d,NULL);ms-=50;}}</code> |
 | `pause_ms` | function | 619 | <code>static void pause_ms(long long ms,long long end){while(ms&gt;0&amp;&amp;!serve_stop&amp;&amp;monotonic_ns()&lt;end){struct timespec d={0,(ms&gt;50?50:ms)&#42;1000000L};nanosleep(&amp;d,NULL);ms-=50;}}</code> |
 | `serve` | function | 624 | <code>static int serve(const RunnerConfig &#42;c,long long run_seconds,long long interval_ms,FILE &#42;out) {</code> |
-| `action` | variable | 625 | <code>struct sigaction action={0};action.sa_handler=serve_signal;sigemptyset(&amp;action.sa_mask);sigaction(SIGTERM,&amp;action,NULL);sigaction(SIGINT,&amp;action,NULL);</code> |
-| `rs` | variable | 626 | <code>ServeStats st={0};ReconcileStats rs={0};char &#42;recon=NULL;size_t rn=0;FILE &#42;ro=open_memstream(&amp;recon,&amp;rn);</code> |
-| `st` | variable | 626 | <code>ServeStats st={0};ReconcileStats rs={0};char &#42;recon=NULL;size_t rn=0;FILE &#42;ro=open_memstream(&amp;recon,&amp;rn);</code> |
 | `bounded_i64` | function | 641 | <code>static int bounded_i64(const HfJson &#42;j,const char &#42;key,long long min,long long max,long long &#42;value){int64_t v=0;if(!hf_json_i64(j,hf_json_field(j,0,key),&amp;v)&#124;&#124;v&lt;min&#124;&#124;v&gt;max)return 0;&#42;value=v;return 1;}</code> |
 | `hf_component_12_2` | function | 642 | <code>int hf_component_12_2(const char &#42;action,const char &#42;request,FILE &#42;out) {</code> |
-| `keys` | variable | 645 | <code>const char &#42;keys&#91;&#93;={"config_path","run_seconds","poll_interval_ms"};int serving=!strcmp(action,"launch.serve");long long seconds=0,interval=0;</code> |
-| `rs` | variable | 650 | <code>ReconcileStats rs={0};char &#42;list=NULL;size_t n=0;FILE &#42;o=open_memstream(&amp;list,&amp;n);int done=o&amp;&amp;reconcile(&amp;c,o,&amp;rs);if(o)fclose(o);</code> |
-| `keys` | variable | 654 | <code>const char &#42;keys&#91;&#93;={"config_path","event_id"};</code> |
 | `hf_runner_job_claim` | function | 669 | <code>int hf_runner_job_claim(const char &#42;config_path,const char &#42;operation,HfHttpResponse &#42;response) {</code> |
-| `expected` | variable | 672 | <code>if(ok){int result=hf_json_field(j,0,"result"),binding=hf_json_field(j,result,"binding");char actual&#91;128&#93;;const char &#42;names&#91;&#93;={"organisation_id","run_id","sandbox_id","boot_id","boot_generation"};const…</code> |
-| `names` | variable | 672 | <code>if(ok){int result=hf_json_field(j,0,"result"),binding=hf_json_field(j,result,"binding");char actual&#91;128&#93;;const char &#42;names&#91;&#93;={"organisation_id","run_id","sandbox_id","boot_id","boot_generation"};const…</code> |
 | `hf_runner_job_placement` | function | 675 | <code>int hf_runner_job_placement(const char &#42;config_path,const char &#42;action) {</code> |
 
 ## src/hyperfide/preparation_process.c
@@ -10014,30 +7765,17 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `pp_environment` | variable | 61 | <code>static const char &#42;const pp_environment&#91;&#93;={</code> |
 | `pp_free_env` | function | 69 | <code>static void pp_free_env(char &#42;&#42;env) {for(size_t n=0;env&amp;&amp;env&#91;n&#93;;n++)free(env&#91;n&#93;);free(env);}</code> |
 | `pp_env` | function | 70 | <code>static char &#42;&#42;pp_env(const HfPreparationProcessSpec &#42;s) {</code> |
-| `defaults` | variable | 73 | <code>const char &#42;const defaults&#91;&#93;={"PATH=/usr/local/bin:/usr/bin:/bin","LANG=C","LC_ALL=C"};</code> |
-| `names` | variable | 91 | <code>const char &#42;names&#91;&#93;={"HOME","TMPDIR","HF_JOB_HOME","HF_JOB_TMPDIR"};</code> |
-| `values` | variable | 92 | <code>const char &#42;values&#91;&#93;={s-&gt;home,s-&gt;tmp,s-&gt;home,s-&gt;tmp};</code> |
 | `pp_inventory` | function | 101 | <code>static int pp_inventory(uid_t uid,HfProcessIdentity &#42;list,size_t &#42;count) {</code> |
 | `pp_signal` | function | 121 | <code>static int pp_signal(const HfProcessIdentity &#42;expected,uid_t uid,int signal) {</code> |
 | `pp_reap_uid` | function | 130 | <code>static void pp_reap_uid(HfProcessIdentity &#42;list,size_t count,pid_t main,int &#42;done,int &#42;known,int &#42;status) {</code> |
 | `pp_stop` | function | 139 | <code>static int pp_stop(const HfPreparationProcessSpec &#42;s,HfProcessIdentity &#42;list,pid_t main,int &#42;done,int &#42;known,int &#42;status) {</code> |
-| `delay` | variable | 149 | <code>struct timespec delay={.tv_nsec=10000000};while(nanosleep(&amp;delay,&amp;delay)&amp;&amp;errno==EINTR){}</code> |
 | `pp_watchdog` | function | 153 | <code>static int pp_watchdog(const HfPreparationProcessSpec &#42;s) {</code> |
 | `pp_clear_capabilities` | function | 157 | <code>static int pp_clear_capabilities(void) {</code> |
-| `header` | variable | 158 | <code>struct __user_cap_header_struct header={.version=_LINUX_CAPABILITY_VERSION_3,.pid=0};</code> |
-| `capabilities` | variable | 159 | <code>struct __user_cap_data_struct capabilities&#91;2&#93;={{0},{0}};</code> |
 | `pp_copy_fd` | function | 162 | <code>static int pp_copy_fd(int fd) {return fcntl(fd,F_DUPFD_CLOEXEC,10);}</code> |
 | `pp_child` | function | 163 | <code>static void pp_child(const HfPreparationProcessSpec &#42;s,char &#42;&#42;environment,int out,int error,int ready,int gate,pid_t parent) {</code> |
-| `normal` | variable | 177 | <code>struct sigaction normal={.sa_handler=SIG_DFL};sigemptyset(&amp;normal.sa_mask);</code> |
 | `pp_digest` | function | 193 | <code>static int pp_digest(EVP_MD_CTX &#42;ctx,char out&#91;72&#93;) {</code> |
 | `pp_drain` | function | 197 | <code>static int pp_drain(int pipe,int log,EVP_MD_CTX &#42;digest,unsigned long long &#42;bytes,unsigned long long &#42;total,</code> |
 | `hf_preparation_process` | function | 213 | <code>int hf_preparation_process(const HfPreparationProcessSpec &#42;s,HfPreparationProcessResult &#42;result) {</code> |
-| `pipes` | variable | 240 | <code>int pipes&#91;4&#93;&#91;2&#93;={{-1,-1},{-1,-1},{-1,-1},{-1,-1}},status=0,done=0,known=0,executed=0,io_ok=1,overflow=0,eof&#91;2&#93;={0,0};</code> |
-| `digest` | variable | 241 | <code>EVP_MD_CTX &#42;digest&#91;2&#93;={EVP_MD_CTX_new(),EVP_MD_CTX_new()};pid_t child=-1;int main_pidfd=-1;</code> |
-| `p` | variable | 258 | <code>struct pollfd p={pipes&#91;2&#93;&#91;0&#93;,POLLIN&#124;POLLHUP,0};if(poll(&amp;p,1,10)&lt;0&amp;&amp;errno!=EINTR)break;</code> |
-| `p` | variable | 281 | <code>struct pollfd p&#91;2&#93;={{pipes&#91;0&#93;&#91;0&#93;,POLLIN&#124;POLLHUP,0},{pipes&#91;1&#93;&#91;0&#93;,POLLIN&#124;POLLHUP,0}};</code> |
-| `pause` | variable | 299 | <code>struct timespec pause={.tv_nsec=1000000};nanosleep(&amp;pause,NULL);</code> |
-| `p` | variable | 308 | <code>if(!eof&#91;0&#93;&#124;&#124;!eof&#91;1&#93;){struct pollfd p&#91;2&#93;={{pipes&#91;0&#93;&#91;0&#93;,POLLIN&#124;POLLHUP,0},{pipes&#91;1&#93;&#91;0&#93;,POLLIN&#124;POLLHUP,0}};if(poll(p,2,10)&lt;0&amp;&amp;errno!=EINTR){io_ok=0;break;}}</code> |
 
 ## src/hyperfide/preparation_stage.c
 
@@ -10054,14 +7792,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `quantity` | function | 30 | <code>static int quantity(const HfJson &#42;j,int o,const char &#42;k,uint64_t &#42;n) {</code> |
 | `positive` | function | 37 | <code>static int positive(const HfJson &#42;j,int o,const char &#42;key,uint64_t maximum,uint64_t &#42;result){</code> |
 | `target_binding` | function | 42 | <code>static int target_binding(const HfJson &#42;j,int target,int physical,const char &#42;operation,const char &#42;org,const char &#42;run,const char &#42;sandbox,const char &#42;boot,const char &#42;boot_generation,const char &#42;slo…</code> |
-| `keys` | variable | 43 | <code>const char &#42;keys&#91;&#93;={"target_binding_id","organisation_id","run_id","preparation_operation_id","task_id","request_id","reservation_id","allocation_id","allocation_generation","sandbox_id","sandbox_boot…</code> |
-| `uuid_keys` | variable | 45 | <code>const char &#42;uuid_keys&#91;&#93;={"target_binding_id","organisation_id","run_id","preparation_operation_id","task_id","request_id","reservation_id","allocation_id","sandbox_id","boot_id","target_slot_id","targ…</code> |
-| `generation_keys` | variable | 48 | <code>const char &#42;generation_keys&#91;&#93;={"allocation_generation","sandbox_boot_generation","target_slot_generation","generation"};</code> |
-| `sha_keys` | variable | 52 | <code>const char &#42;sha_keys&#91;&#93;={"source_digest","profile_digest","boot_preparation_digest"};</code> |
-| `fixed_keys` | variable | 54 | <code>const char &#42;fixed_keys&#91;&#93;={"organisation_id","run_id","preparation_operation_id","sandbox_id","boot_id","sandbox_boot_generation","target_slot_id","repository_id","reservation_id","workspace_path","sou…</code> |
-| `fixed_values` | variable | 55 | <code>const char &#42;fixed_values&#91;&#93;={org,run,operation,sandbox,boot,boot_generation,slot,repository,reservation,workspace,source_object,source_tree};</code> |
-| `target_keys` | variable | 57 | <code>const char &#42;target_keys&#91;&#93;={"target_runner_session_id","target_slot_generation","home_path","tmp_path"};</code> |
-| `physical_keys` | variable | 58 | <code>const char &#42;physical_keys&#91;&#93;={"session_id","slot_generation","home_path","tmp_path"};</code> |
 | `strict_dir` | function | 64 | <code>static int strict_dir(const char &#42;path,int create) {</code> |
 | `protected_read` | function | 79 | <code>static int protected_read(const char &#42;path,size_t maximum,char &#42;&#42;text,size_t &#42;length) {</code> |
 | `workspace_parent` | function | 90 | <code>static int workspace_parent(const char &#42;path,const char &#42;leaf,uid_t uid,gid_t gid) {</code> |
@@ -10071,20 +7801,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `Fetch` | typedef | 136 | <code>typedef struct {char org&#91;37&#93;,run&#91;37&#93;,operation&#91;37&#93;,transport&#91;4096&#93;;} Fetch;</code> |
 | `rpc` | function | 137 | <code>static HfJson &#42;rpc(const Fetch &#42;f,const char &#42;action,const char &#42;id,HfHttpResponse &#42;response) {</code> |
 | `fetch_object` | function | 150 | <code>static int fetch_object(const Fetch &#42;f,const char &#42;id,const char &#42;digest,uint64_t size,int fd,EVP_MD_CTX &#42;whole) {</code> |
-| `response` | variable | 152 | <code>HfHttpResponse response={0};HfJson &#42;j=rpc(f,"artifact.object.read",id,&amp;response);int ok=0;</code> |
 | `fetch_content` | function | 161 | <code>static int fetch_content(const Fetch &#42;f,const char &#42;id,const char &#42;kind,const char &#42;digest,const char &#42;parent_digest,uint64_t size,int fd) {</code> |
-| `response` | variable | 165 | <code>HfHttpResponse response={0};HfJson &#42;j=rpc(f,"artifact.manifest.read",id,&amp;response);ok=0;</code> |
 | `mkdir_owned` | function | 187 | <code>static int mkdir_owned(int parent,const char &#42;name,uid_t uid,gid_t gid,mode_t mode) {</code> |
 | `stage_file` | function | 193 | <code>static int stage_file(const Fetch &#42;f,int dir,int context,const char &#42;root,const char &#42;role,const char &#42;id,const char &#42;kind,const char &#42;digest,const char &#42;parent,uint64_t bytes,int sequence,gid_t gid,F…</code> |
 | `hf_runner_stage_preparation` | function | 203 | <code>int hf_runner_stage_preparation(const char &#42;config_path,const HfJson &#42;claim,int result,HfPreparationStage &#42;stage) {</code> |
-| `fetch` | variable | 212 | <code>Fetch fetch={0};int64_t uid=0,gid=0;</code> |
-| `job_keys` | variable | 215 | <code>const char &#42;job_keys&#91;&#93;={"namespace","job_id","lease_generation","reservation_id","input_packet_digest","input_manifest_digest"};</code> |
-| `keys` | variable | 230 | <code>const char &#42;keys&#91;&#93;={"node_path","node_digest","recipe_path","recipe_digest","base_root","native_path","native_digest","max_stage_bytes"};</code> |
-| `expected` | variable | 239 | <code>int arg=argv+1;const char &#42;expected&#91;&#93;={stage-&gt;node_path,stage-&gt;recipe_path,"--job-context",stage-&gt;context_path};</code> |
-| `scope_keys` | variable | 242 | <code>const char &#42;scope_keys&#91;&#93;={"sandbox_id","boot_id","slot_id","repository_id"};</code> |
-| `scope_values` | variable | 243 | <code>char &#42;scope_values&#91;&#93;={sandbox,boot,slot,repository};</code> |
-| `source_keys` | variable | 247 | <code>int source=hf_json_field(claim,p,"source");char source_values&#91;4&#93;&#91;4096&#93;;const char &#42;source_keys&#91;&#93;={"repository_key","source_object_id","source_tree_id","source_manifest_digest"};</code> |
-| `response` | variable | 284 | <code>HfHttpResponse response={0};HfJson &#42;manifest=rpc(&amp;fetch,"artifact.object.inspect",input_id,&amp;response);uint64_t input_size=0;</code> |
 
 ## src/hyperfide/preparation_support.h
 
@@ -10114,7 +7834,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `hp_hash_file` | function | 301 | <code>static inline int hp_hash_file(int root, const char &#42;relative, char out&#91;72&#93;) {</code> |
 | `hp_millis` | function | 372 | <code>static inline long long hp_millis(void) {</code> |
 | `hp_spawn_env` | function | 380 | <code>static inline int hp_spawn_env(const char &#42;cwd, char &#42;const argv&#91;&#93;,</code> |
-| `ready` | variable | 543 | <code>struct pollfd ready = {channel&#91;0&#93;, POLLIN &#124; POLLHUP, 0};</code> |
 | `hp_spawn` | function | 577 | <code>static inline int hp_spawn(const char &#42;cwd, char &#42;const argv&#91;&#93;, const char &#42;log,</code> |
 
 ## src/hyperfide/process_tree.c
@@ -10125,11 +7844,9 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | --- | --- | ---: | --- |
 | `_GNU_SOURCE` | macro | 1 | <code>#define _GNU_SOURCE</code> |
 | `hf_runner_binding` | function | 20 | <code>int hf_runner_binding(const char &#42;request,HfRunnerBinding &#42;binding) {</code> |
-| `fields` | variable | 28 | <code>const char &#42;fields&#91;&#93;={"attempt_id","attempt_generation","sandbox_id","boot_id","boot_generation"};</code> |
 | `hf_runner_processes` | function | 34 | <code>int hf_runner_processes(const HfRunnerBinding &#42;binding,HfProcessIdentity &#42;list,size_t capacity) {</code> |
 | `TreeNode` | typedef | 43 | <code>typedef struct {pid_t pid,ppid;uid_t uid;unsigned long long start;char state;} TreeNode;</code> |
 | `node_order` | function | 44 | <code>static int node_order(const void &#42;a,const void &#42;b){pid_t x=((const TreeNode&#42;)a)-&gt;pid,y=((const TreeNode&#42;)b)-&gt;pid;return (x&gt;y)-(x&lt;y);}</code> |
-| `key` | variable | 45 | <code>static const TreeNode &#42;node_find(const TreeNode &#42;nodes,size_t count,pid_t pid){TreeNode key={.pid=pid};return bsearch(&amp;key,nodes,count,sizeof &#42;nodes,node_order);}</code> |
 | `node_find` | function | 45 | <code>static const TreeNode &#42;node_find(const TreeNode &#42;nodes,size_t count,pid_t pid){TreeNode key={.pid=pid};return bsearch(&amp;key,nodes,count,sizeof &#42;nodes,node_order);}</code> |
 | `node_agent` | function | 46 | <code>static int node_agent(const TreeNode &#42;n,const HfRunnerBinding &#42;b){return n-&gt;pid==b-&gt;agent_pid&amp;&amp;n-&gt;start==b-&gt;agent_start&amp;&amp;n-&gt;uid==b-&gt;uid;}</code> |
 | `node_broker` | function | 47 | <code>static int node_broker(const TreeNode &#42;n,const HfRunnerBinding &#42;b){return n-&gt;pid==b-&gt;broker_pid&amp;&amp;n-&gt;start==b-&gt;broker_start;}</code> |
@@ -10137,7 +7854,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `stat_extra` | function | 63 | <code>static int stat_extra(pid_t pid,unsigned long long start,pid_t &#42;session,unsigned long long &#42;ticks,long &#42;threads){</code> |
 | `hf_process_tree_inventory` | function | 73 | <code>int hf_process_tree_inventory(const HfRunnerBinding &#42;b,HfProcessTree &#42;tree){</code> |
 | `hf_process_tree_cancel` | function | 96 | <code>int hf_process_tree_cancel(const HfRunnerBinding &#42;b,int rounds,int &#42;remaining){</code> |
-| `delay` | variable | 97 | <code>HfProcessTree &#42;tree=malloc(sizeof &#42;tree);if(!tree)return 0;struct timespec delay={.tv_nsec=100000000};int result=0;&#42;remaining=-1;</code> |
 | `read_small` | function | 105 | <code>static int read_small(const char &#42;path,char &#42;out,size_t capacity){</code> |
 | `keyed` | function | 109 | <code>static long long keyed(const char &#42;text,const char &#42;key){</code> |
 | `cgroup_of` | function | 112 | <code>static int cgroup_of(pid_t pid,char &#42;out,size_t capacity){</code> |
@@ -10147,10 +7863,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `ProgressScan` | typedef | 125 | <code>typedef struct {int available;unsigned long long stdout_bytes,stderr_bytes;time_t last_output;long long events,useful,noop,repeated,invalid,max_sequence;int last_useful;char last_state&#91;32&#93;;} ProgressS…</code> |
 | `spool` | function | 126 | <code>static FILE &#42;spool(const HfRunnerBinding &#42;b,const char &#42;suffix,struct stat &#42;st){</code> |
 | `progress_scan` | function | 134 | <code>static void progress_scan(const HfRunnerBinding &#42;b,HfJson &#42;j,ProgressScan &#42;s){</code> |
-| `names` | variable | 142 | <code>const char &#42;names&#91;&#93;={"type","sequence","useful","state"};char type&#91;16&#93;,state&#91;32&#93;="WORKING";int64_t sequence=-1;int useful=0,known=0,field;</code> |
 | `state_in` | function | 152 | <code>static int state_in(const char &#42;state,const char &#42;const &#42;list,size_t n){for(size_t k=0;k&lt;n;++k)if(!strcmp(state,list&#91;k&#93;))return 1;return 0;}</code> |
 | `identity_items` | function | 154 | <code>static int identity_items(const HfJson &#42;j,const char &#42;name,HfProcessIdentity &#42;items,int capacity){</code> |
-| `names` | variable | 156 | <code>const char &#42;names&#91;&#93;={"pid","start_time"};</code> |
 | `identity_status` | function | 164 | <code>static const char &#42;identity_status(const HfProcessIdentity &#42;expected,const char &#42;boot){</code> |
 | `identity_report` | function | 168 | <code>static void identity_report(FILE &#42;out,const char &#42;name,const HfProcessIdentity &#42;items,int count,const char &#42;boot){</code> |
 | `relation_names` | variable | 173 | <code>static const char &#42;const relation_names&#91;&#93;={"","AGENT","DESCENDANT","ADOPTED_BY_BROKER","ESCAPED"};</code> |
@@ -10159,14 +7873,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `cgroup_number` | function | 178 | <code>static int cgroup_number(const char &#42;dir,const char &#42;file,unsigned long long &#42;value,int &#42;unlimited){</code> |
 | `limits_report` | function | 182 | <code>static void limits_report(FILE &#42;out,const HfProcessTree &#42;t,int &#42;saturated_any){</code> |
 | `ipc_report` | function | 222 | <code>static void ipc_report(FILE &#42;out,const HfRunnerBinding &#42;b,const HfJson &#42;j){</code> |
-| `fields` | variable | 226 | <code>const char &#42;fields&#91;&#93;={"launch_id","attempt_id","attempt_generation","sandbox_id","boot_id","boot_generation"};char &#42;payload=NULL,&#42;reply=NULL;size_t n=0,m=0;FILE &#42;p=open_memstream(&amp;payload,&amp;n),&#42;r=NULL;</code> |
 | `hf_component_12_3` | function | 235 | <code>int hf_component_12_3(const char &#42;action,const char &#42;request,FILE &#42;out) {</code> |
-| `allowed` | variable | 237 | <code>HfJson &#42;j=malloc(sizeof &#42;j);const char &#42;allowed&#91;&#93;={"state_dir","launch_id","attempt_id","attempt_generation","sandbox_id","boot_id","boot_generation","progress_baseline","tracked","native_children","s…</code> |
-| `base_names` | variable | 242 | <code>const char &#42;base_names&#91;&#93;={"stdout_bytes","stderr_bytes","sequence"};</code> |
-| `counts` | variable | 249 | <code>int counts&#91;5&#93;={0},undeclared=0;unsigned long long virtual_bytes=0,tree_ticks=0,outside_ticks=0;long resident=0,tree_resident=0,outside_resident=0;pid_t agent_session=-1,agent_group=-1;</code> |
-| `agent` | variable | 254 | <code>HfProcessIdentity agent={.pid=binding.agent_pid,.start_time=binding.agent_start};const char &#42;agent_liveness=identity_status(&amp;agent,binding.os_boot_id);</code> |
-| `broker` | variable | 256 | <code>HfProcessIdentity broker={.pid=binding.broker_pid,.start_time=binding.broker_start};</code> |
-| `waiting` | variable | 273 | <code>const char &#42;waiting&#91;&#93;={"MODEL_WAITING","BUILD_WAITING","TOOL_WAITING"},&#42;errors&#91;&#93;={"MODEL_ERROR","TOOL_ERROR","AUTH_FAILED","RATE_LIMITED","QUOTA_EXHAUSTED"};</code> |
 
 ## src/hyperfide/readiness.c
 
@@ -10182,61 +7889,26 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `decimal_value` | function | 110 | <code>static int decimal_value(const char &#42;raw, const char &#42;key, uint64_t &#42;out) {</code> |
 | `hash_absolute` | function | 123 | <code>static int hash_absolute(const char &#42;path, char out&#91;72&#93;) {</code> |
 | `manifest_check` | function | 133 | <code>static int manifest_check(const char &#42;base, int manifest, const char &#42;profile,</code> |
-| `descriptors` | variable | 147 | <code>int descriptors&#91;&#93; = {module, manifest, policy};</code> |
-| `names` | variable | 156 | <code>const char &#42;names&#91;&#93; = {"HF_VERIFY_MODULE_FD",</code> |
-| `values` | variable | 164 | <code>const char &#42;values&#91;&#93; = {module_fd,   manifest_fd, policy_fd, module_digest,</code> |
-| `extra` | variable | 166 | <code>char &#42;extra&#91;9&#93; = {0};</code> |
-| `argv` | variable | 179 | <code>char &#42;argv&#91;&#93; = {(char &#42;)node, "--input-type=module", "-e",</code> |
 | `profile_os` | function | 210 | <code>static int profile_os(const char &#42;profile) {</code> |
 | `find_binding` | function | 251 | <code>static int find_binding(const char &#42;bindings, const char &#42;name,</code> |
 | `probe_tool` | function | 275 | <code>static int probe_tool(const char &#42;binding, const char &#42;workspace,</code> |
-| `keys` | variable | 277 | <code>static const char &#42;const keys&#91;&#93; = {"name", "version", "executable", "argv",</code> |
 | `tools_ready` | function | 328 | <code>static int tools_ready(const char &#42;profile, const char &#42;workspace,</code> |
-| `groups` | variable | 339 | <code>const char &#42;groups&#91;&#93; = {"toolchains", "package_managers", "native_agents",</code> |
-| `single` | variable | 360 | <code>const char &#42;single&#91;&#93; = {"supervisor", "hyperfide"};</code> |
 | `source_same_stat` | function | 380 | <code>static int source_same_stat(const struct stat &#42;a, const struct stat &#42;b) {</code> |
 | `source_parent` | function | 388 | <code>static int source_parent(int root, const char &#42;relative,</code> |
 | `source_metadata_open` | function | 415 | <code>static int source_metadata_open(int root, const char &#42;relative) {</code> |
 | `source_metadata_safe` | function | 438 | <code>static int source_metadata_safe(const char &#42;repository, const char &#42;workspace) {</code> |
-| `denied` | variable | 482 | <code>const char &#42;denied&#91;&#93; = {"commondir", "objects/info/alternates",</code> |
 | `source_git` | function | 512 | <code>static int source_git(const char &#42;repository, const char &#42;diagnostics,</code> |
-| `extra` | variable | 538 | <code>char &#42;extra&#91;&#93; = {"GIT_NO_LAZY_FETCH=1", "GIT_NO_REPLACE_OBJECTS=1", NULL};</code> |
 | `source_config_safe` | function | 542 | <code>static int source_config_safe(const char &#42;repository, const char &#42;diagnostics,</code> |
-| `args` | variable | 545 | <code>char &#42;args&#91;&#93; = {"config",      "--local", "--no-includes",</code> |
 | `source_blob_at` | function | 578 | <code>static int source_blob_at(int root, const char &#42;relative, const char &#42;mode,</code> |
 | `source_lfs_matches` | function | 677 | <code>static int source_lfs_matches(const char &#42;repository, const char &#42;oid,</code> |
-| `args` | variable | 681 | <code>char &#42;args&#91;&#93; = {"cat-file", "blob", (char &#42;)oid, NULL};</code> |
 | `source_tree_clean` | function | 721 | <code>static int source_tree_clean(const char &#42;repository, const char &#42;commit,</code> |
-| `fsck` | variable | 729 | <code>char &#42;fsck&#91;&#93; = {"fsck",          "--full",        "--no-reflogs",</code> |
-| `head` | variable | 733 | <code>char &#42;head&#91;&#93; = {"rev-parse", "--verify", "HEAD", NULL};</code> |
-| `index_args` | variable | 746 | <code>char &#42;index_args&#91;&#93; = {</code> |
-| `args` | variable | 751 | <code>char &#42;args&#91;&#93; = {"ls-tree", "-r", "-z", (char &#42;)commit, NULL};</code> |
 | `source_ready` | function | 824 | <code>static int source_ready(const char &#42;profile, const char &#42;workspace,</code> |
-| `argv` | variable | 899 | <code>char &#42;argv&#91;&#93; = {"/usr/bin/git", "--no-replace-objects",</code> |
-| `tree_args` | variable | 920 | <code>char &#42;tree_args&#91;&#93; = {"/usr/bin/git", "--no-replace-objects",</code> |
-| `untracked` | variable | 962 | <code>char &#42;untracked&#91;&#93; = {"/usr/bin/git",</code> |
-| `ignored_files` | variable | 974 | <code>char &#42;ignored_files&#91;&#93; = {"/usr/bin/git",</code> |
-| `head` | variable | 1029 | <code>char &#42;head&#91;&#93; = {"/usr/bin/git", "--no-replace-objects",</code> |
-| `verify` | variable | 1059 | <code>char &#42;verify&#91;&#93; = {"/usr/bin/git", "--no-replace-objects",</code> |
 | `same_scope` | function | 1082 | <code>static int same_scope(const char &#42;a, const char &#42;b) {</code> |
-| `keys` | variable | 1083 | <code>const char &#42;keys&#91;&#93; = {"run_id", "actor_id", "attempt_id"};</code> |
 | `future_time` | function | 1094 | <code>static int future_time(const char &#42;raw) {</code> |
 | `credentials_ready` | function | 1119 | <code>static int credentials_ready(const char &#42;profile) {</code> |
-| `envelope_keys` | variable | 1136 | <code>static const char &#42;const envelope_keys&#91;&#93; = {"schema_version", "records"};</code> |
-| `scope_keys` | variable | 1137 | <code>static const char &#42;const scope_keys&#91;&#93; = {"run_id", "actor_id", "attempt_id"};</code> |
-| `record_keys` | variable | 1156 | <code>static const char &#42;const record_keys&#91;&#93; = {</code> |
-| `assignment_keys` | variable | 1160 | <code>static const char &#42;const assignment_keys&#91;&#93; = {"run_id", "actor_id",</code> |
 | `tcp_reachable` | function | 1185 | <code>static int tcp_reachable(const char &#42;hostname, int port, int timeout) {</code> |
-| `hints` | variable | 1192 | <code>struct addrinfo hints = {0}, &#42;addresses = NULL;</code> |
-| `pfd` | variable | 1212 | <code>struct pollfd pfd = {fd, POLLOUT, 0};</code> |
-| `pause` | variable | 1237 | <code>struct timespec pause = {0, 5000000};</code> |
 | `network_ready` | function | 1242 | <code>static int network_ready(const char &#42;profile, int timeout, int &#42;probes) {</code> |
-| `groups` | variable | 1246 | <code>const char &#42;groups&#91;&#93; = {"routes", "registries"};</code> |
 | `hf_component_11_3` | function | 1281 | <code>int hf_component_11_3(const char &#42;action, const char &#42;request, FILE &#42;output) {</code> |
-| `keys` | variable | 1282 | <code>static const char &#42;const keys&#91;&#93; = {"schema_version",</code> |
-| `args` | variable | 1453 | <code>char &#42;args&#91;&#93; = {"/usr/bin/true", NULL};</code> |
-| `value` | variable | 1462 | <code>char value&#91;8&#93; = {0};</code> |
-| `args` | variable | 1480 | <code>char &#42;args&#91;&#93; = {"/usr/bin/python3", "-c", (char &#42;)script, NULL};</code> |
 
 ## src/hyperfide/supervisor.c
 
@@ -10260,38 +7932,20 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `kernel_boot` | function | 99 | <code>static int kernel_boot(char output&#91;37&#93;) {</code> |
 | `digest_valid` | function | 106 | <code>static int digest_valid(const char &#42;value) {</code> |
 | `slot_db_open` | function | 113 | <code>static int slot_db_open(const char &#42;root,int create,sqlite3 &#42;&#42;db) {</code> |
-| `columns` | variable | 127 | <code>const char &#42;columns&#91;&#93;={"profile TEXT NOT NULL DEFAULT 'distinct_uid'","credential_sensitive INTEGER NOT NULL DEFAULT 0","kernel_boot_id TEXT NOT NULL DEFAULT ''","storage_bytes INTEGER NOT NULL DEFAUL…</code> |
 | `slot_entry` | function | 135 | <code>static void slot_entry(FILE &#42;out,sqlite3_stmt &#42;row) {</code> |
 | `hf_slot_inventory` | function | 149 | <code>int hf_slot_inventory(const char &#42;root,const char &#42;boot_id,const char &#42;preparation,char &#42;&#42;json,size_t &#42;length) {</code> |
 | `uid_has_processes` | function | 170 | <code>static int uid_has_processes(uid_t uid) {</code> |
 | `slot_result` | function | 180 | <code>static void slot_result(FILE &#42;out,const char &#42;root,const char &#42;slot,const char &#42;boot,const char &#42;kernel,long long uid,long long gid,int port,const SlotProfile &#42;profile,int sensitive,long long storage,…</code> |
-| `variables` | variable | 188 | <code>const char &#42;variables&#91;&#93;&#91;2&#93;={{"HOME","home"},{"TMPDIR","tmp"},{"TMP","tmp"},{"TEMP","tmp"},{"XDG_CACHE_HOME","home/.cache"},{"XDG_CONFIG_HOME","home/.config"},{"XDG_DATA_HOME","home/.local/share"},{"XD…</code> |
 | `slot_allocate` | function | 193 | <code>static int slot_allocate(const HfJson &#42;json,FILE &#42;out) {</code> |
-| `keys` | variable | 194 | <code>const char &#42;keys&#91;&#93;={"root","slot_id","uid","gid","isolation_profile","credential_sensitive","boot_id","preparation_digest","config_path","run_id","boot_generation","storage_bytes"};</code> |
-| `address` | variable | 239 | <code>int sock=socket(AF_INET,SOCK_STREAM&#124;SOCK_CLOEXEC,0);struct sockaddr_in address={.sin_family=AF_INET,.sin_addr.s_addr=htonl(INADDR_LOOPBACK),.sin_port=0};socklen_t address_length=sizeof address;</code> |
 | `slot_release` | function | 272 | <code>static int slot_release(const HfJson &#42;json,FILE &#42;out) {</code> |
-| `keys` | variable | 273 | <code>const char &#42;keys&#91;&#93;={"root","slot_id"};char root&#91;4096&#93;,slot&#91;37&#93;;</code> |
 | `slot_inventory_action` | function | 308 | <code>static int slot_inventory_action(const HfJson &#42;json,FILE &#42;out) {</code> |
-| `keys` | variable | 309 | <code>const char &#42;keys&#91;&#93;={"root","boot_id","preparation_digest"};char root&#91;4096&#93;,boot&#91;37&#93;,preparation&#91;72&#93;,kernel&#91;37&#93;;</code> |
 | `request_action` | function | 337 | <code>static int request_action(const char &#42;action,const HfJson &#42;json,FILE &#42;out) {</code> |
-| `keys` | variable | 338 | <code>const char &#42;keys&#91;&#93;={"config_path","payload_json","operation_id","idempotency_key","correlation_id","causation_id","seconds","nonce"};</code> |
-| `response` | variable | 348 | <code>HfHttpResponse response={0};int completed=hf_supervisor_call(config,!strcmp(action,"supervisor.enroll"),payload,operation,idempotency,correlation,cause,request_seconds,request_nonce,&amp;response);</code> |
-| `bindings` | variable | 359 | <code>const char &#42;bindings&#91;&#93;={"run_id","sandbox_id","boot_id","boot_generation"};</code> |
 | `placement_prepare` | function | 383 | <code>static int placement_prepare(const char &#42;config,const char &#42;run,const char &#42;generation) {</code> |
-| `response` | variable | 387 | <code>HfHttpResponse response={0};HfJson &#42;json=malloc(sizeof &#42;json);int ok=0,authorized=0;</code> |
 | `write_transport` | function | 394 | <code>static int write_transport(const char &#42;path,const HfTransportConfig &#42;settings,const char &#42;key_path,const char &#42;credential) {</code> |
 | `enrollment_result` | function | 403 | <code>static int enrollment_result(const HfHttpResponse &#42;response,const char &#42;payload,const char &#42;previous,char credential&#91;37&#93;) {</code> |
-| `bindings` | variable | 408 | <code>const char &#42;bindings&#91;&#93;={"run_id","sandbox_id","boot_id","boot_generation"};</code> |
 | `credential_rotate` | function | 418 | <code>static int credential_rotate(const HfJson &#42;json,FILE &#42;out) {</code> |
-| `keys` | variable | 419 | <code>const char &#42;keys&#91;&#93;={"config_path","grant_path","provisioning_intent_id","run_id","sandbox_id","boot_id","boot_generation"};</code> |
-| `jk` | variable | 430 | <code>const char &#42;jk&#91;&#93;={"schema_version","old_credential_id","old_key_path","new_key_path","public_key_b64","grant_path","operation_id","idempotency_key","correlation_id","payload"};</code> |
-| `response` | variable | 477 | <code>HfHttpResponse response={0};int completed=body&amp;&amp;hf_transport_post(&amp;next,1,body,NULL,NULL,&amp;response);free(body);</code> |
-| `probe` | variable | 492 | <code>HfHttpResponse probe={0};HfJson &#42;seen=malloc(sizeof &#42;seen);int proven=0;</code> |
 | `request_proof` | function | 521 | <code>static int request_proof(const HfJson &#42;json,FILE &#42;out) {</code> |
-| `keys` | variable | 522 | <code>const char &#42;keys&#91;&#93;={"config_path","payload_json","operation_id","idempotency_key","correlation_id","seconds","nonce"};</code> |
 | `hf_component_12_1` | function | 535 | <code>int hf_component_12_1(const char &#42;action,const char &#42;request,FILE &#42;out) {</code> |
-| `keys` | variable | 541 | <code>const char &#42;keys&#91;&#93;={NULL};</code> |
-| `keys` | variable | 545 | <code>char path&#91;4096&#93;,public_key&#91;44&#93;;const char &#42;keys&#91;&#93;={"key_path"};</code> |
 
 ## src/hyperfide/supervisor.h
 
@@ -10353,31 +8007,15 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `state_save` | function | 83 | <code>static int state_save(int dir,const Daemon &#42;d) {</code> |
 | `make_payload` | function | 110 | <code>static char &#42;make_payload(Daemon &#42;d,const char &#42;kind) {</code> |
 | `state_load` | function | 117 | <code>static int state_load(int dir,Daemon &#42;d) {</code> |
-| `keys` | variable | 123 | <code>const char &#42;keys&#91;&#93;={"schema_version","binding","registered","state_version","registration_digest","pending"};</code> |
-| `pk` | variable | 133 | <code>const char &#42;pk&#91;&#93;={"kind","operation_id","idempotency_key","correlation_id","payload","registration"};</code> |
 | `prep_valid` | function | 152 | <code>static int prep_valid(const char &#42;prep) {</code> |
 | `receipt_identity` | function | 159 | <code>static int receipt_identity(Daemon &#42;d,const HfJson &#42;config,const char &#42;key_path,char &#42;&#42;receipt,size_t &#42;size) {</code> |
-| `names` | variable | 171 | <code>const char &#42;names&#91;&#93;={"run_id","sandbox_id","boot_id","boot_generation"};const char &#42;values&#91;&#93;={d-&gt;run,d-&gt;sandbox,d-&gt;boot,d-&gt;generation};</code> |
-| `values` | variable | 171 | <code>const char &#42;names&#91;&#93;={"run_id","sandbox_id","boot_id","boot_generation"};const char &#42;values&#91;&#93;={d-&gt;run,d-&gt;sandbox,d-&gt;boot,d-&gt;generation};</code> |
 | `observation_bound` | function | 177 | <code>static int observation_bound(const HfJson &#42;slots,int list,const HfJson &#42;o,int item,const char &#42;root) {</code> |
 | `registration_now` | function | 194 | <code>static char &#42;registration_now(Daemon &#42;d) {</code> |
 | `load_config` | function | 224 | <code>static int load_config(const char &#42;request,Daemon &#42;d) {</code> |
-| `keys` | variable | 225 | <code>HfJson &#42;j=malloc(sizeof &#42;j);const char &#42;keys&#91;&#93;={"config_path"};char &#42;raw=NULL,&#42;registration=NULL,&#42;transport=NULL,&#42;receipt=NULL;</code> |
-| `names` | variable | 228 | <code>const char &#42;names&#91;&#93;={"transport_config","state_dir","organisation_id"};</code> |
-| `values` | variable | 229 | <code>char &#42;values&#91;&#93;={d-&gt;transport,d-&gt;root,d-&gt;organisation};</code> |
-| `caps` | variable | 230 | <code>const size_t caps&#91;&#93;={sizeof d-&gt;transport,sizeof d-&gt;root,37};</code> |
-| `legacy` | variable | 239 | <code>const char &#42;legacy&#91;&#93;={"run_id","sandbox_id","boot_id","boot_generation","runner_registration_path"};</code> |
-| `slots` | variable | 240 | <code>char &#42;slots&#91;&#93;={d-&gt;run,d-&gt;sandbox,d-&gt;boot,d-&gt;generation,d-&gt;registration};</code> |
-| `lcaps` | variable | 241 | <code>const size_t lcaps&#91;&#93;={37,37,37,sizeof d-&gt;generation,sizeof d-&gt;registration};</code> |
-| `rk` | variable | 269 | <code>const char &#42;rk&#91;&#93;={"preparation_digest","inventory"};char prep&#91;72&#93;;</code> |
 | `accept_response` | function | 285 | <code>static int accept_response(Daemon &#42;d,const HfHttpResponse &#42;response) {</code> |
 | `version_conflict` | function | 311 | <code>static int version_conflict(const HfHttpResponse &#42;r) {</code> |
 | `pause_ms` | function | 316 | <code>static void pause_ms(long ms) {</code> |
-| `wait` | variable | 317 | <code>struct timespec wait={.tv_sec=ms/1000,.tv_nsec=(ms%1000)&#42;1000000};</code> |
 | `hf_supervisor_daemon` | function | 320 | <code>int hf_supervisor_daemon(const char &#42;request,FILE &#42;out) {</code> |
-| `d` | variable | 321 | <code>Daemon d={0};int dir=-1,lock=-1,result=1;const char &#42;error="DAEMON_CONFIGURATION_INVALID";</code> |
-| `ignore_pipe` | variable | 338 | <code>struct sigaction ignore_pipe={0};ignore_pipe.sa_handler=SIG_IGN;sigemptyset(&amp;ignore_pipe.sa_mask);</code> |
-| `response` | variable | 354 | <code>HfHttpResponse response={0};</code> |
 
 ## src/hyperfide/transport.c
 
@@ -10414,9 +8052,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `hf_private_write` | function | 351 | <code>int hf_private_write(const char &#42;path,const void &#42;data,size_t length,int replace) {</code> |
 | `hf_native_error` | function | 378 | <code>int hf_native_error(FILE &#42;out,const char &#42;code) {fprintf(stderr,"hyperfide native: %s&#92;n",code);(void)out;return 1;}</code> |
 | `origin_valid` | function | 379 | <code>static int origin_valid(const char &#42;origin) {</code> |
-| `forbidden` | variable | 387 | <code>CURLUPart forbidden&#91;&#93;={CURLUPART_USER,CURLUPART_PASSWORD,CURLUPART_QUERY,CURLUPART_FRAGMENT};</code> |
 | `hf_transport_config` | function | 395 | <code>int hf_transport_config(const char &#42;path,HfTransportConfig &#42;config) {</code> |
-| `keys` | variable | 399 | <code>const char &#42;keys&#91;&#93;={"origin","ca_file","key_path","credential_id","grant_path","timeout_ms","run_id"};</code> |
 | `no_password` | function | 409 | <code>static int no_password(char &#42;buf,int size,int rwflag,void &#42;userdata) {(void)buf;(void)size;(void)rwflag;(void)userdata;return 0;}</code> |
 | `private_key` | function | 410 | <code>static EVP_PKEY &#42;private_key(const char &#42;path) {</code> |
 | `hf_transport_keygen` | function | 417 | <code>int hf_transport_keygen(const char &#42;path,char public_key&#91;44&#93;) {</code> |
@@ -10426,9 +8062,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `curl_initialize` | function | 453 | <code>static void curl_initialize(void) {curl_ready=curl_global_init(CURL_GLOBAL_DEFAULT)==CURLE_OK;}</code> |
 | `response_write` | function | 454 | <code>static size_t response_write(char &#42;data,size_t size,size_t count,void &#42;opaque) {</code> |
 | `hf_transport_post` | function | 462 | <code>int hf_transport_post(const HfTransportConfig &#42;config,int enrollment,const char &#42;body,const char &#42;seconds,const char &#42;nonce,HfHttpResponse &#42;response) {</code> |
-| `allowed` | variable | 473 | <code>const char &#42;allowed&#91;&#93;={"grant_id","secret_b64"};</code> |
 | `HF_CURL` | macro | 496 | <code>#define HF_CURL(option,value) do {if (configured&amp;&amp;curl_easy_setopt(curl,option,value)!=CURLE_OK) configured=0;} while (0)</code> |
-| `anchor` | variable | 508 | <code>struct curl_blob anchor={.data=ca,.len=ca_size,.flags=CURL_BLOB_COPY};</code> |
 | `hf_envelope` | function | 524 | <code>char &#42;hf_envelope(const char &#42;payload,const char &#42;operation,const char &#42;idempotency,const char &#42;correlation,const char &#42;causation) {</code> |
 | `hf_http_response_free` | function | 538 | <code>void hf_http_response_free(HfHttpResponse &#42;response) {free(response-&gt;body);memset(response,0,sizeof &#42;response);}</code> |
 
@@ -10478,7 +8112,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | Indexed name | Kind | Line | Source declaration |
 | --- | --- | ---: | --- |
 | `index_health_init` | function | 6 | <code>int index_health_init(Cg &#42;cg) {</code> |
-| `cols` | variable | 19 | <code>static const char &#42;cols&#91;&#93;&#91;2&#93; = {</code> |
 | `index_health_stale` | function | 38 | <code>bool index_health_stale(Cg &#42;cg, const char &#42;path) {</code> |
 | `index_health_branch_stale` | function | 56 | <code>bool index_health_branch_stale(Cg &#42;cg) {</code> |
 | `index_health_record` | function | 73 | <code>void index_health_record(Cg &#42;cg, const char &#42;path, const IndexHealthResult &#42;r) {</code> |
@@ -10487,7 +8120,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `index_health_remove` | function | 133 | <code>void index_health_remove(Cg &#42;cg, long file_id) {</code> |
 | `index_health_prune_missing` | function | 143 | <code>void index_health_prune_missing(Cg &#42;cg) {</code> |
 | `index_health_generated` | function | 169 | <code>bool index_health_generated(const char &#42;path, const char &#42;body, size_t len) {</code> |
-| `marks` | variable | 174 | <code>const char &#42;marks&#91;&#93; = {"@generated", "auto-generated", "autogenerated",</code> |
 
 ## src/index_health.h
 
@@ -10543,7 +8175,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `IntegrateAgentmd` | typedef | 389 | <code>typedef struct { Cg &#42;cg; } IntegrateAgentmd;</code> |
 | `integrate_agentmd_call` | function | 390 | <code>static int integrate_agentmd_call(void &#42;v) {</code> |
 | `integrate_agent_context` | function | 399 | <code>static int integrate_agent_context(Cg &#42;cg) {</code> |
-| `call` | variable | 415 | <code>IntegrateAgentmd call = { cg };</code> |
 | `integrate_apply_portable` | function | 426 | <code>int integrate_apply_portable(Cg &#42;cg, bool quiet) {</code> |
 | `adapter_json` | function | 452 | <code>static void adapter_json(const Adapter &#42;a, const char &#42;path,</code> |
 | `integrate_plan` | function | 470 | <code>int integrate_plan(Cg &#42;cg, bool json) {</code> |
@@ -10568,8 +8199,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `jev_config` | function | 51 | <code>static void jev_config(JevConfig &#42;c) {</code> |
 | `dup_list` | function | 73 | <code>static char &#42;&#42;dup_list(const char &#42;const &#42;v, int n) {</code> |
 | `jev_question_noul` | function | 80 | <code>int jev_question_noul(JevQuestion &#42;q, const char &#42;name,</code> |
-| `keys` | variable | 88 | <code>const char &#42;keys&#91;2&#93; = { "true", "false" };</code> |
-| `descs` | variable | 89 | <code>const char &#42;descs&#91;2&#93; = { when_true ? when_true : "",</code> |
 | `jev_question_choice` | function | 98 | <code>int jev_question_choice(JevQuestion &#42;q, const char &#42;name,</code> |
 | `jev_question_score` | function | 112 | <code>int jev_question_score(JevQuestion &#42;q, const char &#42;name,</code> |
 | `jev_question_free` | function | 125 | <code>void jev_question_free(JevQuestion &#42;q) {</code> |
@@ -10583,7 +8212,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `jev_tmp_dir` | function | 255 | <code>static int jev_tmp_dir(const Cg &#42;cg, char &#42;out, size_t cap) {</code> |
 | `write_private` | function | 268 | <code>static int write_private(const char &#42;path, const char &#42;data) {</code> |
 | `sleep_ms` | function | 281 | <code>static void sleep_ms(long ms) {</code> |
-| `ts` | variable | 283 | <code>struct timespec ts = { ms / 1000, (ms % 1000) &#42; 1000000L };</code> |
 | `excerpt_of` | function | 287 | <code>static void excerpt_of(const char &#42;s, char &#42;out, size_t cap) {</code> |
 | `curl_once` | function | 299 | <code>static int curl_once(const char &#42;curl, const char &#42;cfg, char &#42;&#42;body,</code> |
 | `jnum` | function | 333 | <code>static double jnum(const char &#42;obj, const char &#42;key, bool &#42;ok) {</code> |
@@ -10606,7 +8234,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `list_push` | function | 765 | <code>static void list_push(char &#42;&#42;&#42;v, int &#42;n, const char &#42;s) {</code> |
 | `ask_usage` | function | 770 | <code>static int ask_usage(void) {</code> |
 | `jev_ask_cli` | function | 779 | <code>static int jev_ask_cli(Cg &#42;cg, int argc, char &#42;&#42;argv, bool json) {</code> |
-| `a` | variable | 781 | <code>AskArgs a = {0};</code> |
 | `curl_version` | function | 925 | <code>static void curl_version(const char &#42;curl, char &#42;out, size_t cap) {</code> |
 | `key_hint` | function | 947 | <code>static void key_hint(const char &#42;key, char &#42;out, size_t cap) {</code> |
 | `log_stats` | function | 954 | <code>static long log_stats(const char &#42;path, long &#42;last_ts) {</code> |
@@ -10622,13 +8249,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `answer_confidence` | function | 1200 | <code>static double answer_confidence(const JevAnswer &#42;a) {</code> |
 | `sb_confidence` | function | 1204 | <code>static void sb_confidence(StrBuf &#42;b, double c) {</code> |
 | `jev_triage_failure` | function | 1208 | <code>int jev_triage_failure(Cg &#42;cg, const char &#42;output, JevTriage &#42;out) {</code> |
-| `cats` | variable | 1212 | <code>static const char &#42;const cats&#91;&#93; = {</code> |
-| `catd` | variable | 1215 | <code>static const char &#42;const catd&#91;&#93; = {</code> |
-| `acts` | variable | 1225 | <code>static const char &#42;const acts&#91;&#93; = {</code> |
-| `actd` | variable | 1228 | <code>static const char &#42;const actd&#91;&#93; = {</code> |
 | `rank_sort` | function | 1285 | <code>static void rank_sort(JevFinding &#42;v, int n) {</code> |
 | `jev_rank_findings` | function | 1294 | <code>int jev_rank_findings(Cg &#42;cg, JevFinding &#42;v, int n) {</code> |
-| `levels` | variable | 1298 | <code>static const char &#42;const levels&#91;&#93; = {</code> |
 | `jev_pr_readiness` | function | 1360 | <code>int jev_pr_readiness(Cg &#42;cg, const char &#42;state_json, JevReadiness &#42;out) {</code> |
 | `jev_report_error` | function | 1396 | <code>int jev_report_error(const JevResult &#42;r, const char &#42;what) {</code> |
 
@@ -10734,7 +8356,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `ImpStyle` | typedef | 18 | <code>typedef enum {</code> |
 | `MAXPATS` | macro | 28 | <code>#define MAXPATS 12</code> |
 | `LangSpec` | typedef | 29 | <code>typedef struct {</code> |
-| `LANGS` | variable | 43 | <code>static LangSpec LANGS&#91;&#93; = {</code> |
 | `NLANGS` | macro | 141 | <code>#define NLANGS ((int)(sizeof LANGS / sizeof LANGS&#91;0&#93;))</code> |
 | `EXTMAP` | variable | 144 | <code>static const struct { const char &#42;ext, &#42;lang, &#42;spec; } EXTMAP&#91;&#93; = {</code> |
 | `KEYWORDS` | variable | 183 | <code>static const char &#42;KEYWORDS&#91;&#93; = {</code> |
@@ -10783,10 +8404,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `imp_dot` | function | 898 | <code>static void imp_dot(const LangSpec &#42;L, const char &#42;line, int lineno,</code> |
 | `lang_scan_imports` | function | 922 | <code>static void lang_scan_imports(const LangSpec &#42;L, const char &#42;line, int lineno,</code> |
 | `lang_parse` | function | 935 | <code>void lang_parse(const char &#42;lang, const char &#42;path, const char &#42;src,</code> |
-| `td` | variable | 950 | <code>struct { int depth, line; const char &#42;agg; } td = { -1, 0, NULL };</code> |
-| `cs` | variable | 952 | <code>CleanState cs = {0};</code> |
-| `cr` | variable | 953 | <code>CmtRange cr = { -1, -1 };</code> |
-| `DEFINERS` | variable | 1161 | <code>static const char &#42;DEFINERS&#91;&#93; = {</code> |
 
 ## src/lsp.c
 
@@ -10799,14 +8416,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `LSP_INDEX_RETRY_MS` | macro | 30 | <code>#define LSP_INDEX_RETRY_MS 3000</code> |
 | `LSP_FRESH_MS` | macro | 31 | <code>#define LSP_FRESH_MS 3000</code> |
 | `lsp_index` | function | 40 | <code>static void lsp_index(Cg &#42;cg, const SysInfo &#42;si, const char &#42;abs) {</code> |
-| `o` | variable | 42 | <code>IndexOpts o = {0};</code> |
-| `paths` | variable | 46 | <code>const char &#42;paths&#91;1&#93; = { abs };</code> |
 | `lsp_read` | function | 70 | <code>static char &#42;lsp_read(void) {</code> |
 | `lsp_send` | function | 89 | <code>static void lsp_send(const char &#42;payload) {</code> |
 | `lsp_reply` | function | 94 | <code>static void lsp_reply(const char &#42;id, const char &#42;result) {</code> |
 | `lsp_notify` | function | 101 | <code>static void lsp_notify(const char &#42;method, const char &#42;params) {</code> |
 | `uri_to_path` | function | 111 | <code>static void uri_to_path(const char &#42;uri, char &#42;out, size_t cap) {</code> |
-| `hex` | variable | 117 | <code>char hex&#91;3&#93; = { p&#91;1&#93;, p&#91;2&#93;, 0 };</code> |
 | `path_to_uri` | function | 127 | <code>static void path_to_uri(const char &#42;root, const char &#42;rel, StrBuf &#42;b) {</code> |
 | `rel_of` | function | 135 | <code>static const char &#42;rel_of(const Cg &#42;cg, const char &#42;abs) {</code> |
 | `emit_location` | function | 143 | <code>static void emit_location(Cg &#42;cg, StrBuf &#42;b, const char &#42;path, int line,</code> |
@@ -10837,18 +8451,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `cmd_info` | function | 70 | <code>static int cmd_info(const SysInfo &#42;si, Cg &#42;cg, bool json, int flag_workers) {</code> |
 | `FRESH_WINDOW_MS` | macro | 161 | <code>#define FRESH_WINDOW_MS 3000</code> |
 | `index_fresh` | function | 162 | <code>static void index_fresh(Cg &#42;cg, const SysInfo &#42;si) {</code> |
-| `o` | variable | 164 | <code>IndexOpts o = {0};</code> |
 | `main` | function | 172 | <code>int main(int argc, char &#42;&#42;argv) {</code> |
-| `answer_capture` | variable | 363 | <code>AnswerCapture answer_capture = {0};</code> |
-| `o` | variable | 373 | <code>IndexOpts o = {0};                 /&#42; cg_index's blocking pass &#42;/</code> |
-| `o` | variable | 397 | <code>IndexOpts o = {0};</code> |
-| `lim` | variable | 475 | <code>SemFlowLimits lim = {</code> |
-| `pfd` | variable | 565 | <code>struct pollfd pfd = { .fd = STDIN_FILENO, .events = POLLIN };</code> |
-| `o` | variable | 667 | <code>MemExportOpts o = {0};</code> |
-| `o` | variable | 675 | <code>MemImportOpts o = {0};</code> |
-| `o` | variable | 707 | <code>ChangelogOpts o = {0};</code> |
-| `o` | variable | 720 | <code>RecapOpts o = {0};</code> |
-| `o` | variable | 735 | <code>CodemapOpts o = {0};</code> |
 
 ## src/mcp.c
 
@@ -10859,7 +8462,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `hf_client_authority_guard` | function | 2 | <code>extern int hf_client_authority_guard(const char &#42;operation, FILE &#42;output);</code> |
 | `CallCtx` | typedef | 26 | <code>typedef struct {</code> |
 | `mcp_filter` | function | 35 | <code>static void mcp_filter(const CallCtx &#42;c, QueryFilter &#42;f) {</code> |
-| `argv` | variable | 58 | <code>char &#42;argv&#91;4&#93; = { "x", NULL, NULL, NULL };</code> |
 | `t_search` | function | 71 | <code>static int t_search(void &#42;v) {</code> |
 | `t_context` | function | 89 | <code>static int t_context(void &#42;v) {</code> |
 | `t_files` | function | 114 | <code>static int t_files(void &#42;v) {</code> |
@@ -10868,7 +8470,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `t_symbol` | function | 160 | <code>static int t_symbol(void &#42;v) {</code> |
 | `t_impact` | function | 168 | <code>static int t_impact(void &#42;v) {</code> |
 | `t_flow` | function | 182 | <code>static int t_flow(void &#42;v) {</code> |
-| `lim` | variable | 187 | <code>SemFlowLimits lim = {</code> |
 | `t_inspect_hierarchy` | function | 198 | <code>static int t_inspect_hierarchy(void &#42;v) {</code> |
 | `t_inspect_unreferenced` | function | 207 | <code>static int t_inspect_unreferenced(void &#42;v) {</code> |
 | `t_routes` | function | 215 | <code>static int t_routes(void &#42;v) {</code> |
@@ -10876,11 +8477,9 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `t_index_status` | function | 223 | <code>static int t_index_status(void &#42;v) {</code> |
 | `t_state` | function | 230 | <code>static int t_state(void &#42;v)   { CallCtx &#42;c = v; return cmd_state(c-&gt;cg, true); }</code> |
 | `t_projection_status` | function | 232 | <code>static int t_projection_status(void &#42;v) {</code> |
-| `argv` | variable | 234 | <code>char &#42;argv&#91;&#93; = { "status", NULL };</code> |
 | `t_integrate` | function | 237 | <code>static int t_integrate(void &#42;v) {</code> |
 | `t_event_ingest` | function | 244 | <code>static int t_event_ingest(void &#42;v) {</code> |
 | `t_event_history` | function | 255 | <code>static int t_event_history(void &#42;v) {</code> |
-| `a` | variable | 259 | <code>char &#42;a&#91;&#93; = { "history", "-n", lim };</code> |
 | `t_progress` | function | 262 | <code>static int t_progress(void &#42;v) {</code> |
 | `t_work_open` | function | 266 | <code>static int t_work_open(void &#42;v) {</code> |
 | `t_work_update` | function | 273 | <code>static int t_work_update(void &#42;v) {</code> |
@@ -10892,25 +8491,15 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `unfold_stderr` | function | 323 | <code>static void unfold_stderr(int saved) {</code> |
 | `run_spec` | function | 329 | <code>static int run_spec(int argc, char &#42;&#42;argv, bool json) {</code> |
 | `t_spec_status` | function | 336 | <code>static int t_spec_status(void &#42;v) {</code> |
-| `a` | variable | 338 | <code>char &#42;a&#91;&#93; = { "status" };</code> |
 | `t_spec_reconcile` | function | 341 | <code>static int t_spec_reconcile(void &#42;v) {</code> |
-| `a` | variable | 345 | <code>char &#42;a&#91;&#93; = { "reconcile", "--repair" };</code> |
 | `t_spec_next` | function | 350 | <code>static int t_spec_next(void &#42;v) {</code> |
-| `a` | variable | 352 | <code>char &#42;a&#91;&#93; = { "next" };</code> |
 | `t_spec_start` | function | 355 | <code>static int t_spec_start(void &#42;v) {</code> |
-| `a` | variable | 359 | <code>char &#42;a&#91;&#93; = { "start", id };</code> |
 | `t_spec_mode` | function | 364 | <code>static int t_spec_mode(void &#42;v) {</code> |
-| `a` | variable | 368 | <code>char &#42;a&#91;&#93; = { "mode", mode };</code> |
 | `t_spec_implemented` | function | 373 | <code>static int t_spec_implemented(void &#42;v) {</code> |
-| `a` | variable | 383 | <code>char &#42;a&#91;&#93; = { "implemented", id };</code> |
 | `t_spec_done` | function | 388 | <code>static int t_spec_done(void &#42;v) {</code> |
-| `a` | variable | 395 | <code>char &#42;a&#91;&#93; = { "done", id, "--force" };</code> |
 | `t_spec_render` | function | 400 | <code>static int t_spec_render(void &#42;v) {</code> |
-| `a` | variable | 405 | <code>char &#42;a&#91;&#93; = { "render", "--check" };</code> |
 | `t_spec_trace` | function | 408 | <code>static int t_spec_trace(void &#42;v) {</code> |
-| `a` | variable | 411 | <code>char &#42;a&#91;&#93; = { "trace", id };</code> |
 | `t_docs` | function | 417 | <code>static int t_docs(void &#42;v, const char &#42;action) {</code> |
-| `argv` | variable | 419 | <code>char &#42;argv&#91;&#93; = { (char &#42;)action };</code> |
 | `t_docs_status` | function | 422 | <code>static int t_docs_status(void &#42;v) { return t_docs(v, "status"); }</code> |
 | `t_docs_plan` | function | 423 | <code>static int t_docs_plan(void &#42;v)   { return t_docs(v, "plan"); }</code> |
 | `t_docs_packet` | function | 424 | <code>static int t_docs_packet(void &#42;v) { return t_docs(v, "packet"); }</code> |
@@ -10920,9 +8509,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `t_remember` | function | 428 | <code>static int t_remember(void &#42;v) {</code> |
 | `t_recall` | function | 441 | <code>static int t_recall(void &#42;v) {</code> |
 | `t_memory_export` | function | 451 | <code>static int t_memory_export(void &#42;v) {</code> |
-| `o` | variable | 453 | <code>MemExportOpts o = {0};</code> |
 | `t_memory_import` | function | 469 | <code>static int t_memory_import(void &#42;v) {</code> |
-| `o` | variable | 471 | <code>MemImportOpts o = {0};</code> |
 | `t_show` | function | 499 | <code>static int t_show(void &#42;v) {</code> |
 | `t_why` | function | 510 | <code>static int t_why(void &#42;v) {</code> |
 | `t_test_impact` | function | 518 | <code>static int t_test_impact(void &#42;v) {</code> |
@@ -10930,32 +8517,21 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `t_review` | function | 526 | <code>static int t_review(void &#42;v) { CallCtx &#42;c = v; return cmd_review(c-&gt;cg, true); }</code> |
 | `t_check` | function | 527 | <code>static int t_check(void &#42;v)  { CallCtx &#42;c = v; return cmd_check(c-&gt;cg, true, false); }</code> |
 | `t_guard` | function | 528 | <code>static int t_guard(void &#42;v) {</code> |
-| `argv` | variable | 531 | <code>char &#42;argv&#91;1&#93; = { p };</code> |
 | `t_git_sync` | function | 536 | <code>static int t_git_sync(void &#42;v) {</code> |
 | `t_spec_wave` | function | 541 | <code>static int t_spec_wave(void &#42;v) {</code> |
-| `a` | variable | 543 | <code>char &#42;a&#91;&#93; = { "wave" };</code> |
 | `t_spec_lint` | function | 546 | <code>static int t_spec_lint(void &#42;v) {</code> |
-| `a` | variable | 548 | <code>char &#42;a&#91;&#93; = { "lint" };</code> |
 | `t_spec_new` | function | 551 | <code>static int t_spec_new(void &#42;v) {</code> |
-| `a` | variable | 555 | <code>char &#42;a&#91;&#93; = { "new", f };</code> |
 | `t_spec_add` | function | 560 | <code>static int t_spec_add(void &#42;v) {</code> |
 | `t_spec_claim` | function | 591 | <code>static int t_spec_claim(void &#42;v) {</code> |
-| `a` | variable | 599 | <code>char &#42;a&#91;&#93; = { "claim", id, "--agent",</code> |
 | `t_spec_release` | function | 606 | <code>static int t_spec_release(void &#42;v) {</code> |
-| `a` | variable | 614 | <code>char &#42;a&#91;&#93; = { "release", id, "--agent",</code> |
 | `t_spec_ready` | function | 621 | <code>static int t_spec_ready(void &#42;v) {</code> |
-| `a` | variable | 623 | <code>char &#42;a&#91;&#93; = { "ready" };</code> |
 | `t_spec_claim_next` | function | 626 | <code>static int t_spec_claim_next(void &#42;v) {</code> |
-| `a` | variable | 632 | <code>char &#42;a&#91;&#93; = { "claim-next", "--agent",</code> |
 | `t_handoff` | function | 639 | <code>static int t_handoff(void &#42;v) {</code> |
 | `t_resume` | function | 652 | <code>static int t_resume(void &#42;v) {</code> |
 | `t_memory_classify` | function | 663 | <code>static int t_memory_classify(void &#42;v) {</code> |
 | `t_skills_list` | function | 673 | <code>static int t_skills_list(void &#42;v) {</code> |
-| `a` | variable | 675 | <code>char &#42;a&#91;&#93; = { "cg", "skills", "list" };</code> |
 | `t_skills_promote` | function | 678 | <code>static int t_skills_promote(void &#42;v) {</code> |
-| `a` | variable | 682 | <code>char &#42;a&#91;&#93; = { "cg", "skills", "promote", id };</code> |
 | `t_codemap` | function | 689 | <code>static int t_codemap(void &#42;v) {</code> |
-| `o` | variable | 693 | <code>CodemapOpts o = { .budget = budget &gt; 0 ? budget : 0, .outfile = "-",</code> |
 | `S_QFILTER` | macro | 700 | <code>#define S_QFILTER "&#92;"path&#92;":{&#92;"type&#92;":&#91;&#92;"string&#92;",&#92;"array&#92;"&#93;,&#92;"items&#92;":" &#92;</code> |
 | `S_QUERY` | macro | 708 | <code>#define S_QUERY  "{&#92;"type&#92;":&#92;"object&#92;",&#92;"properties&#92;":{&#92;"query&#92;":{&#92;"type&#92;":&#92;"string&#92;"}," &#92;</code> |
 | `S_CTX` | macro | 711 | <code>#define S_CTX    "{&#92;"type&#92;":&#92;"object&#92;",&#92;"properties&#92;":{&#92;"query&#92;":{&#92;"type&#92;":&#92;"string&#92;"}," &#92;</code> |
@@ -11014,14 +8590,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `mcp_list_prompts` | function | 1370 | <code>static void mcp_list_prompts(StrBuf &#42;r) {</code> |
 | `mcp_tools_json` | function | 1384 | <code>void mcp_tools_json(StrBuf &#42;r) {</code> |
 | `mcp_call_tool` | function | 1401 | <code>int mcp_call_tool(Cg &#42;cg, const SysInfo &#42;si, const char &#42;name,</code> |
-| `o` | variable | 1414 | <code>IndexOpts o = {0};</code> |
-| `ctx` | variable | 1422 | <code>CallCtx ctx = { cg, si, args_json &amp;&amp; args_json&#91;0&#93; ? args_json : NULL };</code> |
 | `cmd_tool` | function | 1451 | <code>int cmd_tool(Cg &#42;cg, const SysInfo &#42;si, int argc, char &#42;&#42;argv, bool json) {</code> |
 | `send_line` | function | 1501 | <code>static void send_line(StrBuf &#42;b) {</code> |
 | `reply_result` | function | 1508 | <code>static void reply_result(const char &#42;id, const char &#42;result_json) {</code> |
 | `reply_error` | function | 1515 | <code>static void reply_error(const char &#42;id, int code, const char &#42;msg) {</code> |
 | `cmd_mcp` | function | 1524 | <code>int cmd_mcp(Cg &#42;cg, const SysInfo &#42;si) {</code> |
-| `SUPPORTED` | variable | 1541 | <code>static const char &#42;SUPPORTED&#91;&#93; = {</code> |
 | `self_path` | function | 1684 | <code>static int self_path(char &#42;out, size_t cap) {</code> |
 | `server_entry` | function | 1691 | <code>static char &#42;server_entry(const char &#42;bin, bool vscode_style) {</code> |
 | `install_json` | function | 1702 | <code>static void install_json(const char &#42;path, const char &#42;root_key,</code> |
@@ -11086,7 +8659,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `jv_digits` | function | 1084 | <code>static const char &#42;jv_digits(const char &#42;p) {</code> |
 | `jv_number` | function | 1090 | <code>static const char &#42;jv_number(const char &#42;p) {</code> |
 | `jv_value` | function | 1102 | <code>static const char &#42;jv_value(const char &#42;p, int depth) {</code> |
-| `LIT` | variable | 1123 | <code>static const char &#42;const LIT&#91;&#93; = { "true", "false", "null" };</code> |
 | `json_object_ok` | function | 1129 | <code>static bool json_object_ok(const char &#42;s) {</code> |
 | `port_get_str` | function | 1137 | <code>static char &#42;port_get_str(const char &#42;obj, const char &#42;key, bool &#42;bad) {</code> |
 | `PortRec` | typedef | 1146 | <code>typedef struct {</code> |
@@ -11101,7 +8673,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `cid_row` | function | 1314 | <code>static long cid_row(const CidRow &#42;v, int n, const char &#42;cid) {</code> |
 | `target_cids` | function | 1326 | <code>static int target_cids(Cg &#42;cg, CidRow &#42;&#42;out) {</code> |
 | `port_from_dir` | function | 1346 | <code>static int port_from_dir(Cg &#42;cg, const char &#42;dir, StrBuf &#42;out,</code> |
-| `all` | variable | 1374 | <code>MemExportOpts all = {0};</code> |
 | `port_step` | function | 1382 | <code>static bool port_step(Cg &#42;cg, sqlite3_stmt &#42;st, char &#42;err, size_t errcap) {</code> |
 | `port_insert` | function | 1390 | <code>static bool port_insert(Cg &#42;cg, PortRec &#42;r, char &#42;err, size_t errcap) {</code> |
 | `port_relink` | function | 1420 | <code>static int port_relink(Cg &#42;cg, PortIn &#42;in, const CidRow &#42;tv, int tn,</code> |
@@ -11139,7 +8710,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `session_branch` | function | 210 | <code>static void session_branch(Cg &#42;cg, const char &#42;sname, char &#42;out, size_t cap) {</code> |
 | `place_agent` | function | 221 | <code>static void place_agent(Cg &#42;cg, const char &#42;agent, const char &#42;sname,</code> |
 | `active_tasks` | function | 255 | <code>static void active_tasks(Cg &#42;cg) {</code> |
-| `roots` | variable | 259 | <code>const char &#42;roots&#91;2&#93; = { cg-&gt;root, cg-&gt;shared };</code> |
 | `is_task_id` | function | 280 | <code>static bool is_task_id(const char &#42;id, size_t n) {</code> |
 | `idch` | function | 286 | <code>static bool idch(char c) {</code> |
 | `task_in_text` | function | 293 | <code>static bool task_in_text(const char &#42;text, char &#42;out, size_t cap) {</code> |
@@ -11153,7 +8723,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `heartbeat` | function | 486 | <code>static void heartbeat(Cg &#42;cg, const char &#42;agent, const char &#42;tool,</code> |
 | `record_spawn` | function | 503 | <code>static void record_spawn(Cg &#42;cg, const Hook &#42;h, const char &#42;spawner) {</code> |
 | `read_meta` | function | 560 | <code>static char &#42;read_meta(Cg &#42;cg, const Hook &#42;h) {</code> |
-| `cwds` | variable | 571 | <code>const char &#42;cwds&#91;2&#93; = { cg-&gt;shared, cg-&gt;root };</code> |
 | `record_start` | function | 595 | <code>static void record_start(Cg &#42;cg, const Hook &#42;h) {</code> |
 | `record_stop` | function | 707 | <code>static void record_stop(Cg &#42;cg, const Hook &#42;h, const char &#42;agent,</code> |
 | `is_spawn_tool` | function | 731 | <code>static bool is_spawn_tool(const char &#42;t) {</code> |
@@ -11163,7 +8732,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `IngestCall` | typedef | 852 | <code>typedef struct { Cg &#42;cg; const char &#42;host; const char &#42;payload; } IngestCall;</code> |
 | `ingest_call` | function | 854 | <code>static int ingest_call(void &#42;u) {</code> |
 | `cmd_hook_event` | function | 859 | <code>int cmd_hook_event(Cg &#42;cg, const char &#42;host, bool json) {</code> |
-| `ic` | variable | 869 | <code>IngestCall ic = { cg, host, payload };</code> |
 | `NView` | typedef | 925 | <code>typedef struct {</code> |
 | `load_views` | function | 934 | <code>static int load_views(Cg &#42;cg, NView &#42;&#42;out) {</code> |
 | `is_root` | function | 1000 | <code>static bool is_root(const NView &#42;v, int n, int i) {</code> |
@@ -11176,7 +8744,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `TreeCall` | typedef | 1115 | <code>typedef struct { Cg &#42;cg; const char &#42;feature; } TreeCall;</code> |
 | `tree_call` | function | 1117 | <code>static int tree_call(void &#42;u) {</code> |
 | `native_fleet_tree_json` | function | 1122 | <code>int native_fleet_tree_json(Cg &#42;cg, const char &#42;feature) {</code> |
-| `t` | variable | 1140 | <code>TreeCall t = { cg, feature };</code> |
 | `native_counts` | function | 1162 | <code>bool native_counts(Cg &#42;cg, int &#42;live, int &#42;subs, int &#42;branches) {</code> |
 | `native_summary` | function | 1188 | <code>void native_summary(Cg &#42;cg, StrBuf &#42;b, bool json) {</code> |
 | `native_flags` | function | 1202 | <code>void native_flags(int argc, char &#42;&#42;argv) {</code> |
@@ -11238,18 +8805,15 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `OrchSpecCall` | typedef | 99 | <code>typedef struct { int argc; char &#42;&#42;argv; bool json; } OrchSpecCall;</code> |
 | `orch_call_spec` | function | 101 | <code>static int orch_call_spec(void &#42;v) {</code> |
 | `orch_spec` | function | 114 | <code>static int orch_spec(char &#42;&#42;out, bool json, int argc, ...) {</code> |
-| `c` | variable | 120 | <code>OrchSpecCall c = { argc, argv, json };</code> |
 | `OrchResumeCall` | typedef | 124 | <code>typedef struct { Cg &#42;g; const char &#42;task; } OrchResumeCall;</code> |
 | `orch_call_resume` | function | 126 | <code>static int orch_call_resume(void &#42;v) {</code> |
 | `orch_call_docs_packet` | function | 131 | <code>static int orch_call_docs_packet(void &#42;v) {</code> |
-| `argv` | variable | 133 | <code>char &#42;argv&#91;&#93; = { (char &#42;)"packet" };</code> |
 | `orch_docs_ready` | function | 139 | <code>static bool orch_docs_ready(const char &#42;id) {</code> |
 | `sup_branch_has_main` | function | 179 | <code>static bool sup_branch_has_main(const char &#42;repo, const char &#42;mainbr,</code> |
 | `sup_wave_fresh` | function | 191 | <code>static bool sup_wave_fresh(long wave) {</code> |
 | `orch_prompt_retry` | function | 203 | <code>static void orch_prompt_retry(const char &#42;path, const char &#42;feature,</code> |
 | `orch_roles_load` | function | 206 | <code>static void orch_roles_load(const Hierarchy &#42;h) {</code> |
 | `orch_argv` | function | 224 | <code>static int orch_argv(const char &#42;driver, const char &#42;extra, const char &#42;cmd,</code> |
-| `d` | variable | 227 | <code>DriverSpec d = { driver, g_model, extra, cmd, g_structured };</code> |
 | `orch_argv_free` | function | 237 | <code>static void orch_argv_free(char &#42;&#42;av) {</code> |
 | `orch_argv_print` | function | 241 | <code>static void orch_argv_print(char &#42;&#42;av) {</code> |
 | `orch_spec_root` | function | 254 | <code>static int orch_spec_root(char &#42;out, size_t cap) {</code> |
@@ -11262,19 +8826,15 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `orch_hier` | function | 392 | <code>static Kvx &#42;orch_hier(const char &#42;tree, Hierarchy &#42;h);</code> |
 | `orch_prompt_ahead` | function | 396 | <code>static void orch_prompt_ahead(Cg &#42;cg, const FleetNode &#42;n, const char &#42;feature,</code> |
 | `orch_write_prompt` | function | 463 | <code>static int orch_write_prompt(const char &#42;cgroot, const char &#42;feature,</code> |
-| `c` | variable | 473 | <code>OrchResumeCall c = { &amp;g, id };</code> |
 | `orch_spawn` | function | 497 | <code>static pid_t orch_spawn(char &#42;&#42;av, const char &#42;root, const char &#42;promptfile,</code> |
 | `orch_dry_run` | function | 533 | <code>static int orch_dry_run(const char &#42;specroot, const char &#42;cgroot,</code> |
 | `OrchSlot` | typedef | 610 | <code>typedef struct {</code> |
 | `orch_heartbeat` | function | 622 | <code>static int orch_heartbeat(OrchSlot &#42;slot, long ttl_min) {</code> |
 | `orch_live` | function | 638 | <code>static int orch_live(const OrchSlot &#42;slots, int n) {</code> |
 | `orch_reap` | function | 648 | <code>static int orch_reap(pid_t pid) {</code> |
-| `ts` | variable | 654 | <code>struct timespec ts = { 0, 100 &#42; 1000 &#42; 1000 };</code> |
 | `FleetRunOpts` | typedef | 670 | <code>typedef struct { const char &#42;run_id; const char &#42;resume; bool all; } FleetRunOpts;</code> |
 | `orch_fleet_run` | function | 671 | <code>static int orch_fleet_run(const char &#42;feature_ov, const OrchCfg &#42;cfg,</code> |
 | `cmd_spec_run` | function | 676 | <code>int cmd_spec_run(int argc, char &#42;&#42;argv) {</code> |
-| `ro` | variable | 794 | <code>FleetRunOpts ro = { run_id, resume, all_features };</code> |
-| `ts` | variable | 1048 | <code>struct timespec ts = { 0, 150 &#42; 1000 &#42; 1000 };</code> |
 | `ORCH_WAKE_BACKOFF` | macro | 1084 | <code>#define ORCH_WAKE_BACKOFF  1          /&#42; seconds between manager wakes &#42;/</code> |
 | `ORCH_ROUNDS_DFLT` | macro | 1085 | <code>#define ORCH_ROUNDS_DFLT   16          /&#42; manager wakes before giving up &#42;/</code> |
 | `orch_hier` | function | 1089 | <code>static Kvx &#42;orch_hier(const char &#42;tree, Hierarchy &#42;h) {</code> |
@@ -11297,15 +8857,12 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `orch_subtree` | function | 1431 | <code>static void orch_subtree(Cg &#42;cg, const char &#42;feature, long wave,</code> |
 | `OrchPlanCall` | typedef | 1452 | <code>typedef struct { Cg &#42;g; const char &#42;feature; } OrchPlanCall;</code> |
 | `orch_call_plan` | function | 1454 | <code>static int orch_call_plan(void &#42;v) {</code> |
-| `av` | variable | 1456 | <code>char &#42;av&#91;5&#93; = { (char &#42;)"cg", (char &#42;)"fleet", (char &#42;)"plan",</code> |
 | `orch_manager_prompt` | function | 1472 | <code>static int orch_manager_prompt(Cg &#42;cg, const FleetNode &#42;n, const char &#42;path) {</code> |
-| `pc` | variable | 1499 | <code>OrchPlanCall pc = { cg, n-&gt;feature };</code> |
 | `orch_spawn_manager` | function | 1531 | <code>int orch_spawn_manager(Cg &#42;cg, const char &#42;feature, long wave,</code> |
 | `OrchBeginCall` | typedef | 1635 | <code>typedef struct { Cg &#42;g; const char &#42;id; const char &#42;feature; } OrchBeginCall;</code> |
 | `orch_call_begin` | function | 1637 | <code>static int orch_call_begin(void &#42;v) {</code> |
 | `orch_json_into` | function | 1652 | <code>static void orch_json_into(const char &#42;js, const char &#42;key, char &#42;out,</code> |
 | `orch_spawn_worker` | function | 1659 | <code>int orch_spawn_worker(Cg &#42;cg, const char &#42;feature, const char &#42;id,</code> |
-| `bc` | variable | 1717 | <code>OrchBeginCall bc = { cg, id, feature };</code> |
 | `orch_ago` | function | 1786 | <code>static void orch_ago(long seen, char &#42;out, size_t cap) {</code> |
 | `OrchWorkerRow` | typedef | 1795 | <code>typedef struct {</code> |
 | `orch_worker_rows` | function | 1802 | <code>static int orch_worker_rows(Cg &#42;cg, const char &#42;feature, OrchWorkerRow &#42;&#42;out) {</code> |
@@ -11348,7 +8905,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `sup_node_end` | function | 2720 | <code>static void sup_node_end(Sup &#42;s, long id, const char &#42;state, int exit,</code> |
 | `sup_gone` | function | 2739 | <code>static bool sup_gone(pid_t pid, long start, bool adopted, int &#42;crc) {</code> |
 | `sup_kill` | function | 2753 | <code>static void sup_kill(pid_t pid, long start, bool adopted) {</code> |
-| `ts` | variable | 2757 | <code>struct timespec ts = { 0, 100 &#42; 1000 &#42; 1000 };</code> |
 | `sup_terminate` | function | 2765 | <code>static void sup_terminate(Sup &#42;s) {</code> |
 | `sup_tap_adopt` | function | 2785 | <code>static void sup_tap_adopt(DriverTap &#42;t, const char &#42;log, const char &#42;agent,</code> |
 | `fleet_run_resume` | function | 2798 | <code>static int fleet_run_resume(Sup &#42;s) {</code> |
@@ -11361,7 +8917,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `HandoffCall` | typedef | 2981 | <code>typedef struct { Cg &#42;cg; const char &#42;task, &#42;blocked, &#42;note; } HandoffCall;</code> |
 | `sup_handoff_call` | function | 2982 | <code>static int sup_handoff_call(void &#42;v) {</code> |
 | `sup_end_attempt` | function | 2990 | <code>static void sup_end_attempt(Sup &#42;s, OrchFleetSlot &#42;sl, const char &#42;kind,</code> |
-| `h` | variable | 2996 | <code>HandoffCall h = { s-&gt;g, tag, why, "recorded by the supervisor" };</code> |
 | `supervisor_budget_check` | function | 3007 | <code>static bool supervisor_budget_check(Sup &#42;s, OrchFleetSlot &#42;sl, long now) {</code> |
 | `supervisor_stall_check` | function | 3028 | <code>static void supervisor_stall_check(Sup &#42;s, OrchFleetSlot &#42;sl, long now) {</code> |
 | `sup_supervise` | function | 3060 | <code>static void sup_supervise(Sup &#42;s) {</code> |
@@ -11389,8 +8944,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `main_wake` | function | 3985 | <code>static void main_wake(MainAgent &#42;m, const char &#42;reason) {</code> |
 | `main_tick` | function | 3995 | <code>static void main_tick(Cg &#42;g, MainAgent &#42;m, Sup &#42;sups, int nsup,</code> |
 | `supervisor_run` | function | 4051 | <code>static int supervisor_run(Cg &#42;g, char &#42;&#42;features, int nfeat,</code> |
-| `ts` | variable | 4153 | <code>struct timespec ts = { 0, 150 &#42; 1000 &#42; 1000 };</code> |
-| `ts` | variable | 4177 | <code>struct timespec ts = { 0, 150 &#42; 1000 &#42; 1000 };</code> |
 | `orch_fleet_run` | function | 4192 | <code>static int orch_fleet_run(const char &#42;feature_ov, const OrchCfg &#42;cfg,</code> |
 | `self_exe` | function | 4347 | <code>static void self_exe(char &#42;out, size_t cap) {</code> |
 | `RunRef` | typedef | 4355 | <code>typedef struct { char run&#91;40&#93;, feature&#91;128&#93;, state&#91;16&#93;; int pid; bool alive; } RunRef;</code> |
@@ -11400,10 +8953,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `Live` | typedef | 4408 | <code>typedef struct { long id; char role&#91;16&#93;, agent&#91;128&#93;, task&#91;64&#93;, attempt&#91;65&#93;;</code> |
 | `pos_arg` | function | 4444 | <code>static const char &#42;pos_arg(int argc, char &#42;&#42;argv) {</code> |
 | `detach_supervisor` | function | 4452 | <code>static int detach_supervisor(Cg &#42;cg, char &#42;&#42;pass, int npass,</code> |
-| `ts` | variable | 4497 | <code>struct timespec ts = { 0, 50 &#42; 1000 &#42; 1000 };</code> |
 | `cmd_fleet_up` | function | 4529 | <code>int cmd_fleet_up(Cg &#42;cg, int argc, char &#42;&#42;argv, bool json) {</code> |
 | `cmd_fleet_control` | function | 4577 | <code>int cmd_fleet_control(Cg &#42;cg, const char &#42;verb, int argc, char &#42;&#42;argv,</code> |
-| `ts` | variable | 4639 | <code>struct timespec ts = { 0, 100 &#42; 1000 &#42; 1000 };</code> |
 | `cmd_fleet_runs` | function | 4666 | <code>int cmd_fleet_runs(Cg &#42;cg, bool json) {</code> |
 
 ## src/plugin.c
@@ -11434,7 +8985,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `command_body` | function | 224 | <code>static char &#42;command_body(const char &#42;bin, const char &#42;desc,</code> |
 | `PluginFile` | typedef | 234 | <code>typedef struct { const char &#42;rel; char &#42;body; } PluginFile;</code> |
 | `plugin_render` | function | 239 | <code>int plugin_render(const char &#42;bin, bool json, StrBuf &#42;out, int &#42;changed,</code> |
-| `files` | variable | 243 | <code>PluginFile files&#91;&#93; = {</code> |
 | `plugin_codex_hooks` | function | 287 | <code>int plugin_codex_hooks(const Cg &#42;cg, const char &#42;bin, char path&#91;4700&#93;) {</code> |
 | `plugin_file_state` | function | 296 | <code>const char &#42;plugin_file_state(const char &#42;path, const char &#42;mark) {</code> |
 | `plugin_codex_state` | function | 305 | <code>const char &#42;plugin_codex_state(const Cg &#42;cg, char path&#91;4700&#93;) {</code> |
@@ -11494,10 +9044,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `proj_cmp` | function | 154 | <code>static int proj_cmp(const void &#42;a, const void &#42;b) {</code> |
 | `projection_branches` | function | 168 | <code>static int projection_branches(Cg &#42;cg, const char &#42;base, char &#42;&#42;extra, int nextra,</code> |
 | `projection_shadow_commit` | function | 271 | <code>static int projection_shadow_commit(Cg &#42;cg, ProjBranch &#42;b, int seq) {</code> |
-| `parents` | variable | 286 | <code>const char &#42;parents&#91;1&#93; = { b-&gt;head };</code> |
 | `proj_conflict_add` | function | 294 | <code>static void proj_conflict_add(Projection &#42;p, const ProjectionConflict &#42;src,</code> |
 | `proj_fold` | function | 321 | <code>static int proj_fold(Cg &#42;cg, Projection &#42;p, bool strict) {</code> |
-| `parents` | variable | 361 | <code>const char &#42;parents&#91;2&#93; = { running, b-&gt;contribution };</code> |
 | `proj_branches_json` | function | 379 | <code>static void proj_branches_json(const Projection &#42;p, StrBuf &#42;b) {</code> |
 | `proj_conflicts_json` | function | 408 | <code>static void proj_conflicts_json(const Projection &#42;p, StrBuf &#42;b) {</code> |
 | `proj_object` | function | 429 | <code>static void proj_object(const char &#42;base, const char &#42;base_head,</code> |
@@ -11508,9 +9056,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `proj_last` | function | 532 | <code>static void proj_last(Cg &#42;cg, ProjRow &#42;r) {</code> |
 | `proj_store` | function | 555 | <code>static int proj_store(Cg &#42;cg, const Projection &#42;p, const char &#42;branches,</code> |
 | `proj_index` | function | 586 | <code>static int proj_index(Cg &#42;cg, const SysInfo &#42;si, const char &#42;commit,</code> |
-| `o` | variable | 646 | <code>IndexOpts o = {0};</code> |
 | `proj_lock` | function | 676 | <code>static int proj_lock(Cg &#42;cg, long wait_ms, bool &#42;waited) {</code> |
-| `ts` | variable | 686 | <code>struct timespec ts = { 0, 25 &#42; 1000 &#42; 1000 };</code> |
 | `proj_unlock` | function | 692 | <code>static void proj_unlock(int fd) {</code> |
 | `proj_cg_path` | function | 711 | <code>static void proj_cg_path(Cg &#42;cg, const char &#42;name, char &#42;out, size_t cap) {</code> |
 | `projection_mark_dirty` | function | 715 | <code>void projection_mark_dirty(Cg &#42;cg, const char &#42;why) {</code> |
@@ -11519,8 +9065,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `proj_last_activity` | function | 743 | <code>static long proj_last_activity(Cg &#42;cg) {</code> |
 | `proj_worth_building` | function | 770 | <code>static bool proj_worth_building(Cg &#42;cg) {</code> |
 | `proj_spawn_background` | function | 791 | <code>static int proj_spawn_background(Cg &#42;cg) {</code> |
-| `who` | variable | 816 | <code>static const char &#42;const who&#91;&#93; = { "CG_AGENT", "CG_ROLE", "CG_PARENT",</code> |
-| `av` | variable | 821 | <code>char &#42;av&#91;&#93; = { self, (char &#42;)"projection", (char &#42;)"build",</code> |
 | `projection_auto_build` | function | 831 | <code>int projection_auto_build(Cg &#42;cg, const char &#42;why, long &#42;retry_ms) {</code> |
 | `projection_follow` | function | 863 | <code>void projection_follow(Cg &#42;cg, const char &#42;why) {</code> |
 | `proj_age` | function | 889 | <code>static void proj_age(char &#42;out, size_t cap, long s) {</code> |
@@ -11577,7 +9121,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `assistant_words` | function | 211 | <code>static void assistant_words(Session &#42;s, const char &#42;text) {</code> |
 | `EMIT` | macro | 217 | <code>#define EMIT(str) do { sess_push(s, 'a', (str)); if (clean.len) sb_putc(&amp;clean, ' '); sb_puts(&amp;clean, (str)); } while (0)</code> |
 | `command_matters` | function | 259 | <code>static bool command_matters(const char &#42;cmd) {</code> |
-| `words` | variable | 260 | <code>static const char &#42;const words&#91;&#93; = {</code> |
 | `set_date` | function | 267 | <code>static void set_date(Session &#42;s, const char &#42;ts) {</code> |
 | `claude_content` | function | 274 | <code>static void claude_content(Session &#42;s, const char &#42;msg, bool user) {</code> |
 | `parse_claude` | function | 323 | <code>static int parse_claude(Session &#42;s, FILE &#42;f) {</code> |
@@ -11626,7 +9169,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `HF_ADVICE_BUDGET_MS` | macro | 1277 | <code>#define HF_ADVICE_BUDGET_MS 2000</code> |
 | `hf_decision_phase` | function | 1280 | <code>static char &#42;hf_decision_phase(int purpose, int phase, const char &#42;input,</code> |
 | `hf_decision_advice` | function | 1319 | <code>int hf_decision_advice(int purpose, const char &#42;observation, char &#42;&#42;advice) {</code> |
-| `names` | variable | 1320 | <code>static const char &#42;const names&#91;&#93; = {NULL, "guard", "readiness", "triage", "memory", "recap"};</code> |
 | `hf_advice_unit` | function | 1374 | <code>int hf_advice_unit(const char &#42;obj, const char &#42;key, double &#42;out) {</code> |
 
 ## src/resolve.c
@@ -11641,7 +9183,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `manifest_free` | function | 33 | <code>static void manifest_free(Manifest &#42;m) {</code> |
 | `manifest_has` | function | 39 | <code>static bool manifest_has(const Manifest &#42;m, const char &#42;module) {</code> |
 | `load_package_json` | function | 54 | <code>static void load_package_json(const char &#42;root, Manifest &#42;js) {</code> |
-| `sections` | variable | 63 | <code>const char &#42;sections&#91;&#93; = { "dependencies", "devDependencies",</code> |
 | `load_go_mod` | function | 81 | <code>static void load_go_mod(const char &#42;root, Manifest &#42;go) {</code> |
 | `load_requirements_txt` | function | 124 | <code>static void load_requirements_txt(const char &#42;root, Manifest &#42;py) {</code> |
 | `load_pyproject_toml` | function | 152 | <code>static void load_pyproject_toml(const char &#42;root, Manifest &#42;py) {</code> |
@@ -11649,18 +9190,12 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `strip_ext` | function | 226 | <code>static void strip_ext(char &#42;buf, size_t cap, const char &#42;path) {</code> |
 | `norm_dots` | function | 235 | <code>static void norm_dots(char &#42;p) {</code> |
 | `find_repo_file` | function | 265 | <code>static long find_repo_file(Cg &#42;cg, const char &#42;module, const char &#42;from_path,</code> |
-| `JS_EXTS` | variable | 348 | <code>static const char &#42;JS_EXTS&#91;&#93; = { ".ts", ".tsx", ".js", ".jsx", ".mjs",</code> |
-| `C_EXTS` | variable | 350 | <code>static const char &#42;C_EXTS&#91;&#93;  = { ".h", ".c", ".hpp", ".cpp", ".cc", NULL };</code> |
-| `PY_EXTS` | variable | 351 | <code>static const char &#42;PY_EXTS&#91;&#93; = { ".py", NULL };</code> |
-| `GO_EXTS` | variable | 352 | <code>static const char &#42;GO_EXTS&#91;&#93; = { ".go", NULL };</code> |
 | `NEAR_MAX` | macro | 472 | <code>#define NEAR_MAX 32</code> |
 | `NearManifest` | typedef | 473 | <code>typedef struct { char dir&#91;1024&#93;; Manifest m; bool exists; } NearManifest;</code> |
 | `near_manifest_has` | function | 475 | <code>static bool near_manifest_has(Cg &#42;cg, NearManifest &#42;near, int &#42;nnear,</code> |
 | `node_core_module` | function | 501 | <code>static bool node_core_module(const char &#42;module) {</code> |
-| `CORE` | variable | 502 | <code>static const char &#42;CORE&#91;&#93; = {</code> |
 | `mod_matches` | function | 522 | <code>static bool mod_matches(const char &#42;module, const char &#42;cand_path);</code> |
 | `resolve_imports_run` | function | 533 | <code>static void resolve_imports_run(Cg &#42;cg, bool scoped) {</code> |
-| `js_m` | variable | 535 | <code>Manifest js_m = {0}, go_m = {0}, py_m = {0}, rs_m = {0};</code> |
 | `resolve_imports` | function | 690 | <code>void resolve_imports(Cg &#42;cg)        { resolve_imports_run(cg, false); }</code> |
 | `resolve_imports_scoped` | function | 691 | <code>void resolve_imports_scoped(Cg &#42;cg) { resolve_imports_run(cg, true); }</code> |
 | `C_BUILTINS` | variable | 701 | <code>static const struct { const char &#42;header; const char &#42;names; } C_BUILTINS&#91;&#93; = {</code> |
@@ -11672,7 +9207,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `in_names` | function | 888 | <code>static bool in_names(const char &#42;names, const char &#42;name) {</code> |
 | `C_HDR_MAX` | macro | 909 | <code>#define C_HDR_MAX 64</code> |
 | `C_HDR_LEN` | macro | 910 | <code>#define C_HDR_LEN 48</code> |
-| `c_hdrs` | variable | 915 | <code>} c_hdrs = { -1, 0, {{0}} };</code> |
 | `c_load_headers` | function | 917 | <code>static void c_load_headers(Cg &#42;cg, long file_id) {</code> |
 | `c_builtin` | function | 940 | <code>static bool c_builtin(Cg &#42;cg, long file_id, const char &#42;name) {</code> |
 | `c_builtin_reset` | function | 952 | <code>static void c_builtin_reset(void) { c_hdrs.file_id = -1; c_hdrs.n = 0; }</code> |
@@ -11683,7 +9217,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `path_stem` | function | 1013 | <code>static size_t path_stem(const char &#42;path, const char &#42;&#42;out) {</code> |
 | `cand_definition` | function | 1027 | <code>static int cand_definition(const Cand &#42;c, int nc, int pick) {</code> |
 | `mod_matches` | function | 1055 | <code>static bool mod_matches(const char &#42;module, const char &#42;cand_path) {</code> |
-| `EXTS` | variable | 1061 | <code>static const char &#42;EXTS&#91;&#93; = { "js","jsx","ts","tsx","mjs","cjs",</code> |
 | `ImpCache` | typedef | 1092 | <code>typedef struct { char name&#91;128&#93;; char module&#91;256&#93;; } ImpCache;</code> |
 | `load_imports` | function | 1094 | <code>static int load_imports(Cg &#42;cg, long file_id, ImpCache &#42;out, int cap) {</code> |
 | `resolve_refs_run` | function | 1117 | <code>static void resolve_refs_run(Cg &#42;cg, bool scoped) {</code> |
@@ -11710,7 +9243,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | Indexed name | Kind | Line | Source declaration |
 | --- | --- | ---: | --- |
 | `RoutePat` | typedef | 15 | <code>typedef struct {</code> |
-| `RP` | variable | 27 | <code>static RoutePat RP&#91;&#93; = {</code> |
 | `NRP` | macro | 120 | <code>#define NRP ((int)(sizeof RP / sizeof RP&#91;0&#93;))</code> |
 | `routes_global_init` | function | 122 | <code>void routes_global_init(void) {</code> |
 | `lang_in` | function | 138 | <code>static bool lang_in(const char &#42;langs, const char &#42;lang) {</code> |
@@ -11719,14 +9251,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `RouteLex` | typedef | 171 | <code>typedef struct {</code> |
 | `scrub_route_line` | function | 185 | <code>static void scrub_route_line(const char &#42;lang,const char &#42;path,int line,</code> |
 | `route_opener` | function | 239 | <code>static const char &#42;route_opener(const char &#42;s,const char &#42;lang) {</code> |
-| `keys` | variable | 240 | <code>const char &#42;keys&#91;&#93;={".get(",".post(",".put(",".patch(",".delete(",</code> |
 | `route_statement_complete` | function | 250 | <code>static bool route_statement_complete(const char &#42;s,size_t start) {</code> |
 | `route_limit` | function | 268 | <code>static void route_limit(ParseResult &#42;pr,int line) {</code> |
 | `routes_scan_line` | function | 272 | <code>void routes_scan_line(const char &#42;lang, const char &#42;path, int lineno,</code> |
-| `verbs` | variable | 295 | <code>static const char &#42;verbs&#91;&#93;={"GET","POST","PUT","PATCH","DELETE","HEAD","OPTIONS"};</code> |
-| `verbs` | variable | 347 | <code>const char &#42;verbs&#91;&#93;={"GET","POST","PUT","PATCH","DELETE","HEAD","OPTIONS"};</code> |
 | `routes_scan_file` | function | 445 | <code>void routes_scan_file(const char &#42;path, ParseResult &#42;pr) {</code> |
-| `verbs` | variable | 461 | <code>const char &#42;verbs&#91;&#93;={"get","post","put","patch","delete"};</code> |
 
 ## src/runtime.c
 
@@ -11740,46 +9268,30 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `state_call_vcs` | function | 48 | <code>static int state_call_vcs(void &#42;v) {</code> |
 | `StateSpecCall` | typedef | 53 | <code>typedef struct { bool json; bool reconcile; } StateSpecCall;</code> |
 | `state_call_spec` | function | 54 | <code>static int state_call_spec(void &#42;v) {</code> |
-| `status` | variable | 56 | <code>char &#42;status&#91;&#93; = { "status" };</code> |
-| `reconcile` | variable | 57 | <code>char &#42;reconcile&#91;&#93; = { "reconcile" };</code> |
 | `state_raw_json` | function | 61 | <code>static void state_raw_json(StrBuf &#42;b, const char &#42;raw) {</code> |
 | `state_live_attempt` | function | 70 | <code>static bool state_live_attempt(Cg &#42;cg, const char &#42;agent, SpecAttempt &#42;a,</code> |
 | `cmd_state` | function | 99 | <code>int cmd_state(Cg &#42;cg, bool json) {</code> |
-| `vc` | variable | 108 | <code>StateVcsCall vc = { cg, json };</code> |
-| `sc` | variable | 109 | <code>StateSpecCall sc = { json, false }, sr = { json, true };</code> |
 | `runtime_key_cmp` | function | 185 | <code>static int runtime_key_cmp(const void &#42;a, const void &#42;b) {</code> |
 | `runtime_json_object_valid` | function | 193 | <code>static bool runtime_json_object_valid(const char &#42;payload) {</code> |
 | `runtime_canonical_json` | function | 227 | <code>static char &#42;runtime_canonical_json(const char &#42;payload) {</code> |
 | `runtime_first_string` | function | 255 | <code>static char &#42;runtime_first_string(const char &#42;payload,</code> |
 | `runtime_first_raw` | function | 265 | <code>static char &#42;runtime_first_raw(const char &#42;payload,</code> |
 | `runtime_kind` | function | 275 | <code>static char &#42;runtime_kind(const char &#42;payload) {</code> |
-| `KEYS` | variable | 276 | <code>static const char &#42;const KEYS&#91;&#93; = {</code> |
 | `RuntimeFile` | typedef | 293 | <code>typedef struct {</code> |
 | `RuntimeFiles` | typedef | 300 | <code>typedef struct { RuntimeFile &#42;v; int n, cap; } RuntimeFiles;</code> |
 | `runtime_files_push` | function | 302 | <code>static void runtime_files_push(RuntimeFiles &#42;files, const char &#42;path,</code> |
 | `runtime_walk_files` | function | 319 | <code>static void runtime_walk_files(const char &#42;root, const char &#42;rel,</code> |
 | `runtime_file_cmp` | function | 344 | <code>static int runtime_file_cmp(const void &#42;a, const void &#42;b) {</code> |
 | `runtime_workspace_revision` | function | 353 | <code>void runtime_workspace_revision(Cg &#42;cg, char out&#91;65&#93;) {</code> |
-| `files` | variable | 356 | <code>RuntimeFiles files = {0};</code> |
 | `RuntimeEventRow` | typedef | 428 | <code>typedef struct {</code> |
 | `runtime_event_store` | function | 437 | <code>static int runtime_event_store(Cg &#42;cg, const RuntimeEventRow &#42;r,</code> |
 | `runtime_journal_apply` | function | 475 | <code>int runtime_journal_apply(Cg &#42;cg, const char &#42;args, char &#42;err,</code> |
-| `K` | variable | 477 | <code>static const char &#42;const K&#91;&#93; = {</code> |
-| `r` | variable | 490 | <code>RuntimeEventRow r = {</code> |
 | `runtime_event_queue` | function | 508 | <code>static bool runtime_event_queue(Cg &#42;cg, const RuntimeEventRow &#42;r) {</code> |
-| `k` | variable | 510 | <code>const char &#42;k&#91;&#93; = { "source", "kind", "session", "attempt", "task",</code> |
-| `v` | variable | 513 | <code>const char &#42;v&#91;&#93; = { r-&gt;source, r-&gt;kind, r-&gt;session, r-&gt;attempt, r-&gt;task,</code> |
 | `runtime_event_ingest` | function | 531 | <code>int runtime_event_ingest(Cg &#42;cg, const char &#42;source, const char &#42;payload,</code> |
-| `SESSION_KEYS` | variable | 537 | <code>static const char &#42;const SESSION_KEYS&#91;&#93; = {</code> |
-| `ATTEMPT_KEYS` | variable | 541 | <code>static const char &#42;const ATTEMPT_KEYS&#91;&#93; = {</code> |
-| `TASK_KEYS` | variable | 544 | <code>static const char &#42;const TASK_KEYS&#91;&#93; = { "task", "task_id", NULL };</code> |
-| `OUTPUT_KEYS` | variable | 545 | <code>static const char &#42;const OUTPUT_KEYS&#91;&#93; = {</code> |
-| `r` | variable | 624 | <code>RuntimeEventRow r = {</code> |
 | `runtime_event_history` | function | 687 | <code>static int runtime_event_history(Cg &#42;cg, int limit, bool json) {</code> |
 | `RuntimeSample` | typedef | 744 | <code>typedef struct {</code> |
 | `runtime_contains_ci` | function | 751 | <code>static bool runtime_contains_ci(const char &#42;s, const char &#42;needle) {</code> |
 | `runtime_sample_failure` | function | 764 | <code>static bool runtime_sample_failure(const RuntimeSample &#42;s) {</code> |
-| `KEYS` | variable | 773 | <code>static const char &#42;const KEYS&#91;&#93; = { "status", "outcome", "result", NULL };</code> |
 | `runtime_sample_waiting` | function | 783 | <code>static bool runtime_sample_waiting(const RuntimeSample &#42;s) {</code> |
 | `runtime_threshold` | function | 795 | <code>static int runtime_threshold(const char &#42;name, int dflt, int floor) {</code> |
 | `runtime_classify_progress` | function | 805 | <code>int runtime_classify_progress(Cg &#42;cg, const char &#42;attempt,</code> |
@@ -11804,7 +9316,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `WalkList` | typedef | 58 | <code>typedef struct { Walked &#42;v; int n, cap; } WalkList;</code> |
 | `walk_push` | function | 60 | <code>static void walk_push(WalkList &#42;wl, const char &#42;rel, long size, long mtime,</code> |
 | `walk_dir` | function | 82 | <code>static void walk_dir(const char &#42;root, const char &#42;rel, const Ignore &#42;ig,</code> |
-| `ws` | variable | 84 | <code>WalkSet ws = {0};</code> |
 | `walked_cmp` | function | 93 | <code>static int walked_cmp(const void &#42;a, const void &#42;b) {</code> |
 | `dbfile_cmp` | function | 96 | <code>static int dbfile_cmp(const void &#42;a, const void &#42;b) {</code> |
 | `Pipe` | typedef | 102 | <code>typedef struct {</code> |
@@ -11821,10 +9332,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `step_reset` | function | 399 | <code>static void step_reset(sqlite3_stmt &#42;st) {</code> |
 | `purge_file_children` | function | 405 | <code>static int purge_file_children(Cg &#42;cg, Stmts &#42;s, long file_id) {</code> |
 | `index_copy_rows` | function | 447 | <code>static int index_copy_rows(Cg &#42;cg, Stmts &#42;s, long file_id, long from,</code> |
-| `in_order` | variable | 451 | <code>sqlite3_stmt &#42;in_order&#91;&#93; = { s-&gt;cp_syms, s-&gt;cp_symfts, s-&gt;cp_refs,</code> |
-| `count` | variable | 455 | <code>long &#42;count&#91;&#93; = { &amp;st-&gt;symbols, NULL, &amp;st-&gt;refs, &amp;st-&gt;anchors, NULL,</code> |
 | `write_done` | function | 481 | <code>static int write_done(Cg &#42;cg, Stmts &#42;s, const Walked &#42;w, Done &#42;d,</code> |
-| `hr` | variable | 483 | <code>IndexHealthResult hr = {</code> |
 | `drop_skipped_file` | function | 781 | <code>static int drop_skipped_file(Cg &#42;cg, Stmts &#42;s, const Walked &#42;w,</code> |
 | `soft_insert` | function | 813 | <code>static void soft_insert(sqlite3_stmt &#42;ins, long file_id, int line,</code> |
 | `probe` | function | 829 | <code>static bool probe(sqlite3_stmt &#42;st, const char &#42;tok, char &#42;out, size_t cap) {</code> |
@@ -11840,7 +9348,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `fts_prepurge` | function | 1052 | <code>static void fts_prepurge(Cg &#42;cg, Stmts &#42;s, Walked &#42;jobs, Done &#42;chunk, int n) {</code> |
 | `semantic_retry_debt` | function | 1080 | <code>static void semantic_retry_debt(Cg &#42;cg) {</code> |
 | `flush_chunk` | function | 1086 | <code>static int flush_chunk(Cg &#42;cg, Stmts &#42;s, Walked &#42;jobs, Done &#42;chunk, int n,</code> |
-| `hr` | variable | 1099 | <code>IndexHealthResult hr = {</code> |
 | `target_rel` | function | 1143 | <code>static bool target_rel(const char &#42;root, const char &#42;in, char &#42;out, size_t cap) {</code> |
 | `targets_cover` | function | 1162 | <code>static bool targets_cover(char &#42;&#42;t, int nt, const char &#42;path) {</code> |
 | `walk_targets` | function | 1175 | <code>static void walk_targets(const char &#42;root, const Ignore &#42;ig, char &#42;&#42;t, int nt,</code> |
@@ -11848,8 +9355,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `targets_free` | function | 1229 | <code>static void targets_free(char &#42;&#42;t, int n) {</code> |
 | `index_find_twins` | function | 1240 | <code>static void index_find_twins(Cg &#42;cg, WalkList &#42;jobs, const IndexOpts &#42;o) {</code> |
 | `index_pass` | function | 1277 | <code>static int index_pass(Cg &#42;cg, const SysInfo &#42;si, const IndexOpts &#42;o,</code> |
-| `wl` | variable | 1284 | <code>WalkList wl = {0};</code> |
-| `jobs` | variable | 1342 | <code>WalkList jobs = {0};</code> |
 | `TRI_REPAIR_MAX` | macro | 1507 | <code>#define TRI_REPAIR_MAX 50000</code> |
 | `tri_rows` | function | 1509 | <code>static long tri_rows(Cg &#42;cg) {</code> |
 | `index_tri_repair` | function | 1528 | <code>static void index_tri_repair(Cg &#42;cg, long &#42;repaired) {</code> |
@@ -11864,7 +9369,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `index_report` | function | 1776 | <code>static void index_report(const IndexStats &#42;st, const IndexOpts &#42;o) {</code> |
 | `cg_index_ex` | function | 1810 | <code>int cg_index_ex(Cg &#42;cg, const SysInfo &#42;si, const IndexOpts &#42;o, IndexStats &#42;st) {</code> |
 | `cg_index` | function | 2057 | <code>int cg_index(Cg &#42;cg, const SysInfo &#42;si, bool full, IndexStats &#42;st, bool quiet) {</code> |
-| `o` | variable | 2058 | <code>IndexOpts o = {0};</code> |
 
 ## src/sem_channels.c
 
@@ -11883,7 +9387,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `hash_long` | function | 47 | <code>static uint64_t hash_long(uint64_t h, long x) {</code> |
 | `local_path` | function | 51 | <code>static bool local_path(const char &#42;p) {</code> |
 | `http_method` | function | 59 | <code>static bool http_method(const char &#42;s) {</code> |
-| `methods` | variable | 60 | <code>static const char &#42;methods&#91;&#93;={"GET","POST","PUT","PATCH","DELETE","HEAD","OPTIONS",NULL};</code> |
 | `valid_identity` | function | 65 | <code>static bool valid_identity(const char &#42;s) {</code> |
 | `receiver_identity` | function | 76 | <code>static char &#42;receiver_identity(Cg &#42;cg, long file, const char &#42;value) {</code> |
 | `supported` | function | 106 | <code>static bool supported(const ChannelFact &#42;f) {</code> |
@@ -11898,9 +9401,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `same_site` | function | 278 | <code>static bool same_site(const ChannelFact &#42;a, const ChannelFact &#42;b) {</code> |
 | `insert_edge` | function | 282 | <code>static int insert_edge(Cg &#42;cg, sqlite3_stmt &#42;q, const ChannelFact &#42;source,</code> |
 | `synthesize` | function | 310 | <code>static int synthesize(Cg &#42;cg, ChannelFacts &#42;facts) {</code> |
-| `route` | variable | 340 | <code>SemRouteMatch route={0};</code> |
 | `sem_channels_pass` | function | 373 | <code>int sem_channels_pass(Cg &#42;cg, const long &#42;changed_files, int nfiles) {</code> |
-| `facts` | variable | 376 | <code>ChannelFacts facts={0};</code> |
 | `sem_channels_register` | function | 414 | <code>void sem_channels_register(void) {</code> |
 
 ## src/sem_channels.h
@@ -11922,7 +9423,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `DISPATCH_CAP` | macro | 7 | <code>#define DISPATCH_CAP 32</code> |
 | `done` | function | 9 | <code>static int done(sqlite3_stmt &#42;q) { int rc=sqlite3_step(q); sqlite3_finalize(q); return rc==SQLITE_DONE?0:-1; }</code> |
 | `callback_api` | function | 11 | <code>static int callback_api(const char &#42;name) {</code> |
-| `apis` | variable | 14 | <code>static const char &#42;apis&#91;&#93;={"on","once","subscribe","addEventListener",</code> |
 | `unique_symbol` | function | 21 | <code>static long unique_symbol(Cg &#42;cg, long branch, long preferred_file,</code> |
 | `symbol_file` | function | 53 | <code>static long symbol_file(Cg &#42;cg,long id) {</code> |
 | `edge_evidence` | function | 60 | <code>static const char &#42;edge_evidence(const char &#42;kind) {</code> |
@@ -11932,7 +9432,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `paired` | function | 190 | <code>static int paired(Cg &#42;cg,long branch,const char &#42;invoke_kind,</code> |
 | `direct` | function | 250 | <code>static int direct(Cg &#42;cg,long branch,const char &#42;fact_kind,const char &#42;edge_kind,</code> |
 | `interfaces` | function | 272 | <code>static int interfaces(Cg &#42;cg,long branch) {</code> |
-| `paths` | variable | 302 | <code>char &#42;paths&#91;DISPATCH_CAP&#93;={0};</code> |
 | `form_events` | function | 320 | <code>static int form_events(Cg &#42;cg,long branch) {</code> |
 | `sem_dispatch_run` | function | 385 | <code>int sem_dispatch_run(Cg &#42;cg,const long &#42;changed_files,int nfiles) {</code> |
 | `sem_dispatch_register` | function | 409 | <code>void sem_dispatch_register(void) { (void)sem_pass_register("dispatch",50,sem_dispatch_run); }</code> |
@@ -12003,13 +9502,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `dependency` | function | 138 | <code>static void dependency(ImportPass &#42;p, long fid, const char &#42;key, const char &#42;hash,</code> |
 | `file_dependency` | function | 145 | <code>static void file_dependency(ImportPass &#42;p,long source,long target) {</code> |
 | `unresolved_candidates` | function | 155 | <code>static void unresolved_candidates(ImportPass &#42;p,long source,const char &#42;from,</code> |
-| `exts` | variable | 160 | <code>static const char &#42;exts&#91;&#93;={".ts",".tsx",".js",".jsx",".mts",".cts",</code> |
 | `config_data` | function | 170 | <code>static char &#42;config_data(ImportPass &#42;p, long fid, const char &#42;relative,</code> |
 | `strip_json_comments` | function | 179 | <code>static void strip_json_comments(char &#42;data) {</code> |
 | `alias_match` | function | 202 | <code>static bool alias_match(const char &#42;pattern,const char &#42;module,char capture&#91;PATH_CAP&#93;) {</code> |
 | `alias_value` | function | 212 | <code>static bool alias_value(const char &#42;value,const char &#42;capture,char out&#91;PATH_CAP&#93;) {</code> |
 | `config_aliases` | function | 218 | <code>static long config_aliases(ImportPass &#42;p,long fid,const char &#42;from,</code> |
-| `names` | variable | 224 | <code>const char &#42;names&#91;&#93;={"tsconfig.json","jsconfig.json"};</code> |
 | `load_packages` | function | 278 | <code>static void load_packages(ImportPass &#42;p) {</code> |
 | `workspace_package` | function | 303 | <code>static long workspace_package(ImportPass &#42;p,long fid,const char &#42;from,</code> |
 | `module_file` | function | 323 | <code>static long module_file(ImportPass &#42;p,long fid,const char &#42;from,const char &#42;module,</code> |
@@ -12017,9 +9514,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `exported_symbol` | function | 431 | <code>static long exported_symbol(ImportPass &#42;p,long file,const char &#42;name,</code> |
 | `update` | function | 470 | <code>static void update(ImportPass &#42;p,long id,long file,long symbol) {</code> |
 | `sem_imports_pass` | function | 476 | <code>int sem_imports_pass(Cg &#42;cg,const long &#42;changed_files,int nfiles) {</code> |
-| `p` | variable | 479 | <code>ImportPass p={.cg=cg};</code> |
-| `visited` | variable | 535 | <code>long visited&#91;EXPORT_DEPTH&#93;={0};</code> |
-| `visited` | variable | 553 | <code>long visited&#91;EXPORT_DEPTH&#93;={0};</code> |
 | `sem_imports_register` | function | 571 | <code>void sem_imports_register(void) {</code> |
 | `sem_imports_config_changed` | function | 575 | <code>bool sem_imports_config_changed(Cg &#42;cg) {</code> |
 
@@ -12142,10 +9636,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `ensure_route_schema` | function | 31 | <code>static void ensure_route_schema(Cg &#42;cg) {</code> |
 | `step_done` | function | 44 | <code>static int step_done(sqlite3_stmt &#42;q) {</code> |
 | `sem_routes_purge_file` | function | 53 | <code>int sem_routes_purge_file(Cg &#42;cg,long file_id) {</code> |
-| `sql` | variable | 55 | <code>const char &#42;sql&#91;&#93; = {</code> |
 | `exact_symbol` | function | 85 | <code>static long exact_symbol(Cg &#42;cg, long file, const char &#42;name, int &#42;count) {</code> |
 | `resolve_handler` | function | 95 | <code>static long resolve_handler(Cg &#42;cg,long file,const char &#42;fw,const char &#42;handler,int &#42;count) {</code> |
-| `qualifier` | variable | 143 | <code>char qualifier&#91;128&#93;={0};</code> |
 | `adjacent_handler` | function | 179 | <code>static long adjacent_handler(Cg &#42;cg,long file,int line,int &#42;count) {</code> |
 | `sole_default_handler` | function | 195 | <code>static long sole_default_handler(Cg &#42;cg,long file,int &#42;count) {</code> |
 | `source_line` | function | 207 | <code>static bool source_line(Cg &#42;cg,const char &#42;path,int want,char out&#91;4096&#93;) {</code> |
@@ -12157,7 +9649,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `sem_routes_pass` | function | 394 | <code>int sem_routes_pass(Cg &#42;cg,const long &#42;changed_files,int nfiles) {</code> |
 | `sem_routes_register` | function | 570 | <code>void sem_routes_register(void) { sem_pass_register("routes",40,sem_routes_pass); }</code> |
 | `sem_route_lookup_unique` | function | 572 | <code>int sem_route_lookup_unique(Cg &#42;cg,const char &#42;method,const char &#42;path,</code> |
-| `regpath` | variable | 592 | <code>char regpath&#91;4096&#93;={0};bool ok=false;</code> |
 
 ## src/sem_routes.h
 
@@ -12218,13 +9709,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `TYPE_MAX_CANDIDATES` | macro | 6 | <code>#define TYPE_MAX_CANDIDATES 64</code> |
 | `TYPE_MAX_WALK` | macro | 7 | <code>#define TYPE_MAX_WALK 256</code> |
 | `relation_kind` | function | 9 | <code>static const char &#42;relation_kind(const char &#42;kind) {</code> |
-| `kinds` | variable | 11 | <code>static const char &#42;const kinds&#91;&#93; = {</code> |
 | `is_type_kind` | function | 20 | <code>static bool is_type_kind(const char &#42;s) {</code> |
 | `canonical_name` | function | 31 | <code>static bool canonical_name(const char &#42;src, char out&#91;256&#93;) {</code> |
 | `Candidate` | typedef | 58 | <code>typedef struct { long id, file_id, parent_id; int score; } Candidate;</code> |
 | `candidate_allowed` | function | 60 | <code>static bool candidate_allowed(const char &#42;relation, const char &#42;kind,</code> |
 | `resolve_target` | function | 79 | <code>static long resolve_target(Cg &#42;cg, long owner_id, long file_id,</code> |
-| `best` | variable | 101 | <code>Candidate best = {0}; int count = 0, ties = 0;</code> |
 | `resolve_override` | function | 131 | <code>static long resolve_override(Cg &#42;cg,long method,const char &#42;spelling) {</code> |
 | `insert_edge` | function | 162 | <code>static int insert_edge(Cg &#42;cg, sqlite3_stmt &#42;q, long source_file,</code> |
 | `sem_types_run` | function | 182 | <code>int sem_types_run(Cg &#42;cg, const long &#42;changed_files, int nfiles) {</code> |
@@ -12272,11 +9761,9 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `bind_span` | function | 188 | <code>static void bind_span(sqlite3_stmt &#42;q, int n, SemSpan s) {</code> |
 | `done` | function | 195 | <code>static void done(Cg &#42;cg, sqlite3_stmt &#42;q) {</code> |
 | `sem_file_purge` | function | 206 | <code>int sem_file_purge(Cg &#42;cg, long file_id) {</code> |
-| `tables` | variable | 227 | <code>const char &#42;tables&#91;&#93; = {"semantic_dependencies", "semantic_type_facts",</code> |
 | `mapped` | function | 239 | <code>static long mapped(const long &#42;ids, int n, int index) {</code> |
 | `sem_file_replace` | function | 243 | <code>int sem_file_replace(Cg &#42;cg, long file_id, const SemResult &#42;r,</code> |
 | `sem_file_copy` | function | 365 | <code>int sem_file_copy(Cg &#42;cg, long file_id, long twin_file_id) {</code> |
-| `queries` | variable | 385 | <code>const char &#42;queries&#91;&#93; = {</code> |
 | `SEM_MAX_PASSES` | macro | 437 | <code>#define SEM_MAX_PASSES 16</code> |
 | `sem_imports_register` | function | 442 | <code>extern void sem_imports_register(void) __attribute__((weak));</code> |
 | `sem_resolve_register` | function | 443 | <code>extern void sem_resolve_register(void) __attribute__((weak));</code> |
@@ -12334,7 +9821,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `Job` | typedef | 46 | <code>typedef struct {</code> |
 | `mono_ms` | function | 58 | <code>static long mono_ms(void) {</code> |
 | `send_raw` | function | 64 | <code>static void send_raw(const char &#42;p, size_t n) {</code> |
-| `pf` | variable | 70 | <code>struct pollfd pf = { STDOUT_FILENO, POLLOUT, 0 };</code> |
 | `send_msg` | function | 82 | <code>static void send_msg(StrBuf &#42;b) {</code> |
 | `reply` | function | 88 | <code>static void reply(const char &#42;id, const char &#42;result) {</code> |
 | `reply_err` | function | 94 | <code>static void reply_err(const char &#42;id, int code, const char &#42;msg) {</code> |
@@ -12345,12 +9831,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `Batch` | typedef | 204 | <code>typedef struct { StrBuf &#42;b; int n; long last; } Batch;</code> |
 | `batch_add` | function | 206 | <code>static int batch_add(const EventRow &#42;e, void &#42;ud) {</code> |
 | `serve_push` | function | 214 | <code>static void serve_push(Cg &#42;cg, Sub &#42;s) {</code> |
-| `bt` | variable | 234 | <code>Batch bt = { &amp;b, 0, s-&gt;cursor };</code> |
 | `serve_snapshot` | function | 254 | <code>static void serve_snapshot(Cg &#42;cg, const char &#42;id, const char &#42;params) {</code> |
 | `Server` | typedef | 276 | <code>typedef struct {</code> |
 | `raw_or` | function | 285 | <code>static char &#42;raw_or(const char &#42;obj, const char &#42;key) {</code> |
 | `serve_dispatch` | function | 289 | <code>static void serve_dispatch(Server &#42;sv, const char &#42;line) {</code> |
-| `argv` | variable | 327 | <code>char &#42;argv&#91;&#93; = { g_self, (char &#42;)"tool", (char &#42;)"call", name,</code> |
 | `kill_jobs` | function | 413 | <code>static void kill_jobs(Job &#42;jobs) {</code> |
 | `cmd_serve` | function | 429 | <code>int cmd_serve(Cg &#42;cg, const SysInfo &#42;si) {</code> |
 
@@ -12365,7 +9849,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `ROR` | macro | 25 | <code>#define ROR(x,n) (((x) &gt;&gt; (n)) &#124; ((x) &lt;&lt; (32 - (n))))</code> |
 | `sha_block` | function | 27 | <code>static void sha_block(Sha256 &#42;s, const uint8_t &#42;p) {</code> |
 | `sha256_hex` | function | 52 | <code>void sha256_hex(const void &#42;data, size_t len, char out_hex&#91;65&#93;) {</code> |
-| `s` | variable | 53 | <code>Sha256 s = { .h = {</code> |
 
 ## src/skills.c
 
@@ -12429,7 +9912,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `discover_features` | function | 492 | <code>static int discover_features(const char &#42;specdir, char &#42;&#42;&#42;out) {</code> |
 | `render_feature` | function | 516 | <code>static int render_feature(const char &#42;root, const char &#42;specdir,</code> |
 | `spec_render` | function | 571 | <code>static int spec_render(const char &#42;root, bool check, bool quiet) {</code> |
-| `w` | variable | 588 | <code>Writer w = { .check = check, .quiet = quiet };</code> |
 | `spec_render_json` | function | 641 | <code>static int spec_render_json(const char &#42;root, bool check) {</code> |
 | `Spec` | typedef | 650 | <code>typedef struct {</code> |
 | `spec_close` | function | 659 | <code>static void spec_close(Spec &#42;s) {</code> |
@@ -12456,7 +9938,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `clause_text` | function | 894 | <code>static char &#42;clause_text(const Spec &#42;s, const char &#42;clause) {</code> |
 | `print_task` | function | 913 | <code>static void print_task(const Spec &#42;s, const char &#42;id) {</code> |
 | `json_task` | function | 971 | <code>static void json_task(const Spec &#42;s, const char &#42;id, StrBuf &#42;b) {</code> |
-| `decl` | variable | 1020 | <code>const char &#42;decl&#91;2&#93; = { "symbols", "touches" };</code> |
 | `spec_current` | function | 1039 | <code>static const char &#42;spec_current(const Spec &#42;s) {</code> |
 | `spec_in_progress_count` | function | 1049 | <code>static int spec_in_progress_count(const Spec &#42;s) {</code> |
 | `spec_attempt_sweep` | function | 1066 | <code>static void spec_attempt_sweep(Cg &#42;g) {</code> |
@@ -12486,11 +9967,9 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `spec_next_cmd` | function | 1727 | <code>static int spec_next_cmd(Spec &#42;s, bool json) {</code> |
 | `spec_docs_verified` | function | 1782 | <code>static bool spec_docs_verified(const Spec &#42;s) {</code> |
 | `spec_docs_finish` | function | 1793 | <code>int spec_docs_finish(Cg &#42;cg, const char &#42;feature) {</code> |
-| `args` | variable | 1794 | <code>char &#42;args&#91;&#93; = { "docs", "done", "-f", (char &#42;)feature };</code> |
 | `spec_docs_cmd` | function | 1804 | <code>static int spec_docs_cmd(Spec &#42;s, const char &#42;action, const char &#42;agent,</code> |
 | `spec_globs_overlap` | function | 1949 | <code>bool spec_globs_overlap(const char &#42;a, const char &#42;b) {</code> |
 | `spec_touches_conflict` | function | 1964 | <code>static bool spec_touches_conflict(Spec &#42;s, const char &#42;id, char &#42;other,</code> |
-| `defaults` | variable | 1975 | <code>const char &#42;defaults&#91;&#93; = { "README.md", "docs/&#42;&#42;", "CONTRIBUTING.md", "CHANGELOG.md" };</code> |
 | `spec_live_leases` | function | 2046 | <code>static int spec_live_leases(const Spec &#42;s, StrBuf &#42;b, bool json) {</code> |
 | `spec_wave_cmd` | function | 2117 | <code>static int spec_wave_cmd(Spec &#42;s, bool json) {</code> |
 | `spec_lease_ahead_column` | function | 2177 | <code>static bool spec_lease_ahead_column(Cg &#42;g) {</code> |
@@ -12515,10 +9994,8 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `spec_done_cmd` | function | 3192 | <code>static int spec_done_cmd(Spec &#42;s, const char &#42;id, const char &#42;agent,</code> |
 | `spec_journal_apply` | function | 3387 | <code>int spec_journal_apply(Cg &#42;g, const char &#42;op, const char &#42;args, char &#42;err,</code> |
 | `spec_graph_open` | function | 3451 | <code>static bool spec_graph_open(Cg &#42;g, bool sync) {</code> |
-| `o` | variable | 3458 | <code>IndexOpts o = {0};</code> |
 | `graph_symbol_row` | function | 3472 | <code>static void graph_symbol_row(sqlite3_stmt &#42;st, char &#42;path, size_t pcap,</code> |
 | `path_has_qualifier` | function | 3483 | <code>static bool path_has_qualifier(const char &#42;path, const char &#42;segment,</code> |
-| `forms` | variable | 3492 | <code>const char &#42;forms&#91;2&#93; = { raw, normal };</code> |
 | `qualified_path_score` | function | 3506 | <code>static int qualified_path_score(const char &#42;qualified, const char &#42;path) {</code> |
 | `graph_symbol_named` | function | 3523 | <code>static int graph_symbol_named(Cg &#42;g, const char &#42;lookup,</code> |
 | `graph_symbol` | function | 3566 | <code>static int graph_symbol(Cg &#42;g, const char &#42;name, char &#42;path, size_t pcap,</code> |
@@ -12531,7 +10008,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `list_literal` | function | 4013 | <code>static char &#42;list_literal(const char &#42;csv) {</code> |
 | `TaskSpec` | typedef | 4038 | <code>typedef struct {</code> |
 | `spec_add_cmd` | function | 4045 | <code>static int spec_add_cmd(Spec &#42;s, const char &#42;id, const TaskSpec &#42;t,</code> |
-| `lists` | variable | 4077 | <code>const char &#42;lists&#91;&#93;&#91;2&#93; = {</code> |
 | `Lint` | typedef | 4122 | <code>typedef struct { StrBuf b; int errors, warnings; } Lint;</code> |
 | `lint_say` | function | 4124 | <code>static void lint_say(Lint &#42;l, bool error, const char &#42;id, const char &#42;fmt, ...) {</code> |
 | `lint_cycle` | function | 4136 | <code>static bool lint_cycle(Spec &#42;s, const char &#42;id, char &#42;&#42;stack, int depth,</code> |
@@ -12555,7 +10031,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `DIRTY_MAX_BYTES` | macro | 39 | <code>#define DIRTY_MAX_BYTES (256 &#42; 1024)</code> |
 | `gate_path` | function | 46 | <code>static void gate_path(const Cg &#42;cg, const char &#42;name, char &#42;out, size_t cap) {</code> |
 | `sleep_ms` | function | 57 | <code>static void sleep_ms(long ms) {</code> |
-| `ts` | variable | 58 | <code>struct timespec ts = { ms / 1000, (ms % 1000) &#42; 1000000L };</code> |
 | `syncgate_acquire` | function | 64 | <code>int syncgate_acquire(const Cg &#42;cg, long wait_ms) {</code> |
 | `syncgate_release` | function | 83 | <code>void syncgate_release(int fd) {</code> |
 | `dirty_lock` | function | 90 | <code>static int dirty_lock(const Cg &#42;cg) {</code> |
@@ -12649,12 +10124,10 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `Commit` | typedef | 186 | <code>typedef struct {</code> |
 | `commit_load` | function | 192 | <code>static int commit_load(const Cg &#42;cg, const char &#42;hash, Commit &#42;c) {</code> |
 | `cmd_commit_with_options` | function | 208 | <code>int cmd_commit_with_options(Cg &#42;cg, const char &#42;msg, bool quiet,</code> |
-| `m` | variable | 210 | <code>Manifest m = {0};</code> |
 | `cmd_commit` | function | 277 | <code>int cmd_commit(Cg &#42;cg, const char &#42;msg, bool quiet) {</code> |
 | `cmd_log` | function | 281 | <code>int cmd_log(Cg &#42;cg, int limit, bool json) {</code> |
 | `TreeDiff` | typedef | 322 | <code>typedef struct { StrBuf added, modified, deleted; int na, nm, nd;</code> |
 | `tree_status` | function | 325 | <code>static void tree_status(Cg &#42;cg, TreeDiff &#42;td, bool json) {</code> |
-| `work` | variable | 329 | <code>Manifest work = {0}, head = {0};</code> |
 | `cmd_status` | function | 380 | <code>int cmd_status(Cg &#42;cg, bool json) {</code> |
 | `CHANGES_SYM_CAP` | macro | 411 | <code>#define CHANGES_SYM_CAP 40</code> |
 | `CHANGES_CAL_CAP` | macro | 412 | <code>#define CHANGES_CAL_CAP 8</code> |
@@ -12666,7 +10139,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `diff_blobs` | function | 557 | <code>static void diff_blobs(StrBuf &#42;b, char &#42;ad, size_t al, char &#42;bd, size_t bl) {</code> |
 | `Op` | typedef | 592 | <code>typedef struct { char mark; int ai, bi; } Op;</code> |
 | `cmd_diff` | function | 630 | <code>int cmd_diff(Cg &#42;cg, const char &#42;ra, const char &#42;rb) {</code> |
-| `ma` | variable | 642 | <code>Manifest ma = {0}, mb = {0};</code> |
 | `has_def` | function | 707 | <code>static bool has_def(const ParseResult &#42;pr, const char &#42;name, const char &#42;kind) {</code> |
 | `has_route` | function | 715 | <code>static bool has_route(const ParseResult &#42;pr, const RouteDef &#42;r) {</code> |
 | `count_lines` | function | 723 | <code>static long count_lines(const char &#42;d, size_t n) {</code> |
@@ -12675,21 +10147,13 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `line_delta` | function | 758 | <code>static void line_delta(const char &#42;od, size_t ol, const char &#42;nd, size_t nl,</code> |
 | `changelog_file` | function | 775 | <code>static void changelog_file(Cg &#42;cg, StrBuf &#42;md, const char &#42;path,</code> |
 | `cmd_changelog` | function | 835 | <code>int cmd_changelog(Cg &#42;cg, int limit, const char &#42;outfile) {</code> |
-| `m` | variable | 859 | <code>Manifest m = {0};</code> |
-| `ma` | variable | 865 | <code>Manifest ma = {0}, mb = {0};</code> |
 | `cmd_checkout` | function | 985 | <code>int cmd_checkout(Cg &#42;cg, const char &#42;id, bool force) {</code> |
-| `target` | variable | 1008 | <code>Manifest target = {0}, current = {0};</code> |
-| `key` | variable | 1016 | <code>MEnt key = {.path = target.v&#91;i&#93;.path};</code> |
-| `key` | variable | 1039 | <code>MEnt key = {.path = current.v&#91;i&#93;.path};</code> |
 | `PathSet` | typedef | 1058 | <code>typedef struct { char &#42;&#42;v; int n, cap; } PathSet;</code> |
 | `ps_add` | function | 1060 | <code>static void ps_add(PathSet &#42;p, const char &#42;path) {</code> |
 | `man_diff_paths` | function | 1071 | <code>static void man_diff_paths(const Manifest &#42;a, const Manifest &#42;b, PathSet &#42;p) {</code> |
 | `vcs_commits_for_path` | function | 1088 | <code>int vcs_commits_for_path(Cg &#42;cg, const char &#42;path, int limit, char &#42;&#42;&#42;ids,</code> |
 | `vcs_find_commits` | function | 1139 | <code>int vcs_find_commits(Cg &#42;cg, const char &#42;needle, char &#42;&#42;&#42;ids, char &#42;&#42;&#42;msgs,</code> |
 | `vcs_changed_paths` | function | 1170 | <code>int vcs_changed_paths(Cg &#42;cg, const char &#42;needle, char &#42;&#42;&#42;out) {</code> |
-| `p` | variable | 1171 | <code>PathSet p = {0};</code> |
-| `work` | variable | 1174 | <code>Manifest work = {0}, headm = {0};</code> |
-| `tree` | variable | 1195 | <code>Manifest tree = {0}, parent = {0};</code> |
 
 ## src/walk.c
 
@@ -12732,13 +10196,9 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `watch_interval` | function | 181 | <code>static long watch_interval(void) {</code> |
 | `watch_rearm` | function | 191 | <code>static void watch_rearm(Watcher &#42;w, Pending &#42;pend) {</code> |
 | `watch_attempt` | function | 199 | <code>static bool watch_attempt(Cg &#42;cg, const SysInfo &#42;si, Watcher &#42;w,</code> |
-| `before` | variable | 216 | <code>WatchHealth before = {0};</code> |
 | `watch_sync` | function | 247 | <code>static int watch_sync(Cg &#42;cg, const SysInfo &#42;si, const Pending &#42;p,</code> |
-| `o` | variable | 249 | <code>IndexOpts o = {0};</code> |
 | `watch_auto_off` | function | 263 | <code>static bool watch_auto_off(const char &#42;root) {</code> |
 | `cmd_watch` | function | 271 | <code>int cmd_watch(Cg &#42;cg, const SysInfo &#42;si, int debounce_ms) {</code> |
-| `pend` | variable | 299 | <code>Pending pend = {0};</code> |
-| `pfd` | variable | 329 | <code>struct pollfd pfd = { .fd = w.fd, .events = POLLIN };</code> |
 | `FleetWatch` | typedef | 385 | <code>typedef struct {</code> |
 | `FLEET_POLL_MS` | macro | 398 | <code>#define FLEET_POLL_MS 3000</code> |
 | `fleet_watch_open` | function | 400 | <code>static FleetWatch &#42;fleet_watch_open(const Cg &#42;parent, long id,</code> |
@@ -12746,11 +10206,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `fleet_scan` | function | 440 | <code>static void fleet_scan(Cg &#42;cg, FleetWatch &#42;&#42;&#42;pv, int &#42;pn) {</code> |
 | `watch_fleet` | function | 497 | <code>int watch_fleet(Cg &#42;cg, const SysInfo &#42;si, int debounce_ms) {</code> |
 | `portable_pause` | function | 600 | <code>static void portable_pause(int ms) {</code> |
-| `ts` | variable | 601 | <code>struct timespec ts = { ms / 1000, (ms % 1000) &#42; 1000000L };</code> |
 | `portable_sync` | function | 605 | <code>static void portable_sync(Cg &#42;cg, const SysInfo &#42;si) {</code> |
-| `before` | variable | 606 | <code>WatchHealth before = {0};</code> |
-| `opts` | variable | 608 | <code>IndexOpts opts = {0};</code> |
-| `stats` | variable | 609 | <code>IndexStats stats = {0};</code> |
 | `watch_fleet` | function | 621 | <code>int watch_fleet(Cg &#42;cg, const SysInfo &#42;si, int debounce_ms) {</code> |
 | `cmd_watch` | function | 645 | <code>int cmd_watch(Cg &#42;cg, const SysInfo &#42;si, int debounce_ms) {</code> |
 
@@ -12764,8 +10220,6 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `lock_marker` | function | 17 | <code>static int lock_marker(const Cg &#42;cg) {</code> |
 | `unlock_marker` | function | 26 | <code>static void unlock_marker(int fd) { flock(fd, LOCK_UN); close(fd); }</code> |
 | `read_locked` | function | 28 | <code>static bool read_locked(const Cg &#42;cg, WatchHealth &#42;out) {</code> |
-| `buf` | variable | 34 | <code>char buf&#91;96&#93; = {0};</code> |
-| `reason` | variable | 40 | <code>char reason&#91;32&#93; = {0};</code> |
 | `watch_health_read` | function | 49 | <code>bool watch_health_read(const Cg &#42;cg, WatchHealth &#42;out) {</code> |
 | `write_locked` | function | 57 | <code>static bool write_locked(const Cg &#42;cg, bool pending,</code> |
 | `watch_health_mark` | function | 72 | <code>bool watch_health_mark(const Cg &#42;cg, const char &#42;reason) {</code> |
