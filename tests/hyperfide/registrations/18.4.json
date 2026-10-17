@@ -38,6 +38,9 @@
     "findings.repair.refused-retries-preserve-evidence-links",
     "findings.repair.genuine-execution-start-observed",
     "findings.repair.genuine-submission-admitted",
+    "findings.repair.genuine-independent-qualification",
+    "findings.repair.qualified-without-original-proof-refused",
+    "findings.repair.genuine-original-and-repaired-reproduction",
     "findings.repair.genuine-independent-resolution",
     "findings.repair.reopen-after-relevant-change"
   ],

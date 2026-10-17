@@ -49,7 +49,7 @@ def accepted_intent(f,criteria):
     repair=f.sql('SELECT definition,criteria_digest FROM hyperfide.tasks WHERE id=$1',[i['task_a']])[0]
     prior=f.sql('SELECT policy FROM hyperfide.proof_registries WHERE task_id=$1',[i['task_a']])[0]['policy']
     rubric=prior['rubric_digest'];reviewers=prior['clauses'][0]['reviewers']
-    check={'id':'finding-repaired','argv':[str(executable),'--version'],'executable_digest':c.sha(executable.read_bytes()),'timeout_ms':1000,'required_artifacts':['fixture/stdout.log'],'input_keys':['source','dependency','toolchain','configuration','graph','contract']}
+    check=f.repair_check
     source=SOURCE.replace('RUBRIC',json.dumps(rubric)).replace('REVIEWERS',json.dumps(reviewers))+''.join(key+' = '+json.dumps(check[key])+'\n' for key in ('argv','executable_digest','timeout_ms','required_artifacts','input_keys'))
     parsed=json.loads(subprocess.check_output(['node','--input-type=module','-e',"import{parseKvx}from'./services/hyperfide/dist/spec/import.js';let s='';for await(const c of process.stdin)s+=c;process.stdout.write(JSON.stringify(parseKvx(s)));"],input=source.encode(),cwd=c.ROOT))
     spec=uid();document={'schema_version':1,'revision_digest':c.sha(b'finding-repair-accepted-envelope'),'source_digest':c.sha(source.encode()),'repositories':[{'repository_id':i['repository'],'source_object_id':c.OID,'integration_ref':'refs/heads/main'}],'allowed_actions':[],'closure_policy':{'required_evidence':['finding-repaired'],'required_review_roles':[],'publication':'AFTER_QUALIFICATION'},'provenance':None,'parsed':parsed,'runtime_wave_offset':0}
@@ -89,8 +89,8 @@ def setup(f):
     review_policy=c.sha(b'finding-review-policy');inputs=c.sha(b'finding-review-inputs');candidate=c.sha(b'finding-review-candidate')
     c.insert(f,'review_policies',c.scoped(f,digest=review_policy,revision='1',definition={}))
     c.insert(f,'review_watchers',c.scoped(f,policy_digest=review_policy,watcher_id='finding-fixture-reviewer',reviewer_session_id=x['watcher'],rubric_digest=policy['rubric_digest'],review_class='semantic',path_prefixes=[]))
-    c.insert(f,'source_objects',{'organisation_id':i['organisation'],'repository_id':x['repository'],'object_id':'c'*40,'object_type':'tree'})
-    c.insert(f,'review_commits',c.scoped(f,repository_id=x['repository'],source_object_id=c.OID,tree_object_id='c'*40,parent_objects=[],changed_paths=['src/claim-a.ts'],attribution={'task_id':x['task'],'attempt_id':x['attempt']}))
+    c.insert(f,'source_objects',{'organisation_id':i['organisation'],'repository_id':x['repository'],'object_id':f.baseline_tree,'object_type':'tree'})
+    c.insert(f,'review_commits',c.scoped(f,repository_id=x['repository'],source_object_id=c.OID,tree_object_id=f.baseline_tree,parent_objects=[],changed_paths=['src/claim-a.ts'],attribution={'task_id':x['task'],'attempt_id':x['attempt']}))
     c.insert(f,'review_obligations',c.scoped(f,id=x['obligation'],repository_id=x['repository'],source_object_id=c.OID,policy_digest=review_policy,watcher_id='finding-fixture-reviewer'))
     c.insert(f,'review_obligation_inputs',c.scoped(f,obligation_id=x['obligation'],generation='1',input_manifest_digest=inputs,candidate_digest=candidate,snapshot={}))
     c.insert(f,'review_receipts',c.scoped(f,id=x['receipt'],request_id=uid(),request_digest=c.sha(b'historical-review-request'),obligation_id=x['obligation'],lease_generation='1',generation='1',reviewer_session_id=x['watcher'],rubric_digest=policy['rubric_digest'],input_manifest_digest=inputs,candidate_digest=candidate,outcome='FINDINGS',limitations=[]))
@@ -160,7 +160,12 @@ def reopen_after_change(f,call,fid):
     resolved=call('finding.repair.inspect',{'finding_id':fid})
     expect(resolved['phase']=='RESOLVED' and resolved['resolution']['current'] is True,'Requires genuine16/17 resolution before a relevant 16.4 change can withdraw it')
     prior=[r for r in resolved['repairs'] if r['state']=='RESOLVED'][-1]
-    c.call(f,'assurance.invalidate',{'organisation_id':f.ids['organisation'],'run_id':f.ids['run'],'submission_id':prior['custody_id'],'request_id':uid(),'expected_state_version':'1','changes':{'source':c.sha(b'relevant-change')}},component='16.4')
+    version=f.sql('SELECT state_version::text AS version FROM hyperfide.assurance_applicability WHERE custody_id=$1',[prior['custody_id']])[0]['version']
+    request=uid()
+    operation=f.operation('16.4','assurance.invalidate',{'organisation_id':f.ids['organisation'],'run_id':f.ids['run'],'submission_id':prior['custody_id'],'request_id':request,'expected_state_version':version,'changes':{'source':c.sha(b'relevant-change')}})
+    operation['idempotency_key']=request
+    status,body=f.request(operation,key='operator')
+    expect(status==200 and body.get('ok') is True,'Relevant input invalidation refused: '+str(body))
     reopened=call('finding.repair.recheck',{'finding_id':fid,'expected_state_version':resolved['registry_version']})
     after=call('finding.repair.inspect',{'finding_id':fid})
     expect(reopened['reopened'] is True and after['phase']=='REOPENED' and after['resolution']['current'] is False and [r for r in after['repairs'] if r['repair_id']==prior['repair_id']][0]['resolution_evidence_ids']==prior['resolution_evidence_ids'])
@@ -169,12 +174,17 @@ def main():
     spec=importlib.util.spec_from_file_location('repair_submission_fixture',Path(__file__).parents[1]/'support/repair_submission.py')
     submission=importlib.util.module_from_spec(spec);spec.loader.exec_module(submission)
     driver=submission.RepairSubmission(c.ROOT);c.OID=driver.baseline
+    spec=importlib.util.spec_from_file_location('repair_qualification_fixture',Path(__file__).parents[1]/'support/repair_qualification.py')
+    qualification_module=importlib.util.module_from_spec(spec);spec.loader.exec_module(qualification_module)
+    qualification=qualification_module.RepairQualification(driver,c)
+    qualification.install(scheduler)
     def prepare(f):
-        driver.setup(f);setup(f)
+        f.baseline_tree=driver.git('rev-parse',driver.baseline+'^{tree}')
+        driver.setup(f);qualification.setup(f);setup(f)
     try:
-        f=scheduler.SchedulerFixture(extra_components=('1.1','12.2','16.1','16.2','16.3','16.4','18.1','18.2','18.3','18.4'),extra_setup=prepare,source_object_id=driver.baseline)
+        f=scheduler.SchedulerFixture(extra_components=('1.1','12.2','16.1','16.2','16.3','16.4','17.4','18.1','18.2','18.3','18.4'),extra_setup=prepare,source_object_id=driver.baseline)
     except BaseException:
-        driver.close();raise
+        qualification.close();driver.close();raise
     def call(action,payload):return c.call(f,action,payload,component='finding-remediation')
     def reject(action,payload,code=None):return c.reject(f,action,payload,code,component='finding-remediation')
     def finding_version(fid):return str(c.call(f,'finding.inspect',{'finding_id':fid})['finding']['registry_version'])
@@ -241,11 +251,21 @@ def main():
                  'expected_state_version':repair_version(rid)})
             attempt=f.sql('SELECT execution_state,compute_authority FROM hyperfide.attempts WHERE id=$1',[token['attempt_id']])[0]
             expect(attempt=={'execution_state':'SUBMITTED','compute_authority':'RELEASED'} and admitted['qualification']=='PENDING')
+            objects=f.sql('SELECT object_id,object_type FROM hyperfide.source_objects WHERE repository_id=$1 AND object_id=ANY($2::text[])',
+                [f.ids['repository'],[driver.head,driver.git('rev-parse',driver.head+'^{tree}')]])
+            expect({row['object_type'] for row in objects}=={'commit','tree'},'Submission must retain both independently measured Git object identities')
         check('findings.repair.genuine-submission-admitted',submit_repair)
+        check('findings.repair.genuine-independent-qualification',lambda:qualification.qualify(f))
+        check('findings.repair.qualified-without-original-proof-refused',lambda:reject('finding.repair.resolve',{'repair_id':rid,'expected_state_version':repair_version(rid)},'ORIGINAL_REPRODUCTION_REQUIRED'))
+        def resolve_repair():
+            plan_id=qualification.reproduce(f,rid)
+            call('finding.repair.resolve',{'repair_id':rid,'expected_state_version':repair_version(rid),'reproduction_plan_id':plan_id})
+        check('findings.repair.genuine-original-and-repaired-reproduction',resolve_repair)
         check('findings.repair.genuine-independent-resolution',lambda:expect(c.call(f,'finding.inspect',{'finding_id':fid})['finding']['phase']=='RESOLVED','Actual16/17 independent repair proof is not integrated'))
         check('findings.repair.reopen-after-relevant-change',lambda:reopen_after_change(f,call,fid))
     finally:
         try:
+            qualification.close()
             if getattr(f,'native_probe',None):f.native_probe.cleanup()
         finally:
             try:f.close()

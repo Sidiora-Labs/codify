@@ -23,6 +23,11 @@ class RepairSubmission:
             self.git('config', 'user.email', 'fixture@example.invalid')
             (self.repository / 'src').mkdir()
             (self.repository / 'src/claim-a.ts').write_text('original failure\n')
+            self.recipe = dict(schema_version=1, kind='hyperfide.preparation-policy', commands=[],
+                               cache_scope='repair', cache_paths=[], minimum_free_bytes='1',
+                               minimum_free_inodes='1', network_timeout_milliseconds=1000)
+            (self.repository / 'prepare.json').write_text(json.dumps(self.recipe))
+            (self.repository / 'scan.json').write_text('{"prepared":true}\n')
             self.git('add', '--all')
             self.git('commit', '-qm', 'accepted baseline')
             self.baseline = self.git('rev-parse', 'HEAD')
