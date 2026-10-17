@@ -92,6 +92,7 @@ class Fixture:
         return self.ok("7.3","graph.publish.commit",self.scoped(build_id=build,channel=channel,expected_generation=expected,operation_id=operation or str(uuid.uuid4())))
 def ingestion(f):
     state={}
+    check("graph.ingestion.retry-yields-primary-capacity",retry_capacity)
     check("graph.ingestion.real-copy-describe",lambda:expect(f.ok("7.2","graph.ingest.describe",{})["transport"]=="POSTGRESQL_COPY_FROM_STDIN","COPY capability not advertised"))
     def create():state["build"]=f.create()["build_id"];expect(sql("SELECT count(*) FROM hyperfide.graph_builds").stdout.strip()=="1","build was not durably created")
     check("graph.ingestion.persist-build",create);b=state["build"]
@@ -157,6 +158,39 @@ def ingestion(f):
     check("graph.ingestion.concurrent-branch-race-isolated",lambda:branch_race(f,branch))
 
 SYMBOLS=400
+def retry_capacity():
+    script=r"""
+import assert from 'node:assert/strict';
+import {TransactionGateway} from './services/hyperfide/dist/storage/transactions.js';
+let active=0,attempts=0,guards=0,available=false;
+const source={async acquirePrimary(){
+    active++;return {signal:new AbortController().signal,release(){active--;},client:{
+        async query(sql){return {rows:sql.startsWith('SELECT pg_is_in_recovery')?[{recovery:false,readonly:false}]:[]};}
+    }};
+}};
+const gateway=new TransactionGateway(source);
+// Model a still-running SSI peer: immediate retries encounter the same conflict.
+const peer=setTimeout(()=>{assert.equal(active,0);available=true;},80);
+try {
+    await gateway.withPrimaryTransaction({timeoutMs:2000,maxRetries:2,guard(){guards++;}},()=>{
+        attempts++;if(!available)throw Object.assign(new Error('SSI pivot'),{code:'40001'});
+    });
+    assert.equal(attempts,2);assert.equal(guards,attempts);assert.equal(active,0);
+} finally {clearTimeout(peer);}
+for(const cancel of [false,true]){
+    const controller=new AbortController();let calls=0;
+    const timer=cancel?setTimeout(()=>controller.abort(),20):undefined;
+    try {
+        await assert.rejects(gateway.withPrimaryTransaction({timeoutMs:cancel?2000:20,maxRetries:2,signal:controller.signal},()=>{
+            calls++;throw Object.assign(new Error('deadlock'),{code:'40P01'});
+        }),{code:'TX_TIMEOUT'});
+        assert.equal(calls,1);assert.equal(active,0);
+    } finally {clearTimeout(timer);}
+}
+"""
+    result=subprocess.run(["node","--input-type=module","-e",script],cwd=ROOT,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=10)
+    expect(result.returncode==0,"retry capacity/deadline regression: "+result.stderr[-1800:])
+
 def branch_commit(f):
     """A second commit of the same repository whose symbol count dwarfs the batch count."""
     source=f.native.repo;base=dict(commit=f.native.commit,tree=f.native.tree)
