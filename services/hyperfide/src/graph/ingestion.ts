@@ -37,8 +37,60 @@ export async function graphGuard(tx:GraphTransaction,scope:GraphScope,ctx:Compon
  const row=result.rows[0];if(!row||row.authority_epoch!==scope.authority_epoch)fail('GRAPH_AUTHORITY_STALE','Graph authority epoch changed');
  if(write&&!['READY','RUNNING'].includes(row.state))fail('GRAPH_RUN_INACTIVE','Graph mutation requires a ready or running run');
 }
+// Process-local graph admission, independent of the shared 4.2 primary pool.
+// Graph work never holds more than maxActive primary connections, always below
+// the pool maximum, so claims/heartbeats/identity keep reserved capacity.
+// Waiting graph work holds no connection; a full queue or expired wait is a typed refusal.
+export interface GraphAdmissionLimits {max_active:number;max_queued:number;queue_wait_ms:number;primary_pool_max:number}
+interface AdmissionWaiter {grant:()=>void;refuse:(error:FoundationError)=>void}
+export class GraphAdmission {
+ private active=0;private queue:AdmissionWaiter[]=[];private admitted=0;private refused=0;
+ constructor(readonly limits:GraphAdmissionLimits){}
+ private overloaded(message:string):FoundationError{this.refused++;return new FoundationError('GRAPH_OVERLOADED',message);}
+ async run<T>(signal:AbortSignal|undefined,fn:()=>Promise<T>):Promise<T>{
+  if(signal?.aborted)throw new FoundationError('GRAPH_CANCELLED','Graph request cancelled before admission');
+  if(this.active<this.limits.max_active)this.active++;
+  else{
+   if(this.limits.max_active===0)throw this.overloaded('Graph admission disabled: primary pool cannot reserve coordination capacity');
+   if(this.queue.length>=this.limits.max_queued)throw this.overloaded('Graph admission queue is full');
+   await new Promise<void>((resolve,reject)=>{
+    const settle=()=>{clearTimeout(timer);signal?.removeEventListener('abort',abort);const i=this.queue.indexOf(waiter);if(i>=0)this.queue.splice(i,1);};
+    const waiter:AdmissionWaiter={grant:()=>{settle();resolve();},refuse:error=>{settle();reject(error);}};
+    const abort=()=>waiter.refuse(new FoundationError('GRAPH_CANCELLED','Graph request cancelled while queued'));
+    const timer=setTimeout(()=>waiter.refuse(this.overloaded('Graph admission wait expired')),this.limits.queue_wait_ms);
+    signal?.addEventListener('abort',abort,{once:true});this.queue.push(waiter);
+   });
+  }
+  this.admitted++;
+  try{return await fn();}
+  finally{const next=this.queue[0];if(next)next.grant();else this.active--;}
+ }
+ metrics():JsonObject{return {...this.limits,active:this.active,queued:this.queue.length,admitted:this.admitted,refused:this.refused};}
+}
+function admissionSetting(env:Readonly<NodeJS.ProcessEnv>,name:string,fallback:number,min:number,max:number):number{
+ const value=env[name];if(value===undefined)return fallback;
+ if(!/^(0|[1-9][0-9]*)$/.test(value)||Number(value)<min||Number(value)>max)fail('GRAPH_CONFIG_INVALID','Invalid bounded setting '+name);
+ return Number(value);
+}
+function primaryPoolMax(ctx:ComponentContext):number{
+ try{const value=(ctx.resources.describe() as {primary?:{maxActive?:unknown}}).primary?.maxActive;if(Number.isSafeInteger(value)&&Number(value)>=1)return Number(value);}catch{/* fall back to the 4.2 default contract */}
+ return admissionSetting(ctx.env??{},'HYPERFIDE_PG_POOL_MAX',4,1,16);
+}
+export function graphAdmissionLimits(ctx:ComponentContext):GraphAdmissionLimits{
+ const env=ctx.env??{},pool=primaryPoolMax(ctx),ceiling=pool-1;
+ const maxActive=admissionSetting(env,'HYPERFIDE_GRAPH_MAX_ACTIVE',Math.max(0,Math.min(ceiling,Math.floor(pool/2))),0,15);
+ if(maxActive>ceiling)fail('GRAPH_CONFIG_INVALID','HYPERFIDE_GRAPH_MAX_ACTIVE must stay below the primary pool maximum');
+ return {max_active:maxActive,max_queued:admissionSetting(env,'HYPERFIDE_GRAPH_MAX_QUEUED',8,0,256),queue_wait_ms:admissionSetting(env,'HYPERFIDE_GRAPH_QUEUE_WAIT_MS',2000,1,30000),primary_pool_max:pool};
+}
+const admissions=new WeakMap<object,GraphAdmission>();
+export function graphAdmission(ctx:ComponentContext):GraphAdmission{
+ const key=ctx.resources as object;let admission=admissions.get(key);
+ if(!admission){admission=new GraphAdmission(graphAdmissionLimits(ctx));admissions.set(key,admission);}
+ return admission;
+}
 export async function graphTransaction<T>(ctx:ComponentContext,scope:GraphScope,fn:(tx:GraphTransaction)=>Promise<T>,write=true):Promise<T>{
- return graphGateway(ctx).withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:invocationOf(ctx).signal,guard:tx=>graphGuard(tx,scope,ctx,write)},fn);
+ const gateway=graphGateway(ctx),signal=invocationOf(ctx).signal;
+ return graphAdmission(ctx).run(signal,()=>gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal,guard:tx=>graphGuard(tx,scope,ctx,write)},fn));
 }
 export function sourceId(build:string,bundle:string,family:string,legacy:unknown):string {
  const h=createHash('md5').update(build+':'+bundle+':'+family+':'+String(legacy)).digest('hex');
@@ -205,9 +257,10 @@ async function resolve(input:unknown,ctx:ComponentContext):Promise<unknown>{
  });
 }
 export function createComponent(ctx:ComponentContext):Component{
+ graphAdmission(ctx);// validate trusted admission limits at startup
  const wrap=(fn:(value:unknown,context:ComponentContext)=>Promise<unknown>)=>async(input:unknown,context:ComponentContext)=>{try{return await fn(input,context);}catch(e){if(e instanceof FoundationError)throw e;throw new FoundationError('GRAPH_STORAGE_FAILED','Graph operation failed; reconcile durable build state before retry');}};
  return {apiVersion:1,actions:{
-  'graph.ingest.describe':input=>{exact(input,[]);return {schema_version:1,transport:'POSTGRESQL_COPY_FROM_STDIN',max_chunk_bytes:262144,max_resolution_batch:256,publication:false};},
+  'graph.ingest.describe':(input,context)=>{exact(input,[]);return {schema_version:1,transport:'POSTGRESQL_COPY_FROM_STDIN',max_chunk_bytes:262144,max_resolution_batch:256,publication:false,admission:graphAdmission(context).metrics()};},
   'graph.ingest.create':wrap(createBuild),'graph.ingest.chunk':wrap(stageChunk),'graph.ingest.seal':wrap(seal),'graph.ingest.resolve':wrap(resolve),
   'graph.ingest.inspect':wrap(async(input,context)=>{const r=exact(input,['organisation_id','run_id','authority_epoch','build_id']),s=scopeInput(r,context),id=uuid(r.build_id);return graphTransaction(context,s,async tx=>({build:await getBuild(tx,s,id),coverage:await graphCoverage(tx,s,id)}),false);})
  }};
