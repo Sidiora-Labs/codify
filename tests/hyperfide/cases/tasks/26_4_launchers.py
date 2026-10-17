@@ -111,7 +111,15 @@ def offline(base,env):
  check('offline.local-mode-identified',lambda:expect(init.returncode==0 and identifies_mode(mode.stdout,'local')))
  remembered=native('remember','offline decision kept local');recalled=native('recall','--json');context=native('context','core','--json')
  check('offline.local-core-workflow-works',lambda:expect(remembered.returncode==0 and recalled.returncode==0 and json.loads(recalled.stdout)['memories'][0]['body']=='offline decision kept local' and context.returncode==0 and any(s['name']=='core' for s in json.loads(context.stdout)['symbols'])))
- check('offline.cg-alias-local-parity',lambda:expect(native('recall','--json',binary='cg').stdout==recalled.stdout and native('authority','mode',binary='cg').stdout==mode.stdout))
+ def alias_parity():
+  expect(native('recall','--json',binary='cg').stdout==recalled.stdout)
+  canonical=last_json(native('authority','mode').stdout)
+  alias=last_json(native('authority','mode',binary='cg').stdout)
+  # Cache age advances between invocations; compare the remaining contract.
+  canonical.get('cache',{}).pop('age_seconds',None)
+  alias.get('cache',{}).pop('age_seconds',None)
+  expect(alias==canonical)
+ check('offline.cg-alias-local-parity',alias_parity)
  local_store=tree(repo/'.codegraph')
  marker=repo/'.hyperfide/authority.json';marker.parent.mkdir();marker.write_text(json.dumps({'schema_version':1,'mode':'distributed','authority_epoch':uid()}));marker.chmod(0o600)
  offline_mode=native('authority','mode',extra={'HYPERFIDE_MODE':'offline'})
