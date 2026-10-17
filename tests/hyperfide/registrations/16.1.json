@@ -14,16 +14,11 @@
     "assurance.16.1.auth.forged.submission.revoke",
     "assurance.16.1.auth.absent.submission.inspect",
     "assurance.16.1.auth.forged.submission.inspect",
-    "assurance.16.1.primary.unbranded-denied",
     "assurance.16.1.schema.applied",
     "assurance.16.1.history.no-authority",
     "assurance.16.1.history.immutable-update",
     "assurance.16.1.history.immutable-delete",
     "assurance.16.1.history.preserved",
-    "assurance.16.1.https.signed-missing",
-    "assurance.16.1.https.cross-scope",
-    "assurance.16.1.https.wrong-role",
-    "assurance.16.1.https.no-authority",
     "assurance.16.1.semantic.fresh",
     "assurance.16.1.semantic.cached",
     "assurance.16.1.semantic.upgrade-refused",
@@ -37,13 +32,39 @@
     "assurance.16.1.git.double-star-depth",
     "assurance.16.1.git.spaces-preserved",
     "assurance.16.1.git.malformed-utf8-path",
-    "assurance.16.1.git.unchanged-source"
+    "assurance.16.1.git.unchanged-source",
+    "assurance.16.1.submit.fabricated-evidence-refused",
+    "assurance.16.1.submit.empty-evidence-refused",
+    "assurance.16.1.submit.mismatched-revision-refused",
+    "assurance.16.1.submit.criteria-mismatch-refused",
+    "assurance.16.1.submit.stale-generation-refused",
+    "assurance.16.1.submit.refusals-leave-compute",
+    "assurance.16.1.submit.admitted",
+    "assurance.16.1.submit.compute-released",
+    "assurance.16.1.submit.immutable-binding",
+    "assurance.16.1.submit.lost-response-replay",
+    "assurance.16.1.submit.exact-replay",
+    "assurance.16.1.submit.conflicting-replay",
+    "assurance.16.1.submit.released-compute-cannot-resubmit",
+    "assurance.16.1.independence.coding-worker-claim-refused",
+    "assurance.16.1.independence.coding-sandbox-assign-refused",
+    "assurance.16.1.independence.worker-disposition-denied",
+    "assurance.16.1.independence.outcome-pending",
+    "assurance.16.1.race.concurrent-identical",
+    "assurance.16.1.race.expiry-sweeper",
+    "assurance.16.1.race.expiry-after-admission",
+    "assurance.16.1.race.coding-cleanup-preserves-custody",
+    "assurance.16.1.primary.unbranded-denied",
+    "assurance.16.1.https.signed-missing",
+    "assurance.16.1.https.cross-scope",
+    "assurance.16.1.https.wrong-role",
+    "assurance.16.1.https.no-authority"
   ],
   "argv": [
     "python3",
     "tests/hyperfide/cases/tasks/16_1.py"
   ],
-  "timeout_seconds": 300,
+  "timeout_seconds": 900,
   "required_env": [
     "PGHOST",
     "PGPORT",
@@ -57,7 +78,14 @@
     "services/hyperfide/dist/assurance/validity.js",
     "services/hyperfide/dist/storage/transactions.js",
     "services/hyperfide/dist/transport/protocol.js",
-    "services/hyperfide/dist/storage/dispositions.js"
+    "services/hyperfide/dist/storage/dispositions.js",
+    "services/hyperfide/dist/scheduler/leases.js",
+    "services/hyperfide/dist/scheduler/claim.js",
+    "services/hyperfide/dist/hierarchy/packets.js",
+    "services/hyperfide/dist/spec/obligations.js",
+    "services/hyperfide/dist/artifacts/objects.js",
+    "services/hyperfide/dist/identity/enrollment.js",
+    "services/hyperfide/dist/control.js"
   ],
   "resources": [
     {
@@ -89,6 +117,26 @@
       "id": "hf-task-16.1-signed-files",
       "kind": "local-directory",
       "scope": "task16.1-signed-disposable"
+    },
+    {
+      "id": "hf-task-16.1-submission-database",
+      "kind": "postgresql-database",
+      "scope": "task16.1-submission-disposable"
+    },
+    {
+      "id": "hf-task-16.1-submission-service",
+      "kind": "https-service",
+      "scope": "task16.1-submission-disposable"
+    },
+    {
+      "id": "hf-task-16.1-submission-role",
+      "kind": "postgresql-role",
+      "scope": "task16.1-submission-disposable"
+    },
+    {
+      "id": "hf-task-16.1-submission-files",
+      "kind": "local-directory",
+      "scope": "task16.1-submission-disposable"
     }
   ],
   "cleanup_argv": [
@@ -101,7 +149,8 @@
     "assurance/observations-16.1.json",
     "assurance/database-absence-16.1.json",
     "assurance/signed-absence-16.1.json",
-    "assurance/git-absence-16.1.json"
+    "assurance/git-absence-16.1.json",
+    "assurance/submission-absence-16.1.json"
   ],
   "source_files": [
     "services/hyperfide/src/assurance/submission.ts",
@@ -126,7 +175,11 @@
     "tests/hyperfide/qualify.py",
     "tests/hyperfide/support/identity_fixture.py",
     "services/hyperfide/src/assurance/preparation.ts",
-    "tests/hyperfide/cases/tasks/11_1.py"
+    "tests/hyperfide/cases/tasks/11_1.py",
+    "tests/hyperfide/cases/tasks/5_1.py",
+    "tests/hyperfide/cases/tasks/3_2.py",
+    "tests/hyperfide/cases/tasks/3_1.py",
+    "tests/hyperfide/cases/tasks/15_2.py"
   ],
   "source_roots": [
     "services/hyperfide/src",
