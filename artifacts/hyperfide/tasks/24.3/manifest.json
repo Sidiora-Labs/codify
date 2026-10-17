@@ -1,0 +1,282 @@
+{
+  "schema_version": 1,
+  "campaign_id": "hyperfide-task-24.3-scoped-stop-controls-v1",
+  "registered_variant": "task:24.3",
+  "scope": "task-component",
+  "case_ids": [
+    "V-017",
+    "V-054"
+  ],
+  "expected_assertion_ids": [
+    "recovery.fence.authority-durable-before-effects",
+    "recovery.fence.prototype-key-is-data",
+    "recovery.fence.first-resource-prepared",
+    "recovery.fence.unknown-keeps-original-operation",
+    "recovery.fence.resource-substitution-refused",
+    "recovery.fence.nonce-cross-operation-refused",
+    "recovery.fence.renewal-retains-original-unknown",
+    "recovery.fence.renewed-authority-append-only",
+    "recovery.fence.operation-locks-cleaned",
+    "recovery.fence.hardlink-journal-refused",
+    "recovery.fence.fixture-proof-not-production",
+    "recovery.fence.unbranded-permit-refused-before-effects",
+    "recovery.fence.uncovered-writer-refused",
+    "recovery.fence.missing-host-backend-refused",
+    "recovery.fence.completion-exact-json-bytes-retained",
+    "recovery.fence.completion-persisted-before-return",
+    "recovery.fence.accepted-completion-proof-survives-later-observation",
+    "recovery.fence.missing-completion-refused",
+    "recovery.fence.completion-topology-substitution-refused",
+    "recovery.fence.observation-capability-has-no-mutation-admission",
+    "recovery.fence.observation-retains-destructive-binding",
+    "recovery.fence.observation-journal-persists-only-new-read",
+    "recovery.fence.observation-cannot-prepare-new-resource",
+    "recovery.fence.observation-missing-operation-no-nonce-custody",
+    "recovery.fence.observation-unbranded-proof-refused",
+    "recovery.fencing-service.listener-starts-without-database",
+    "recovery.fencing-service.signed-wrong-topology-no-effects",
+    "recovery.fencing-service.signed-wrong-resources-no-effects",
+    "recovery.fencing-service.unavailable-physical-backend-stays-unknown",
+    "recovery.fencing-service.unknown-retains-durable-authority-custody",
+    "recovery.fencing-service.unsafe-server-config-refused",
+    "recovery.fencing-service.fixture-topology-cannot-start-production-listener",
+    "recovery.fencing-service.listener-shutdown-observed",
+    "recovery.fencing-component.registered-provisioner-service",
+    "recovery.fencing-component.no-activation-authority",
+    "recovery.fencing-component.input-closed",
+    "recovery.fencing-component.listener-bound",
+    "recovery.fencing-component.unsigned-isolation-refused",
+    "recovery.fencing-component.listener-closed-on-shutdown",
+    "recovery.fencing-component.missing-config-refuses-startup",
+    "recovery.stop.registered-control-component",
+    "recovery.pause.admission-gated",
+    "recovery.pause.preserves-authority",
+    "recovery.pause.idempotent-command",
+    "recovery.pause.resume-before-quiescence-refused",
+    "recovery.pause.quiescence-confirmed",
+    "recovery.pause.reconcile-idempotent",
+    "recovery.pause.resume-restores-run",
+    "recovery.pause.resume-idempotent",
+    "recovery.pause.second-resume-refused",
+    "recovery.drain.deadline-persisted",
+    "recovery.drain.admission-gated",
+    "recovery.drain.inflight-allowed-to-finish",
+    "recovery.drain.observes-finish-debt",
+    "recovery.drain.no-fallback-before-deadline",
+    "recovery.drain.control-survives-restart",
+    "recovery.drain.deadline-fallback-applied",
+    "recovery.drain.fallback-revokes-authority",
+    "recovery.drain.fallback-applied-once",
+    "recovery.drain.fallback-session-is-debt",
+    "recovery.stop.real-process",
+    "recovery.stop.durable-control",
+    "recovery.stop.no-new-admission",
+    "recovery.stop.run-stopping",
+    "recovery.stop.during-provisioning",
+    "recovery.stop.during-build",
+    "recovery.stop.revoke-before-external-call",
+    "recovery.stop.worker-and-leader-debt",
+    "recovery.stop.during-review",
+    "recovery.stop.custody-explicitly-revoked",
+    "recovery.stop.artifacts-preserved",
+    "recovery.stop.during-merge-preparation-fenced",
+    "recovery.stop.not-falsely-complete",
+    "recovery.stop.idempotent-command",
+    "recovery.stop.enclosing-control-precedence",
+    "recovery.stop.drain-cannot-weaken-stop",
+    "recovery.stop.debt-survives-restart",
+    "recovery.stop.intent-replayed-after-restart",
+    "recovery.stop.unreachable-debt-reported",
+    "recovery.stop.publication-fenced",
+    "recovery.stop.reconcile-never-complete",
+    "recovery.stop.reconcile-idempotent",
+    "recovery.stop.finalize-unproven-cleanup",
+    "recovery.stop.finalize-leaves-run-stopping",
+    "recovery.stop.resume-with-open-debt-refused",
+    "recovery.stop.reject-caller-confirmation",
+    "recovery.stop.cross-run-scope",
+    "recovery.stop.stale-epoch",
+    "recovery.stop.historical-sandbox-excludes-new-task",
+    "recovery.stop.historical-sandbox-preserves-new-task",
+    "recovery.stop.historical-sandbox-preserves-new-custody",
+    "recovery.stop.historical-sandbox-preserves-new-attempt",
+    "recovery.stop.historical-sandbox-retains-physical-debt",
+    "recovery.stop.run-includes-unattempted-task",
+    "recovery.stop.unattempted-task-admission-blocked",
+    "recovery.cancel.terminal-intent",
+    "recovery.cancel.tasks-cancelled",
+    "recovery.cancel.idempotent-command",
+    "recovery.cancel.resume-refused",
+    "recovery.cancel.cannot-weaken-to-stop",
+    "recovery.cancel.unreachable-debt-after-restart",
+    "recovery.cancel.finalize-unproven-refused",
+    "recovery.cancel.resume-refused-after-restart",
+    "recovery.cleanup.debt-inventory-explicit"
+  ],
+  "approval": {
+    "approved": true,
+    "allowed_actions": [
+      "postgresql.fixture.create",
+      "postgresql.fixture.drop",
+      "https.fixture.listen"
+    ]
+  },
+  "inputs": [
+    {
+      "path": "services/hyperfide/components/24.3.json",
+      "sha256": "e705fbcbcd17be8b4f84f550d994478ee73196f536f468c8db0eac04b7e5d0e2",
+      "size": 379
+    },
+    {
+      "path": "services/hyperfide/components/external-fencing.json",
+      "sha256": "302b73f79298ac606df611f9e19e52c2fd4355965a50a7d783dda9a465f0a3a4",
+      "size": 315
+    },
+    {
+      "path": "services/hyperfide/dist/control.js",
+      "sha256": "1383288f00472de29607207d1d318e257c6e80c0fb2c05ca9fb2d974040e8032",
+      "size": 118
+    },
+    {
+      "path": "services/hyperfide/dist/identity/credentials.js",
+      "sha256": "a0bc687c3aaa8078b35830fdf888aea2de7109761358c5a039a7785d52cddc4c",
+      "size": 40789
+    },
+    {
+      "path": "services/hyperfide/dist/migration/legacy.js",
+      "sha256": "cba33a62d078fde69656fe108fcc81bea22cb703269aea3d65e991f7c88f5fda",
+      "size": 18474
+    },
+    {
+      "path": "services/hyperfide/dist/providers/placement.js",
+      "sha256": "57e45b8a688f3a9323c8464a44e296d8278ed43cfa52148e2c5cd72e5efe5a35",
+      "size": 54228
+    },
+    {
+      "path": "services/hyperfide/dist/provisioner.js",
+      "sha256": "0747f45b91ff8319ea22f6ced47d0af9c812f502d8240b543d06c7f1ba0d030a",
+      "size": 126
+    },
+    {
+      "path": "services/hyperfide/dist/recovery/control.js",
+      "sha256": "61e12389fe9db286ea4869103d808b063c6046bba03912dbf31a9f3fb6c34089",
+      "size": 38886
+    },
+    {
+      "path": "services/hyperfide/dist/recovery/fencing.js",
+      "sha256": "f7df4b32ba6a08f741124a684faa48bb6c14cc3af6419317ad54f24d6083647c",
+      "size": 43090
+    },
+    {
+      "path": "services/hyperfide/dist/recovery/fencing_service.js",
+      "sha256": "0108cf9e2c6c8322fc45ba4aba9b2b248b741eac73b7699eddcb67919f80bd84",
+      "size": 6545
+    },
+    {
+      "path": "services/hyperfide/dist/recovery/stop.js",
+      "sha256": "3d9cc18bcd22e30d411bff7eeb5addd1fb2668a6c094a89be3e5cfb086478816",
+      "size": 30450
+    },
+    {
+      "path": "services/hyperfide/dist/transport/isolation.js",
+      "sha256": "ff2069799444f52e3dd98d9a0ecfb80313be350e2a118773c0c91337bede29c5",
+      "size": 19487
+    },
+    {
+      "path": "services/hyperfide/dist/transport/protocol.js",
+      "sha256": "fe965513abe410e78b8941de532bd2e4b7df12056a7fb35cd8645dc429e1e88d",
+      "size": 12240
+    },
+    {
+      "path": "services/hyperfide/migrations/0024-recovery.sql",
+      "sha256": "1fa85902851893983c51e9c1d146126db59379aabe4bf189021f3a5d7718c9ec",
+      "size": 11353
+    },
+    {
+      "path": "services/hyperfide/package-lock.json",
+      "sha256": "101f5bc9fbb5864f227051eb2d0388449925df88c0fdd0e5755b40b808a4cfbb",
+      "size": 128778
+    },
+    {
+      "path": "services/hyperfide/package.json",
+      "sha256": "51c686f08fdfa47386af869cd6cdb63f1d2553f99366741239ded92dfe0d4398",
+      "size": 766
+    },
+    {
+      "path": "services/hyperfide/src/recovery/fencing.ts",
+      "sha256": "a79f289e150a9bafbb1b8861b48d6d6214b3809e1b89c0e90dbba2bc81833fe0",
+      "size": 41778
+    },
+    {
+      "path": "services/hyperfide/src/recovery/fencing_service.ts",
+      "sha256": "866f25f3a6bef90fa972d843777ce8cef33855a521816eaa58d8fee100db6a16",
+      "size": 7587
+    },
+    {
+      "path": "services/hyperfide/src/recovery/stop.ts",
+      "sha256": "a7c707fe8bb4f881d5724fd807e7a7b2aeb39b21957d910a18e1212ad5093803",
+      "size": 27186
+    },
+    {
+      "path": "services/hyperfide/tsconfig.json",
+      "sha256": "2b45e09325652f23d0bf4ec53439e4552cf4c2854d7288ce40186d4074f894bb",
+      "size": 487
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/24_1.py",
+      "sha256": "501cafb76358fcb20432ca8fe79a6eea0a5cdafef63ab431dec0fddf9bbc1660",
+      "size": 19848
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/24_3.py",
+      "sha256": "30231b4ae88c4d6e94f42ddbfcc295de37229cd211f2f3ccd2153e880cb55056",
+      "size": 45193
+    },
+    {
+      "path": "tests/hyperfide/check-evidence.py",
+      "sha256": "cc8de56fb25bea153490b4143a231f1ff6f4dac758baaea4bf90fb7d9ba236a0",
+      "size": 30633
+    },
+    {
+      "path": "tests/hyperfide/manifest.schema.json",
+      "sha256": "3407092d7e6e452bb288e996f840bd5bab22d6c0f494a49bf944cd73c18078b8",
+      "size": 3216
+    },
+    {
+      "path": "tests/hyperfide/qualify.py",
+      "sha256": "8aa17f5e2572c8557f15353f7267e98600547fb0f2693486c0e0f2fc1abce8c2",
+      "size": 37538
+    },
+    {
+      "path": "tests/hyperfide/registrations/24.3.json",
+      "sha256": "772efd42ca5a5c1756f3a169260f03c6d42ad6c46ee9d36949584e2e496b477c",
+      "size": 7802
+    },
+    {
+      "path": "tests/hyperfide/support/identity_fixture.py",
+      "sha256": "2b992fd5eab4d903909a4dd621b2ce3c7278fa932e163cbad8f33cf2b65efe0a",
+      "size": 29318
+    }
+  ],
+  "resources": [
+    {
+      "id": "hf-task-24.3-database",
+      "kind": "postgresql-database",
+      "scope": "task24.3-disposable"
+    },
+    {
+      "id": "hf-task-24.3-fencing-database",
+      "kind": "postgresql-database",
+      "scope": "task24.3-disposable"
+    }
+  ],
+  "seed": 24003,
+  "policy": {
+    "component_only": true,
+    "full_case_qualification": "UNRUN",
+    "provider_network": "forbidden",
+    "live_supervisor_stop": "UNVERIFIED_NO_RUNNER_SUPERVISORS_PROVIDER",
+    "remote_execution": "after-approval-only",
+    "scope_limit": "Registered task-component variant only; this receipt cannot replace any full-case/provider/connector/campaign receipt."
+  }
+}
