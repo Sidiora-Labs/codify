@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "variant": "full:V-020",
+  "task": "27.2",
+  "scope": "full-case",
+  "cases": [
+    "V-020"
+  ],
+  "assertion_ids": [
+    "parity.v020.source-revision",
+    "parity.v020.configuration",
+    "parity.v020.legacy-toolchain",
+    "parity.v020.approved-corpus-complete",
+    "parity.v020.symbol-semantics",
+    "parity.v020.reference-semantics",
+    "parity.v020.caller-semantics",
+    "parity.v020.contract-findings",
+    "parity.v020.word-body-fts",
+    "parity.v020.comment-fts",
+    "parity.v020.identifier-trigram",
+    "parity.v020.body-trigram",
+    "parity.v020.identifier-segmentation",
+    "parity.v020.unicode-tokenisation",
+    "parity.v020.case-and-punctuation",
+    "parity.v020.phrase-and-boolean-syntax",
+    "parity.v020.path-glob-language-filters",
+    "parity.v020.rank-order",
+    "parity.v020.explicit-rank-ties",
+    "parity.v020.branch-isolation",
+    "parity.v020.folded-branch-projection",
+    "parity.v020.missing-source-diagnostics",
+    "parity.v020.contentless-body-readback",
+    "parity.v020.stable-pagination",
+    "parity.v020.output-and-time-budgets",
+    "parity.v020.approved-differences-only",
+    "parity.v020.complete-source-provenance",
+    "parity.v020.original-inputs-unchanged",
+    "parity.v020.complete-cleanup",
+    "parity.v020.coverage-and-freshness",
+    "parity.v020.exact-name-precedence",
+    "parity.v020.negative-empty-escaped-parameterisation",
+    "parity.v020.structured-timeout-and-truncation",
+    "parity.v020.explain-plan-and-round-trips"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/parity/v020.py"
+  ],
+  "source_files": [
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/registry.json",
+    "tests/hyperfide/campaigns/parity.py",
+    "tests/hyperfide/campaigns/deterministic.py",
+    "tests/hyperfide/campaigns/authority.py",
+    "tests/hyperfide/cases/parity/v020.py"
+  ],
+  "source_roots": [
+    "tests/hyperfide/campaigns"
+  ],
+  "required_env": [
+    "HYPERFIDE_PARITY_V020_MANIFEST"
+  ],
+  "fixtures": [],
+  "resources": [],
+  "timeout_seconds": 14400
+}
