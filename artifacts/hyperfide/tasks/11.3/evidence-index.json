@@ -1,9 +1,13 @@
 {
   "task": "11.3",
-  "commit": "12aa390190b3d3e360e079254378a381103fc236",
-  "requalified_on": "12aa390190b3d3e360e079254378a381103fc236",
+  "commit": "6a91b0130b1d6a09407f5f786b975545dcdc937b",
+  "requalified_on": "6a91b0130b1d6a09407f5f786b975545dcdc937b",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-036 --manifest tests/hyperfide/manifests/tasks/11.3.json && python3 tests/hyperfide/qualify.py --case V-038 --manifest tests/hyperfide/manifests/tasks/11.3.json && python3 tests/hyperfide/qualify.py --case V-039 --manifest tests/hyperfide/manifests/tasks/11.3.json",
   "exit_code": 0,
-  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"60f1ae14-5787-4ce8-bd55-a0c292bc7dcb\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/11.3/campaigns/1dde9e1bd588c1e37df9b8e4108d359e8a0def4db4ba9f403439ac3bcb4c00db\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"d805ff33-6c49-4725-83bf-b7e733b78785\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/11.3/campaigns/1dde9e1bd588c1e37df9b8e4108d359e8a0def4db4ba9f403439ac3bcb4c00db\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"c70a6bc3-b44d-44f7-97a5-c930abe0fe12\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/11.3/campaigns/1dde9e1bd588c1e37df9b8e4108d359e8a0def4db4ba9f403439ac3bcb4c00db\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
-  "ran_at": "2026-10-17T14:15:40.172Z"
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"02010a92-835b-4622-9cc9-13345f6aa603\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/11.3/campaigns/a067482cb780aaeca1af69286eecde18ec66f796950f4b7ef5c41854cde8dbf9\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"e1f71b0d-7887-49e0-acde-ff59d32ecd24\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/11.3/campaigns/a067482cb780aaeca1af69286eecde18ec66f796950f4b7ef5c41854cde8dbf9\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"5df07014-6406-427b-ae88-61cec6284d85\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/11.3/campaigns/a067482cb780aaeca1af69286eecde18ec66f796950f4b7ef5c41854cde8dbf9\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T18:21:49.767802+00:00",
+  "environment": {
+    "HF_TEST_NPM": "/tmp/hyperfide-11.3-tools/npm",
+    "npm_target": "/root/.local/share/mise/installs/node/24.22.0/lib/node_modules/npm/bin/npm-cli.js"
+  }
 }
