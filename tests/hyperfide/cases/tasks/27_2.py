@@ -56,7 +56,7 @@ def trace():
             event("claim", task_id="task" + str(number), attempt_id="attempt" + str(number), slot_id="slot" + str(number % 200), generation=1)
         for number in range(start, min(start + 200, 1500)):
             event("revoke", task_id="task" + str(number), attempt_id="attempt" + str(number), generation=1)
-    for fault in ("stale_generation", "reversed_commits", "unknown_create", "replica_lag", "saturation", "main_loss", "credential_expiry"):
+    for fault in d.REQUIRED_FAULTS:
         event("fault_observed", False, fault=fault)
     for number in range(100):
         event("cleanup", resource_id="sandbox" + str(number), confirmed_absent=True)
@@ -79,6 +79,94 @@ def activation(sequence=1):
     request_digest='sha256:'+d.digest(json.dumps(request,ensure_ascii=False,separators=(',',':')).encode())
     proof={'activation':{'operation_id':ACTIVATION,'deployment_id':DEPLOYMENT,'epoch':EPOCH2,'request_digest':request_digest,'accepted_at':'2026-10-16T12:00:01Z'},'authority_epoch':{'deployment_id':DEPLOYMENT,'epoch':EPOCH2,'previous_epoch':EPOCH1,'state':'ACTIVE','fence_id':receipt['fence_id'],'proof_digest':'sha256:'+d.digest(raw.encode()),'activated_at':'2026-10-16T12:00:01Z'},'previous_authority_epoch':{'deployment_id':DEPLOYMENT,'epoch':EPOCH1,'state':'REVOKED'},'fencer_receipt_json':raw}
     return small('epoch',True,sequence,operation_id=ACTIVATION,new_epoch=EPOCH2,activation_proof=proof)
+
+def mixed_load_checks():
+    profile={"sandboxes":100,"slots":200,"session_lifetimes":1500,"virtual_hours":72,"readers":300,"initial_authority_epoch":EPOCH1,"deployment_id":DEPLOYMENT}
+    sweep_profile={**d.SWEEP_PROFILE,"initial_authority_epoch":EPOCH1,"deployment_id":DEPLOYMENT}
+    check("campaign.deterministic.required-fault-set",lambda:{"db_failover","sandbox_loss","main_loss","credential_expiry","replica_lag","unknown_create","stale_generation","reversed_commits","saturation"}==set(d.REQUIRED_FAULTS) and {row["fault"] for row in d.schedule(profile,17) if row["operation"]=="fault"}==set(d.REQUIRED_FAULTS))
+    report=d.simulate(profile,[17,19])
+    check("campaign.deterministic.multi-seed-reference-simulation",lambda:report["evidence_scope"]=="SIMULATION_ONLY" and report["live_frontier_qualified"] is False and [row["seed"] for row in report["seeds"]]==[17,19] and all(row["peak_slots"]==200 and row["simulated_agents"]==1500 and row["virtual_elapsed_ms"]==72*3600000 and row["wall_clock_ns"]>0 for row in report["seeds"]) and report["seeds"][0]["trace_sha256"]!=report["seeds"][1]["trace_sha256"])
+    check("campaign.deterministic.hundreds-of-readers",lambda:all(row["reader_sessions"]==300 for row in report["seeds"]) and len([row for row in d.schedule(profile,17) if row["operation"]=="read"])==300)
+    replica_grant=small("read",True,reader_id="reader",source="replica")
+    check("campaign.deterministic.replica-read-not-authoritative",lambda:reject(lambda:model([replica_grant])) and model([small("read",True,reader_id="reader",source="primary")]).state()["authoritative_reads"]==1)
+    claim=small("claim",task_id="task",attempt_id="attempt",slot_id="slot",generation=1)
+    late=small("heartbeat",False,3,task_id="task",attempt_id="attempt",generation=1)
+    check("campaign.deterministic.stale-heartbeat-fenced",lambda:model([claim,small("revoke",True,2,task_id="task",attempt_id="attempt",generation=1),late]).state()["owners"]=={} and reject(lambda:model([claim,small("revoke",True,2,task_id="task",attempt_id="attempt",generation=1),{**late,"accepted":True}])))
+    events,_=d.mixed_trace(sweep_profile,17)
+    unlabelled=copy.deepcopy(events);next(row for row in unlabelled if row["kind"]=="claim")["agent_kind"]="LIVE"
+    check("campaign.deterministic.simulated-agents-labelled",lambda:all(row["agent_kind"]=="SIMULATED" for row in d.schedule(profile,17) if row["operation"]=="session") and d.require_simulated_agents(events)==400 and reject(lambda:d.require_simulated_agents(unlabelled)))
+    larger={**profile,"session_lifetimes":3000}
+    check("campaign.deterministic.no-fixed-start-history-limit",lambda:d.reconstruct(d.mixed_trace(larger,23)[0],larger)["session_lifetimes"]==3000 and len([row for row in d.schedule(larger,23) if row["operation"]=="session"])==3000)
+    sweep=d.sweep(sweep_profile,17)
+    check("campaign.deterministic.sweep-dimensions",lambda:len(sweep)==3*3*3*2 and {tuple(sorted(row["point"].items())) for row in sweep}=={tuple(sorted(point.items())) for point in d.sweep_points()} and {row["point"]["write_read_ratio"] for row in sweep}=={"1:9","1:1","9:1"})
+    saturated=[row for row in sweep if row["point"]["concurrency"]==250]
+    check("campaign.deterministic.sweep-invariants-under-saturation",lambda:saturated and all(row["peak_slots"]==200 and row["metrics"]["lock_wait_count"]!="0" for row in saturated))
+    check("campaign.deterministic.graph-batching-avoids-amplification",lambda:all(row["graph_round_trips"]==-(-5000//row["point"]["batch_size"]) for row in sweep) and all(row["graph_round_trips"]<row["per_symbol_round_trips"] for row in sweep if row["point"]["batch_size"]>1) and all(row["graph_round_trips"]==row["per_symbol_round_trips"] for row in sweep if row["point"]["batch_size"]==1))
+    from decimal import Decimal
+    check("campaign.deterministic.sweep-latency-distribution",lambda:all(Decimal(row["metrics"]["p50"])<=Decimal(row["metrics"]["p95"])<=Decimal(row["metrics"]["p99"]) and 0<Decimal(row["metrics"]["reader_fairness_jain"])<=1 and int(row["metrics"]["connection_peak"])<=d.SIMULATED_POOL and row["metrics"]["query_plans"]=="NOT_OBSERVED_IN_SIMULATION" for row in sweep))
+    simulated={**sweep[0]["metrics"],"workload_digest":"a"*64,"environment_digest":"b"*64,"provenance_digest":"c"*64}
+    check("campaign.deterministic.simulated-metrics-not-baseline",lambda:reject(lambda:d.compare_metrics(simulated,simulated)))
+    combinations=d.fault_combinations(17)
+    replay=d.replay_faults(sweep_profile,17,combinations)
+    check("campaign.deterministic.fault-combinations-match-single-fault",lambda:len(replay)==len(combinations)>=36 and all(set(row["injected"])==set(row["faults"]) for row in replay) and tuple(replay[-1]["faults"])==d.REQUIRED_FAULTS)
+    check("campaign.deterministic.fault-seed-reproduces",lambda:d.replay_faults(sweep_profile,17,combinations[:3])==replay[:3] and d.fault_combinations(17)==combinations and d.replay_faults(sweep_profile,19,combinations[:1])[0]["trace_sha256"]!=replay[0]["trace_sha256"])
+    hostile,_=d.mixed_trace(sweep_profile,17,("reversed_commits",));next(row for row in hostile if row.get("injected"))["accepted"]=True
+    check("campaign.deterministic.malicious-acceptance-detected",lambda:reject(lambda:d.reconstruct(hostile,sweep_profile)))
+    backlog,_=d.mixed_trace(sweep_profile,17,("sandbox_loss",));backlog=[row for row in backlog if not (row["kind"]=="cleanup" and row.get("recovery")=="sandbox_loss")]
+    for number,row in enumerate(backlog):row["sequence"]=number+1
+    check("campaign.deterministic.no-hidden-backlog",lambda:reject(lambda:d.check_invariants(backlog,d.reconstruct(backlog,sweep_profile),sweep_profile,("sandbox_loss",))))
+
+def parity_checks():
+    import parity
+    check("campaign.parity.inventory-matches-registry",lambda:all(parity.assertion_ids(case)==parity.registered_ids(case) and len(set(parity.assertion_ids(case)))==count for case,count in (("V-020",34),("V-025",23))))
+    with tempfile.TemporaryDirectory(prefix="hyperfide-parity-component-") as temporary:
+        root=Path(temporary)
+        candidate=root/"candidate";candidate.mkdir()
+        (candidate/"README").write_text("component candidate checkout")
+        git=["git","-C",str(candidate),"-c","user.name=component","-c","user.email=component@example.invalid"]
+        subprocess.run(["git","init","-q",str(candidate)],check=True);subprocess.run(git+["add","README"],check=True);subprocess.run(git+["commit","-qm","component"],check=True)
+        revision=subprocess.run(["git","-C",str(candidate),"rev-parse","HEAD"],capture_output=True,text=True,check=True).stdout.strip()
+        files={name:root/(name+".bin") for name in ("corpus","snapshot","configuration","legacy_toolchain")}
+        for name,path in files.items():path.write_text("component "+name)
+        bridge=root/"bridge.py"
+        bridge.write_text("import hashlib,json,sys\nfrom pathlib import Path\ndata=sys.stdin.buffer.read();q=json.loads(data);modes=set(sys.argv[2:]);side=sys.argv[1]\ndigests={k:[p['sha256'] for p in v] for k,v in sorted(q['inputs'].items()) if k!='golden'}\nobservation={'holds':True,'evidence':['component-fixture'],'check':q['check']}\nif side=='candidate' and 'diverge' in modes and q['check'] in('rank-order','typed-row-preservation'):observation['rank']='different'\nif 'tamper' in modes:Path(q['inputs']['configuration'][0]['path']).write_text('tampered')\nprimary=digests.get('corpus',digests.get('snapshot'))\nprint(json.dumps({'schema_version':1,'request_sha256':hashlib.sha256(data).hexdigest(),'source_revision':q.get('source_revision',q.get('legacy_revision')),'input_digests':digests,'toolchain_sha256':q['inputs']['legacy_toolchain'][0]['sha256'],'observation':observation,'provenance':primary,'cleanup':{'complete':True,'remaining':['leaked']if 'leak' in modes else[]}}))\n")
+        def adapter(side,*modes):
+            return {"argv":[str(Path(sys.executable).resolve()),str(bridge),side,*modes],"cwd":str(candidate if side=="candidate" else root),"pins":[pin(sys.executable),pin(bridge)],"timeout_seconds":20,"required_env":[]}
+        def manifest(case,legacy=(),candidate_modes=(),differences=(),adapters=None):
+            primary="corpus" if case=="V-020" else "snapshot"
+            value={"schema_version":1,"case":case,"campaign_id":"component-"+case,"source_revision":revision,"legacy_revision":"legacy-component-1","approval":{"approved":True,"kind":"parity","case":case},
+                   "inputs":{name:[pin(files[name])] for name in (primary,"configuration","legacy_toolchain")},"adapters":adapters if adapters is not None else {"legacy":adapter("legacy",*legacy),"candidate":adapter("candidate",*candidate_modes)},"approved_differences":list(differences)}
+            path=root/("parity-"+case+"-"+str(len(list(root.glob("parity-*.json"))))+".json");path.write_text(json.dumps(value))
+            return path,hashlib.sha256(path.read_bytes()).hexdigest()
+        def execute(case,**options):
+            path,sha=manifest(case,**options)
+            return parity.run_case(case,path,root/"evidence"/path.stem,sha)
+        def status(results,name):
+            return [row for key,row in results.items() if key.endswith("."+name)][0]["status"]
+        check("campaign.parity.component-bridges-pass",lambda:all(row["status"]=="PASS" for case in ("V-020","V-025") for row in execute(case).values()))
+        path,_=manifest("V-025")
+        check("campaign.parity.unapproved-manifest-digest-blocks",lambda:reject(lambda:parity.run_case("V-025",path,root/"evidence"/"unbound",None),d.Blocked) and reject(lambda:parity.run_case("V-025",path,root/"evidence"/"wrong","0"*64),d.Blocked))
+        def absent():
+            campaign=root/"campaign";campaign.mkdir(exist_ok=True);(campaign/"manifest.json").write_text(json.dumps({"policy":{"approved_parity_manifest_sha256":None}}))
+            env={key:value for key,value in os.environ.items() if key!=parity.manifest_env("V-020")};env["HYPERFIDE_CAMPAIGN_DIR"]=str(campaign)
+            result=subprocess.run([sys.executable,str(ROOT/"tests/hyperfide/cases/parity/v020.py")],capture_output=True,text=True,env=env,timeout=60)
+            rows=[json.loads(line) for line in result.stdout.splitlines()]
+            asserted=[row for row in rows if row["type"]=="assertion"]
+            return result.returncode==2 and len(asserted)==34 and all(row["actual"]["status"]=="BLOCKED" for row in asserted) and rows[-1]=={"type":"cleanup","resources":[],"complete":True}
+        check("campaign.parity.absent-manifest-blocks-without-pass",absent)
+        partial,sha=manifest("V-025",adapters={"candidate":adapter("candidate")})
+        check("campaign.parity.missing-bridge-blocks",lambda:reject(lambda:parity.run_case("V-025",partial,root/"evidence"/"partial",sha),d.Blocked))
+        diverged=execute("V-025",candidate_modes=("diverge",))
+        check("campaign.parity.semantic-difference-fails",lambda:status(diverged,"typed-row-preservation")=="FAIL" and status(diverged,"approved-differences-only")=="FAIL" and status(diverged,"actual-import-readback")=="PASS")
+        row=[value for key,value in diverged.items() if key.endswith(".typed-row-preservation")][0]
+        exact={"assertion_id":"parity.v025.typed-row-preservation","legacy_sha256":row["legacy_sha256"],"candidate_sha256":row["candidate_sha256"],"reason":"component approved difference","approved_by":"component-reviewer"}
+        approved=execute("V-025",candidate_modes=("diverge",),differences=[exact])
+        wrong=execute("V-025",candidate_modes=("diverge",),differences=[{**exact,"candidate_sha256":"0"*64}])
+        check("campaign.parity.exact-approved-difference-only",lambda:all(value["status"]=="PASS" for value in approved.values()) and status(wrong,"typed-row-preservation")=="FAIL" and status(wrong,"approved-differences-only")=="FAIL")
+        tampered=execute("V-025",candidate_modes=("tamper",))
+        files["configuration"].write_text("component configuration")
+        leaked=execute("V-025",legacy=("leak",))
+        check("campaign.parity.input-tamper-and-cleanup-detected",lambda:status(tampered,"original-archive-retained")=="FAIL" and status(leaked,"complete-cleanup")=="FAIL" and status(leaked,"typed-row-preservation")=="PASS")
 
 def run():
     check("campaign.deterministic.exact1500-reference", lambda: d.reconstruct(trace(), {"sandboxes": 100, "slots": 200, "initial_authority_epoch":EPOCH1,"deployment_id":DEPLOYMENT})["session_lifetimes"] == 1500)
@@ -142,7 +230,7 @@ def run():
     check("campaign.deterministic.unknown-event", lambda: reject(lambda: model([small("invented", False)])))
     check("campaign.deterministic.duplicate-json-rejected", lambda: reject(lambda: d.decode('{"same":1,"same":2}')))
     check("campaign.deterministic.nonfinite-json-rejected", lambda: reject(lambda: d.decode('{"x":NaN}')))
-    profile = {"sandboxes":100,"slots":200,"session_lifetimes":1500,"virtual_hours":72,"initial_authority_epoch":EPOCH1,"deployment_id":DEPLOYMENT,"authority_contract":"04-journal-v1"}
+    profile = {"sandboxes":100,"slots":200,"session_lifetimes":1500,"virtual_hours":72,"readers":300,"initial_authority_epoch":EPOCH1,"deployment_id":DEPLOYMENT,"authority_contract":"04-journal-v1"}
     commands = d.schedule(profile, 17)
     check("campaign.deterministic.seeded-schedule", lambda: commands == d.schedule(profile, 17) and commands != d.schedule(profile, 19))
     check("campaign.deterministic.schedule-workload-count", lambda: len([row for row in commands if row["operation"] == "session"]) == 1500)
@@ -277,7 +365,7 @@ def run():
         repositories = [{"repository_id":"00000000-0000-0000-0000-000000000001", "candidate_head":"a"*40, "input_manifest_digest":"sha256:"+"b"*64}]
         source = folder / "source-set.json"
         source.write_bytes(d.canonical(repositories))
-        value = {"schema_version":1, "campaign_id":"component-input-validation", "kind":"deterministic", "source_revision":"a"*40, "source_manifest_digest":"sha256:"+d.digest(d.canonical(repositories)), "approval":{"approved":True,"kind":"deterministic"}, "profile":{"sandboxes":100,"slots":200,"session_lifetimes":1500,"virtual_hours":72,"initial_authority_epoch":EPOCH1,"deployment_id":DEPLOYMENT,"authority_contract":"04-journal-v1"}, "inputs":{"planning":[pin(corpus)],"graph":[pin(corpus)],"source_manifest":[pin(source)]},"adapters":{},"seeds":[17,19]}
+        value = {"schema_version":1, "campaign_id":"component-input-validation", "kind":"deterministic", "source_revision":"a"*40, "source_manifest_digest":"sha256:"+d.digest(d.canonical(repositories)), "approval":{"approved":True,"kind":"deterministic"}, "profile":{"sandboxes":100,"slots":200,"session_lifetimes":1500,"virtual_hours":72,"readers":300,"initial_authority_epoch":EPOCH1,"deployment_id":DEPLOYMENT,"authority_contract":"04-journal-v1"}, "inputs":{"planning":[pin(corpus)],"graph":[pin(corpus)],"source_manifest":[pin(source)]},"adapters":{},"seeds":[17,19]}
         manifest_path = folder / "profile.json"
         def load(candidate):
             manifest_path.write_text(json.dumps(candidate))
@@ -295,6 +383,17 @@ def run():
         check("campaign.deterministic.source-set-hash-mismatch",lambda:reject(lambda:load(changed)))
         load(value)
         check("campaign.deterministic.missing-real-bridges-block",lambda:reject(lambda:d.run(manifest_path,folder/"evidence"),d.Blocked))
+        few_readers=copy.deepcopy(value);few_readers["profile"]["readers"]=50
+        check("campaign.deterministic.readers-required-in-profile",lambda:reject(lambda:load(few_readers)))
+        def simulation_cli():
+            load(value)
+            evidence=folder/"simulation-evidence"
+            record=d.simulate_campaign(manifest_path,evidence)
+            report=json.loads(Path(record["path"]).read_text())
+            return report["evidence_scope"]=="SIMULATION_ONLY" and report["live_frontier_qualified"] is False and report["implementation_evidence"] is False and len(report["sweep"])==2*len(d.sweep_points()) and len(report["fault_replay"])==2*len(d.fault_combinations(17))
+        check("campaign.deterministic.simulation-report-separated",simulation_cli)
+    mixed_load_checks()
+    parity_checks()
     # Exercise the same focused regression methods through the registered runner.
     import unittest
     sys.path.insert(0, str(ROOT / "tests/hyperfide"))

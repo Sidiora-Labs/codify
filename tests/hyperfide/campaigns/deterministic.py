@@ -28,6 +28,9 @@ class CampaignError(Exception):
 class Blocked(CampaignError):
     pass
 
+REQUIRED_FAULTS = ("stale_generation", "reversed_commits", "unknown_create", "replica_lag", "saturation", "main_loss", "db_failover", "sandbox_loss", "credential_expiry")
+SIMULATED_AGENT = "SIMULATED"
+
 def require(condition, message):
     if not condition:
         raise CampaignError(message)
@@ -125,6 +128,8 @@ def load_manifest(path, kind):
         require(profile.get("authority_contract") == "04-journal-v1", "current two-lineage durable journal contract required for campaign execution")
     integer(profile.get("virtual_hours"), "virtual_hours")
     require(profile["virtual_hours"] >= 72, "72 virtual hours required")
+    if kind == "deterministic":
+        require(integer(profile.get("readers"), "readers") >= 200, "hundreds of concurrent readers required")
     require(isinstance(manifest["inputs"], dict) and {"planning", "graph"} <= set(manifest["inputs"]), "approved planning and graph inputs required")
     for name, pins in manifest["inputs"].items():
         require(isinstance(pins, list) and pins, "empty corpus: " + name)
@@ -435,6 +440,7 @@ class Reference:
         self.submitted, self.qualified, self.custody_generations = {}, set(), {}
         self.last_sequence, self.last_time = 0, -1
         self.peak, self.accepted = 0, 0
+        self.readers, self.reads, self.authoritative_reads = set(), 0, 0
 
     def apply(self, event):
         require(isinstance(event, dict), "event object required")
@@ -457,6 +463,17 @@ class Reference:
                 self.generations[task] = generation
                 self.attempts.add(attempt)
                 self.peak = max(self.peak, len(self.slots))
+        elif kind == "heartbeat":
+            owner = self.owners.get(event.get("task_id"))
+            accepted = event.get("epoch") == self.epoch and owner is not None and owner[:2] == (event.get("attempt_id"), event.get("generation"))
+        elif kind == "read":
+            reader, source = event.get("reader_id"), event.get("source")
+            require(isinstance(reader, str) and reader and source in ("primary", "replica"), "reader identity and read source required")
+            # Replica reads are served but never authoritative for ownership decisions.
+            accepted = source == "primary" and event.get("epoch") == self.epoch
+            self.readers.add(reader)
+            self.reads += 1
+            self.authoritative_reads += int(accepted)
         elif kind in ("revoke", "expire", "submit"):
             task = event.get("task_id")
             owner = self.owners.get(task)
@@ -549,7 +566,7 @@ class Reference:
             require(isinstance(event.get("fault"), str), "observed fault identity required")
             self.faults.add(event["fault"])
             accepted = False
-        elif kind in ("replica_read", "unknown_create", "saturation", "credential_expiry", "main_loss", "sandbox_loss"):
+        elif kind in ("replica_read", "unknown_create", "saturation", "credential_expiry", "main_loss", "sandbox_loss", "db_failover"):
             # Observations cannot grant authority or prove a resource absent.
             accepted = False
         else:
@@ -560,7 +577,7 @@ class Reference:
         return accepted
 
     def state(self):
-        return {"epoch": self.epoch, "owners": {key: list(value) for key, value in sorted(self.owners.items())}, "slots": dict(sorted(self.slots.items())), "custody": {key: list(value) for key, value in sorted(self.submitted.items())}, "resources": sorted(self.resources), "publications": dict(sorted(self.publications.items())), "effect_count": len(self.effects), "accepted_count": self.accepted, "peak_slots": self.peak, "session_lifetimes": len(self.attempts), "pending_creates": sorted(self.pending_creates), "faults": sorted(self.faults), "virtual_elapsed_ms": self.last_time}
+        return {"epoch": self.epoch, "owners": {key: list(value) for key, value in sorted(self.owners.items())}, "slots": dict(sorted(self.slots.items())), "custody": {key: list(value) for key, value in sorted(self.submitted.items())}, "resources": sorted(self.resources), "publications": dict(sorted(self.publications.items())), "effect_count": len(self.effects), "accepted_count": self.accepted, "peak_slots": self.peak, "session_lifetimes": len(self.attempts), "pending_creates": sorted(self.pending_creates), "faults": sorted(self.faults), "virtual_elapsed_ms": self.last_time, "reader_sessions": len(self.readers), "reads": self.reads, "authoritative_reads": self.authoritative_reads}
 
 def reconstruct(events, profile):
     require(isinstance(events, list) and events, "nonempty independently observed event stream required")
@@ -575,12 +592,247 @@ def schedule(profile, seed):
     horizon = profile["virtual_hours"] * 3600 * 1000
     for resource in range(profile["sandboxes"]):
         commands.append({"operation": "create", "operation_id": f"seed{seed}-create{resource}", "sandbox_index": resource, "virtual_ms": 0})
+    # Session count is a declared workload size, never a fixed start-history cap.
     for index in range(profile["session_lifetimes"]):
-        commands.append({"operation": "session", "operation_id": f"seed{seed}-session{index}", "task_index": index, "slot_index": index % profile["slots"], "virtual_ms": (index // profile["slots"]) * horizon // max(1, (profile["session_lifetimes"] + profile["slots"] - 1) // profile["slots"]), "reverse_commit_order": index % 2 == 0})
-    for fault in ("stale_generation", "reversed_commits", "unknown_create", "replica_lag", "saturation", "main_loss", "credential_expiry"):
+        commands.append({"operation": "session", "operation_id": f"seed{seed}-session{index}", "task_index": index, "slot_index": index % profile["slots"], "virtual_ms": (index // profile["slots"]) * horizon // max(1, (profile["session_lifetimes"] + profile["slots"] - 1) // profile["slots"]), "reverse_commit_order": index % 2 == 0, "agent_kind": SIMULATED_AGENT})
+    for index in range(integer(profile.get("readers"), "readers")):
+        commands.append({"operation": "read", "operation_id": f"seed{seed}-reader{index}", "reader_index": index, "source": rng.choice(("primary", "replica")), "virtual_ms": rng.randrange(horizon)})
+    for fault in REQUIRED_FAULTS:
         commands.append({"operation": "fault", "operation_id": f"seed{seed}-{fault}", "fault": fault, "virtual_ms": rng.randrange(horizon)})
     commands.append({"operation": "cleanup", "operation_id": f"seed{seed}-cleanup", "virtual_ms": horizon})
     return sorted(commands, key=lambda row: (row["virtual_ms"], row["operation_id"]))
+
+def require_simulated_agents(events):
+    claims = [event for event in events if isinstance(event, dict) and event.get("kind") == "claim"]
+    require(claims and all(event.get("agent_kind") == SIMULATED_AGENT for event in claims), "simulated agents must be labelled as simulated")
+    return len({event.get("attempt_id") for event in claims if event.get("accepted") is True})
+
+SWEEP_DIMENSIONS = {"concurrency": (25, 200, 250), "batch_size": (1, 100, 1000), "write_read_ratio": ("1:9", "1:1", "9:1"), "replica_lag_ms": (0, 2000)}
+SWEEP_PROFILE = {"sandboxes": 100, "slots": 200, "session_lifetimes": 400, "virtual_hours": 72, "readers": 300, "graph_symbols": 5000}
+SIMULATED_POOL = 50
+
+class Trace:
+    """Generator-side expected decisions; the Reference independently re-derives them."""
+    def __init__(self, epoch):
+        self.events, self.epoch, self.clock = [], epoch, 0
+
+    def add(self, kind, accepted, at=None, **fields):
+        if at is not None:
+            self.clock = max(self.clock, at)
+        self.events.append({"sequence": len(self.events) + 1, "virtual_ms": self.clock, "kind": kind, "operation_id": "sim" + str(len(self.events) + 1), "epoch": self.epoch, "accepted": accepted, **fields})
+        return self.events[-1]
+
+def ratio(value):
+    require(isinstance(value, str) and re.fullmatch(r"[1-9][0-9]*:[1-9][0-9]*", value), "write:read ratio required")
+    writes, reads = value.split(":")
+    return int(writes), int(reads)
+
+def mixed_trace(profile, seed, faults=(), concurrency=None, batch_size=1000, write_read_ratio="1:9", replica_lag_ms=0, graph_symbols=None):
+    """Seeded mixed graph/coordination/reader traffic with injected stale and malicious events."""
+    require(len(set(faults)) == len(faults) and set(faults) <= set(REQUIRED_FAULTS), "unknown or duplicate injected fault")
+    rng = random.Random(seed)
+    sandboxes, slots, sessions, readers = (integer(profile.get(key), key) for key in ("sandboxes", "slots", "session_lifetimes", "readers"))
+    require(sandboxes >= 2, "at least two sandboxes required")
+    horizon = integer(profile.get("virtual_hours"), "virtual_hours") * 3600000
+    concurrency = integer(slots if concurrency is None else concurrency, "concurrency")
+    batch_size = integer(batch_size, "graph batch size")
+    symbols = integer(profile.get("graph_symbols", 0) if graph_symbols is None else graph_symbols, "graph symbols", 0)
+    integer(replica_lag_ms, "replica lag", 0)
+    writes, reads_per = ratio(write_read_ratio)
+    width = min(concurrency, slots)
+    waves = -(-sessions // width)
+    full_waves = [wave for wave in range(waves) if width == slots and min(sessions, (wave + 1) * width) - wave * width == slots]
+    if "saturation" in faults:
+        require(full_waves, "saturation injection requires a fully occupied slot wave")
+    when = {fault: rng.choice(full_waves) if fault == "saturation" else rng.randrange(waves) for fault in faults}
+    wave_ms = horizon // (waves + 1)
+    trace, injected = Trace(profile["initial_authority_epoch"]), {}
+    def inject(fault, kind, **fields):
+        injected[fault] = injected.get(fault, 0) + 1
+        return trace.add(kind, False, injected=fault, **fields)
+    resources, pending = [], None
+    for index in range(sandboxes):
+        create = trace.add("create_intent", True)
+        if index == 0 and "unknown_create" in faults:
+            trace.add("fault_observed", False, fault="unknown_create")
+            inject("unknown_create", "unknown_create")
+            pending = (create["operation_id"], "sandbox-%d-%d" % (seed, index))
+            continue
+        resources.append("sandbox-%d-%d" % (seed, index))
+        trace.add("provider_observe", True, resource_id=resources[-1], create_operation_id=create["operation_id"])
+    if pending:
+        # The reservation of an unknown create still consumes capacity.
+        inject("unknown_create", "create_intent")
+    batches = -(-symbols // batch_size)
+    for number in range(batches):
+        trace.add("effect", True, effect_key="graph-batch-%d-%d" % (seed, number), graph_symbols=min(batch_size, symbols - number * batch_size))
+    next_task, reader, rejected_claims, latencies, per_reader = 0, 0, 0, [], [0] * readers
+    queueing = max(0, concurrency - SIMULATED_POOL)
+    def cost(base_us):
+        latencies.append(base_us + base_us * queueing // SIMULATED_POOL)
+    latencies.extend([5000 + 10 * min(batch_size, symbols) + 5000 * queueing // SIMULATED_POOL] * batches)
+    for wave in range(waves):
+        trace.clock = max(trace.clock, wave * wave_ms + rng.randrange(max(1, wave_ms // 2)))
+        owners = []
+        for position, number in enumerate(range(next_task, min(next_task + width, sessions))):
+            owners.append({"task_id": "task-%d" % number, "attempt_id": "attempt-%d-%d" % (seed, number), "slot_id": "slot-%d" % position, "generation": 1})
+            trace.add("claim", True, agent_kind=SIMULATED_AGENT, **owners[-1])
+            cost(4000)
+        next_task += len(owners)
+        if pending and wave == 0:
+            trace.add("provider_observe", True, resource_id=pending[1], create_operation_id=pending[0])
+            resources.append(pending[1])
+            pending = None
+        overflow = concurrency - slots if concurrency > slots and len(owners) == slots else 0
+        if "saturation" in faults and wave == when["saturation"]:
+            trace.add("fault_observed", False, fault="saturation")
+            trace.add("saturation", False)
+            overflow = max(overflow, 1)
+        for extra in range(overflow):
+            # Offered load above registered slots is refused, never silently queued as authority.
+            inject("saturation", "claim", task_id="overflow-%d-%d" % (wave, extra), attempt_id="overflow-%d-%d-%d" % (seed, wave, extra), slot_id="overflow-slot-%d" % extra, generation=1, agent_kind=SIMULATED_AGENT)
+            rejected_claims += 1
+            cost(4000)
+        for owner in owners:
+            trace.add("heartbeat", True, task_id=owner["task_id"], attempt_id=owner["attempt_id"], generation=owner["generation"])
+            cost(1000)
+            trace.add("effect", True, effect_key="artifact-" + owner["attempt_id"])
+            trace.add("effect", True, effect_key="review-" + owner["attempt_id"])
+            cost(3000)
+            cost(3000)
+        for number in range(len(owners) * reads_per // writes):
+            source = "replica" if number % 2 else "primary"
+            trace.add("read", source == "primary", reader_id="reader-%d" % (reader % readers), source=source, replica_lag_ms=replica_lag_ms if source == "replica" else 0)
+            per_reader[reader % readers] += 1
+            reader += 1
+            cost(1000 + (1000 * replica_lag_ms if source == "replica" else 0))
+        active = list(owners)
+        if owners and "replica_lag" in faults and wave == when["replica_lag"]:
+            trace.add("fault_observed", False, fault="replica_lag")
+            inject("replica_lag", "replica_read")
+            # A lagged replica showing the task free must not grant a second owner.
+            inject("replica_lag", "claim", task_id=owners[0]["task_id"], attempt_id="lagged-" + owners[0]["attempt_id"], slot_id="lagged-slot", generation=2, agent_kind=SIMULATED_AGENT)
+            rejected_claims += 1
+        if owners and "credential_expiry" in faults and wave == when["credential_expiry"]:
+            trace.add("fault_observed", False, fault="credential_expiry")
+            trace.add("credential_expiry", False)
+            # Retrying after credential renewal must not duplicate the durable effect.
+            inject("credential_expiry", "effect", effect_key="artifact-" + owners[0]["attempt_id"])
+        for fault in ("main_loss", "db_failover"):
+            if owners and fault in faults and wave == when[fault]:
+                trace.add("fault_observed", False, fault=fault)
+                trace.add(fault, False)
+                for owner in active:
+                    trace.add("expire", True, task_id=owner["task_id"], attempt_id=owner["attempt_id"], generation=owner["generation"], recovery=fault)
+                active = []
+                inject(fault, "heartbeat", task_id=owners[0]["task_id"], attempt_id=owners[0]["attempt_id"], generation=owners[0]["generation"])
+        if "sandbox_loss" in faults and wave == when["sandbox_loss"]:
+            lost = resources.pop(1)
+            trace.add("fault_observed", False, fault="sandbox_loss")
+            inject("sandbox_loss", "sandbox_loss", resource_id=lost)
+            trace.add("cleanup", True, resource_id=lost, confirmed_absent=True, recovery="sandbox_loss")
+            create = trace.add("create_intent", True, recovery="sandbox_loss")
+            resources.append("replacement-%d-%d" % (seed, wave))
+            trace.add("provider_observe", True, resource_id=resources[-1], create_operation_id=create["operation_id"], recovery="sandbox_loss")
+        for owner in active:
+            trace.add("revoke", True, task_id=owner["task_id"], attempt_id=owner["attempt_id"], generation=owner["generation"])
+            cost(2000)
+        if owners and "stale_generation" in faults and wave == when["stale_generation"]:
+            trace.add("fault_observed", False, fault="stale_generation")
+            inject("stale_generation", "claim", task_id=owners[0]["task_id"], attempt_id="late-" + owners[0]["attempt_id"], slot_id="late-slot", generation=owners[0]["generation"], agent_kind=SIMULATED_AGENT)
+            inject("stale_generation", "heartbeat", task_id=owners[0]["task_id"], attempt_id=owners[0]["attempt_id"], generation=owners[0]["generation"])
+            rejected_claims += 1
+        if owners and "reversed_commits" in faults and wave == when["reversed_commits"]:
+            trace.add("fault_observed", False, fault="reversed_commits")
+            # The older acknowledgement arrives after the newer commit and must be inert.
+            inject("reversed_commits", "revoke", task_id=owners[-1]["task_id"], attempt_id=owners[-1]["attempt_id"], generation=owners[-1]["generation"])
+            inject("reversed_commits", "effect", effect_key="review-" + owners[-1]["attempt_id"])
+    for resource in resources:
+        trace.add("cleanup", True, horizon, resource_id=resource, confirmed_absent=True)
+    summary = {"graph_symbols": symbols, "graph_batch_size": batch_size, "graph_round_trips": batches, "per_symbol_round_trips": symbols,
+               "rejected_claims": rejected_claims, "injected": dict(sorted(injected.items())), "latencies_us": latencies, "per_reader_reads": per_reader,
+               "connection_peak": min(concurrency + (1 if reads_per else 0), SIMULATED_POOL), "concurrency": concurrency}
+    return trace.events, summary
+
+def check_invariants(events, state, profile, faults=()):
+    require(not state["owners"] and not state["slots"] and not state["custody"] and not state["resources"] and not state["pending_creates"], "hidden backlog, orphan resource or unresolved create after cleanup")
+    require(state["peak_slots"] <= profile["slots"], "registered slot limit exceeded")
+    require(all(event["accepted"] is False for event in events if "injected" in event), "injected stale/malicious event was accepted")
+    for fault in faults:
+        require(fault in state["faults"] and any(event.get("injected") == fault for event in events), "fault not exercised: " + fault)
+    require_simulated_agents(events)
+    return True
+
+def nearest_rank(samples, fraction):
+    ordered = sorted(samples)
+    return ordered[max(0, -(-len(ordered) * fraction[0] // fraction[1]) - 1)]
+
+def simulated_metrics(summary, state, virtual_ms):
+    """Virtual-time model outputs: descriptive simulation, never a measured baseline."""
+    from decimal import Decimal
+    samples, reads = summary["latencies_us"], summary["per_reader_reads"]
+    require(samples and virtual_ms > 0, "simulated samples required")
+    def ms(value):
+        return format(Decimal(value) / 1000, "f")
+    total = sum(reads)
+    fairness = format(Decimal(total * total) / (len(reads) * sum(value * value for value in reads)), ".6f") if total else None
+    return {"measurement_kind": "SIMULATED_VIRTUAL", "quantile_basis": "EXACT_SAMPLES", "sample_count": len(samples),
+            "units": {"p50": "ms", "p95": "ms", "p99": "ms", "throughput": "1/s", "error_count": "count", "connection_peak": "count", "lock_wait_count": "count"},
+            "p50": ms(nearest_rank(samples, (50, 100))), "p95": ms(nearest_rank(samples, (95, 100))), "p99": ms(nearest_rank(samples, (99, 100))),
+            "throughput": format(Decimal(state["accepted_count"]) * 1000 / virtual_ms, ".6f"), "error_count": "0",
+            "rejected_by_invariant": summary["rejected_claims"], "connection_peak": str(summary["connection_peak"]),
+            "lock_wait_count": str(summary["rejected_claims"]), "reader_fairness_jain": fairness, "query_plans": "NOT_OBSERVED_IN_SIMULATION"}
+
+def sweep_points(dimensions=SWEEP_DIMENSIONS):
+    import itertools
+    names = sorted(dimensions)
+    return [dict(zip(names, values)) for values in itertools.product(*(dimensions[name] for name in names))]
+
+def sweep(profile, seed, dimensions=SWEEP_DIMENSIONS):
+    results = []
+    for point in sweep_points(dimensions):
+        events, summary = mixed_trace(profile, seed, (), point["concurrency"], point["batch_size"], point["write_read_ratio"], point["replica_lag_ms"])
+        state = reconstruct(events, profile)
+        check_invariants(events, state, profile)
+        require(state["effect_count"] >= summary["graph_round_trips"], "graph batches were not durably applied")
+        results.append({"point": point, "state_sha256": digest(canonical(state)), "peak_slots": state["peak_slots"], "graph_round_trips": summary["graph_round_trips"],
+                        "per_symbol_round_trips": summary["per_symbol_round_trips"], "metrics": simulated_metrics(summary, state, state["virtual_elapsed_ms"])})
+    return results
+
+def fault_combinations(seed, extra=4):
+    import itertools
+    rng = random.Random(seed)
+    combinations = [tuple(pair) for pair in itertools.combinations(REQUIRED_FAULTS, 2)]
+    combinations += [tuple(sorted(rng.sample(REQUIRED_FAULTS, 3))) for _ in range(extra)]
+    return combinations + [REQUIRED_FAULTS]
+
+def replay_faults(profile, seed, combinations=None):
+    """Every combination must preserve the union of its single-fault invariants."""
+    results = []
+    for combination in combinations or fault_combinations(seed):
+        events, summary = mixed_trace(profile, seed, combination, write_read_ratio="1:1")
+        state = reconstruct(events, profile)
+        check_invariants(events, state, profile, combination)
+        results.append({"faults": list(combination), "seed": seed, "trace_sha256": digest(canonical(events)), "state_sha256": digest(canonical(state)), "injected": summary["injected"]})
+    return results
+
+def simulate(profile, seeds):
+    """Independent reference-model replay of the declared large-run profile; simulation only."""
+    require(isinstance(seeds, list) and len(seeds) >= 2 and len(set(seeds)) == len(seeds) and all(type(seed) is int for seed in seeds), "multiple distinct integer fault seeds required")
+    rows = []
+    for seed in seeds:
+        started = time.monotonic_ns()
+        events, summary = mixed_trace(profile, seed, REQUIRED_FAULTS)
+        state = reconstruct(events, profile)
+        check_invariants(events, state, profile, REQUIRED_FAULTS)
+        require(state["session_lifetimes"] == profile["session_lifetimes"] and state["peak_slots"] == profile["slots"], "declared session/slot schedule was not exercised")
+        require(state["virtual_elapsed_ms"] == profile["virtual_hours"] * 3600000, "declared virtual horizon was not exercised")
+        require(state["reader_sessions"] == profile["readers"], "declared reader population was not exercised")
+        rows.append({"seed": seed, "trace_sha256": digest(canonical(events)), "state_sha256": digest(canonical(state)), "events": len(events),
+                     "simulated_agents": require_simulated_agents(events), "reader_sessions": state["reader_sessions"], "peak_slots": state["peak_slots"],
+                     "virtual_elapsed_ms": state["virtual_elapsed_ms"], "wall_clock_ns": time.monotonic_ns() - started, "injected": summary["injected"]})
+    return {"schema_version": 1, "evidence_scope": "SIMULATION_ONLY", "live_frontier_qualified": False, "agents": SIMULATED_AGENT,
+            "time_basis": {"virtual_elapsed_ms": "simulated schedule clock", "wall_clock_ns": "host monotonic replay duration"}, "seeds": rows}
 
 def compare_metrics(current, baseline):
     """Preserve decimal measurements and histogram bounds; never infer causality."""
@@ -627,34 +879,52 @@ def run(path, evidence):
     results = []
     for seed in seeds:
         request = {"schema_version": 1, "kind": "deterministic", "source_revision": manifest["source_revision"], "source_manifest_digest": manifest["source_manifest_digest"], "profile": manifest["profile"], "inputs": manifest["inputs"], "seed": seed, "schedule": schedule(manifest["profile"], seed)}
+        started = time.monotonic_ns()
         observations = {name: adapter.call(request)[0] for name, adapter in adapters.items()}
+        wall_clock_ns = time.monotonic_ns() - started
         current, baseline = observations["implementation"], observations["baseline"]
         require(current.get("mode") == baseline.get("mode") == "SIMULATED", "deterministic results must identify simulation")
         require(current.get("source_manifest_digest") == baseline.get("source_manifest_digest") == manifest["source_manifest_digest"], "actual multi-repository source set differs from campaign")
         state = reconstruct(current.get("events"), manifest["profile"])
         require(state == current.get("final_state"), "reported final state differs from independently reconstructed state")
+        require_simulated_agents(current["events"])
+        require(state["reader_sessions"] >= manifest["profile"]["readers"], "declared concurrent reader population was not exercised")
         baseline_state = reconstruct(baseline.get("events"), manifest["profile"])
         require(state == baseline_state, "implementation/baseline final state parity failed")
         require(not state["owners"] and not state["slots"] and not state["custody"] and not state["resources"] and not state["pending_creates"], "incomplete final cleanup/inventory or unresolved creates")
         require(state["peak_slots"] >= 200, "200 simultaneously occupied simulated slots not observed")
         require(state["session_lifetimes"] == manifest["profile"]["session_lifetimes"] and state["virtual_elapsed_ms"] == manifest["profile"]["virtual_hours"] * 3600000, "declared schedule was not fully exercised")
-        require(set(state["faults"]) >= {"stale_generation", "reversed_commits", "unknown_create", "replica_lag", "saturation", "main_loss", "credential_expiry"}, "actual fault observation coverage incomplete")
+        require(set(state["faults"]) >= set(REQUIRED_FAULTS), "actual fault observation coverage incomplete")
         for corpus in ("planning", "graph"):
             require(current.get("input_digests", {}).get(corpus) == [pin["sha256"] for pin in manifest["inputs"][corpus]], "actual corpus coverage differs from pins")
         for domain in ("planning_result", "graph_query_results"):
             require(isinstance(current.get(domain), (dict, list)) and bool(current[domain]), "actual parsed planning/graph query results absent")
             require(canonical(current[domain]) == canonical(baseline.get(domain)), "planning/graph semantic parity failed")
         metrics = compare_metrics(current.get("metrics"), baseline.get("metrics"))
-        results.append({"seed": seed, "state": state, "metrics": metrics})
-    return sealed_write(directory / "result.json", {"schema_version": 1, "kind": "deterministic", "status": "PASS", "evidence_scope": "SIMULATION_ONLY", "live_frontier_qualified": False, "seeds": results})
+        results.append({"seed": seed, "state": state, "metrics": metrics, "virtual_elapsed_ms": state["virtual_elapsed_ms"], "wall_clock_ns": wall_clock_ns})
+    reference = simulate(manifest["profile"], seeds)
+    return sealed_write(directory / "result.json", {"schema_version": 1, "kind": "deterministic", "status": "PASS", "evidence_scope": "SIMULATION_ONLY", "live_frontier_qualified": False, "simulated_agents": True, "seeds": results, "reference_simulation": reference})
+
+def simulate_campaign(path, evidence):
+    """Reference-only replay: reports simulation separately and grants no implementation evidence."""
+    manifest, _ = load_manifest(path, "deterministic")
+    seeds = manifest.get("seeds")
+    profile = manifest["profile"]
+    sweep_profile = {**SWEEP_PROFILE, "initial_authority_epoch": profile["initial_authority_epoch"], "deployment_id": profile["deployment_id"]}
+    report = {**simulate(profile, seeds), "kind": "deterministic-reference-simulation", "implementation_evidence": False,
+              "sweep": [row for seed in seeds for row in sweep(sweep_profile, seed)], "fault_replay": [row for seed in seeds for row in replay_faults(sweep_profile, seed)]}
+    directory = Path(evidence) / (manifest["campaign_id"] + "-simulation-" + str(uuid.uuid4()))
+    directory.mkdir(parents=True, mode=0o700)
+    return sealed_write(directory / "simulation.json", report)
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--evidence", required=True)
+    parser.add_argument("--simulate", action="store_true", help="reference-model replay only; never implementation or live evidence")
     args = parser.parse_args()
     try:
-        print(json.dumps(run(args.manifest, args.evidence)))
+        print(json.dumps((simulate_campaign if args.simulate else run)(args.manifest, args.evidence)))
         return 0
     except (CampaignError, OSError, KeyError, TypeError) as exc:
         print(json.dumps({"status": "BLOCKED" if isinstance(exc, Blocked) else "FAIL", "error": str(exc), "live_frontier_qualified": False}), file=sys.stderr)

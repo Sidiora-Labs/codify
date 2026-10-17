@@ -84,7 +84,33 @@
     "campaign.authority.restored-database-is-distinct-from-external-head",
     "campaign.authority.retained-older-candidate-can-reconcile-positive-commit",
     "campaign.authority.sorted-request-hash-cannot-replace-actual-ordered-json-stringify",
-    "campaign.authority.unseen-database-lineage-rejected-even-with-valid-document-seal"
+    "campaign.authority.unseen-database-lineage-rejected-even-with-valid-document-seal",
+    "campaign.deterministic.readers-required-in-profile",
+    "campaign.deterministic.simulation-report-separated",
+    "campaign.deterministic.required-fault-set",
+    "campaign.deterministic.multi-seed-reference-simulation",
+    "campaign.deterministic.hundreds-of-readers",
+    "campaign.deterministic.replica-read-not-authoritative",
+    "campaign.deterministic.stale-heartbeat-fenced",
+    "campaign.deterministic.simulated-agents-labelled",
+    "campaign.deterministic.no-fixed-start-history-limit",
+    "campaign.deterministic.sweep-dimensions",
+    "campaign.deterministic.sweep-invariants-under-saturation",
+    "campaign.deterministic.graph-batching-avoids-amplification",
+    "campaign.deterministic.sweep-latency-distribution",
+    "campaign.deterministic.simulated-metrics-not-baseline",
+    "campaign.deterministic.fault-combinations-match-single-fault",
+    "campaign.deterministic.fault-seed-reproduces",
+    "campaign.deterministic.malicious-acceptance-detected",
+    "campaign.deterministic.no-hidden-backlog",
+    "campaign.parity.inventory-matches-registry",
+    "campaign.parity.component-bridges-pass",
+    "campaign.parity.unapproved-manifest-digest-blocks",
+    "campaign.parity.absent-manifest-blocks-without-pass",
+    "campaign.parity.missing-bridge-blocks",
+    "campaign.parity.semantic-difference-fails",
+    "campaign.parity.exact-approved-difference-only",
+    "campaign.parity.input-tamper-and-cleanup-detected"
   ],
   "cases": [
     "V-024",
@@ -105,7 +131,9 @@
     "tests/hyperfide/campaigns/deterministic.py",
     "tests/hyperfide/cases/tasks/27_2.py",
     "tests/hyperfide/campaigns/authority.py",
-    "tests/hyperfide/test_authority_campaign.py"
+    "tests/hyperfide/test_authority_campaign.py",
+    "tests/hyperfide/campaigns/parity.py",
+    "tests/hyperfide/cases/parity/v020.py"
   ],
   "source_roots": [
     "tests/hyperfide/campaigns"

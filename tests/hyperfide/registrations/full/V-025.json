@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "variant": "full:V-025",
+  "task": "27.2",
+  "scope": "full-case",
+  "cases": [
+    "V-025"
+  ],
+  "assertion_ids": [
+    "parity.v025.accepted-import-snapshot-binding",
+    "parity.v025.actual-schema-capabilities",
+    "parity.v025.typed-row-preservation",
+    "parity.v025.deterministic-identity-relationships",
+    "parity.v025.actual-import-readback",
+    "parity.v025.graph-schema-upgrade",
+    "parity.v025.search-semantics-preserved",
+    "parity.v025.unicode-trigram-edge-matrix",
+    "parity.v025.incomplete-snapshot-refusal",
+    "parity.v025.durable-boundary-interruptions",
+    "parity.v025.idempotent-resume",
+    "parity.v025.specified-recovery-strategy",
+    "parity.v025.source-provenance-preserved",
+    "parity.v025.unsupported-legacy-diagnostics",
+    "parity.v025.original-archive-retained",
+    "parity.v025.historical-state-not-live-authority",
+    "parity.v025.no-partial-graph-publication",
+    "parity.v025.approved-differences-only",
+    "parity.v025.complete-cleanup",
+    "parity.v025.wal-consistent-capture",
+    "parity.v025.complete-table-column-class-inventory",
+    "parity.v025.forward-version-client-refusal",
+    "parity.v025.unresolved-reference-diagnostics"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/parity/v025.py"
+  ],
+  "source_files": [
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/registry.json",
+    "tests/hyperfide/campaigns/parity.py",
+    "tests/hyperfide/campaigns/deterministic.py",
+    "tests/hyperfide/campaigns/authority.py",
+    "tests/hyperfide/cases/parity/v025.py"
+  ],
+  "source_roots": [
+    "tests/hyperfide/campaigns"
+  ],
+  "required_env": [
+    "HYPERFIDE_PARITY_V025_MANIFEST"
+  ],
+  "fixtures": [],
+  "resources": [],
+  "timeout_seconds": 14400
+}

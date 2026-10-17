@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "campaign_id": "hyperfide-full-v-020-parity-v1",
+  "registered_variant": "full:V-020",
+  "scope": "full-case",
+  "case_ids": [
+    "V-020"
+  ],
+  "expected_assertion_ids": [
+    "parity.v020.source-revision",
+    "parity.v020.configuration",
+    "parity.v020.legacy-toolchain",
+    "parity.v020.approved-corpus-complete",
+    "parity.v020.symbol-semantics",
+    "parity.v020.reference-semantics",
+    "parity.v020.caller-semantics",
+    "parity.v020.contract-findings",
+    "parity.v020.word-body-fts",
+    "parity.v020.comment-fts",
+    "parity.v020.identifier-trigram",
+    "parity.v020.body-trigram",
+    "parity.v020.identifier-segmentation",
+    "parity.v020.unicode-tokenisation",
+    "parity.v020.case-and-punctuation",
+    "parity.v020.phrase-and-boolean-syntax",
+    "parity.v020.path-glob-language-filters",
+    "parity.v020.rank-order",
+    "parity.v020.explicit-rank-ties",
+    "parity.v020.branch-isolation",
+    "parity.v020.folded-branch-projection",
+    "parity.v020.missing-source-diagnostics",
+    "parity.v020.contentless-body-readback",
+    "parity.v020.stable-pagination",
+    "parity.v020.output-and-time-budgets",
+    "parity.v020.approved-differences-only",
+    "parity.v020.complete-source-provenance",
+    "parity.v020.original-inputs-unchanged",
+    "parity.v020.complete-cleanup",
+    "parity.v020.coverage-and-freshness",
+    "parity.v020.exact-name-precedence",
+    "parity.v020.negative-empty-escaped-parameterisation",
+    "parity.v020.structured-timeout-and-truncation",
+    "parity.v020.explain-plan-and-round-trips"
+  ],
+  "approval": {
+    "approved": false,
+    "allowed_actions": []
+  },
+  "inputs": [
+    {
+      "path": "tests/hyperfide/qualify.py",
+      "sha256": "8aa17f5e2572c8557f15353f7267e98600547fb0f2693486c0e0f2fc1abce8c2",
+      "size": 37538
+    },
+    {
+      "path": "tests/hyperfide/check-evidence.py",
+      "sha256": "cc8de56fb25bea153490b4143a231f1ff6f4dac758baaea4bf90fb7d9ba236a0",
+      "size": 30633
+    },
+    {
+      "path": "tests/hyperfide/registry.json",
+      "sha256": "59c858064cf8f112221068f9b2c6b7c9a3d5480aaad0792baa0845e1e601b52e",
+      "size": 11102
+    },
+    {
+      "path": "tests/hyperfide/campaigns/parity.py",
+      "sha256": "f44b8ce87e585468ce8056ad7066bf808e7cecc70fde4492d327a0dcac289356",
+      "size": 14302
+    },
+    {
+      "path": "tests/hyperfide/campaigns/deterministic.py",
+      "sha256": "e43c5539201be7c4f6f28750f74bbeb6f973a6b3728bb694c957a7933454bf56",
+      "size": 65545
+    },
+    {
+      "path": "tests/hyperfide/campaigns/authority.py",
+      "sha256": "1e6c2ba995bffa4eb765e98926ac35de3dd366d7c49a9ca8eaa9706eab6bdc3a",
+      "size": 16901
+    },
+    {
+      "path": "tests/hyperfide/cases/parity/v020.py",
+      "sha256": "9426a5425109f63252c1fc6dd6070a163a107e174e2ba597c4dc21f145868e3e",
+      "size": 322
+    }
+  ],
+  "resources": [],
+  "seed": 17,
+  "policy": {
+    "evidence_scope": "FULL_CASE",
+    "qualification": "UNRUN",
+    "approval_status": "PENDING_OPERATOR_APPROVAL",
+    "approved_parity_manifest_sha256": null,
+    "approved_parity_manifest_env": "HYPERFIDE_PARITY_V020_MANIFEST",
+    "missing_inputs": [
+      "approved manifest-selected legacy codegraph corpus",
+      "pinned legacy toolchain and configuration",
+      "golden legacy query outputs",
+      "actual legacy and candidate search bridges"
+    ],
+    "note": "Approval requires a new immutable manifest binding the approved parity manifest digest; this file never claims a PASS."
+  }
+}
