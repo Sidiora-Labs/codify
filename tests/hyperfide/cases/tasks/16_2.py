@@ -239,9 +239,9 @@ def install_cases():
     if "--cleanup" not in sys.argv:
         # The registered --cleanup run reports the single observed cleanup event; the in-run cleanup stays silent.
         original_cleanup=module.cleanup
-        def cleanup():
+        def cleanup(report=False):
             with contextlib.redirect_stdout(io.StringIO()):
-                return original_cleanup()
+                return original_cleanup(report=report)
         module.cleanup=cleanup
 
 install_cases()
