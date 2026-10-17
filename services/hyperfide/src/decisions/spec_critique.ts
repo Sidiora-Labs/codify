@@ -39,10 +39,15 @@ export function validateCritique(value:unknown,packetState:Data):Data[]{
  });
 }
 export function amendmentSummary(value:unknown):Data{
- const analysis=exact(value,['schema_version','proposal_digest','accepted','dispatch_authority','status','diagnostics','impact','structural']);
+ const validationFields=(value:unknown,keys:string[],required=keys):Data=>{
+  try{return exact(value,keys,required);}catch{fail('DECISION_VALIDATION_INVALID','Spec validator returned unexpected or missing fields');}
+ };
+ const analysis=validationFields(value,['schema_version','proposal_digest','accepted','dispatch_authority','status','diagnostics','impact','structural']);
  if(analysis.schema_version!==1||analysis.accepted!==false||analysis.dispatch_authority!==false||!['STRUCTURALLY_VALID','INVALID'].includes(String(analysis.status)))fail('DECISION_VALIDATION_INVALID','Spec validator returned an invalid nonaccepting analysis');
- const impact=exact(analysis.impact,['added','changed','retired','affected_task_ids','global_intent_changed','external_dependents']),counts:Data={},bounded:Data={};
+ const baseFields=['added','changed','retired','affected_task_ids','global_intent_changed','external_dependents'];
+ const impact=validationFields(analysis.impact,[...baseFields,'revalidation','unaffected_active_task_ids'],baseFields),counts:Data={},bounded:Data={};
  for(const key of ['added','changed','retired','affected_task_ids','external_dependents']){const rows=list(impact[key],200000);counts[key]=rows.length;bounded[key]=rows.slice(0,128);}
+ for(const key of ['revalidation','unaffected_active_task_ids'])if(key in impact){const rows=list(impact[key],200000);counts[key]=rows.length;bounded[key]=rows.slice(0,128);}
  if(typeof impact.global_intent_changed!=='boolean')fail('DECISION_VALIDATION_INVALID','Spec validator omitted global intent impact');
  const structural=obj(analysis.structural),{edges,...report}=structural;
  return {schema_version:1,proposal_digest:str(analysis.proposal_digest),accepted:false,dispatch_authority:false,status:analysis.status,diagnostics:list(analysis.diagnostics,128),
