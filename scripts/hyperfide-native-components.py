@@ -186,7 +186,8 @@ def resolve(library, declaration):
         problems.append('pkg-config and header versions differ')
     if 'tls_backend' in declaration:
         backends = tool(['curl-config', '--ssl-backends'])
-        observed['tls_backends'] = sorted(part.strip() for part in (backends or '').split(',') if part.strip())
+        # curl-config names a backend with an optional qualifier ("OpenSSL v3+", "GnuTLS"); the declaration pins the bare name.
+        observed['tls_backends'] = sorted({part.strip().split()[0] for part in (backends or '').split(',') if part.strip()})
         if declaration['tls_backend'] not in observed['tls_backends']:
             problems.append('qualified TLS backend ' + declaration['tls_backend'] + ' unavailable')
     observed['development_package'] = package(declaration.get('debian_development'))
