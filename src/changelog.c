@@ -162,20 +162,72 @@ static const char *version_source(const char *tree, char *path, size_t cap)
     return path;
 }
 
-/* the version in one rendering of the source file; "" when none */
-static void version_parse(const char *src, const char *body, char *out, size_t cap)
+/* The replacement text of the first `#define name ...` in body, or NULL. */
+static const char *macro_value(const char *body, const char *name, size_t len)
 {
+    for (const char *line = body; *line; )
+    {
+        const char *end = strchr(line, '\n');
+        if (!end)
+            end = line + strlen(line);
+        const char *p = line;
+        while (p < end && isblank((unsigned char)*p))
+            p++;
+        if (p < end && *p++ == '#')
+        {
+            while (p < end && isblank((unsigned char)*p))
+                p++;
+            if (end - p >= 7 && !strncmp(p, "define", 6) && isblank((unsigned char)p[6]))
+            {
+                p += 6;
+                while (p < end && isblank((unsigned char)*p))
+                    p++;
+                if ((size_t)(end - p) > len && !strncmp(p, name, len) &&
+                    isblank((unsigned char)p[len]))
+                    return p + len + strspn(p + len, " \t");
+            }
+        }
+        line = *end ? end + 1 : end;
+    }
+    return NULL;
+}
+
+/* The version in one rendering of the source file; "" when none. A header's
+ * CG_VERSION is followed through `#define CG_VERSION OTHER_MACRO` (src/cg.h
+ * names HYPERFIDE_VERSION since 2.0; older revisions define the literal).
+ * External only so tests/unit/test_changelog.c can link it. */
+void changelog_version_parse(const char *src, const char *body, char *out, size_t cap);
+void changelog_version_parse(const char *src, const char *body, char *out, size_t cap)
+{
+    if (!cap)
+        return;
     out[0] = 0;
     if (!body)
         return;
     const char *dot = strrchr(src, '.');
     if (dot && !strcmp(dot, ".h"))
     {
-        const char *d = strstr(body, "define CG_VERSION");
-        const char *q = d ? strchr(d, '"') : NULL;
-        const char *e = q ? strchr(q + 1, '"') : NULL;
-        if (q && e)
-            snprintf(out, cap, "%.*s", (int)(e - q - 1), q + 1);
+        const char *name = "CG_VERSION";
+        size_t len = strlen(name);
+        for (int hop = 0; hop < 8; hop++)
+        {
+            const char *v = macro_value(body, name, len);
+            if (!v)
+                return;
+            if (*v == '"')
+            {
+                const char *e = strchr(v + 1, '"');
+                if (e && !memchr(v + 1, '\n', (size_t)(e - v - 1)))
+                    snprintf(out, cap, "%.*s", (int)(e - v - 1), v + 1);
+                return;
+            }
+            name = v;
+            len = 0;
+            while (isalnum((unsigned char)v[len]) || v[len] == '_')
+                len++;
+            if (!len)
+                return;
+        }
     }
     else if (dot && !strcmp(dot, ".json"))
     {
@@ -207,7 +259,7 @@ static void version_at(const char *tree, const char *src, const char *rev,
     StrBuf b;
     sb_init(&b);
     if (git_capture(tree, a.p, &b) == 0)
-        version_parse(src, b.p, out, cap);
+        changelog_version_parse(src, b.p, out, cap);
     else
         out[0] = 0;
     sb_free(&a);
@@ -219,7 +271,7 @@ static void version_now(const char *tree, const char *src, char *out, size_t cap
     char abs[4900];
     snprintf(abs, sizeof abs, "%s/%s", tree, src);
     char *body = read_entire_file(abs, NULL);
-    version_parse(src, body, out, cap);
+    changelog_version_parse(src, body, out, cap);
     free(body);
 }
 

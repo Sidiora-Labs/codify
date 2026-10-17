@@ -86,9 +86,12 @@ clean:
 .PHONY: all unit integration test install uninstall clean release
 
 # nonpublishing release construction; destinations are operator configuration
-# (see scripts/release.sh)
+# (see scripts/release.sh). The bundle lands in RELEASE_DIR, default
+# build/release (ignored, so the clean-checkout check still holds):
+#   make release RELEASE_DIR=/path/to/out
+RELEASE_DIR ?= $(BUILD)/release
 release:
-	scripts/release.sh
+	scripts/release.sh --output "$(RELEASE_DIR)"
 
 # Hyperfide approved split runtime: explicit dependency setup and service builds.
 # Build-time Python validates native fragments; native execution remains a C binary.
@@ -112,3 +115,7 @@ hyperfide-native:
 	mv $(BUILD)/hyperfide-native-link-contract.tmp $(BUILD)/hyperfide-native-link-contract.json
 	$(CC) $(CFLAGS) -Isrc/hyperfide -I$(BUILD) $(LDFLAGS) -Wl,--disable-new-dtags,-rpath,'$$ORIGIN/../lib/hyperfide' -o $(BUILD)/hyperfide-native.tmp src/hyperfide/component_main.c src/sha256.c $$(python3 scripts/hyperfide-native-components.py --sources) $(LDLIBS) $$(python3 scripts/hyperfide-native-components.py --libraries)
 	mv $(BUILD)/hyperfide-native.tmp $(BUILD)/hyperfide-native
+
+.PHONY: print-link-libs
+print-link-libs:
+	@printf '%s\n' '$(LDLIBS) $(NATIVE_LIBRARIES)'
