@@ -118,7 +118,10 @@
     "tests/hyperfide/check-evidence.py",
     "tests/hyperfide/manifest.schema.json",
     "tests/hyperfide/qualify.py",
-    "tests/hyperfide/support/identity_fixture.py"
+    "tests/hyperfide/support/identity_fixture.py",
+    "services/hyperfide/src/storage/dispositions.ts",
+    "services/hyperfide/src/storage/durability.ts",
+    "services/hyperfide/migrations/0004-durability.sql"
   ],
   "source_roots": [
     "services/hyperfide/src",

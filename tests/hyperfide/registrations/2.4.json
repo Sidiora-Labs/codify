@@ -68,6 +68,7 @@
     "proof.auth.existing-cross-run",
     "proof.auth.role-refused",
     "proof.accepted-task-command.exact-adapter",
+    "proof.accepted-task-command.explicit-empty-artifacts",
     "proof.legacy.unbound-registry-refused",
     "proof.history.unchanged-task-retained",
     "proof.history.changed-task-rejects-old-policy",
@@ -132,7 +133,10 @@
     "services/hyperfide/src/identity/enrollment.ts",
     "services/hyperfide/src/transport/protocol.ts",
     "services/hyperfide/components/4.2.json",
-    "services/hyperfide/components/14.1.json"
+    "services/hyperfide/components/14.1.json",
+    "services/hyperfide/src/storage/dispositions.ts",
+    "services/hyperfide/src/storage/durability.ts",
+    "services/hyperfide/migrations/0004-durability.sql"
   ],
   "source_roots": [
     "services/hyperfide/src",
