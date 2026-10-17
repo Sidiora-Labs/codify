@@ -8,7 +8,7 @@
     ],
     "approved": true
   },
-  "campaign_id": "hyperfide-task-25.4-actual-authority-v2-requal-12aa390190b3-requal-6a91b0130b1d",
+  "campaign_id": "hyperfide-task-25.4-actual-authority-v2-requal-12aa390190b3-requal-6a91b0130b1d-requal-ff4632c9bc89",
   "case_ids": [
     "V-028",
     "V-052",
@@ -767,8 +767,8 @@
     },
     {
       "path": "src/hyperfide/supervisor.c",
-      "sha256": "963f24ac8d969b629c9cdadc9058580638fdd6c087f7867794b42289f9ce33c3",
-      "size": 53969
+      "sha256": "9b9f0af624ae07def106eb6aeb742d2ff391db909dc9ae9a45e1dfd078238675",
+      "size": 54074
     },
     {
       "path": "src/hyperfide/supervisor.h",
