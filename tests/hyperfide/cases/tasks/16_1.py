@@ -319,7 +319,7 @@ def cleanup_signed():
 def cleanup(report=True):
     """In-run teardown is silent; only the independent --cleanup invocation reports one observed event."""
     global DATABASE, RESOURCE
-    signed_resources=cleanup_signed()+cleanup_git()+cleanup_preparation()+cleanup_submission()
+    signed_resources=cleanup_signed()+cleanup_git()+cleanup_preparation()+cleanup_submission()+cleanup_connected()
     signed_absent=all(row['observed_absent'] for row in signed_resources)
     record = directory()/("resource-"+TASK+".json")
     if DATABASE is None and record.exists():
@@ -517,144 +517,27 @@ SUBMISSION_TASKS=("q1","q2","q3")
 def submission_record():
     return directory()/("submission-resource-"+TASK+".json")
 
+def submission_stack_module():
+    import importlib.util
+    spec=importlib.util.spec_from_file_location("hf16_submission_stack",ROOT/"tests/hyperfide/integration/submission_stack.py")
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
+
 def submission_cases():
     """Positive and racing worker submissions through the production signed HTTPS service.
 
     Compute authority comes from an actual signed scheduler claim and packet; the accepted spec,
     task definitions and proof registries are trusted fixture preconditions written before start.
     """
-    import base64,copy,hashlib,importlib.util,shutil,tempfile,threading,time
-    def load(name,relative):
-        spec=importlib.util.spec_from_file_location(name,ROOT/relative)
-        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
-    scheduler=load("hf16_scheduler_fixture","tests/hyperfide/cases/tasks/5_1.py")
-    objects=load("hf16_object_fixture","tests/hyperfide/cases/tasks/15_2.py")
-    uid,identity=scheduler.uid,scheduler.identity
-    def sha(data):return "sha256:"+hashlib.sha256(data).hexdigest()
-    record=submission_record()
-    repository=Path(tempfile.mkdtemp(prefix="hyperfide-assurance-submit-"))
-    state={"repository":str(repository),"database":None,"runtime_role":None,"folder":None,"pid":None,"start":None,"port":None,"closed":False}
-    record.write_text(json.dumps(state))
-    def git(*args):
-        return subprocess.run(["git","-c","core.hooksPath=/dev/null","-c","maintenance.auto=false","-c","gc.auto=0",*args],cwd=repository,
-            env=dict(os.environ,GIT_CONFIG_NOSYSTEM="1",GIT_CONFIG_GLOBAL="/dev/null"),text=True,capture_output=True,check=True,timeout=15).stdout.strip()
-    git("init","-q");git("config","user.name","Bounded submission test");git("config","user.email","fixture@example.invalid")
-    (repository/"README").write_text("accepted baseline\n");git("add","--all");git("commit","-qm","accepted baseline")
-    baseline=git("rev-parse","HEAD");heads={}
-    for name in SUBMISSION_TASKS:
-        git("checkout","-q","--detach",baseline);(repository/"src").mkdir(exist_ok=True)
-        (repository/"src"/(name+".ts")).write_text("actual result "+name+"\n");git("add","--all");git("commit","-qm","result "+name)
-        heads[name]=git("rev-parse","HEAD");git("update-ref","refs/heads/attempt-"+name,heads[name])
-    git("checkout","-q","--detach",baseline)
-    for name in SUBMISSION_TASKS:git("worktree","add","-q","--detach",str(repository/"worktrees"/name),heads[name])
-    store=objects.ObjectFixture()
-    def setup(f):
-        i=f.ids;scope={"organisation_id":i["organisation"],"run_id":i["run"]}
-        objects.ORG=scope["organisation_id"];objects.RUN=scope["run_id"];objects.SCOPE=scope
-        f.env.update({"HF_ARTIFACT_S3_ENDPOINT":store.endpoint,"HF_ARTIFACT_ALLOW_LOOPBACK_HTTP":"1","HF_ARTIFACT_S3_REGION":objects.REGION,
-            "HF_ARTIFACT_S3_BUCKET":objects.BUCKET,"HF_ARTIFACT_S3_ACCESS_KEY_ID":objects.KEY,"HF_ARTIFACT_S3_SECRET_ACCESS_KEY":objects.SECRET,
-            "HF_ARTIFACT_S3_SESSION_TOKEN":objects.TOKEN,"HF_ARTIFACT_ORGANISATION_ID":scope["organisation_id"],
-            "HF_ARTIFACT_ALLOWED_RUN_IDS":json.dumps([scope["run_id"]]),"HF_QUALIFICATION_REPOSITORIES":json.dumps({i["repository"]:str(repository)})})
-        executable=str(Path("/usr/bin/python3").resolve())
-        check={"id":"unit","argv":[executable,"-c","raise SystemExit(0)"],"executable_digest":sha(Path(executable).read_bytes()),
-            "timeout_ms":60000,"required_artifacts":["report.json"],"input_keys":["source"]}
-        rubric=sha(b"submission-rubric")
-        source=('[meta]\nslug = "submission-fixture"\n[req.16]\nac_1 = "Independent qualification of immutable worker submissions"\n'
-            '[acceptance.V-013]\nreqs = ["16.1"]\nchecks = ["unit"]\n[proof]\nrubric_digest = '+json.dumps(rubric)+'\n[proof.check.unit]\n'+
-            "".join(key+" = "+json.dumps(check[key])+"\n" for key in ("argv","executable_digest","timeout_ms","required_artifacts","input_keys")))
-        for name in SUBMISSION_TASKS:
-            source+='[task.'+name+']\nwave = 1\nreqs = ["16.1"]\nacceptance_ids = ["V-013"]\nrequires = []\ntouches = ["src/'+name+'.ts"]\n'
-        parsed=json.loads(subprocess.check_output(["node","--input-type=module","-e","import{parseKvx}from'./services/hyperfide/dist/spec/import.js';let s='';for await(const c of process.stdin)s+=c;process.stdout.write(JSON.stringify(parseKvx(s)));"],input=source.encode(),cwd=ROOT,timeout=30))
-        spec=uid();i["submission_spec"]=spec
-        intent={"schema_version":1,"revision_digest":sha(b"submission-envelope-"+spec.encode()),"source_digest":sha(source.encode()),
-            "repositories":[{"repository_id":i["repository"],"source_object_id":baseline,"integration_ref":"refs/heads/main"}],"allowed_actions":f.actions,
-            "closure_policy":{"required_evidence":["unit"],"required_review_roles":[],"publication":"AFTER_QUALIFICATION"},"provenance":None,"parsed":parsed,"runtime_wave_offset":0}
-        f.sql("INSERT INTO hyperfide.spec_revisions(organisation_id,project_id,id,source_digest,source_content,document,schema_version,revision_digest) VALUES($1,$2,$3,$4,$5,$6,1,$7)",
-            [i["organisation"],i["project"],spec,sha(source.encode()),source,json.dumps(intent),intent["revision_digest"]])
-        f.sql("INSERT INTO hyperfide.run_spec_revisions(organisation_id,run_id,spec_generation,spec_revision_id) VALUES($1,$2,2,$3)",[i["organisation"],i["run"],spec])
-        f.sql("UPDATE hyperfide.runs SET spec_generation=2,spec_revision_id=$3,state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[i["organisation"],i["run"],spec])
-        sections={section["name"]:section for section in parsed["sections"]}
-        f.submission_criteria={}
-        for name in SUBMISSION_TASKS:
-            task,slot=uid(),uid();i["task_"+name]=task;i["slot_"+name]=slot
-            definition=copy.deepcopy(f.packet_definition);definition.update(feature_key="alpha",touches=["src/"+name+".ts"],section=sections["task."+name])
-            f.definitions[name]=definition
-            criteria=sha(("accepted-submission-criteria-"+name).encode());f.submission_criteria[name]=criteria
-            f.sql("INSERT INTO hyperfide.tasks(organisation_id,run_id,id,task_key,feature_package_id,spec_revision_id,spec_generation,criteria_digest,definition,wave) VALUES($1,$2,$3,$4,$5,$6,2,$7,$8,1)",
-                [i["organisation"],i["run"],task,"alpha.submit-"+name,i["package"],spec,criteria,json.dumps(definition)])
-            f.sql("INSERT INTO hyperfide.worker_slots(organisation_id,id,sandbox_id,slot_key,boot_generation,capacity_kind,state) VALUES($1,$2,$3,$4,1,'AGENT','READY')",
-                [i["organisation"],slot,i["sandbox"],"submit-"+name])
-            policy={"schema_version":1,"criteria_digest":criteria,"spec_revision_id":spec,"spec_generation":"2","repository_id":i["repository"],"source_object_id":baseline,
-                "rubric_digest":rubric,"checks":[check],"clauses":[{"id":"16.1","mode":"EXECUTABLE","acceptance_ids":["V-013"],"checks":["unit"]}],
-                "inputs":{key:sha(("accepted-"+key).encode()) for key in ("source","dependency","toolchain","configuration","graph","contract")},"contract_digests":[]}
-            f.sql("INSERT INTO hyperfide.proof_registries(organisation_id,run_id,task_id,spec_generation,spec_revision_id,criteria_digest,registry_digest,policy) VALUES($1,$2,$3,2,$4,$5,$6,$7)",
-                [i["organisation"],i["run"],task,spec,criteria,identity(policy),json.dumps(policy)])
-    class OwnedScheduler(scheduler.SchedulerFixture):
-        def start(self):
-            try:super().start()
-            finally:self.remember()
-        def remember(self):
-            for key,value in (("database",getattr(self,"database",None)),("runtime_role",getattr(self,"runtime_role",None)),
-                              ("folder",str(getattr(self,"path","")) or None),("port",getattr(self,"port",None))):
-                if value is not None:state[key]=value
-            child=getattr(self,"child",None)
-            if child is not None:
-                state["pid"]=child.pid
-                try:state["start"]=Path("/proc/"+str(child.pid)+"/stat").read_text().rsplit(")",1)[1].split()[19]
-                except FileNotFoundError:pass
-            record.write_text(json.dumps(state))
-    f=None
+    import threading,time
+    support=submission_stack_module();code=support.code;sha=support.sha;uid=support.uid
+    stack=support.SubmissionStack(submission_record(),SUBMISSION_TASKS)
     try:
-        try:
-            f=OwnedScheduler(extra_components=("16.1","16.2"),extra_setup=setup,source_object_id=baseline,agent_limit=6)
-        finally:
-            if f is None:state["closed"]=True;record.write_text(json.dumps(state))
-        i=f.ids;org,run=i["organisation"],i["run"]
-        f.bind=lambda:f.invoke("identity.binding.observe",{"provisioning_intent_id":i["intent"],"sandbox_id":i["sandbox"],"boot_generation":"1","boot_id":i["boot"],
-            "native_sandbox_id":"packet-fixture-resource","observation_digest":sha(b"provider-observation"),"expected_version":"1"},key="provisioner")
-        f.bootstrap_runner()
-        def put(data):
-            value=dict(organisation_id=org,run_id=run,digest=sha(data),size_bytes=str(len(data)),data_base64=base64.b64encode(data).decode(),
-                       retention_class="RUN",retention_until=None,retention_hold=False)
-            return f.ok("artifact.object.put",value,component="15.2",key="operator")["artifact"]["artifact_id"]
-        def code(response):return response.get("error",{}).get("code") if response.get("ok") is False else None
-        def scalar(text,values):return f.sql(text,values)[0]
-        attempts={}
-        def claim(name,lease_ms=300000):
-            request=f.prepare_claim(name,lease_ms);request.update(run_spec_generation="2",spec_generation="2",spec_revision_id=i["submission_spec"])
-            token=f.claim(name,request=request)["token"]
-            workspace,session=uid(),uid()
-            f.sql("INSERT INTO hyperfide.workspaces(organisation_id,run_id,id,repository_id,attempt_id,attempt_generation,sandbox_id,slot_id,sandbox_boot_generation,base_commit,branch_ref,workspace_path) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
-                [org,run,workspace,i["repository"],token["attempt_id"],token["attempt_generation"],token["sandbox_id"],token["slot_id"],token["sandbox_boot_generation"],baseline,"refs/heads/attempt-"+name,str(repository/"worktrees"/name)])
-            f.sql("INSERT INTO hyperfide.agent_sessions(organisation_id,run_id,id,role,parent_session_id,connector,account_key,native_session_id,slot_id,sandbox_id,sandbox_boot_generation,attempt_id,state) VALUES($1,$2,$3,'WORKER',$4,'fixture','fixture',$5,$6,$7,1,$8,'RUNNING')",
-                [org,run,session,i["manager"],"worker-"+name,token["slot_id"],token["sandbox_id"],token["attempt_id"]])
-            f.delegate_principal("worker_"+name,session)
-            log=put(json.dumps({"check":"unit","exit_code":0,"task":name}).encode()+b"\n")
-            source=json.dumps({"repository_id":i["repository"],"source_object_id":heads[name],"workspace_id":workspace}).encode()
-            evidence=json.dumps({"source_object_id":heads[name],"criteria_digest":f.submission_criteria[name],"artifact_ids":[log]}).encode()
-            attempts[name]={"token":token,"workspace":workspace,"session":session,"log":log,"source_bytes":source,"evidence_bytes":evidence,
-                            "source":put(source),"evidence":put(evidence)}
-            return attempts[name]
-        def submission(name,**changes):
-            a=attempts[name];t=a["token"]
-            value={"organisation_id":org,"run_id":run,"task_id":t["task_id"],"request_id":uid(),"attempt_id":t["attempt_id"],"attempt_generation":t["attempt_generation"],
-                "authority_epoch":t["authority_epoch"],"sandbox_id":t["sandbox_id"],"slot_id":t["slot_id"],"sandbox_boot_generation":t["sandbox_boot_generation"],
-                "repository_id":i["repository"],"source_object_id":heads[name],"source_manifest_artifact_id":a["source"],"evidence_manifest_artifact_id":a["evidence"],
-                "criteria_digest":f.submission_criteria[name],"contract_digests":[]}
-            value.update(changes);return value
-        def envelope(name,value,operation_id=None):
-            operation=f.operation("16.1","submission.submit",value,authority=f.authorities["worker_"+name])
-            operation["idempotency_key"]=value["request_id"]
-            if operation_id:operation["operation_id"]=operation_id
-            return operation
-        def send(name,operation):return f.request(operation,key="worker_"+name)[1]
-        def submit(name,value):return send(name,envelope(name,value))
-        def custodies(name):return int(scalar("SELECT count(*)::int AS n FROM hyperfide.submission_custodies WHERE organisation_id=$1 AND run_id=$2 AND task_id=$3",[org,run,i["task_"+name]])["n"])
-        def attempt_state(name):
-            t=attempts[name]["token"]
-            return scalar("SELECT a.compute_authority,a.execution_state,(SELECT string_agg(l.state,',' ORDER BY l.state) FROM hyperfide.compute_leases l WHERE l.organisation_id=a.organisation_id AND l.run_id=a.run_id AND l.attempt_id=a.id) AS leases FROM hyperfide.attempts a WHERE a.organisation_id=$1 AND a.run_id=$2 AND a.id=$3",[org,run,t["attempt_id"]])
+        f=stack.fixture;i=f.ids;org,run=i["organisation"],i["run"]
+        scalar,custodies,attempt_state,submission,submit,send,envelope,put=(stack.scalar,stack.custodies,stack.attempt_state,stack.submission,
+            stack.submit,stack.send,stack.envelope,stack.put)
+        heads,baseline,attempts=stack.heads,stack.baseline,stack.attempts
         # V-013 refusals precede admission on the same current compute generation.
-        a=claim("q1")
+        a=stack.claim("q1")
         fabricated=put(json.dumps({"source_object_id":heads["q1"],"criteria_digest":f.submission_criteria["q1"],"artifact_ids":[str(uuid.uuid4())]}).encode())
         emit("assurance.16.1.submit.fabricated-evidence-refused",code(submit("q1",submission("q1",evidence_manifest_artifact_id=fabricated))),"QUALIFICATION_ARTIFACT_INCOMPLETE")
         empty=put(json.dumps({"source_object_id":heads["q1"],"criteria_digest":f.submission_criteria["q1"],"artifact_ids":[]}).encode())
@@ -700,7 +583,7 @@ def submission_cases():
              "assignments":int(scalar("SELECT count(*)::int AS n FROM hyperfide.assurance_job_assignments WHERE organisation_id=$1 AND run_id=$2 AND job_id=$3",[org,run,job])["n"])},
              {"authority":"ACTIVE","qualification_outcome":"PENDING","state":"PENDING","lease_owner":None,"assignments":0})
         # do_3 races: concurrent identical admission, expiry sweeper and coding cleanup.
-        claim("q2");value=submission("q2");responses=[None]*4
+        stack.claim("q2");value=submission("q2");responses=[None]*4
         def racer(index):responses[index]=send("q2",envelope("q2",value))
         threads=[threading.Thread(target=racer,args=(index,)) for index in range(len(responses))]
         for thread in threads:thread.start()
@@ -708,8 +591,7 @@ def submission_cases():
         ids={row.get("result",{}).get("submission",{}).get("id") for row in responses if row and row.get("ok")}
         emit("assurance.16.1.race.concurrent-identical",{"custodies":custodies("q2"),"distinct_admitted":len(ids),"jobs":int(scalar("SELECT count(*)::int AS n FROM hyperfide.qualification_jobs j JOIN hyperfide.submission_custodies c ON c.organisation_id=j.organisation_id AND c.run_id=j.run_id AND c.id=j.custody_id WHERE c.organisation_id=$1 AND c.run_id=$2 AND c.task_id=$3",[org,run,i["task_q2"]])["n"])},
              {"custodies":1,"distinct_admitted":1,"jobs":1})
-        lease_ms=6000
-        claim("q3",lease_ms=lease_ms)
+        stack.claim("q3",lease_ms=6000)
         expires=scalar("SELECT extract(epoch FROM lease_expires_at-clock_timestamp())::float8 AS s FROM hyperfide.attempts WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,run,attempts["q3"]["token"]["attempt_id"]])["s"]
         deadline=time.monotonic()+float(expires);race={}
         def late_submit():
@@ -750,59 +632,38 @@ def submission_cases():
              "worker_refused":after_cleanup.get("ok") is False},{"cancel_refused":True,"authority":"ACTIVE","outcome":"PENDING","job":"PENDING","worker_refused":True})
         print(json.dumps({"type":"observation","id":"assurance.16.1.submission.codes","cancel":code(cancelled),"after_cleanup":code(after_cleanup)}),flush=True)
     finally:
-        try:
-            if f is not None:f.close()
-        finally:
-            state["closed"]=True;record.write_text(json.dumps(state))
-            store.http.shutdown();store.sink.shutdown();store.http.server_close();store.sink.server_close()
-            shutil.rmtree(repository,ignore_errors=True)
+        stack.close()
+
+CONNECTED_STACK=ROOT/"tests/hyperfide/integration/connected-stack.py"
+
+def connected_stack_cases():
+    """Run the separately owned connected-stack variant as its own process tree and relay its events."""
+    process=subprocess.run([sys.executable,str(CONNECTED_STACK)],cwd=ROOT,env=os.environ.copy(),stdin=subprocess.DEVNULL,
+                           text=True,capture_output=True,timeout=600)
+    failed=process.returncode!=0
+    for line in process.stdout.splitlines():
+        try:event=json.loads(line)
+        except ValueError:continue
+        if event.get("type")=="assertion":
+            OBSERVATIONS.append({"id":event["id"],"actual":event["actual"],"expected":event["expected"]})
+            failed=failed or event["actual"]!=event["expected"]
+        if event.get("type") in ("assertion","observation"):print(json.dumps(event),flush=True)
+    if failed:raise AssertionError("Connected-stack variant failed: "+process.stderr[-1200:])
+
+def cleanup_connected():
+    if TASK!="16.1":return []
+    import importlib.util
+    spec=importlib.util.spec_from_file_location("hf16_connected_stack",CONNECTED_STACK)
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    return module.cleanup_resources()
 
 def cleanup_submission():
     if TASK!="16.1":return []
-    record=submission_record()
-    if not record.exists():return []
-    import re,shutil,signal,socket,tempfile,time
-    state=json.loads(record.read_text())
-    pid,start=state.get("pid"),state.get("start")
-    def current():
-        if pid is None:return False
-        try:return Path("/proc/"+str(pid)+"/stat").read_text().rsplit(")",1)[1].split()[19]==start
-        except FileNotFoundError:return False
-    if current():
-        command=Path("/proc/"+str(pid)+"/cmdline").read_bytes()
-        if b"/services/hyperfide/dist/" not in command:raise ValueError("Unowned submission service process")
-        os.kill(pid,signal.SIGTERM)
-        for _ in range(80):
-            if not current():break
-            time.sleep(.1)
-        if current():os.kill(pid,signal.SIGKILL)
-    stopped=not current()
-    if state.get("port"):
-        with socket.socket() as observer:
-            observer.settimeout(.5);stopped=stopped and observer.connect_ex(("127.0.0.1",state["port"]))!=0
-    database,role=state.get("database"),state.get("runtime_role")
-    if database:
-        if not re.fullmatch(r"hf_identity_[0-9a-f]{32}",database):raise ValueError("Unowned submission database")
-        subprocess.run(["dropdb","--force","--if-exists",database],cwd=ROOT,check=True,capture_output=True,timeout=45)
-    database_absent=database is None or sql("SELECT count(*) FROM pg_database WHERE datname='"+database+"';","postgres").stdout.strip()=="0"
-    if role:
-        if not re.fullmatch(r"hf_ir_[0-9a-f]{32}",role):raise ValueError("Unowned submission runtime role")
-        sql('DROP ROLE IF EXISTS "'+role+'"',"postgres")
-    role_absent=role is None or sql("SELECT count(*) FROM pg_roles WHERE rolname='"+role+"';","postgres").stdout.strip()=="0"
-    paths=[]
-    for key,prefix in (("folder","hyperfide-identity-"),("repository","hyperfide-assurance-submit-")):
-        if state.get(key):
-            location=Path(state[key])
-            if location.parent!=Path(tempfile.gettempdir()) or not location.name.startswith(prefix) or location.is_symlink():raise ValueError("Unowned submission fixture path")
-            if stopped and location.exists():shutil.rmtree(location)
-            paths.append(location)
-    files_absent=all(not location.exists() for location in paths)
-    artifact="assurance/submission-absence-"+TASK+".json"
-    (directory()/("submission-absence-"+TASK+".json")).write_text(json.dumps({"database":database,"database_observed_absent":database_absent,"service_observed_absent":stopped,
-        "runtime_role_observed_absent":role_absent,"fixture_files_observed_absent":files_absent,"paths":[str(location) for location in paths],
-        "observer":"PostgreSQL pg_database/pg_roles, exact service PID/start identity, listener probe and owned temporary paths"})+"\n")
-    def row(key,absent):return {"id":"hf-task-16.1-submission-"+key,"status":"deleted" if absent else "unknown","observed_absent":absent,"evidence_artifact":artifact}
-    return [row("database",database_absent),row("service",stopped),row("role",role_absent),row("files",files_absent)]
+    support=submission_stack_module()
+    def absence(value):
+        (directory()/("submission-absence-"+TASK+".json")).write_text(json.dumps(value)+"\n")
+    return support.cleanup_stack(submission_record(),"hyperfide-assurance-submit-",lambda text:sql(text,"postgres").stdout,
+        "hf-task-16.1-submission-","assurance/submission-absence-"+TASK+".json",absence)
 
 def schema_cases():
     global DATABASE, RESOURCE
@@ -861,6 +722,7 @@ def main(task="16.1"):
             semantic_cases()
             git_cases()
             submission_cases()
+            connected_stack_cases()
         if TASK=="16.2":preparation_cases()
         primary_cases()
         signed_cases()

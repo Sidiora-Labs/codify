@@ -54,6 +54,20 @@
     "assurance.16.1.race.expiry-sweeper",
     "assurance.16.1.race.expiry-after-admission",
     "assurance.16.1.race.coding-cleanup-preserves-custody",
+    "assurance.16.1.connected.services-separate",
+    "assurance.16.1.connected.native-supervisor-heartbeat",
+    "assurance.16.1.connected.claim-from-packet",
+    "assurance.16.1.connected.durable-dispatch-committed",
+    "assurance.16.1.connected.dispatch-restart-before-send",
+    "assurance.16.1.connected.dispatch-send",
+    "assurance.16.1.connected.agent-double-spawned",
+    "assurance.16.1.connected.network-cut-after-commit",
+    "assurance.16.1.connected.dispatch-restart-send-ack",
+    "assurance.16.1.connected.replay-after-reconnect",
+    "assurance.16.1.connected.compute-to-custody",
+    "assurance.16.1.connected.immutable-artifacts",
+    "assurance.16.1.connected.coding-cleanup-preserves-custody",
+    "assurance.16.1.connected.independent-qualification-pending",
     "assurance.16.1.primary.unbranded-denied",
     "assurance.16.1.https.signed-missing",
     "assurance.16.1.https.cross-scope",
@@ -85,7 +99,12 @@
     "services/hyperfide/dist/spec/obligations.js",
     "services/hyperfide/dist/artifacts/objects.js",
     "services/hyperfide/dist/identity/enrollment.js",
-    "services/hyperfide/dist/control.js"
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/dispatch.js",
+    "services/hyperfide/dist/provisioner.js",
+    "services/hyperfide/dist/events/outbox.js",
+    "services/hyperfide/dist/events/inbox.js",
+    "services/hyperfide/dist/scheduler/dispatch.js"
   ],
   "resources": [
     {
@@ -137,6 +156,26 @@
       "id": "hf-task-16.1-submission-files",
       "kind": "local-directory",
       "scope": "task16.1-submission-disposable"
+    },
+    {
+      "id": "hf-task-16.1-connected-database",
+      "kind": "postgresql-database",
+      "scope": "task16.1-connected-stack-disposable"
+    },
+    {
+      "id": "hf-task-16.1-connected-service",
+      "kind": "https-service",
+      "scope": "task16.1-connected-stack-disposable"
+    },
+    {
+      "id": "hf-task-16.1-connected-role",
+      "kind": "postgresql-role",
+      "scope": "task16.1-connected-stack-disposable"
+    },
+    {
+      "id": "hf-task-16.1-connected-files",
+      "kind": "local-directory",
+      "scope": "task16.1-connected-stack-disposable"
     }
   ],
   "cleanup_argv": [
@@ -150,7 +189,9 @@
     "assurance/database-absence-16.1.json",
     "assurance/signed-absence-16.1.json",
     "assurance/git-absence-16.1.json",
-    "assurance/submission-absence-16.1.json"
+    "assurance/submission-absence-16.1.json",
+    "assurance/connected-absence-16.1.json",
+    "assurance/connected-observations-16.1.json"
   ],
   "source_files": [
     "services/hyperfide/src/assurance/submission.ts",
@@ -179,7 +220,18 @@
     "tests/hyperfide/cases/tasks/5_1.py",
     "tests/hyperfide/cases/tasks/3_2.py",
     "tests/hyperfide/cases/tasks/3_1.py",
-    "tests/hyperfide/cases/tasks/15_2.py"
+    "tests/hyperfide/cases/tasks/15_2.py",
+    "tests/hyperfide/integration/connected-stack.py",
+    "tests/hyperfide/integration/submission_stack.py",
+    "tests/hyperfide/integration/tls_relay.py",
+    "tests/hyperfide/integration/agent_double.py",
+    "src/hyperfide/supervisor_daemon.c",
+    "src/hyperfide/supervisor.c",
+    "src/hyperfide/transport.c",
+    "src/hyperfide/component_main.c",
+    "src/hyperfide/components/12.1.kvx",
+    "Makefile",
+    "scripts/hyperfide-native-components.py"
   ],
   "source_roots": [
     "services/hyperfide/src",
@@ -195,6 +247,9 @@
     "postgresql.role.create",
     "postgresql.role.drop",
     "filesystem.fixture.create",
-    "filesystem.fixture.remove"
+    "filesystem.fixture.remove",
+    "process.fixture.start",
+    "process.fixture.stop",
+    "network.fixture.interrupt"
   ]
 }

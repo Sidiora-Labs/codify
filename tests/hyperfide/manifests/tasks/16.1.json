@@ -54,6 +54,20 @@
     "assurance.16.1.race.expiry-sweeper",
     "assurance.16.1.race.expiry-after-admission",
     "assurance.16.1.race.coding-cleanup-preserves-custody",
+    "assurance.16.1.connected.services-separate",
+    "assurance.16.1.connected.native-supervisor-heartbeat",
+    "assurance.16.1.connected.claim-from-packet",
+    "assurance.16.1.connected.durable-dispatch-committed",
+    "assurance.16.1.connected.dispatch-restart-before-send",
+    "assurance.16.1.connected.dispatch-send",
+    "assurance.16.1.connected.agent-double-spawned",
+    "assurance.16.1.connected.network-cut-after-commit",
+    "assurance.16.1.connected.dispatch-restart-send-ack",
+    "assurance.16.1.connected.replay-after-reconnect",
+    "assurance.16.1.connected.compute-to-custody",
+    "assurance.16.1.connected.immutable-artifacts",
+    "assurance.16.1.connected.coding-cleanup-preserves-custody",
+    "assurance.16.1.connected.independent-qualification-pending",
     "assurance.16.1.primary.unbranded-denied",
     "assurance.16.1.https.signed-missing",
     "assurance.16.1.https.cross-scope",
@@ -70,7 +84,10 @@
       "postgresql.role.create",
       "postgresql.role.drop",
       "filesystem.fixture.create",
-      "filesystem.fixture.remove"
+      "filesystem.fixture.remove",
+      "process.fixture.start",
+      "process.fixture.stop",
+      "network.fixture.interrupt"
     ]
   },
   "inputs": [
@@ -1506,8 +1523,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/16_1.py",
-      "sha256": "3fdc4f08f465597d47a73bcb8dda89d69288ac55b5197d184956abd200d43327",
-      "size": 66033
+      "sha256": "349f01bcd20e5f162501fb87498ce8b84a4a83c4b5f9f1a846d601a85d4e321a",
+      "size": 52472
     },
     {
       "path": "tests/hyperfide/cases/tasks/16_2.py",
@@ -1563,6 +1580,61 @@
       "path": "tests/hyperfide/cases/tasks/15_2.py",
       "sha256": "15764545b61284d7bc8eee82aea806b88aca503e652e846440eb8ebe24fbfa91",
       "size": 54584
+    },
+    {
+      "path": "tests/hyperfide/integration/connected-stack.py",
+      "sha256": "7306c0d6395eead4505d45de3f5174eb1725d36a88bc01dfcd6a5c52d9fd19f5",
+      "size": 24802
+    },
+    {
+      "path": "tests/hyperfide/integration/submission_stack.py",
+      "sha256": "283bc60982d1c29f5e16a91b5a05070e1960e55373677517ec495b694c0bb2f2",
+      "size": 19042
+    },
+    {
+      "path": "tests/hyperfide/integration/tls_relay.py",
+      "sha256": "1ab43759358fa45404ce058e1f25007f0b3f1a73008f4177a08f144ab4e828d8",
+      "size": 3538
+    },
+    {
+      "path": "tests/hyperfide/integration/agent_double.py",
+      "sha256": "5e3dfdf8ffc5527dda2acdf4f8ec7f1888bb880797fb5ec90d14782242254569",
+      "size": 3100
+    },
+    {
+      "path": "src/hyperfide/supervisor_daemon.c",
+      "sha256": "612da534a95ecf52711f032c2106c8142f1def8fec2f560d66e05c26052799a9",
+      "size": 16771
+    },
+    {
+      "path": "src/hyperfide/supervisor.c",
+      "sha256": "cbac38ad9d54dadb401ddedc0b95e33f4abac1740813227a31d2033301beeffc",
+      "size": 20555
+    },
+    {
+      "path": "src/hyperfide/transport.c",
+      "sha256": "149271bccafdce93b27f6701b8928a77f7acef5e01a6100e628d794c2a0f73d8",
+      "size": 30077
+    },
+    {
+      "path": "src/hyperfide/component_main.c",
+      "sha256": "cb3b9f726346ac2724ca0d61f44845180074f2347f33a7c22d53b723e476223b",
+      "size": 7574
+    },
+    {
+      "path": "src/hyperfide/components/12.1.kvx",
+      "sha256": "1a2c9986c34f2f5b3e11c8e99395c775ddcb236e0f563d5b1bc2457c75944aea",
+      "size": 525
+    },
+    {
+      "path": "Makefile",
+      "sha256": "15a4ba0d37f9282fe0eb7b77de54de1f3c3bc5246cd283afe7fc54ad6d0f5e8b",
+      "size": 4205
+    },
+    {
+      "path": "scripts/hyperfide-native-components.py",
+      "sha256": "5eb01214a3a91430cf2b66b2f15b40b91d06db8a87a00d88a11aca90985a23c2",
+      "size": 9165
     }
   ],
   "resources": [
@@ -1615,6 +1687,26 @@
       "id": "hf-task-16.1-submission-files",
       "kind": "local-directory",
       "scope": "task16.1-submission-disposable"
+    },
+    {
+      "id": "hf-task-16.1-connected-database",
+      "kind": "postgresql-database",
+      "scope": "task16.1-connected-stack-disposable"
+    },
+    {
+      "id": "hf-task-16.1-connected-service",
+      "kind": "https-service",
+      "scope": "task16.1-connected-stack-disposable"
+    },
+    {
+      "id": "hf-task-16.1-connected-role",
+      "kind": "postgresql-role",
+      "scope": "task16.1-connected-stack-disposable"
+    },
+    {
+      "id": "hf-task-16.1-connected-files",
+      "kind": "local-directory",
+      "scope": "task16.1-connected-stack-disposable"
     }
   ],
   "seed": 1,
@@ -1629,6 +1721,7 @@
     "physical_execution_qualification": "NOT_EVALUATED",
     "scope_limit": "Bounded authentication/primary capability/metadata checks, actual shared semantic fence race/order/cache, real immutable Git ancestry/head/scope, genuine signed HTTPS boundaries, and a positive signed worker submission from an actual signed scheduler claim with compute-to-custody transfer, replay/conflict, independence refusals and expiry/cleanup races; trusted fixture SQL seeds accepted spec/proof/workspace/session preconditions and provider sandbox destruction; no physical verification qualification",
     "supplier_build_status": "CHECK_AND_BUILD_PASS",
-    "result_preparation": "IMMUTABLE_INTENT_AND_EFFECTIVE_INPUT_READER_IMPLEMENTED; ACTUAL_REMOTE_PREPARATION_AND_EFFECTIVE_LEDGER_ADMISSION_NOT_QUALIFIED"
+    "result_preparation": "IMMUTABLE_INTENT_AND_EFFECTIVE_INPUT_READER_IMPLEMENTED; ACTUAL_REMOTE_PREPARATION_AND_EFFECTIVE_LEDGER_ADMISSION_NOT_QUALIFIED",
+    "connected_stack_variant": "connected-stack/controlled-doubles: separate control/dispatch/provisioner HTTPS processes, disposable PostgreSQL, native supervisor daemon process (build/hyperfide-native), killable TLS relay and controlled agent-process doubles; never qualifies a real provider/native frontier variant"
   }
 }
