@@ -80,6 +80,23 @@ function binary() {
     return canonical !== undefined ? canonical : legacy !== undefined ? legacy : 'hyperfide';
 }
 
+/* Every legacy codify.* command id stays registered for existing keybindings and
+ * tasks; its hyperfide.* name is bound to the very same handler, so there is one
+ * implementation per command and no second copy to drift. */
+function commandAliases(name) {
+    return name.startsWith('codify.') ? [name, 'hyperfide.' + name.slice('codify.'.length)] : [name];
+}
+function registerCommands(ctx, cmds) {
+    const seen = new Set();
+    for (const [name, fn] of Object.entries(cmds)) {
+        for (const id of commandAliases(name)) {
+            if (seen.has(id)) throw new Error('Hyperfide: duplicate command registration ' + id);
+            seen.add(id);
+            ctx.subscriptions.push(vscode.commands.registerCommand(id, fn));
+        }
+    }
+}
+
 function workspaceRoot() {
     const f = vscode.workspace.workspaceFolders;
     return f && f.length ? f[0].uri.fsPath : undefined;
@@ -689,9 +706,7 @@ async function activate(ctx) {
         'codify.memories.promote': (arg) => memoryApi.promote(arg),
         'codify.memories.supersede': (arg) => memoryApi.supersede(arg),
     };
-    for (const [name, fn] of Object.entries(cmds)) {
-        ctx.subscriptions.push(vscode.commands.registerCommand(name, fn));
-    }
+    registerCommands(ctx, cmds);
 
     kvx.register(ctx, cgJson, workspaceRoot);
     agentApi = agents.register(ctx, {

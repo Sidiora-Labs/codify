@@ -57,12 +57,12 @@ base   = "wave/{feature}/{wave}"
 [principle]
 task_driven     = "Work is driven by the active feature's task list, in wave order."
 verified_done   = "A task is done only after real remote verification and graph checks pass. Wave closure additionally requires remote regression checks and independent correctness review; component success never certifies a full acceptance case."
-runtime_boundaries = "The approved Hyperfide programme permits declared TypeScript services, PostgreSQL, provider SDKs and native components. Pin and qualify dependencies; preserve the compatible local cg runtime."
+runtime_boundaries = "The approved Hyperfide programme permits declared TypeScript services, PostgreSQL, provider SDKs and native components. Pin and qualify dependencies; preserve the compatible local runtime and its cg compatibility alias."
 non_invasive    = "Hyperfide observes and advises by default; it blocks only where the user asked it to."
 local_first = "The compatible local graph, memory and workflow remain usable offline with no telemetry. Local caches identify their freshness and never grant remote fleet ownership. Decision-model output is advisory; verification and graph checks determine qualification."
 distributed_authority = "Remote fleet authority requires the authenticated coordinator and PostgreSQL. Engineering execution remains remote under the approved programme policy; disconnected clients cannot obtain or renew ownership from cached state."
 anchor_intent   = "Anchor what a reader could not derive from the code: purpose, contract, danger, pointer. Derivable comments are noise."
-generated_owners = "hyperfide spec render owns AGENTS.md and CLAUDE.md; hyperfide agentmd owns .codify/agent-context.md; hyperfide codemap owns CODEMAP.md."
+generated_owners = "hyperfide spec render owns AGENTS.md and CLAUDE.md; hyperfide agentmd owns agent-context.md in the configured context directory (.hyperfide/context by default; legacy .codify is migrated with backups); hyperfide codemap owns CODEMAP.md."
 
 [loop]
 step_1 = "hyperfide brief — load repo state, active task, and prior decisions."

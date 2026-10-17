@@ -1,8 +1,9 @@
 /*
- * Agent context file generation: .codify/agent-context.md built from the graph —
+ * Agent context file generation: agent-context.md in the configured context
+ * directory (.hyperfide/context, or a legacy .codify) built from the graph —
  * languages, directory map, build tooling, entry points, routes, and the
- * most-referenced ("load-bearing") symbols, plus a cg cheatsheet so agents
- * can query the graph themselves.
+ * most-referenced ("load-bearing") symbols, plus a hyperfide cheatsheet so
+ * agents can query the graph themselves.
  */
 #include "cg.h"
 #include <sys/stat.h>
@@ -317,19 +318,21 @@ int cmd_agentmd(Cg *cg, bool write_files) {
     /* ---- cheatsheet ---- */
     sb_puts(&md,
         "\n## Querying this codebase\n\n"
-        "This project is indexed by Codify (SQLite + FTS5, 100% local). "
+        "This project is indexed by Hyperfide (SQLite + FTS5, 100% local). "
         "Prefer these over grep/file-walking — one call returns definitions, "
         "snippets, and call edges:\n\n"
         "```bash\n"
-        "cg context <query>      # symbols + snippets + callers/callees + routes\n"
-        "cg search <text>        # instant name/full-text search\n"
-        "cg grep <pattern> [-i]  # line search, each hit in its symbol\n"
-        "cg files <glob|words>   # find files; --dirs maps directories\n"
-        "cg symbol <name>        # definition + snippet + reference count\n"
-        "cg impact <name> -d 3   # who breaks if this changes\n"
-        "cg routes [filter]      # URL pattern -> handler\n"
-        "cg changes              # impact radius of uncommitted edits\n"
+        "hyperfide context <query>      # symbols + snippets + callers/callees + routes\n"
+        "hyperfide search <text>        # instant name/full-text search\n"
+        "hyperfide grep <pattern> [-i]  # line search, each hit in its symbol\n"
+        "hyperfide files <glob|words>   # find files; --dirs maps directories\n"
+        "hyperfide symbol <name>        # definition + snippet + reference count\n"
+        "hyperfide impact <name> -d 3   # who breaks if this changes\n"
+        "hyperfide routes [filter]      # URL pattern -> handler\n"
+        "hyperfide changes              # impact radius of uncommitted edits\n"
         "```\n\n"
+        "`cg` remains a compatibility alias for every command above "
+        "(`cg context <query>` works unchanged).\n\n"
         "All of the above accept `--json`. The graph auto-syncs via "
         "`hyperfide watch`, or connect over MCP with `hyperfide mcp-install`.\n\n"
         "Over MCP, use `grep_code`, `find_files`, `search_code`, and "
@@ -341,7 +344,7 @@ int cmd_agentmd(Cg *cg, bool write_files) {
         "When another process (an editor's indexer) holds the database, "
         "`hyperfide remember`, `hyperfide handoff`, and the bookkeeping behind "
         "`hyperfide spec done` say **queued**: the write is kept in "
-        "`.codegraph/journal/` and the next `cg` command applies it — do not "
+        "`.codegraph/journal/` and the next `hyperfide` command applies it — do not "
         "re-run it. Exit 75 (a claim) means nothing changed: re-run the same "
         "command. `hyperfide journal` lists what is queued.\n");
 
