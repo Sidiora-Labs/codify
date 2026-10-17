@@ -17,7 +17,7 @@ SCOPE={"organisation_id":ORG,"run_id":RUN}
 DIGEST="sha256:"+"a"*64
 FAILED=[]
 IDS=[
-"review.policy.ten-distinct-watchers","review.policy.reject-nine","review.policy.reject-duplicate-session",
+"review.policy.ten-distinct-watchers","review.policy.reject-nine","review.policy.reject-sixteen","review.policy.reject-duplicate-session",
 "review.policy.reject-unapproved-sharding","review.policy.reject-request-approval",
 "review.discovery.actual-first-batch","review.discovery.actual-second-batch","review.discovery.replay",
 "review.coverage.every-watcher-per-commit","review.coverage.no-completion-from-counts",
@@ -69,6 +69,8 @@ class Fixture:
   self.git("init","--initial-branch=main","--object-format=sha1")
   self.git("config","user.name","Review Fixture");self.git("config","user.email","fixture@example.invalid")
   self.git("config","commit.gpgsign","false");self.git("config","core.hooksPath","/dev/null")
+  # Detached auto-maintenance would outlive the probe and be reported as leaked descendants.
+  self.git("config","maintenance.auto","false");self.git("config","gc.auto","0")
   self.commit("base","price=100");self.pinned=self.git("rev-parse","HEAD").strip()
   self.first=self.commit("[spec:fixture/1.1] change units","price=100; units=cents")
   self.second=self.commit("[spec:fixture/1.1] change error order","price=100; units=cents; errors=auth-first")
@@ -167,63 +169,69 @@ def cases(f):
  check(IDS[0],configure)
  v=copy.deepcopy(f.watcher_policy);v["watchers"].pop()
  check(IDS[1],lambda:f.reject("review.policy.configure",dict(SCOPE,policy=v),"REVIEW_POLICY_INVALID"))
+ v=copy.deepcopy(f.watcher_policy);v["revision"]="16"
+ v["watchers"]+=[{"watcher_id":f"watcher-{n}","reviewer_session_id":xid(0x200+n),"rubric_digest":DIGEST,"review_class":f"class-{n}","path_prefixes":[]} for n in range(10,16)]
+ def reject_sixteen():
+  expect(len(v["watchers"])==16 and len({w["reviewer_session_id"] for w in v["watchers"]})==16,"sixteen-watcher fixture is not distinct")
+  f.reject("review.policy.configure",dict(SCOPE,policy=v),"REVIEW_POLICY_INVALID")
+ check(IDS[2],reject_sixteen)
  v=copy.deepcopy(f.watcher_policy);v["watchers"][1]["reviewer_session_id"]=v["watchers"][0]["reviewer_session_id"]
- check(IDS[2],lambda:f.reject("review.policy.configure",dict(SCOPE,policy=v),"REVIEW_POLICY_INVALID"))
+ check(IDS[3],lambda:f.reject("review.policy.configure",dict(SCOPE,policy=v),"REVIEW_POLICY_INVALID"))
  v=copy.deepcopy(f.watcher_policy);v["mode"]="SPECIALIST"
  for watcher in v["watchers"]:watcher["path_prefixes"]=["api.txt"]
- check(IDS[3],lambda:f.reject("review.policy.configure",dict(SCOPE,policy=v),"REVIEW_SHARDING_APPROVAL_REQUIRED"))
- check(IDS[4],lambda:f.reject("review.policy.configure",dict(SCOPE,policy=v,approved=True),"REVIEW_INPUT_INVALID"))
+ check(IDS[4],lambda:f.reject("review.policy.configure",dict(SCOPE,policy=v),"REVIEW_SHARDING_APPROVAL_REQUIRED"))
+ check(IDS[5],lambda:f.reject("review.policy.configure",dict(SCOPE,policy=v,approved=True),"REVIEW_INPUT_INVALID"))
  def first():
   result=f.discover(1);expect(result["discovered"]==1 and result["remaining"]==1 and result["complete"] is False and result["obligations_created"]==10,"first real Git batch lost obligations")
- check(IDS[5],first)
+ check(IDS[6],first)
  def second():
   result=f.discover(1);expect(result["discovered"]==1 and result["remaining"]==0 and result["complete"] is True and result["obligations_created"]==10,"second real Git batch incomplete")
- check(IDS[6],second)
+ check(IDS[7],second)
  def replay():
   result=f.discover();expect(result["discovered"]==0 and result["obligations_created"]==0,"discovery replay duplicated durable work")
- check(IDS[7],replay)
+ check(IDS[8],replay)
  def all_watchers():
   result=f.coverage(f.second);expect(result["required"]==10 and result["complete"]==0 and len(result["missing"])==10 and result["status"]=="INCOMPLETE","all-watcher default omitted obligations")
   expect(sql(f.task,"SELECT count(*) FROM hyperfide.review_obligations;").stdout.strip()=="20","database obligation count differs")
- check(IDS[8],all_watchers)
- check(IDS[9],lambda:f.reject("review.coverage.inspect",dict(SCOPE,repository_id=REPOSITORY,source_object_id=f.second,complete=True),"REVIEW_INPUT_INVALID"))
+ check(IDS[9],all_watchers)
+ check(IDS[10],lambda:f.reject("review.coverage.inspect",dict(SCOPE,repository_id=REPOSITORY,source_object_id=f.second,complete=True),"REVIEW_INPUT_INVALID"))
  def omission():
   sql(f.task,"DELETE FROM hyperfide.review_obligations WHERE source_object_id='"+f.second+"' AND watcher_id='watcher-0';")
   result=f.coverage(f.second);expect(result["required"]==10 and any(v["reason"]=="OBLIGATION_MISSING" for v in result["missing"]),"missing obligation inflated coverage")
- check(IDS[10],omission)
+ check(IDS[11],omission)
  def repair():
   expect(f.discover()["obligations_created"]==1,"discovery did not restore missing durable obligation")
- check(IDS[11],repair)
+ check(IDS[12],repair)
  def rewrite():
   f.git("reset","--hard",f.pinned);f.rewritten=f.commit("[spec:fixture/1.1] rewritten history","price=7")
   result=f.discover();expect(len(result["rewrites"])==1 and result["discovered"]==1,"history rewrite not recorded")
- check(IDS[12],rewrite)
+ check(IDS[13],rewrite)
  def history():
   expect(sql(f.task,"SELECT count(*) FROM hyperfide.review_commits;").stdout.strip()=="3","rewriting a ref discarded commit history")
   expect(sql(f.task,"SELECT count(*) FROM hyperfide.review_obligations;").stdout.strip()=="30","rewriting a ref discarded obligations")
- check(IDS[13],history)
+ check(IDS[14],history)
  old=f.policy_digest
  def replace():
   f.session(20);v=copy.deepcopy(f.watcher_policy);v["revision"]="2";v["watchers"][0]["reviewer_session_id"]=xid(0x214)
   result=f.configure(v);expect(result["policy_digest"]!=old,"watcher replacement reused prior policy identity")
   expect(f.discover()["obligations_created"]==30,"replacement policy omitted historical commits")
- check(IDS[14],replace)
+ check(IDS[15],replace)
  def old_stale():
   result=f.coverage(f.first,policy_digest=old,candidate_digest=DIGEST,input_manifest_digest=DIGEST)
   expect(result["status"]=="STALE" and result["complete"]==0,"old watcher policy granted current coverage")
- check(IDS[15],old_stale)
+ check(IDS[16],old_stale)
  def untagged():
   commit=f.commit("untagged real change","price=9");result=f.discover()
   expect(commit in result["unattributed"] and result["obligations_created"]==10,"unattributed commit escaped watcher coverage")
- check(IDS[16],untagged)
+ check(IDS[17],untagged)
  def empty():
   commit=f.commit("[spec:fixture/1.1] metadata only");result=f.discover()
   expect(result["discovered"]==1 and f.coverage(commit)["required"]==10,"empty commit escaped default watchers")
- check(IDS[17],empty)
- check(IDS[18],lambda:f.reject("review.commits.discover",dict(SCOPE,repository_id=REPOSITORY,checkout_path="/root"),"REVIEW_INPUT_INVALID"))
- check(IDS[19],lambda:f.reject("review.commits.discover",dict(SCOPE,run_id=xid(404),repository_id=REPOSITORY),"REVIEW_SCOPE_DENIED"))
- check(IDS[20],lambda:closed_audit(f,'review.coverage.inspect',dict(SCOPE,repository_id=REPOSITORY,source_object_id=f.second),'17.1'))
- check(IDS[21],lambda:closed_audit(f,'review.policy.configure',dict(SCOPE,policy=f.watcher_policy),'17.1',write=True))
+ check(IDS[18],empty)
+ check(IDS[19],lambda:f.reject("review.commits.discover",dict(SCOPE,repository_id=REPOSITORY,checkout_path="/root"),"REVIEW_INPUT_INVALID"))
+ check(IDS[20],lambda:f.reject("review.commits.discover",dict(SCOPE,run_id=xid(404),repository_id=REPOSITORY),"REVIEW_SCOPE_DENIED"))
+ check(IDS[21],lambda:closed_audit(f,'review.coverage.inspect',dict(SCOPE,repository_id=REPOSITORY,source_object_id=f.second),'17.1'))
+ check(IDS[22],lambda:closed_audit(f,'review.policy.configure',dict(SCOPE,policy=f.watcher_policy),'17.1',write=True))
 def main():
  with tempfile.TemporaryDirectory(prefix="hf-review-17-1-") as temp:
   f=Fixture("17.1",Path(temp))

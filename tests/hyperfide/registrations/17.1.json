@@ -9,6 +9,7 @@
   "assertion_ids": [
     "review.policy.ten-distinct-watchers",
     "review.policy.reject-nine",
+    "review.policy.reject-sixteen",
     "review.policy.reject-duplicate-session",
     "review.policy.reject-unapproved-sharding",
     "review.policy.reject-request-approval",
