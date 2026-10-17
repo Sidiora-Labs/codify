@@ -1,3 +1,4 @@
+import {verifyPreparationReceipt} from './preparation_receipts.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {constants} from 'node:fs';
@@ -13,7 +14,7 @@ import type {InvocationContext,Principal} from '../transport/protocol.js';
 import {isArtifactStoreCapability} from '../artifacts/objects.js';
 import type {ArtifactStoreCapability} from '../artifacts/objects.js';
 import type {BoundProviderRequest,CapturedProviderOutput} from '../providers/reconcile.js';
-import {readRunnerBinding,readRunnerReadiness,runnerCanonical,runnerResultSigningBytes} from './bridge.js';
+import {readRunnerBinding,readRunnerPreparationBinding,readRunnerReadiness,runnerCanonical,runnerResultSigningBytes} from './bridge.js';
 import type {RunnerRemotePlan} from './bridge.js';
 import {readJobAllocation} from '../scheduler/claim.js';
 import {lookupNativeLaunch} from '../events/outbox.js';
@@ -88,7 +89,9 @@ function boundRequest(binding:Record<string,any>,operation_id:string,argv:string
 function jobRequest(row:Job):BoundProviderRequest{
  const b=row.plan.binding;
  const encoded=Buffer.from(JSON.stringify({config_path:b.state_dir+'/runner.json',operation_id:row.operation_id})).toString('base64url');
- return boundRequest(b,row.operation_id,[b.runner_binary,'--component','12.4','--action','runner.job.execute','--request-base64',encoded],Math.min(3600000,row.plan.request.timeout_ms+60000));
+ const request=boundRequest(b,row.operation_id,[b.runner_binary,'--component','12.4','--action','runner.job.execute','--request-base64',encoded],Math.min(3600000,row.plan.request.timeout_ms+60000));
+ if(row.job_class==='PREPARATION')request.cwd=path.dirname(b.workspace_path);
+ return request;
 }
 function decodeNative(captured:CapturedProviderOutput):{raw:Buffer;digest:string;receipt:Record<string,any>}{
  if(captured.complete!==true||!(captured.stdout instanceof Uint8Array)||!(captured.stderr instanceof Uint8Array)||!digest(captured.spool_digest)||captured.stdout.byteLength>MAX_CAPTURE||captured.exit_code!==0)fail('RUNNER_CAPTURE_INCOMPLETE','Complete native invocation stdout and successful helper exit required');
@@ -106,11 +109,16 @@ function capturedItem(value:unknown):{base64:string;digest:string;size_bytes:str
 function validateReceipt(row:Job,value:Record<string,any>):void{
  const p=row.plan.request,b=row.plan.binding;
  const expected:Record<string,unknown>={operation_id:row.operation_id,organisation_id:row.organisation_id,run_id:row.run_id,session_id:row.session_id,repository_id:p.repository_id,sandbox_id:b.sandbox_id,boot_id:b.boot_id,boot_generation:String(b.boot_generation),slot_id:b.slot_id,slot_generation:String(b.slot_generation),plan_digest:row.plan_digest,argv:p.argv,requested_cwd:p.cwd,executable_digest:p.executable_digest,environment_digest:p.environment_digest,source_manifest_digest:p.source_digest,policy_digest:p.policy_digest};
+ const preparing=row.job_class==='PREPARATION';
+ if(preparing){
+  verifyPreparationReceipt(Buffer.from(JSON.stringify(value)),{operation_id:row.operation_id,plan_digest:row.plan_digest,argv:p.argv,executable_digest:p.executable_digest,workspace_path:b.workspace_path,uid:b.uid,gid:b.gid});
+ }else{
  expected.source_object_id=b.source_object_id;expected.source_tree_id=b.source_tree_id;
  if(!digest(row.plan.source_state_digest)||!digest(row.plan.workspace_digest))fail('RUNNER_MEASURED_INPUT_UNPINNED','Actual physical source and workspace measurements must be pinned in admission');
  expected.source_state_digest=row.plan.source_state_digest;expected.workspace_digest=row.plan.workspace_digest;
+ }
  for(const [key,wanted] of Object.entries(expected))if(!same(value[key],wanted))fail('RUNNER_RECEIPT_BINDING_MISMATCH','Native receipt differs from the immutable admitted plan: '+key);
- if(value.execution_plane!=='REMOTE'||value.workspace_path!==b.workspace_path||!digest(value.source_state_digest)||p.source_provenance_digest!==undefined&&value.source_provenance_digest!==p.source_provenance_digest||!object(value.start_identity)||!Number.isSafeInteger(value.start_identity.pid)||Number(value.start_identity.pid)<=0||!decimal(value.start_identity.start_time,true)||typeof value.start_identity.os_boot_id!=='string'||!uuid(value.start_identity.os_boot_id)||!Number.isSafeInteger(value.start_identity.pgid)||Number(value.start_identity.pgid)<=0||value.start_identity.uid!==b.uid)fail('RUNNER_PROCESS_IDENTITY_MISMATCH','Exact source and kernel process identity required');
+ if(value.execution_plane!=='REMOTE'||value.workspace_path!==b.workspace_path||(!preparing&&!digest(value.source_state_digest))||p.source_provenance_digest!==undefined&&value.source_provenance_digest!==p.source_provenance_digest||!object(value.start_identity)||!Number.isSafeInteger(value.start_identity.pid)||Number(value.start_identity.pid)<=0||!decimal(value.start_identity.start_time,true)||typeof value.start_identity.os_boot_id!=='string'||!uuid(value.start_identity.os_boot_id)||!Number.isSafeInteger(value.start_identity.pgid)||Number(value.start_identity.pgid)<=0||value.start_identity.uid!==b.uid)fail('RUNNER_PROCESS_IDENTITY_MISMATCH','Exact source and kernel process identity required');
  if(!Number.isSafeInteger(value.exit_code)||!Number.isSafeInteger(value.signal)||value.signal<0||![value.timed_out,value.interrupted,value.truncated,value.output_complete,value.artifacts_complete,value.observed_process_absent].every(x=>typeof x==='boolean')||!['CONFIRMED','UNKNOWN'].includes(value.cleanup_status)||!Number.isFinite(Date.parse(value.started_at))||!Number.isFinite(Date.parse(value.ended_at))||Date.parse(value.ended_at)<Date.parse(value.started_at)||!Number.isSafeInteger(value.duration_ms)||value.duration_ms<0)fail('RUNNER_RECEIPT_INVALID','Actual process outcome, timing and cleanup observations required');
  if(!Array.isArray(value.artifacts)||value.artifacts.length>p.artifact_paths.length||value.artifacts.some((a:unknown)=>!object(a)||!p.artifact_paths.includes(a.path as string))||new Set(value.artifacts.map((a:Record<string,unknown>)=>a.path)).size!==value.artifacts.length||value.artifacts_complete&&value.artifacts.length!==p.artifact_paths.length)fail('RUNNER_ARTIFACT_MISMATCH','Artifacts differ from requested exact paths');
  capturedItem(value.stdout);capturedItem(value.stderr);for(const item of value.artifacts)capturedItem(item);
@@ -208,7 +216,8 @@ export async function createComponent(ctx:ComponentContext):Promise<Component>{
  try {
  if(current.plan_digest!==row.plan_digest||hash(runnerCanonical(current.plan))!==row.plan_digest||current.authority_epoch!==i.principal.deployment_epoch||new Date(current.expires_at).getTime()<=new Date(current.db_now).getTime())fail('RUNNER_ADMISSION_STALE','Current immutable admission and run epoch required');
  await authority.guard(tx,current.principal);
- const b=await readRunnerBinding(tx as PrimaryTransaction,{organisation_id:row.organisation_id,run_id:row.run_id,session_id:row.session_id});await readRunnerReadiness(tx as PrimaryTransaction,b);
+ const preparing=row.job_class==='PREPARATION';
+ const b=await (preparing?readRunnerPreparationBinding:readRunnerBinding)(tx as PrimaryTransaction,{organisation_id:row.organisation_id,run_id:row.run_id,session_id:row.session_id});if(!preparing)await readRunnerReadiness(tx as PrimaryTransaction,b);
  for(const key of Object.keys(row.plan.binding))if(!same(b[key],row.plan.binding[key]))fail('RUNNER_BINDING_STALE','Admitted physical runner binding changed');
  const allocation=await readJobAllocation(tx as PrimaryTransaction,{organisation_id:row.organisation_id,run_id:row.run_id,reservation_id:row.reservation_id});
  if(!allocation||(['allocation_id','generation','slot_id','sandbox_id','sandbox_boot_generation','assignee_session_id','request_id'] as const).some(key=>!same(allocation[key],row.plan.allocation[key])))fail('RUNNER_ALLOCATION_STALE','Current complete reservation assignment differs from admission');
@@ -315,7 +324,9 @@ export async function createComponent(ctx:ComponentContext):Promise<Component>{
   for(const key of Object.keys(b))if(!same(key==='preparation_digest'?r.boot_preparation_digest:r[key],b[key as keyof typeof b]))return null;
   return {evidence_digest:hash(runnerCanonical({registry:r.observation_digest,registry_version:String(r.registration_version),launch:r.retained_start})),observed_at:new Date(r.db_now).toISOString()};
  }
-const r=await readRunnerBinding(tx,b);for(const key of Object.keys(b))if(String(key==='preparation_digest'?r.boot_preparation_digest:r[key])!==String(b[key as keyof typeof b]))return null;await readRunnerReadiness(tx,r);return {evidence_digest:r.observation_digest,observed_at:new Date(r.db_now).toISOString()};}catch{return null;}});
+const job=(await tx.query("SELECT job_class FROM hyperfide.runner_remote_jobs WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3 AND state='CLAIMED'",[b.organisation_id,b.run_id,(request as Record<string,any>)?.operation_id])).rows[0];
+ const preparing=job?.job_class==='PREPARATION';
+ const r=await (preparing?readRunnerPreparationBinding:readRunnerBinding)(tx,b);for(const key of Object.keys(b))if(String(key==='preparation_digest'?r.boot_preparation_digest:r[key])!==String(b[key as keyof typeof b]))return null;if(!preparing)await readRunnerReadiness(tx,r);return {evidence_digest:r.observation_digest,observed_at:new Date(r.db_now).toISOString()};}catch{return null;}});
  const workers=Array.from({length:config.concurrency},(_,index)=>worker(index));
  return {apiVersion:1,capabilities:{'runner.native.v1':native},actions:{'runner.executor.describe':async(_input,context)=>{assertInvocation(context.invocation);await authority.authorize(context.invocation);if(context.invocation.principal.role!=='PROVISIONER'||!config.signers.some(s=>s.credential_id===context.invocation!.principal.credential_id))fail('ROLE_DENIED','Configured provisioner status required');return {active,completed,unknown,last_error,concurrency:config.concurrency,replay_policy:'NEVER_RELAUNCH_CLAIMED_OR_UNKNOWN',authority:'NONE'};}},close:async()=>{controller.abort();await Promise.all(workers);if(typeof unregister==='function')unregister();}};
 }
