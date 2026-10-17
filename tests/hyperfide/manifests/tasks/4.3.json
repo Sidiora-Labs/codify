@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "campaign_id": "hyperfide-task-4.3-integrated-4fc39f31-v1-requal-6a1c18309430",
+  "campaign_id": "hyperfide-task-4.3-integrated-4fc39f31-v1-requal-6a1c18309430-requal-12aa390190b3",
   "registered_variant": "task:4.3",
   "scope": "task-component",
   "case_ids": [
@@ -54,8 +54,8 @@
   "inputs": [
     {
       "path": "cg",
-      "sha256": "56b805f522e23e0b61fe7a17e9fc8ca8e3fce19b6eeb6f2cc6015305cda54d32",
-      "size": 69200608
+      "sha256": "08127e8ff517a8f67819f0538a592c2f5a362d1131092cab83a340860332f87e",
+      "size": 69285024
     },
     {
       "path": "services/hyperfide/components/4.3.json",
