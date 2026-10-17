@@ -438,18 +438,18 @@ static void orch_prompt_ahead(Cg *cg, const FleetNode *n, const char *feature,
         sb_printf(&b, "\n\n## Ahead of its requirements\n\n"
                   "Task %s starts while its requirements are still open: %s. "
                   "Their work is not on your branch yet:\n%s\n"
-                  "- Claim it with `cg spec start %s --ahead` (a plain start "
+                  "- Claim it with `hyperfide spec start %s --ahead` (a plain start "
                   "refuses while requirements are open).\n"
                   "- Build against the projection, where every active branch "
-                  "is folded together, theirs included: `cg context <area> "
-                  "--branch %s`, `cg grep <pattern> --branch %s`, `cg search "
+                  "is folded together, theirs included: `hyperfide context <area> "
+                  "--branch %s`, `hyperfide grep <pattern> --branch %s`, `hyperfide search "
                   "<query> --branch %s`.\n"
-                  "- `cg projection findings` lists where your branch and the "
+                  "- `hyperfide projection findings` lists where your branch and the "
                   "branches above collide; settle those with their owners "
                   "early.\n"
-                  "- `cg spec done %s` refuses until %s land%s on main. Commit "
-                  "your work; when you are steered to, run `cg fleet sync` to "
-                  "bring the land into your branch, then `cg spec done %s`.\n",
+                  "- `hyperfide spec done %s` refuses until %s land%s on main. Commit "
+                  "your work; when you are steered to, run `hyperfide fleet sync` to "
+                  "bring the land into your branch, then `hyperfide spec done %s`.\n",
                   id, open.p, brs.p, id, PROJECTION_BRANCH, PROJECTION_BRANCH,
                   PROJECTION_BRANCH, id, open.p, nopen == 1 ? "s" : "", id);
         write_entire_file(path, b.p, b.len);
@@ -484,8 +484,8 @@ static int orch_write_prompt(const char *cgroot, const char *feature,
         sb_puts(&prompt, "You own Codify's final @docs closure. Use the evidence "
                 "packet below to update only the configured documentation targets. "
                 "Keep user, developer, and release coverage explicit; update the "
-                "claims ledger when needed; finish only with `cg docs close`. Do not "
-                "run `cg spec run` or `cg spec done @docs`.\n\n");
+                "claims ledger when needed; finish only with `hyperfide docs close`. Do not "
+                "run `hyperfide spec run` or `hyperfide spec done @docs`.\n\n");
     }
     sb_puts(&prompt, out);
     int wrc = write_entire_file(path, prompt.p, prompt.len);
@@ -537,7 +537,7 @@ static int orch_dry_run(const char *specroot, const char *cgroot,
     config_feature_path(specroot, feature, path, sizeof path);
     Kvx *k = kvx_parse(path);
     if (!k) {
-        fprintf(stderr, "cg spec run: cannot parse %s\n", path);
+        fprintf(stderr, "hyperfide spec run: cannot parse %s\n", path);
         return 1;
     }
     char **ids;
@@ -711,7 +711,7 @@ int cmd_spec_run(int argc, char **argv) {
             fleet = true;
         }
         else {
-            fprintf(stderr, "usage: cg spec run [-n N] [--driver "
+            fprintf(stderr, "usage: hyperfide spec run [-n N] [--driver "
                     "codex|claude|custom] [--dry-run] [--max-fail K] "
                     "[--agent-prefix P] [--fleet [-f <feature>] "
                     "[--max-rounds R] [--status] [--resume [RUN]]]\n");
@@ -721,22 +721,22 @@ int cmd_spec_run(int argc, char **argv) {
 
     char specroot[4096];
     if (orch_spec_root(specroot, sizeof specroot) != 0) {
-        fprintf(stderr, "cg spec run: no spec/workflow.kvx here — scaffold "
-                "one with `cg spec new <feature>`\n");
+        fprintf(stderr, "hyperfide spec run: no spec/workflow.kvx here — scaffold "
+                "one with `hyperfide spec new <feature>`\n");
         return 1;
     }
     char wfpath[4600];
     config_workflow_path(specroot, wfpath, sizeof wfpath);
     Kvx *wf = kvx_parse(wfpath);
     if (!wf) {
-        fprintf(stderr, "cg spec run: cannot parse %s\n", wfpath);
+        fprintf(stderr, "hyperfide spec run: cannot parse %s\n", wfpath);
         return 1;
     }
     char *mode = kvx_str(wf, "mode", "name");
     if (!mode || (strcmp(mode, "parallel") != 0 &&
                   strcmp(mode, "prod") != 0)) {
-        fprintf(stderr, "cg spec run: mode is '%s' — orchestration needs "
-                "`cg spec mode parallel` (or prod)\n",
+        fprintf(stderr, "hyperfide spec run: mode is '%s' — orchestration needs "
+                "`hyperfide spec mode parallel` (or prod)\n",
                 mode && mode[0] ? mode : "standard");
         free(mode);
         kvx_free(wf);
@@ -746,15 +746,15 @@ int cmd_spec_run(int argc, char **argv) {
 
     char cgroot[4096];
     if (cg_find_root(cgroot, sizeof cgroot) != 0) {
-        fprintf(stderr, "cg spec run: leases need a Codify index — run "
-                "`cg init` first\n");
+        fprintf(stderr, "hyperfide spec run: leases need a Codify index — run "
+                "`hyperfide init` first\n");
         kvx_free(wf);
         return 1;
     }
 
     char *feature = kvx_str(wf, "meta", "active_feature");
     if (!feature || !feature[0]) {
-        fprintf(stderr, "cg spec run: no active_feature in %s\n", wfpath);
+        fprintf(stderr, "hyperfide spec run: no active_feature in %s\n", wfpath);
         free(feature);
         kvx_free(wf);
         return 1;
@@ -768,14 +768,14 @@ int cmd_spec_run(int argc, char **argv) {
     if (strcmp(cfg.driver, "codex") != 0 &&
         strcmp(cfg.driver, "claude") != 0 &&
         strcmp(cfg.driver, "custom") != 0) {
-        fprintf(stderr, "cg spec run: unknown driver '%s' (codex, claude, "
+        fprintf(stderr, "hyperfide spec run: unknown driver '%s' (codex, claude, "
                 "or custom)\n", cfg.driver);
         orch_cfg_free(&cfg);
         free(feature);
         return 1;
     }
     if (strcmp(cfg.driver, "custom") == 0 && (!cfg.cmd || !cfg.cmd[0])) {
-        fprintf(stderr, "cg spec run: the custom driver needs cmd = \"...\" "
+        fprintf(stderr, "hyperfide spec run: the custom driver needs cmd = \"...\" "
                 "in workflow.kvx [agents]\n");
         orch_cfg_free(&cfg);
         free(feature);
@@ -835,7 +835,7 @@ int cmd_spec_run(int argc, char **argv) {
                              slots[i].agent, slots[i].attempt,
                              slots[i].fence);
             }
-            fprintf(stderr, "cg spec run: interrupted — children terminated,"
+            fprintf(stderr, "hyperfide spec run: interrupted — children terminated,"
                     " leases released\n");
             rc = 130;
             break;
@@ -898,7 +898,7 @@ int cmd_spec_run(int argc, char **argv) {
                 slots[i].last_heartbeat = heartbeat_now;
                 continue;
             }
-            fprintf(stderr, "cg spec run: task %s lost fenced ownership — "
+            fprintf(stderr, "hyperfide spec run: task %s lost fenced ownership — "
                             "terminating stale agent %s\n", slots[i].id,
                     slots[i].agent);
             if (kill(-slots[i].pid, SIGTERM) != 0)
@@ -909,7 +909,7 @@ int cmd_spec_run(int argc, char **argv) {
             failures++;
         }
         if (!stopping && failures > maxfail) {
-            fprintf(stderr, "cg spec run: %d failure(s) exceed --max-fail "
+            fprintf(stderr, "hyperfide spec run: %d failure(s) exceed --max-fail "
                     "%d — waiting for running agents, then stopping\n",
                     failures, maxfail);
             stopping = true;
@@ -934,7 +934,7 @@ int cmd_spec_run(int argc, char **argv) {
             }
             if (cr != 0) {
                 fprintf(stderr, "%s", out ? out : "");
-                fprintf(stderr, "cg spec run: claim-next failed (rc %d)\n",
+                fprintf(stderr, "hyperfide spec run: claim-next failed (rc %d)\n",
                         cr);
                 free(out);
                 stopping = true;
@@ -951,7 +951,7 @@ int cmd_spec_run(int argc, char **argv) {
             free(lobj);
             free(out);
             if (!id || !id[0] || !attempt || !attempt[0] || fence <= 0) {
-                fprintf(stderr, "cg spec run: could not parse claim-next "
+                fprintf(stderr, "hyperfide spec run: could not parse claim-next "
                         "attempt identity\n");
                 if (id && id[0])
                     orch_abandon(specroot, feat && feat[0] ? feat : feature,
@@ -970,7 +970,7 @@ int cmd_spec_run(int argc, char **argv) {
                                          sizeof prompt);
             if (wprc == 0) orch_prompt_steer(prompt, agent);
             if (wprc != 0) {
-                fprintf(stderr, "cg spec run: could not write prompt for "
+                fprintf(stderr, "hyperfide spec run: could not write prompt for "
                         "task %s\n", id);
                 orch_abandon(specroot, tfeat, id, agent, attempt, fence);
                 orch_note_failure(tfeat, id, -1);
@@ -984,7 +984,7 @@ int cmd_spec_run(int argc, char **argv) {
             int ac = orch_argv(cfg.driver, extra, cfg.cmd, -1, cgroot,
                                prompt, id, agent, av, ORCH_MAX_ARGV);
             if (ac < 0) {
-                fprintf(stderr, "cg spec run: cannot build a %s command "
+                fprintf(stderr, "hyperfide spec run: cannot build a %s command "
                         "line\n", cfg.driver);
                 orch_abandon(specroot, tfeat, id, agent, attempt, fence);
                 free(id);
@@ -1001,7 +1001,7 @@ int cmd_spec_run(int argc, char **argv) {
                                    tfeat, id, attempt, fence);
             orch_argv_free(av);
             if (pid < 0) {
-                fprintf(stderr, "cg spec run: fork failed: %s\n",
+                fprintf(stderr, "hyperfide spec run: fork failed: %s\n",
                         strerror(errno));
                 orch_abandon(specroot, tfeat, id, agent, attempt, fence);
                 orch_note_failure(tfeat, id, -1);
@@ -1508,20 +1508,20 @@ static int orch_manager_prompt(Cg *cg, const FleetNode *n, const char *path) {
         sb_printf(&b,
             "Your subtree is complete only once every task of wave %ld of %s "
             "is qualified and %s is merged into %s:\n"
-            "  cg fleet tree -f %s      # where your workers stand\n"
-            "  cg fleet merge-up <id>   # a task branch a worker handed up\n"
-            "  cg fleet land %ld -f %s  # the gates, then main\n"
-            "  cg fleet pr %ld -f %s    # the pull request\n",
+            "  hyperfide fleet tree -f %s      # where your workers stand\n"
+            "  hyperfide fleet merge-up <id>   # a task branch a worker handed up\n"
+            "  hyperfide fleet land %ld -f %s  # the gates, then main\n"
+            "  hyperfide fleet pr %ld -f %s    # the pull request\n",
             n->wave, n->feature, n->branch, n->base, n->feature, n->wave,
             n->feature, n->wave, n->feature);
     else
         sb_printf(&b,
             "Your subtree is complete only once every task of %s is qualified "
             "and %s is merged into %s:\n"
-            "  cg fleet tree -f %s      # where your workers stand\n"
-            "  cg fleet merge-up <id>   # a wave branch a worker handed up\n"
-            "  cg fleet land %s         # the gates, then main\n"
-            "  cg fleet pr %s           # the pull request\n",
+            "  hyperfide fleet tree -f %s      # where your workers stand\n"
+            "  hyperfide fleet merge-up <id>   # a wave branch a worker handed up\n"
+            "  hyperfide fleet land %s         # the gates, then main\n"
+            "  hyperfide fleet pr %s           # the pull request\n",
             n->feature, n->branch, n->base, n->feature, n->feature, n->feature);
     int rc = write_entire_file(path, b.p, b.len);
     sb_free(&b);
@@ -1537,7 +1537,7 @@ int orch_spawn_manager(Cg *cg, const char *feature, long wave,
     Hierarchy h;
     Kvx *wf = orch_hier(cg->shared, &h);
     if (!h.enabled) {
-        fprintf(stderr, "cg spec run: no enabled [hierarchy] in "
+        fprintf(stderr, "hyperfide spec run: no enabled [hierarchy] in "
                 "spec/workflow.kvx — there is no fleet to spawn\n");
         hier_free(&h);
         kvx_free(wf);
@@ -1595,7 +1595,7 @@ int orch_spawn_manager(Cg *cg, const char *feature, long wave,
                          &wt_created, &br_created, &err) != 0) {
         char ex[300];
         orch_excerpt(&err, ex, sizeof ex);
-        fprintf(stderr, "cg spec run: cannot add the manager worktree %s "
+        fprintf(stderr, "hyperfide spec run: cannot add the manager worktree %s "
                 "for %s: %s\n", n->worktree, n->branch, ex);
         sb_free(&err);
         return 1;
@@ -1606,7 +1606,7 @@ int orch_spawn_manager(Cg *cg, const char *feature, long wave,
     branch_register(cg, n->branch, n->worktree, head, n->base);
 
     if (orch_manager_prompt(cg, n, prompt) != 0) {
-        fprintf(stderr, "cg spec run: could not write the briefing for %s\n",
+        fprintf(stderr, "hyperfide spec run: could not write the briefing for %s\n",
                 n->agent);
         return 1;
     }
@@ -1615,7 +1615,7 @@ int orch_spawn_manager(Cg *cg, const char *feature, long wave,
     int ac = orch_argv(driver, extra, cmd_tmpl, FLEET_FEATURE, n->worktree,
                        prompt, feature, n->agent, av, ORCH_MAX_ARGV);
     if (ac < 0) {
-        fprintf(stderr, "cg spec run: cannot build a %s command line\n",
+        fprintf(stderr, "hyperfide spec run: cannot build a %s command line\n",
                 driver);
         return 1;
     }
@@ -1623,7 +1623,7 @@ int orch_spawn_manager(Cg *cg, const char *feature, long wave,
     pid_t pid = orch_fleet_exec(av, n, prompt, logpath);
     orch_argv_free(av);
     if (pid < 0) {
-        fprintf(stderr, "cg spec run: fork failed: %s\n", strerror(errno));
+        fprintf(stderr, "hyperfide spec run: fork failed: %s\n", strerror(errno));
         return 1;
     }
     n->pid = (int)pid;
@@ -1669,7 +1669,7 @@ int orch_spawn_worker(Cg *cg, const char *feature, const char *id,
     Hierarchy h;
     Kvx *wf = orch_hier(cg->shared, &h);
     if (!h.enabled) {
-        fprintf(stderr, "cg spec run: no enabled [hierarchy] in "
+        fprintf(stderr, "hyperfide spec run: no enabled [hierarchy] in "
                 "spec/workflow.kvx — there is no fleet to spawn\n");
         hier_free(&h);
         kvx_free(wf);
@@ -1719,7 +1719,7 @@ int orch_spawn_worker(Cg *cg, const char *feature, const char *id,
     if (brc != 0) {
         orch_env_restore(&saved);
         if (js && js[0]) fprintf(stderr, "%s", js);
-        fprintf(stderr, "cg spec run: `cg fleet begin %s` was refused "
+        fprintf(stderr, "hyperfide spec run: `hyperfide fleet begin %s` was refused "
                 "(rc %d) — nothing was spawned for it\n", id, brc);
         free(js);
         return 1;
@@ -1739,7 +1739,7 @@ int orch_spawn_worker(Cg *cg, const char *feature, const char *id,
     free(js);
     if (!n->attempt[0] || n->fence <= 0) {
         orch_env_restore(&saved);
-        fprintf(stderr, "cg spec run: `cg fleet begin %s` returned no fenced "
+        fprintf(stderr, "hyperfide spec run: `hyperfide fleet begin %s` returned no fenced "
                 "claim\n", id);
         return 1;
     }
@@ -1755,7 +1755,7 @@ int orch_spawn_worker(Cg *cg, const char *feature, const char *id,
     if (prc == 0 && g_retry_attempt > 0)
         orch_prompt_retry(prompt, feature, id, g_retry_attempt);
     if (prc != 0) {
-        fprintf(stderr, "cg spec run: could not write the briefing for task "
+        fprintf(stderr, "hyperfide spec run: could not write the briefing for task "
                 "%s\n", id);
         orch_abandon(cg->shared, feature, id, n->agent, n->attempt, n->fence);
         return 1;
@@ -1764,7 +1764,7 @@ int orch_spawn_worker(Cg *cg, const char *feature, const char *id,
     int ac = orch_argv(driver, extra, cmd_tmpl, FLEET_WORKER, n->worktree,
                        prompt, id, n->agent, av, ORCH_MAX_ARGV);
     if (ac < 0) {
-        fprintf(stderr, "cg spec run: cannot build a %s command line\n",
+        fprintf(stderr, "hyperfide spec run: cannot build a %s command line\n",
                 driver);
         orch_abandon(cg->shared, feature, id, n->agent, n->attempt, n->fence);
         return 1;
@@ -1773,7 +1773,7 @@ int orch_spawn_worker(Cg *cg, const char *feature, const char *id,
     pid_t pid = orch_fleet_exec(av, n, prompt, logpath);
     orch_argv_free(av);
     if (pid < 0) {
-        fprintf(stderr, "cg spec run: fork failed: %s\n", strerror(errno));
+        fprintf(stderr, "hyperfide spec run: fork failed: %s\n", strerror(errno));
         orch_abandon(cg->shared, feature, id, n->agent, n->attempt, n->fence);
         return 1;
     }
@@ -1865,7 +1865,7 @@ int orch_tree_status(Cg *cg, const char *feature_ov, bool json) {
     Hierarchy h;
     Kvx *wf = orch_hier(cg->shared, &h);
     if (!h.configured) {
-        fprintf(stderr, "cg fleet tree: no [hierarchy] in "
+        fprintf(stderr, "hyperfide fleet tree: no [hierarchy] in "
                 "spec/workflow.kvx — this repository runs flat\n");
         hier_free(&h);
         kvx_free(wf);
@@ -1878,7 +1878,7 @@ int orch_tree_status(Cg *cg, const char *feature_ov, bool json) {
                                          : (active ? active : ""));
     free(active);
     if (!feature[0]) {
-        fprintf(stderr, "cg fleet tree: no active_feature (use -f)\n");
+        fprintf(stderr, "hyperfide fleet tree: no active_feature (use -f)\n");
         hier_free(&h);
         kvx_free(wf);
         return 1;
@@ -2375,9 +2375,9 @@ static int sup_forward_steer(Sup *s, long wave, const char *br,
         sb_free(&st);
         sb_init(&st);
         sb_printf(&st, "%s landed on %s and is now merged forward into %s. "
-                  "Commit your work, then run `cg fleet sync` to bring it "
+                  "Commit your work, then run `hyperfide fleet sync` to bring it "
                   "into %s — your requirements are then done there and "
-                  "`cg spec done %s` can qualify.",
+                  "`hyperfide spec done %s` can qualify.",
                   g_fwd_landed[0] ? g_fwd_landed : "a wave", s->mainbr, br,
                   sl->n.branch, sl->n.task);
         driver_steer(g, sl->n.agent, st.p);
@@ -2388,7 +2388,7 @@ static int sup_forward_steer(Sup *s, long wave, const char *br,
     sb_puts(&p, "]}");
     sb_free(&st);
     events_emit(g, "fleet.forward", subj, p.p);
-    printf("[fleet] %s %s forward into %s; %d worker(s) steered to cg fleet "
+    printf("[fleet] %s %s forward into %s; %d worker(s) steered to hyperfide fleet "
            "sync\n", s->mainbr, strcmp(outcome, "merged") == 0 ? "merged"
            : "(resolved by its manager) merged", br, nsteer);
     fflush(stdout);
@@ -3040,7 +3040,7 @@ static void supervisor_stall_check(Sup *s, OrchFleetSlot *sl, long now) {
         char msg[400];
         snprintf(msg, sizeof msg, "The supervisor has seen no progress on "
                  "%s for %lds. Continue if you are working; if you are "
-                 "stuck, record why with `cg handoff --task %s --blocked "
+                 "stuck, record why with `hyperfide handoff --task %s --blocked "
                  "\"...\"` and exit.", sl->n.task, idle, sl->n.task);
         driver_steer(s->g, sl->n.agent, msg);
         sup_note(s, "supervisor.stall", sl, "nudge", "no progress", idle);
@@ -3106,7 +3106,7 @@ static void supervisor_escalate(Sup *s, const char *task, int level,
     if (level == 1) {
         snprintf(msg, sizeof msg, "Task %s failed every attempt the budget "
                  "allows (%s). Decide: fix it on your branch yourself, "
-                 "re-plan it, or record it as blocked with `cg handoff --task "
+                 "re-plan it, or record it as blocked with `hyperfide handoff --task "
                  "%s --blocked \"...\"` so the run can finish the rest.",
                  task, reason, task);
         driver_steer(s->g, to, msg);
@@ -3319,7 +3319,7 @@ static int sup_wake_managers(Sup *s, const OrchSubtree *sub, long now) {
             continue;
         }
         if (s->wakes <= 0) {
-            fprintf(stderr, "cg spec run: %s did not complete and no manager "
+            fprintf(stderr, "hyperfide spec run: %s did not complete and no manager "
                     "wake is left (--max-rounds) — %d/%d task(s) qualified, "
                     "%ld commit(s) still on %s\n", feature, sub->done,
                     sub->total, sub->ahead < 0 ? 0 : sub->ahead, s->fbranch);
@@ -3379,9 +3379,9 @@ static int supervisor_tick(Sup *s) {
     if (g_orch_int || strcmp(s->state, "stopping") == 0) {
         bool sig = g_orch_int != 0;
         sup_terminate(s);
-        fprintf(stderr, "cg spec run: %s — the fleet was terminated, worker "
+        fprintf(stderr, "hyperfide spec run: %s — the fleet was terminated, worker "
                 "claims released, branches kept\n",
-                sig ? "interrupted" : "stopped (cg fleet down)");
+                sig ? "interrupted" : "stopped (hyperfide fleet down)");
         if (sig) s->rc = 130;
         sup_set_state(s, "stopped", sig ? "signal" : "down");
         return SUP_DONE;
@@ -3451,7 +3451,7 @@ static int supervisor_tick(Sup *s) {
                            strcmp(ts, "implemented") == 0);
         free(ts);
         if (done) { sl->last_heartbeat = now; continue; }
-        fprintf(stderr, "cg spec run: worker %s lost fenced ownership of %s "
+        fprintf(stderr, "hyperfide spec run: worker %s lost fenced ownership of %s "
                 "— terminating it\n", sl->n.agent, sl->n.task);
         sup_kill(sl->n.pid, sl->pid_start, sl->adopted);
         sl->live = false;
@@ -3499,7 +3499,7 @@ static int supervisor_tick(Sup *s) {
         return SUP_DONE;
     }
     if (!s->stopping && s->failures > s->maxfail) {
-        fprintf(stderr, "cg spec run: %d failure(s) exceed --max-fail %d — "
+        fprintf(stderr, "hyperfide spec run: %d failure(s) exceed --max-fail %d — "
                 "waiting for the fleet, then stopping\n", s->failures,
                 s->maxfail);
         orch_event("orch.stop", "feature", NULL, feature, NULL, 0, -999,
@@ -3518,14 +3518,14 @@ static int supervisor_tick(Sup *s) {
     long appr = 0;
     int ap = !mlive && live == 0 ? sup_approval(s, &appr) : 0;
     if (ap == 2) {
-        fprintf(stderr, "cg spec run: approval #%ld for %s was rejected — "
+        fprintf(stderr, "hyperfide spec run: approval #%ld for %s was rejected — "
                 "stopping the run (branches kept)\n", appr, feature);
         s->rc = 1;
         sup_set_state(s, "stopped", "rejected");
         return SUP_DONE;
     }
     if (ap == 1 && s->waiting_on != appr) {
-        printf("[fleet] waiting for approval #%ld — cg fleet approve %ld\n",
+        printf("[fleet] waiting for approval #%ld — hyperfide fleet approve %ld\n",
                appr, appr);
         fflush(stdout);
         s->waiting_on = appr;
@@ -3841,7 +3841,7 @@ static int sup_open(Cg *g, Sup *s, const char *feature, const OrchCfg *cfg,
     if (resume) {
         snprintf(s->run, sizeof s->run, "%s", resume);
         if (fleet_run_resume(s) != 0) {
-            fprintf(stderr, "cg fleet: no run %s to resume\n", s->run);
+            fprintf(stderr, "hyperfide fleet: no run %s to resume\n", s->run);
             return 1;
         }
         sqlite3_stmt *st = cg_prep(g,
@@ -3860,7 +3860,7 @@ static int sup_open(Cg *g, Sup *s, const char *feature, const OrchCfg *cfg,
         if (run_id && run_id[0]) snprintf(s->run, sizeof s->run, "%s", run_id);
         else run_id_new(feature, s->run, sizeof s->run);
         if (fleet_run_open(s, host) != 0) {
-            fprintf(stderr, "cg fleet: could not record run %s\n", s->run);
+            fprintf(stderr, "hyperfide fleet: could not record run %s\n", s->run);
             return 1;
         }
     }
@@ -3940,10 +3940,10 @@ static int orch_main_prompt(Cg *g, const FleetNode *n, Sup *sups, int nsup,
     }
     sqlite3_finalize(st);
     sb_puts(&b, "\n## What you can do\n"
-            "  cg fleet runs / cg fleet tree -f <feature> / cg fleet brief <feature>\n"
-            "  cg fleet steer <agent> \"<message>\"   # tell a manager what to do\n"
-            "  cg remember \"<decision>\" --type decision\n"
-            "  cg fleet checkpoint                   # merge landed pull requests, when the policy allows\n"
+            "  hyperfide fleet runs / hyperfide fleet tree -f <feature> / hyperfide fleet brief <feature>\n"
+            "  hyperfide fleet steer <agent> \"<message>\"   # tell a manager what to do\n"
+            "  hyperfide remember \"<decision>\" --type decision\n"
+            "  hyperfide fleet checkpoint                   # merge landed pull requests, when the policy allows\n"
             "Decide, record why, and exit; you are woken again when something needs you.\n");
     int rc = write_entire_file(path, b.p, b.len);
     sb_free(&b);
@@ -4024,7 +4024,7 @@ static void main_tick(Cg *g, MainAgent *m, Sup *sups, int nsup,
     FleetNode n;
     if (orch_spawn_main(g, cfg->driver, extra, cfg->cmd, sups, nsup, m->reason,
                         &n) != 0) {
-        fprintf(stderr, "cg spec run: could not start the main agent\n");
+        fprintf(stderr, "hyperfide spec run: could not start the main agent\n");
         m->reason[0] = 0;
         return;
     }
@@ -4053,8 +4053,8 @@ static int supervisor_run(Cg *g, char **features, int nfeat,
                           int maxfail, int maxrounds, const FleetRunOpts *ro) {
     int lock = sup_lock_take(g->shared);
     if (lock < 0) {
-        fprintf(stderr, "cg fleet: a supervisor is already running for this "
-                "project — see `cg fleet runs`, or stop it with `cg fleet "
+        fprintf(stderr, "hyperfide fleet: a supervisor is already running for this "
+                "project — see `hyperfide fleet runs`, or stop it with `hyperfide fleet "
                 "down`\n");
         return 1;
     }
@@ -4167,7 +4167,7 @@ static int supervisor_run(Cg *g, char **features, int nfeat,
                     char waiting[128] = "";
                     if (started[i]) continue;
                     feature_ready(g, features[i], waiting, sizeof waiting);
-                    fprintf(stderr, "cg spec run: %s waits for %s, which did "
+                    fprintf(stderr, "hyperfide spec run: %s waits for %s, which did "
                             "not finish\n", features[i], waiting);
                 }
                 rc = 1;
@@ -4195,8 +4195,8 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
                           const FleetRunOpts *ro) {
     Cg g;
     if (!memory_open_quiet(&g)) {
-        fprintf(stderr, "cg spec run: --fleet needs a Codify index — run "
-                "`cg init` first\n");
+        fprintf(stderr, "hyperfide spec run: --fleet needs a Codify index — run "
+                "`hyperfide init` first\n");
         return 1;
     }
     char resume_feature[128] = "", resume_run[40] = "";
@@ -4217,7 +4217,7 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
                                     resume_feature, sizeof resume_feature);
         }
         if (!found) {
-            fprintf(stderr, "cg fleet: nothing to resume — no unfinished run%s%s\n",
+            fprintf(stderr, "hyperfide fleet: nothing to resume — no unfinished run%s%s\n",
                     ro->resume[0] ? " named " : "", ro->resume);
             cg_close(&g);
             return 1;
@@ -4249,7 +4249,7 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
     kvx_free(wf);
 
     if (!feature[0]) {
-        fprintf(stderr, "cg spec run: no active_feature — name one with "
+        fprintf(stderr, "hyperfide spec run: no active_feature — name one with "
                 "-f <feature>\n");
         cg_close(&g);
         return 1;
@@ -4257,8 +4257,8 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
     /* Without a hierarchy there is no second level to run, and the flat
      * `cg spec run` is the whole answer — so nothing is spawned here. */
     if (!configured || !enabled) {
-        fprintf(stderr, "cg spec run: --fleet needs a%s [hierarchy] in "
-                "spec/workflow.kvx — without one `cg spec run` is the "
+        fprintf(stderr, "hyperfide spec run: --fleet needs a%s [hierarchy] in "
+                "spec/workflow.kvx — without one `hyperfide spec run` is the "
                 "single-level run and nothing was spawned\n",
                 configured ? "n enabled" : "");
         cg_close(&g);
@@ -4270,7 +4270,7 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
         return rc;
     }
     if (!git_available(&g)) {
-        fprintf(stderr, "cg spec run: %s has no git repository — the fleet "
+        fprintf(stderr, "hyperfide spec run: %s has no git repository — the fleet "
                 "needs branches\n", g.shared);
         cg_close(&g);
         return 1;
@@ -4469,7 +4469,7 @@ static int detach_supervisor(Cg *cg, char **pass, int npass,
     for (int i = 0; i < npass; i++) av[n++] = pass[i];
     av[n] = NULL;
     pid_t pid = fork();
-    if (pid < 0) { free(av); fprintf(stderr, "cg fleet: fork failed\n"); return 1; }
+    if (pid < 0) { free(av); fprintf(stderr, "hyperfide fleet: fork failed\n"); return 1; }
     if (pid == 0) {
         setsid();
         int in = open("/dev/null", O_RDONLY);
@@ -4503,7 +4503,7 @@ static int detach_supervisor(Cg *cg, char **pass, int npass,
         const char *t = tail ? tail : "";
         size_t tl = strlen(t);
         if (tl > 1200) t += tl - 1200;
-        fprintf(stderr, "cg fleet: the supervisor %s before recording run %s\n%s",
+        fprintf(stderr, "hyperfide fleet: the supervisor %s before recording run %s\n%s",
                 exited ? "exited" : "did not start", name, t);
         free(tail);
         return 1;
@@ -4520,8 +4520,8 @@ static int detach_supervisor(Cg *cg, char **pass, int npass,
     } else {
         printf("fleet %s: run %s — supervisor pid %d\n",
                resume ? "resumed" : "up", name, (int)pid);
-        printf("  log:    %s\n  follow: cg events --follow   status: cg fleet "
-               "runs   stop: cg fleet down\n", logpath);
+        printf("  log:    %s\n  follow: hyperfide events --follow   status: hyperfide fleet "
+               "runs   stop: hyperfide fleet down\n", logpath);
     }
     return 0;
 }
@@ -4550,14 +4550,14 @@ int cmd_fleet_up(Cg *cg, int argc, char **argv, bool json) {
     } else if (fleet_supervisor_alive(cg->shared)) {
         RunRef r;
         run_ref(cg, NULL, &r);
-        fprintf(stderr, "cg fleet: a supervisor is already running%s%s — see "
-                "`cg fleet runs`, or stop it with `cg fleet down`\n",
+        fprintf(stderr, "hyperfide fleet: a supervisor is already running%s%s — see "
+                "`hyperfide fleet runs`, or stop it with `hyperfide fleet down`\n",
                 r.run[0] ? " run " : "", r.run);
         rc = 1;
     } else if (resume) {
         RunRef r;
         if (!run_ref(cg, resume, &r)) {
-            fprintf(stderr, "cg fleet: nothing to resume — no unfinished run%s%s\n",
+            fprintf(stderr, "hyperfide fleet: nothing to resume — no unfinished run%s%s\n",
                     resume[0] ? " named " : "", resume);
             rc = 1;
         } else {
@@ -4585,7 +4585,7 @@ int cmd_fleet_control(Cg *cg, const char *verb, int argc, char **argv,
     }
     RunRef r;
     if (!run_ref(cg, named, &r)) {
-        fprintf(stderr, "cg fleet %s: no %srun%s%s\n", verb,
+        fprintf(stderr, "hyperfide fleet %s: no %srun%s%s\n", verb,
                 named ? "" : "unfinished ", named ? " named " : "",
                 named ? named : "");
         return 1;
@@ -4595,7 +4595,7 @@ int cmd_fleet_control(Cg *cg, const char *verb, int argc, char **argv,
     if (strcmp(verb, "pause") == 0) {
         run_state_set(cg, r.run, "paused", "pause");
         result = r.alive ? "paused — live agents finish, nothing new starts"
-                         : "marked paused (no supervisor is running; `cg fleet "
+                         : "marked paused (no supervisor is running; `hyperfide fleet "
                            "resume` starts one)";
     } else if (strcmp(verb, "resume") == 0) {
         if (r.alive) {
@@ -4645,7 +4645,7 @@ int cmd_fleet_control(Cg *cg, const char *verb, int argc, char **argv,
                : "stop requested — the supervisor has not confirmed yet";
         if (strcmp(st, "stopped") && !drain) rc = 1;
     } else {
-        fprintf(stderr, "cg fleet: unknown control %s\n", verb);
+        fprintf(stderr, "hyperfide fleet: unknown control %s\n", verb);
         return 1;
     }
     if (json) {
@@ -4717,7 +4717,7 @@ int cmd_fleet_runs(Cg *cg, bool json) {
     }
     sqlite3_finalize(st);
     if (json) sb_puts(&b, "]}\n");
-    else if (!n) sb_puts(&b, "no fleet runs yet — start one with `cg fleet up`\n");
+    else if (!n) sb_puts(&b, "no fleet runs yet — start one with `hyperfide fleet up`\n");
     fputs(b.p, stdout);
     sb_free(&b);
     return 0;

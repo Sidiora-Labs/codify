@@ -365,8 +365,8 @@ int cmd_root(bool json) {
     if (!getcwd(cwd, sizeof cwd) ||
         cg_find_project_at(cwd, root, shared, sizeof root) != 0) {
         if (json) printf("{\"root\":null}\n");
-        else fprintf(stderr, "cg: no Codify project here or in any parent "
-                             "directory (run `cg init`)\n");
+        else fprintf(stderr, "hyperfide: no Codify project here or in any parent "
+                             "directory (run `hyperfide init`)\n");
         return 1;
     }
     if (json) {
@@ -399,7 +399,7 @@ int cg_open(Cg *cg, bool create) {
         char p[4600];
         snprintf(p, sizeof p, "%s/%s", cg->root, CG_OBJECTS);
         if (mkdirs(p) != 0) {
-            fprintf(stderr, "cg: cannot create %s\n", p);
+            fprintf(stderr, "hyperfide: cannot create %s\n", p);
             return -1;
         }
     } else {
@@ -407,7 +407,7 @@ int cg_open(Cg *cg, bool create) {
         if (!getcwd(cwd, sizeof cwd) ||
             cg_find_project_at(cwd, cg->root, cg->shared,
                                sizeof cg->root) != 0) {
-            fprintf(stderr, "cg: not inside a Codify project (run `cg init`)\n");
+            fprintf(stderr, "hyperfide: not inside a Codify project (run `hyperfide init`)\n");
             return -1;
         }
     }
@@ -415,7 +415,7 @@ int cg_open(Cg *cg, bool create) {
     char dbpath[4600];
     snprintf(dbpath, sizeof dbpath, "%s/%s", cg->shared, CG_DB);
     if (sqlite3_open(dbpath, &cg->db) != SQLITE_OK) {
-        fprintf(stderr, "cg: cannot open %s: %s\n", dbpath, sqlite3_errmsg(cg->db));
+        fprintf(stderr, "hyperfide: cannot open %s: %s\n", dbpath, sqlite3_errmsg(cg->db));
         return -1;
     }
     /* WAL lets readers run while one writer indexes, and the busy timeout
@@ -430,7 +430,7 @@ int cg_open(Cg *cg, bool create) {
     char *err = NULL;
     body_tri_compat(cg->db);
     if (sqlite3_exec(cg->db, SCHEMA, NULL, NULL, &err) != SQLITE_OK) {
-        fprintf(stderr, "cg: schema: %s\n", err ? err : "?");
+        fprintf(stderr, "hyperfide: schema: %s\n", err ? err : "?");
         sqlite3_free(err);
         return -1;
     }
@@ -456,7 +456,7 @@ int cg_open(Cg *cg, bool create) {
             "CREATE INDEX IF NOT EXISTS idx_file_legacy_time "
             "ON files(branch_id) WHERE mtime_ns IS NULL",
             NULL, NULL, NULL) != SQLITE_OK) {
-        fprintf(stderr, "cg: cannot create legacy timestamp index: %s\n",
+        fprintf(stderr, "hyperfide: cannot create legacy timestamp index: %s\n",
                 sqlite3_errmsg(cg->db));
         return -1;
     }
@@ -532,8 +532,8 @@ static int db_fts_create(Cg *cg) {
     }
     if (contentless && sqlite3_libversion_number() < FTS_CONTENTLESS_MIN) {
         fprintf(stderr,
-            "cg: %s/%s keeps a contentless body index, which needs SQLite "
-            "3.43.0 or newer; this cg links SQLite %s.\n", cg->shared, CG_DB,
+            "hyperfide: %s/%s keeps a contentless body index, which needs SQLite "
+            "3.43.0 or newer; this hyperfide links SQLite %s.\n", cg->shared, CG_DB,
             sqlite3_libversion());
         free(mode);
         return -1;
@@ -547,7 +547,7 @@ static int db_fts_create(Cg *cg) {
             : "CREATE VIRTUAL TABLE IF NOT EXISTS body_fts USING fts5("
               "  path UNINDEXED, body, tokenize='unicode61')";
         if (sqlite3_exec(cg->db, sql, NULL, NULL, &err) != SQLITE_OK) {
-            fprintf(stderr, "cg: schema: %s\n", err ? err : "?");
+            fprintf(stderr, "hyperfide: schema: %s\n", err ? err : "?");
             sqlite3_free(err);
             free(mode);
             return -1;
@@ -642,8 +642,8 @@ int cg_schema_upgrade(Cg *cg) {
     if (current) return 0;
     if (stored > atol(SCHEMA_VERSION)) {
         fprintf(stderr,
-            "cg: %s/%s is schema v%ld, but this cg (%s) only knows v%s.\n"
-            "    A newer cg indexed it — install that build (make install) "
+            "hyperfide: %s/%s is schema v%ld, but this hyperfide (%s) only knows v%s.\n"
+            "    A newer hyperfide indexed it — install that build (make install) "
             "or run it from its tree.\n",
             cg->shared, CG_DB, stored, CG_VERSION, SCHEMA_VERSION);
         return -1;
@@ -701,12 +701,12 @@ int cg_schema_upgrade(Cg *cg) {
     if (sqlite3_exec(cg->db, DROPS, NULL, NULL, &err) != SQLITE_OK ||
         !body_tri_compat(cg->db) ||          /* codify-v15 1.1 */
         sqlite3_exec(cg->db, SCHEMA, NULL, NULL, &err) != SQLITE_OK) {
-        fprintf(stderr, "cg: schema upgrade: %s\n", err ? err : "?");
+        fprintf(stderr, "hyperfide: schema upgrade: %s\n", err ? err : "?");
         sqlite3_free(err);
         return -1;
     }
     if (nmeta > 0)
-        fprintf(stderr, "cg: schema upgraded to v%s — run 'cg sync' to "
+        fprintf(stderr, "hyperfide: schema upgraded to v%s — run 'hyperfide sync' to "
                         "rebuild the graph\n", SCHEMA_VERSION);
     cg_meta_set(cg, "schema_version", SCHEMA_VERSION);
     /* codify-v15 1.1: which body_tri form this SQLite built */
@@ -722,7 +722,7 @@ void cg_close(Cg *cg) {
 sqlite3_stmt *cg_prep(Cg *cg, const char *sql) {
     sqlite3_stmt *st = NULL;
     if (sqlite3_prepare_v2(cg->db, sql, -1, &st, NULL) != SQLITE_OK) {
-        fprintf(stderr, "cg: sql error: %s\n  in: %s\n", sqlite3_errmsg(cg->db), sql);
+        fprintf(stderr, "hyperfide: sql error: %s\n  in: %s\n", sqlite3_errmsg(cg->db), sql);
         exit(2);
     }
     return st;
@@ -743,8 +743,8 @@ void cg_busy_why(const char *why) { g_busy_why = why; }
  * queued — an agent should retry it, not wait for a replay. */
 void cg_busy_report(const char *what) {
     fprintf(stderr,
-        "cg: the graph database is busy — another cg process (usually an "
-        "editor's `cg lsp`, `cg watch`, or a parallel agent) held the write "
+        "hyperfide: the graph database is busy — another hyperfide process (usually an "
+        "editor's `hyperfide lsp`, `hyperfide watch`, or a parallel agent) held the write "
         "lock for the whole wait.\n"
         "    %s was not applied; nothing changed. Re-run the same command — "
         "it is safe to retry.\n"
@@ -775,7 +775,7 @@ int cg_begin_write(Cg *cg) {
      * own, and the caller gets a fresh transaction after them */
     if (rc == SQLITE_OK) return journal_replay(cg, JOURNAL_HELD) < 0 ? -1 : 0;
     if (busy_rc(rc)) { sqlite3_free(err); return -1; }
-    fprintf(stderr, "cg: sql error: %s\n  in: BEGIN IMMEDIATE\n", err ? err : "?");
+    fprintf(stderr, "hyperfide: sql error: %s\n  in: BEGIN IMMEDIATE\n", err ? err : "?");
     sqlite3_free(err);
     exit(2);
 }
@@ -793,7 +793,7 @@ void cg_exec(Cg *cg, const char *sql) {
         cg_busy_report("This command");
         exit(CG_EXIT_BUSY);
     }
-    fprintf(stderr, "cg: sql error: %s\n  in: %s\n", err ? err : "?", sql);
+    fprintf(stderr, "hyperfide: sql error: %s\n  in: %s\n", err ? err : "?", sql);
     sqlite3_free(err);
     exit(2);
 }

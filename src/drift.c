@@ -371,7 +371,7 @@ int cmd_drift(Cg *cg, int argc, char **argv, bool json) {
     const char *sub = argc >= 1 ? argv[0] : "collisions";
     if (!strcmp(sub, "check")) {
         if (argc < 2) {
-            fprintf(stderr, "usage: cg drift check <id> [--base REF]\n");
+            fprintf(stderr, "usage: hyperfide drift check <id> [--base REF]\n");
             return 1;
         }
         const char *base = getenv("CG_BASE");
@@ -379,7 +379,7 @@ int cmd_drift(Cg *cg, int argc, char **argv, bool json) {
             if (!strcmp(argv[i], "--base")) base = argv[i + 1];
         if (!base || !base[0]) base = "HEAD";
         char *tag = spec_resolve_task(argv[1], NULL);
-        if (!tag) { fprintf(stderr, "cg drift: unknown task %s\n", argv[1]); return 1; }
+        if (!tag) { fprintf(stderr, "hyperfide drift: unknown task %s\n", argv[1]); return 1; }
         StrBuf r; sb_init(&r);
         int n = drift_spec_check(cg, cg->root, base, NULL, tag, NULL, false, &r);
         if (json) printf("%s\n", r.p);
@@ -394,7 +394,7 @@ int cmd_drift(Cg *cg, int argc, char **argv, bool json) {
         for (int i = 1; i + 1 < argc; i++) if (!strcmp(argv[i], "-f")) feature = argv[i + 1];
         char *active = feature ? NULL : drift_active_feature(cg);
         if (!feature) feature = active;
-        if (!feature) { fprintf(stderr, "cg drift: no active feature\n"); return 1; }
+        if (!feature) { fprintf(stderr, "hyperfide drift: no active feature\n"); return 1; }
         char **ids = NULL;
         int n = drift_open_tasks(cg, feature, &ids);
         StrBuf b; sb_init(&b);
@@ -429,10 +429,10 @@ int cmd_drift(Cg *cg, int argc, char **argv, bool json) {
         for (int i = 1; i + 1 < argc; i++) if (!strcmp(argv[i], "-f")) feature = argv[i + 1];
         char *active = feature ? NULL : drift_active_feature(cg);
         if (!feature) feature = active;
-        if (!feature) { fprintf(stderr, "cg drift: no active feature\n"); return 1; }
+        if (!feature) { fprintf(stderr, "hyperfide drift: no active feature\n"); return 1; }
         StrBuf r; sb_init(&r);
         int nu = coverage_check(cg, feature, &r);
-        if (nu < 0) { fprintf(stderr, "cg drift: no spec for %s\n", feature); free(active); return 1; }
+        if (nu < 0) { fprintf(stderr, "hyperfide drift: no spec for %s\n", feature); free(active); return 1; }
         if (json) printf("{\"feature\":\"%s\",\"uncovered\":%s}\n", feature, r.p);
         else if (!nu) printf("coverage: every acceptance criterion of %s has a qualified task\n", feature);
         else coverage_print(r.p, feature);
@@ -445,7 +445,7 @@ int cmd_drift(Cg *cg, int argc, char **argv, bool json) {
         for (int i = 1; i + 1 < argc; i++) if (!strcmp(argv[i], "-f")) feature = argv[i + 1];
         char *active = feature ? NULL : drift_active_feature(cg);
         if (!feature) feature = active;
-        if (!feature) { fprintf(stderr, "cg drift: no active feature\n"); return 1; }
+        if (!feature) { fprintf(stderr, "hyperfide drift: no active feature\n"); return 1; }
         StrBuf t, j; sb_init(&t); sb_init(&j);
         int n = drift_summary(cg, feature, &t, &j);
         if (json) printf("%s\n", j.p);
@@ -455,7 +455,7 @@ int cmd_drift(Cg *cg, int argc, char **argv, bool json) {
         free(active);
         return 0;
     }
-    fprintf(stderr, "usage: cg drift check <id> [--base REF] | collisions [-f F] "
+    fprintf(stderr, "usage: hyperfide drift check <id> [--base REF] | collisions [-f F] "
                     "| coverage [-f F] | summary [-f F]\n");
     return 1;
 }

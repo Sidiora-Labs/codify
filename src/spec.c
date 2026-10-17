@@ -137,7 +137,7 @@ static int writer_write_owned(Writer *w, const char *path, const char *content) 
         return 0;
     }
     if (hyperfide_owned_write(path, content, nlen, "generated-spec v1", legacy_owned) != 0) {
-        fprintf(stderr, "cg spec: write %s failed\n", path);
+        fprintf(stderr, "hyperfide spec: write %s failed\n", path);
         return -1;
     }
     w->written++;
@@ -519,12 +519,12 @@ static int render_feature(const char *root, const char *specdir,
     char fdir[4600], fpath[4700];
     if (!path_format(fdir, sizeof fdir, "%s/%s", specdir, fname) ||
         !path_format(fpath, sizeof fpath, "%s/spec.kvx", fdir)) {
-        fprintf(stderr, "cg spec: feature path is too long\n");
+        fprintf(stderr, "hyperfide spec: feature path is too long\n");
         return -1;
     }
     Kvx *f = kvx_parse(fpath);
     if (!f) {
-        fprintf(stderr, "cg spec: feature %s: cannot parse %s\n", fname, fpath);
+        fprintf(stderr, "hyperfide spec: feature %s: cannot parse %s\n", fname, fpath);
         return -1;
     }
     char *feature = S(f, "meta", "feature");
@@ -535,7 +535,7 @@ static int render_feature(const char *root, const char *specdir,
     char *des = render_design(f, fdir, banner, err, sizeof err);
     char *tsk = des ? render_tasks(f, fdir, banner, err, sizeof err) : NULL;
     if (!des || !tsk) {
-        fprintf(stderr, "cg spec: feature %s: %s\n", fname, err);
+        fprintf(stderr, "hyperfide spec: feature %s: %s\n", fname, err);
         free(req); free(des); free(feature);
         kvx_free(f);
         return -1;
@@ -574,7 +574,7 @@ static int spec_render(const char *root, bool check, bool quiet) {
     snprintf(wfpath, sizeof wfpath, "%s/workflow.kvx", specdir);
     Kvx *wf = kvx_parse(wfpath);
     if (!wf) {
-        fprintf(stderr, "cg spec: cannot parse %s\n", wfpath);
+        fprintf(stderr, "hyperfide spec: cannot parse %s\n", wfpath);
         return 1;
     }
     char *banner = S(wf, "render", "banner");
@@ -623,7 +623,7 @@ static int spec_render(const char *root, bool check, bool quiet) {
 
     if (check && w.stale > 0) {
         if (!quiet)
-            fprintf(stderr, "cg spec: %d output(s) stale — run `cg spec "
+            fprintf(stderr, "hyperfide spec: %d output(s) stale — run `hyperfide spec "
                     "render` and commit\n", w.stale);
         return 2;
     }
@@ -670,14 +670,14 @@ static int spec_load(Spec *s, const char *root_ov, const char *feature_ov,
     if (root_ov) snprintf(s->root, sizeof s->root, "%s", root_ov);
     else if (spec_find_root(s->root, sizeof s->root) != 0) {
         if (!quiet)
-            fprintf(stderr, "cg spec: no spec/workflow.kvx found here or in "
+            fprintf(stderr, "hyperfide spec: no spec/workflow.kvx found here or in "
                     "any parent directory\n");
         return -1;
     }
     config_workflow_path(s->root, s->wfpath, sizeof s->wfpath);
     s->wf = kvx_parse(s->wfpath);
     if (!s->wf) {
-        if (!quiet) fprintf(stderr, "cg spec: cannot parse %s\n", s->wfpath);
+        if (!quiet) fprintf(stderr, "hyperfide spec: cannot parse %s\n", s->wfpath);
         return -1;
     }
     /* A fleet agent carries its feature in CG_FEATURE: with several
@@ -694,14 +694,14 @@ static int spec_load(Spec *s, const char *root_ov, const char *feature_ov,
                             : S(s->wf, "meta", "active_feature");
     if (!s->feature[0]) {
         if (!quiet)
-            fprintf(stderr, "cg spec: no active_feature in workflow.kvx "
+            fprintf(stderr, "hyperfide spec: no active_feature in workflow.kvx "
                     "(use -f <feature>)\n");
         return -1;
     }
     config_feature_path(s->root, s->feature, s->fpath, sizeof s->fpath);
     s->f = kvx_parse(s->fpath);
     if (!s->f) {
-        if (!quiet) fprintf(stderr, "cg spec: cannot parse %s\n", s->fpath);
+        if (!quiet) fprintf(stderr, "hyperfide spec: cannot parse %s\n", s->fpath);
         return -1;
     }
     s->nids = kvx_subsections(s->f, "task", &s->ids);
@@ -1085,7 +1085,7 @@ static void spec_attempt_sweep(Cg *g) {
     sqlite3_busy_timeout(g->db, (int)g->lock_wait_ms);
     int base = rc & 0xff;
     if (rc != SQLITE_OK && base != SQLITE_BUSY && base != SQLITE_LOCKED) {
-        fprintf(stderr, "cg: sql error: %s\n  in: attempt sweep\n",
+        fprintf(stderr, "hyperfide: sql error: %s\n  in: attempt sweep\n",
                 err ? err : "?");
         sqlite3_free(err);
         exit(2);
@@ -1319,14 +1319,14 @@ static int spec_require_owner(Spec *s, const char *id, const char *agent,
         bool live = sqlite3_step(st) == SQLITE_ROW;
         sqlite3_finalize(st);
         cg_close(&g);
-        if (live) fprintf(stderr, "cg spec: live documentation attempt requires "
+        if (live) fprintf(stderr, "hyperfide spec: live documentation attempt requires "
                                  "its --attempt and --fence credentials\n");
         return live ? 1 : 0;
     }
     bool owned = spec_attempt_owned(&g, tag, agent, attempt_id, fence);
     cg_close(&g);
     if (!owned) {
-        fprintf(stderr, "cg spec: stale or foreign attempt for %s — "
+        fprintf(stderr, "hyperfide spec: stale or foreign attempt for %s — "
                         "lifecycle mutation rejected\n", id);
         return 1;
     }
@@ -1369,7 +1369,7 @@ static int spec_set_status_owned(Spec *s, const char *id, const char *status,
     if (!spec_attempt_owned(&g, tag, agent, attempt_id, fence)) {
         cg_exec(&g, "ROLLBACK");
         cg_close(&g);
-        fprintf(stderr, "cg spec: attempt ownership changed while %s was "
+        fprintf(stderr, "hyperfide spec: attempt ownership changed while %s was "
                         "running — lifecycle mutation rejected\n", id);
         return 1;
     }
@@ -1660,7 +1660,7 @@ static int spec_status_cmd(Spec *s, bool json) {
         free(t);
     }
     if (nstale > 0) {
-        printf("stale declarations (repair with `cg spec reconcile "
+        printf("stale declarations (repair with `hyperfide spec reconcile "
                "--repair`):\n");
         for (int i = 0; i < nstale; i++)
             printf("  %-8s in_progress, no live attempt\n", stale[i]);
@@ -1676,7 +1676,7 @@ static int spec_status_cmd(Spec *s, bool json) {
         printf("next: %s — Generate and verify project documentation\n",
                CG_DOC_TASK);
     } else if (strcmp(docs_stage, "blocked") == 0) {
-        printf("documentation blocked — run `cg spec docs reset` to retry\n");
+        printf("documentation blocked — run `hyperfide spec docs reset` to retry\n");
     } else if (!cur && done == leaves && leaves > 0 &&
                (strcmp(docs_stage, "done") == 0 ||
                 strcmp(docs_stage, "off") == 0 ||
@@ -1701,22 +1701,22 @@ static int spec_status_cmd(Spec *s, bool json) {
 static int spec_mode_cmd(Spec *s, const char *mode, bool json) {
     if (!mode || (strcmp(mode, "prod") != 0 && strcmp(mode, "standard") != 0 &&
                   strcmp(mode, "parallel") != 0)) {
-        fprintf(stderr, "cg spec: mode must be standard, prod, or parallel\n");
+        fprintf(stderr, "hyperfide spec: mode must be standard, prod, or parallel\n");
         return 1;
     }
     if (kvx_set_string(s->wfpath, "mode", "name", mode) != 0) {
-        fprintf(stderr, "cg spec: could not set [mode].name in %s\n", s->wfpath);
+        fprintf(stderr, "hyperfide spec: could not set [mode].name in %s\n", s->wfpath);
         return 1;
     }
     if (spec_render(s->root, false, true) != 0) {
-        fprintf(stderr, "cg spec: mode updated, but generated projections "
+        fprintf(stderr, "hyperfide spec: mode updated, but generated projections "
                 "could not be refreshed\n");
         return 1;
     }
     kvx_free(s->wf);
     s->wf = kvx_parse(s->wfpath);
     if (!s->wf) {
-        fprintf(stderr, "cg spec: cannot parse %s after mode update\n", s->wfpath);
+        fprintf(stderr, "hyperfide spec: cannot parse %s after mode update\n", s->wfpath);
         return 1;
     }
     if (json) printf("{\"mode\":\"%s\"}\n", mode);
@@ -1737,7 +1737,7 @@ static int spec_next_cmd(Spec *s, bool json) {
                 sb_free(&b);
             } else {
                 print_docs_task(s);
-                printf("\nstart it: cg spec docs start\n");
+                printf("\nstart it: hyperfide spec docs start\n");
             }
             return 0;
         }
@@ -1775,7 +1775,7 @@ static int spec_next_cmd(Spec *s, bool json) {
     }
     print_task(s, next);
     spec_print_memories(s, next);
-    printf("\nstart it: cg spec start %s\n", next);
+    printf("\nstart it: hyperfide spec start %s\n", next);
     return 0;
 }
 
@@ -1809,7 +1809,7 @@ static int spec_docs_cmd(Spec *s, const char *action, const char *agent,
         if (kvx_set_string(s->fpath, "documentation", "mode", action) != 0 ||
             (!kvx_has(s->f, "documentation") &&
              kvx_set_string(s->fpath, "documentation", "status", "pending") != 0)) {
-            fprintf(stderr, "cg spec docs: cannot update %s\n", s->fpath);
+            fprintf(stderr, "hyperfide spec docs: cannot update %s\n", s->fpath);
             return 1;
         }
         kvx_free(s->f);
@@ -1828,17 +1828,17 @@ static int spec_docs_cmd(Spec *s, const char *action, const char *agent,
         bool startable = strcmp(stage, "pending") == 0 ||
                          strcmp(stage, "blocked") == 0;
         if (!enabled) {
-            fprintf(stderr, "cg spec docs: documentation is %s — run `cg spec "
-                            "docs auto` or `cg spec docs manual` first\n", mode);
+            fprintf(stderr, "hyperfide spec docs: documentation is %s — run `hyperfide spec "
+                            "docs auto` or `hyperfide spec docs manual` first\n", mode);
             free(mode); free(stage); return 1;
         }
         if (!spec_all_tasks_qualified(s)) {
-            fprintf(stderr, "cg spec docs: implementation tasks are not all "
+            fprintf(stderr, "hyperfide spec docs: implementation tasks are not all "
                             "qualified\n");
             free(mode); free(stage); return 1;
         }
         if (!startable) {
-            fprintf(stderr, "cg spec docs: stage is %s, not pending or blocked\n",
+            fprintf(stderr, "hyperfide spec docs: stage is %s, not pending or blocked\n",
                     stage);
             free(mode); free(stage); return 1;
         }
@@ -1852,30 +1852,30 @@ static int spec_docs_cmd(Spec *s, const char *action, const char *agent,
         char *stage = spec_docs_stage(s);
         if (strcmp(action, "block") == 0 &&
             strcmp(stage, "in_progress") != 0) {
-            fprintf(stderr, "cg spec docs: only in_progress documentation can "
+            fprintf(stderr, "hyperfide spec docs: only in_progress documentation can "
                             "be blocked (currently %s)\n", stage);
             free(stage); return 1;
         }
         if (strcmp(action, "reset") == 0 &&
             strcmp(stage, "blocked") != 0 &&
             strcmp(stage, "in_progress") != 0) {
-            fprintf(stderr, "cg spec docs: only blocked or in_progress "
+            fprintf(stderr, "hyperfide spec docs: only blocked or in_progress "
                             "documentation can be reset (currently %s)\n", stage);
             free(stage); return 1;
         }
         if (strcmp(action, "done") == 0) {
             if (strcmp(stage, "in_progress") != 0) {
-                fprintf(stderr, "cg spec docs: stage is %s, not in_progress\n",
+                fprintf(stderr, "hyperfide spec docs: stage is %s, not in_progress\n",
                         stage);
                 free(stage); return 1;
             }
             if (!spec_docs_verified(s)) {
-                fprintf(stderr, "cg spec docs: no successful documentation "
-                                "verification — run `cg docs check`\n");
+                fprintf(stderr, "hyperfide spec docs: no successful documentation "
+                                "verification — run `hyperfide docs check`\n");
                 free(stage); return 1;
             }
             if (!docs_closing_cg) {
-                fprintf(stderr, "cg spec docs: completion is owned by `cg docs "
+                fprintf(stderr, "hyperfide spec docs: completion is owned by `hyperfide docs "
                                 "close` so verification and snapshot attribution "
                                 "remain coupled\n");
                 free(stage); return 1;
@@ -1899,7 +1899,7 @@ static int spec_docs_cmd(Spec *s, const char *action, const char *agent,
             for (int i = 0; i < nr; i++) free(remaining[i]);
             free(remaining);
             if (nr != 0) {
-                fprintf(stderr, "cg docs: snapshot did not capture the checked tree; "
+                fprintf(stderr, "hyperfide docs: snapshot did not capture the checked tree; "
                                 "documentation remains in_progress\n");
                 return 1;
             }
@@ -1911,7 +1911,7 @@ static int spec_docs_cmd(Spec *s, const char *action, const char *agent,
         } else if (spec_docs_set_status(s, to) != 0) return 1;
         spec_render(s->root, false, true);
     } else if (strcmp(action, "status") != 0) {
-        fprintf(stderr, "usage: cg spec docs "
+        fprintf(stderr, "usage: hyperfide spec docs "
                         "[status|auto|manual|off|start|block|reset|done]\n");
         return 1;
     }
@@ -2272,14 +2272,14 @@ static int spec_heartbeat_cmd(Spec *s, const char *id, const char *agent,
     bool docs = strcmp(id, CG_DOC_TASK) == 0;
     if ((!docs && (!task_exists(s, id) || !task_is_leaf(s, id))) ||
         (docs && !kvx_has(s->f, "documentation"))) {
-        fprintf(stderr, "cg spec: no runnable [task.%s] in %s\n", id,
+        fprintf(stderr, "hyperfide spec: no runnable [task.%s] in %s\n", id,
                 s->fpath);
         return 1;
     }
     Cg g;
     if (!memory_open_quiet(&g)) {
-        fprintf(stderr, "cg spec: heartbeat needs a Codify index here "
-                        "(run `cg init`)\n");
+        fprintf(stderr, "hyperfide spec: heartbeat needs a Codify index here "
+                        "(run `hyperfide init`)\n");
         return 1;
     }
     char tag[700], attempt[65] = "";
@@ -2305,7 +2305,7 @@ static int spec_heartbeat_cmd(Spec *s, const char *id, const char *agent,
         (fence_arg > 0 && fence_arg != fence)) {
         if (!queued) cg_exec(&g, "ROLLBACK");
         cg_close(&g);
-        fprintf(stderr, "cg spec: stale or foreign attempt for %s — "
+        fprintf(stderr, "hyperfide spec: stale or foreign attempt for %s — "
                         "heartbeat rejected\n", id);
         return 1;
     }
@@ -2334,7 +2334,7 @@ static int spec_heartbeat_cmd(Spec *s, const char *id, const char *agent,
             sb_free(&b);
         } else {
             printf("heartbeat %s attempt %.12s fence %ld (%ld min) — queued: "
-                   "the database is busy; the next cg command that gets the "
+                   "the database is busy; the next hyperfide command that gets the "
                    "write lock applies it\n", id, attempt, fence, ttl_min);
         }
         return 0;
@@ -2346,7 +2346,7 @@ static int spec_heartbeat_cmd(Spec *s, const char *id, const char *agent,
     if (rc != 0) {
         cg_exec(&g, "ROLLBACK");
         cg_close(&g);
-        fprintf(stderr, "cg spec: attempt %.12s is no longer live — "
+        fprintf(stderr, "hyperfide spec: attempt %.12s is no longer live — "
                         "heartbeat rejected\n", attempt);
         return 1;
     }
@@ -2376,14 +2376,14 @@ static int spec_reconcile_cmd(Spec *s, bool repair, bool json) {
             char sec[300];
             task_sec(sec, sizeof sec, stale[i]);
             if (kvx_set_status(s->fpath, sec, "pending") != 0) {
-                fprintf(stderr, "cg spec: could not repair [%s]\n", sec);
+                fprintf(stderr, "hyperfide spec: could not repair [%s]\n", sec);
                 free(stale);
                 return 1;
             }
             repaired++;
         }
         if (repaired && spec_render(s->root, false, true) != 0) {
-            fprintf(stderr, "cg spec: declarations repaired but generated "
+            fprintf(stderr, "hyperfide spec: declarations repaired but generated "
                             "projections could not be refreshed\n");
             free(stale);
             return 1;
@@ -2405,7 +2405,7 @@ static int spec_reconcile_cmd(Spec *s, bool repair, bool json) {
         printf("reconcile: %d stale declaration(s)%s:\n", n,
                repair ? " repaired to pending" : "");
         for (int i = 0; i < n; i++) printf("  %s\n", stale[i]);
-        if (!repair) printf("repair: cg spec reconcile --repair\n");
+        if (!repair) printf("repair: hyperfide spec reconcile --repair\n");
     }
     free(stale);
     return 0;
@@ -2426,7 +2426,7 @@ static int spec_claim_take(Cg *g, Spec *s, const char *id, const char *agent,
     spec_attempt_sweep(g);
     bool docs = strcmp(id, CG_DOC_TASK) == 0;
     if (!docs && !task_exists(s, id)) {
-        fprintf(stderr, "cg spec: no [task.%s] in %s\n", id, s->fpath);
+        fprintf(stderr, "hyperfide spec: no [task.%s] in %s\n", id, s->fpath);
         return 1;
     }
     /* only claimable work: an eligible pending leaf, or a task already in
@@ -2442,7 +2442,7 @@ static int spec_claim_take(Cg *g, Spec *s, const char *id, const char *agent,
             claimable = true;
         free(st0);
         if (!in_flight && !claimable) {
-            fprintf(stderr, "cg spec: %s is not claimable — it is finished, "
+            fprintf(stderr, "hyperfide spec: %s is not claimable — it is finished, "
                     "a heading, or has unmet requires%s\n", id,
                     ahead ? "" : " (--ahead claims it against the projection)");
                 return 1;
@@ -2455,7 +2455,7 @@ static int spec_claim_take(Cg *g, Spec *s, const char *id, const char *agent,
     if (sqlite3_step(q) == SQLITE_ROW) {
         const char *owner = (const char *)sqlite3_column_text(q, 0);
         if (strcmp(owner, agent) != 0) {
-            fprintf(stderr, "cg spec: %s is already claimed by %s\n", id, owner);
+            fprintf(stderr, "hyperfide spec: %s is already claimed by %s\n", id, owner);
             sqlite3_finalize(q);
             cg_exec(g, "ROLLBACK");
                 return 1;
@@ -2467,7 +2467,7 @@ static int spec_claim_take(Cg *g, Spec *s, const char *id, const char *agent,
     if ((docs || spec_parallel_mode(s)) &&
         spec_touches_conflict(s, id, other, sizeof other, pat, sizeof pat,
                               g)) {
-        fprintf(stderr, "cg spec: %s touches %s, which in-progress task %s "
+        fprintf(stderr, "hyperfide spec: %s touches %s, which in-progress task %s "
                 "also claims — pick a disjoint task\n", id, pat, other);
         cg_exec(g, "ROLLBACK");
         return 1;
@@ -2483,7 +2483,7 @@ static int spec_claim_take(Cg *g, Spec *s, const char *id, const char *agent,
     }
     if (spec_lease_upsert(g, tag, agent, host, session, now, ttl_min,
                           touches, out) != 0) {
-        fprintf(stderr, "cg spec: could not create attempt for %s\n", id);
+        fprintf(stderr, "hyperfide spec: could not create attempt for %s\n", id);
         free(touches);
         cg_exec(g, "ROLLBACK");
         return 1;
@@ -2535,8 +2535,8 @@ static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
                           bool release, bool force, bool json) {
     Cg g;
     if (!memory_open_quiet(&g)) {
-        fprintf(stderr, "cg spec: claims need a Codify index here "
-                        "(run `cg init`)\n");
+        fprintf(stderr, "hyperfide spec: claims need a Codify index here "
+                        "(run `hyperfide init`)\n");
         return 1;
     }
     char tag[256];
@@ -2555,7 +2555,7 @@ static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
         if (sqlite3_step(q) == SQLITE_ROW) {
             const char *owner = (const char *)sqlite3_column_text(q, 0);
             if (strcmp(owner, agent) != 0 && !force) {
-                fprintf(stderr, "cg spec: %s is held by %s, not %s — release "
+                fprintf(stderr, "hyperfide spec: %s is held by %s, not %s — release "
                         "with --agent %s or --force\n", id, owner, agent,
                         owner);
                 sqlite3_finalize(q);
@@ -2567,7 +2567,7 @@ static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
         sqlite3_finalize(q);
         if (((attempt_arg && attempt_arg[0]) || fence_arg > 0) &&
             !spec_attempt_owned(&g, tag, agent, attempt_arg, fence_arg)) {
-            fprintf(stderr, "cg spec: stale or foreign attempt for %s — "
+            fprintf(stderr, "hyperfide spec: stale or foreign attempt for %s — "
                             "release rejected\n", id);
             if (!queued) cg_exec(&g, "ROLLBACK");
             cg_close(&g);
@@ -2599,7 +2599,7 @@ static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
             fputs(b.p, stdout);
             sb_free(&b);
         } else if (queued) {
-            printf("released %s — queued: the database is busy; the next cg "
+            printf("released %s — queued: the database is busy; the next hyperfide "
                    "command that gets the write lock applies it\n", id);
         } else printf("released %s\n", id);
         cg_close(&g);
@@ -2735,8 +2735,8 @@ static int spec_claim_next_cmd(Spec *s, const char *agent, const char *host,
                                const char *session, long ttl_min, bool json) {
     Cg g;
     if (!memory_open_quiet(&g)) {
-        fprintf(stderr, "cg spec: claims need a Codify index here "
-                        "(run `cg init`)\n");
+        fprintf(stderr, "hyperfide spec: claims need a Codify index here "
+                        "(run `hyperfide init`)\n");
         return 1;
     }
     char lockpath[4720];
@@ -2824,7 +2824,7 @@ static int spec_claim_next_cmd(Spec *s, const char *agent, const char *host,
         cg_exec(&g, "ROLLBACK");
         cg_close(&g);
         if (lockfd >= 0) { flock(lockfd, LOCK_UN); close(lockfd); }
-        fprintf(stderr, "cg spec: could not create attempt for %s\n", id);
+        fprintf(stderr, "hyperfide spec: could not create attempt for %s\n", id);
         return 1;
     }
     cg_exec(&g, "COMMIT");
@@ -2844,7 +2844,7 @@ static int spec_claim_next_cmd(Spec *s, const char *agent, const char *host,
         spec_attempt_finish(&g, tag, "abandoned", "task status write failed");
         cg_close(&g);
         if (lockfd >= 0) { flock(lockfd, LOCK_UN); close(lockfd); }
-        fprintf(stderr, "cg spec: could not rewrite status of [%s] in %s\n",
+        fprintf(stderr, "hyperfide spec: could not rewrite status of [%s] in %s\n",
                 sec, s->fpath);
         return 1;
     }
@@ -2910,25 +2910,25 @@ static int spec_claim_next_cmd(Spec *s, const char *agent, const char *host,
 static int spec_start_cmd(Spec *s, const char *id, bool force, bool ahead,
                           bool json) {
     if (!task_exists(s, id)) {
-        fprintf(stderr, "cg spec: no [task.%s] in %s\n", id, s->fpath);
+        fprintf(stderr, "hyperfide spec: no [task.%s] in %s\n", id, s->fpath);
         return 1;
     }
     if (!task_is_leaf(s, id)) {
-        fprintf(stderr, "cg spec: task %s is a group heading (no wave) — "
+        fprintf(stderr, "hyperfide spec: task %s is a group heading (no wave) — "
                 "start one of its subtasks\n", id);
         return 1;
     }
     char *st = task_status(s, id);
     bool already_in_progress = strcmp(st, "in_progress") == 0;
     if (strcmp(st, "done") == 0 && !force) {
-        fprintf(stderr, "cg spec: task %s is already done (--force to "
+        fprintf(stderr, "hyperfide spec: task %s is already done (--force to "
                 "restart)\n", id);
         free(st);
         return 1;
     }
     if (strcmp(st, "implemented") == 0 && !force) {
-        fprintf(stderr, "cg spec: task %s is implemented — qualification "
-                "pending; use `cg spec done %s` or --force to restart\n", id,
+        fprintf(stderr, "hyperfide spec: task %s is implemented — qualification "
+                "pending; use `hyperfide spec done %s` or --force to restart\n", id,
                 id);
         free(st);
         return 1;
@@ -2942,7 +2942,7 @@ static int spec_start_cmd(Spec *s, const char *id, bool force, bool ahead,
         char other[64] = "", pat[256] = "";
         if (spec_touches_conflict(s, id, other, sizeof other, pat, sizeof pat,
                                   NULL)) {
-            fprintf(stderr, "cg spec: %s touches %s, which in-progress task %s "
+            fprintf(stderr, "hyperfide spec: %s touches %s, which in-progress task %s "
                     "also claims — pick a disjoint task (--force to "
                     "override)\n", id, pat, other);
             return 1;
@@ -2951,7 +2951,7 @@ static int spec_start_cmd(Spec *s, const char *id, bool force, bool ahead,
     int in_progress = spec_in_progress_count(s);
     if (!already_in_progress && in_progress >= max_in_progress && !force) {
         fprintf(stderr,
-                "cg spec: %d task(s) already in_progress (limit %ld) — finish "
+                "hyperfide spec: %d task(s) already in_progress (limit %ld) — finish "
                 "one or raise [limits].max_in_progress; use --force only to "
                 "override the configured safety gate\n",
                 in_progress, max_in_progress);
@@ -2966,7 +2966,7 @@ static int spec_start_cmd(Spec *s, const char *id, bool force, bool ahead,
         sb_printf(&ahead_reqs, "%s%s", i ? " " : "", unmet[i]);
     for (int i = 0; i < nu && i < 8; i++) free(unmet[i]);
     if (nu > 0 && !ahead) {
-        fprintf(stderr, "cg spec: task %s has unmet requires: %s (--ahead to "
+        fprintf(stderr, "hyperfide spec: task %s has unmet requires: %s (--ahead to "
                 "start against the projection; done waits until they "
                 "land)\n", id, ahead_reqs.p);
         sb_free(&ahead_reqs);
@@ -2981,14 +2981,14 @@ static int spec_start_cmd(Spec *s, const char *id, bool force, bool ahead,
         if (memory_open_quiet(&g)) {
             if (spec_start_ahead(&g, tag, cg_agent_name(NULL), ahead_reqs.p,
                                  touches) != 0)
-                fprintf(stderr, "cg spec: ahead of %s not recorded on the "
+                fprintf(stderr, "hyperfide spec: ahead of %s not recorded on the "
                         "lease (busy index)\n", ahead_reqs.p);
             cg_close(&g);
         }
         free(touches);
         if (!json)
             printf("ahead of %s — build against the projection (--branch %s); "
-                   "`cg spec done %s` waits until they land\n", ahead_reqs.p,
+                   "`hyperfide spec done %s` waits until they land\n", ahead_reqs.p,
                    PROJECTION_BRANCH, id);
     }
     sb_free(&ahead_reqs);
@@ -2996,7 +2996,7 @@ static int spec_start_cmd(Spec *s, const char *id, bool force, bool ahead,
     char sec[300];
     task_sec(sec, sizeof sec, id);
     if (kvx_set_status(s->fpath, sec, "in_progress") != 0) {
-        fprintf(stderr, "cg spec: could not rewrite status of [%s] in %s\n",
+        fprintf(stderr, "hyperfide spec: could not rewrite status of [%s] in %s\n",
                 sec, s->fpath);
         return 1;
     }
@@ -3029,23 +3029,23 @@ static int spec_verify_task(Spec *s, const char *id);
 static int spec_implemented_cmd(Spec *s, const char *id, const char *agent,
                                 const char *attempt, long fence, bool json) {
     if (!spec_prod_mode(s)) {
-        fprintf(stderr, "cg spec: `implemented` requires Prod mode; run "
-                "`cg spec mode prod` first\n");
+        fprintf(stderr, "hyperfide spec: `implemented` requires Prod mode; run "
+                "`hyperfide spec mode prod` first\n");
         return 1;
     }
     if (!task_exists(s, id)) {
-        fprintf(stderr, "cg spec: no [task.%s] in %s\n", id, s->fpath);
+        fprintf(stderr, "hyperfide spec: no [task.%s] in %s\n", id, s->fpath);
         return 1;
     }
     if (spec_require_owner(s, id, agent, attempt, fence) != 0) return 1;
     if (!task_is_leaf(s, id)) {
-        fprintf(stderr, "cg spec: task %s is a group heading (no wave)\n", id);
+        fprintf(stderr, "hyperfide spec: task %s is a group heading (no wave)\n", id);
         return 1;
     }
     char *st = task_status(s, id);
     if (strcmp(st, "in_progress") != 0) {
-        fprintf(stderr, "cg spec: task %s is %s, not in_progress — "
-                "`cg spec start %s` first\n", id,
+        fprintf(stderr, "hyperfide spec: task %s is %s, not in_progress — "
+                "`hyperfide spec start %s` first\n", id,
                 st[0] ? st : "pending", id);
         free(st);
         return 1;
@@ -3056,7 +3056,7 @@ static int spec_implemented_cmd(Spec *s, const char *id, const char *agent,
     task_sec(sec, sizeof sec, id);
     int vfail = spec_verify_task(s, id);
     if (vfail > 0) {
-        fprintf(stderr, "cg spec: %d graph check(s) failed — task %s NOT "
+        fprintf(stderr, "hyperfide spec: %d graph check(s) failed — task %s NOT "
                 "marked implemented\n", vfail, id);
         char *title = S(s->f, sec, "title");
         StrBuf mb; sb_init(&mb);
@@ -3070,12 +3070,12 @@ static int spec_implemented_cmd(Spec *s, const char *id, const char *agent,
     int src = spec_set_status_owned(s, id, "implemented", agent, attempt,
                                     fence);
     if (src != 0) {
-        fprintf(stderr, "cg spec: could not rewrite status of [%s] in %s\n",
+        fprintf(stderr, "hyperfide spec: could not rewrite status of [%s] in %s\n",
                 sec, s->fpath);
         return 1;
     }
     if (spec_render(s->root, false, true) != 0) {
-        fprintf(stderr, "cg spec: task %s marked implemented, but generated "
+        fprintf(stderr, "hyperfide spec: task %s marked implemented, but generated "
                 "projections could not be refreshed\n", id);
         return 1;
     }
@@ -3193,21 +3193,21 @@ static int spec_done_cmd(Spec *s, const char *id, const char *agent,
                          const char *attempt, long fence, bool force,
                          bool json) {
     if (!task_exists(s, id)) {
-        fprintf(stderr, "cg spec: no [task.%s] in %s\n", id, s->fpath);
+        fprintf(stderr, "hyperfide spec: no [task.%s] in %s\n", id, s->fpath);
         return 1;
     }
     if (spec_require_owner(s, id, agent, attempt, fence) != 0) return 1;
     char *st = task_status(s, id);
     bool was_implemented = strcmp(st, "implemented") == 0;
     if (was_implemented && force) {
-        fprintf(stderr, "cg spec: cannot force an implemented task to done; "
+        fprintf(stderr, "hyperfide spec: cannot force an implemented task to done; "
                 "qualification must pass\n");
         free(st);
         return 1;
     }
     if (strcmp(st, "in_progress") != 0 && !was_implemented && !force) {
-        fprintf(stderr, "cg spec: task %s is %s, not in_progress or "
-                "implemented — `cg spec start %s` first, or --force\n", id,
+        fprintf(stderr, "hyperfide spec: task %s is %s, not in_progress or "
+                "implemented — `hyperfide spec start %s` first, or --force\n", id,
                 st[0] ? st : "pending", id);
         free(st);
         return 1;
@@ -3221,10 +3221,10 @@ static int spec_done_cmd(Spec *s, const char *id, const char *agent,
         bool fleet = (getenv("CG_RUN") && getenv("CG_RUN")[0]) ||
                      (getenv("CG_ROLE") && getenv("CG_ROLE")[0]);
         if (nu > 0 && (!force || fleet)) {
-            fprintf(stderr, "cg spec: task %s has unmet requires:", id);
+            fprintf(stderr, "hyperfide spec: task %s has unmet requires:", id);
             for (int i = 0; i < nu && i < 8; i++)
                 fprintf(stderr, " %s", unmet[i]);
-            fprintf(stderr, " — done waits until they land (`cg fleet sync` "
+            fprintf(stderr, " — done waits until they land (`hyperfide fleet sync` "
                     "brings them in after the land)%s\n",
                     fleet ? "" : "; --force to override");
             for (int i = 0; i < nu && i < 8; i++) free(unmet[i]);
@@ -3244,7 +3244,7 @@ static int spec_done_cmd(Spec *s, const char *id, const char *agent,
         int rc = spec_run_verify(s->root, vc, tail, sizeof tail);
         if (rc != 0) {
             int code = (rc > 0 && (rc & 0x7f) == 0) ? (rc >> 8) & 0xff : rc;
-            fprintf(stderr, "cg spec: verify_cmd failed (exit %d) — task %s "
+            fprintf(stderr, "hyperfide spec: verify_cmd failed (exit %d) — task %s "
                     "NOT marked done%s\n", code,
                     id, force ? "" : " (--force to override)");
             if (!force) {
@@ -3270,7 +3270,7 @@ static int spec_done_cmd(Spec *s, const char *id, const char *agent,
                 sb_free(&mb); free(t); free(vc);
                 return 1;
             }
-            fprintf(stderr, "cg spec: --force: marking done despite failed "
+            fprintf(stderr, "hyperfide spec: --force: marking done despite failed "
                     "verify\n");
             forced_past = true;
         }
@@ -3282,7 +3282,7 @@ static int spec_done_cmd(Spec *s, const char *id, const char *agent,
     int vfail = spec_verify_task(s, id);
     if (vfail > 0) {
         if (!force) {
-            fprintf(stderr, "cg spec: %d graph check(s) failed — task %s NOT "
+            fprintf(stderr, "hyperfide spec: %d graph check(s) failed — task %s NOT "
                     "marked done (--force to override)\n", vfail, id);
             char *t = S(s->f, sec, "title");
             StrBuf mb; sb_init(&mb);
@@ -3291,14 +3291,14 @@ static int spec_done_cmd(Spec *s, const char *id, const char *agent,
             sb_free(&mb); free(t);
             return 1;
         }
-        fprintf(stderr, "cg spec: --force: marking done despite %d failed "
+        fprintf(stderr, "hyperfide spec: --force: marking done despite %d failed "
                 "graph check(s)\n", vfail);
         forced_past = true;
     }
 
     int src = spec_set_status_owned(s, id, "done", agent, attempt, fence);
     if (src != 0) {
-        fprintf(stderr, "cg spec: could not rewrite status of [%s] in %s\n",
+        fprintf(stderr, "hyperfide spec: could not rewrite status of [%s] in %s\n",
                 sec, s->fpath);
         return 1;
     }
@@ -3460,11 +3460,11 @@ static bool spec_graph_open(Cg *g, bool sync) {
     o.quiet = true;
     IndexStats st;
     if (cg_index_ex(g, &si, &o, &st) != 0 && st.busy)
-        fprintf(stderr, "cg spec: graph refresh skipped — the database is "
-                        "busy (another cg process is indexing); checks use "
+        fprintf(stderr, "hyperfide spec: graph refresh skipped — the database is "
+                        "busy (another hyperfide process is indexing); checks use "
                         "the last completed index\n");
     else if (st.coalesced)
-        fprintf(stderr, "cg spec: another cg process is indexing; checks use "
+        fprintf(stderr, "hyperfide spec: another hyperfide process is indexing; checks use "
                         "the last completed index\n");
     return true;
 }
@@ -3614,8 +3614,8 @@ static int spec_verify_task(Spec *s, const char *id) {
 
     Cg g;
     if (!spec_graph_open(&g, true)) {
-        fprintf(stderr, "cg spec: task %s declares symbols/touches but there "
-                "is no .codegraph project here — run `cg init` first\n", id);
+        fprintf(stderr, "hyperfide spec: task %s declares symbols/touches but there "
+                "is no .codegraph project here — run `hyperfide init` first\n", id);
         for (int i = 0; i < nsym; i++) free(syms[i]);
         for (int i = 0; i < ntch; i++) free(tchs[i]);
         free(syms); free(tchs);
@@ -3784,7 +3784,7 @@ static void trace_task(Spec *s, Cg *g, bool have_graph, const char *id,
         }
         if (!nsym && !ntch && !nc)
             printf("  (nothing declared: add `symbols`/`touches` keys or tag "
-                   "commits by working with `cg spec start`)\n");
+                   "commits by working with `hyperfide spec start`)\n");
         if (!have_graph)
             printf("  (no .codegraph project — graph columns unavailable)\n");
     }
@@ -3798,7 +3798,7 @@ static void trace_task(Spec *s, Cg *g, bool have_graph, const char *id,
 
 static int spec_trace_cmd(Spec *s, const char *id, bool sync, bool json) {
     if (id && !task_exists(s, id)) {
-        fprintf(stderr, "cg spec: no [task.%s] in %s\n", id, s->fpath);
+        fprintf(stderr, "hyperfide spec: no [task.%s] in %s\n", id, s->fpath);
         return 1;
     }
     Cg g;
@@ -3853,7 +3853,7 @@ static int spec_trace_cmd(Spec *s, const char *id, bool sync, bool json) {
 /* ---------------- authoring: new, add, lint ---------------- */
 
 static const char *WORKFLOW_TEMPLATE =
-"# Spec workflow for this repository. Edit freely; cg reads it as data.\n"
+"# Spec workflow for this repository. Edit freely; hyperfide reads it as data.\n"
 "\n"
 "[meta]\n"
 "name            = \"%s\"\n"
@@ -3871,16 +3871,16 @@ static const char *WORKFLOW_TEMPLATE =
 "pass.\"\n"
 "\n"
 "[loop]\n"
-"step_1 = \"cg brief — load repo state, active task, and prior decisions.\"\n"
-"step_2 = \"cg spec next — take the lowest-wave eligible task.\"\n"
-"step_3 = \"cg spec start <id> — claim it.\"\n"
-"step_4 = \"cg context <area> — pull the code you need in one call.\"\n"
-"step_5 = \"Implement, and cg remember anything worth keeping.\"\n"
-"step_6 = \"cg commit -m <msg> — snapshot, auto-tagged with the task.\"\n"
-"step_7 = \"cg spec done <id> — qualification runs; done means proven.\"\n"
+"step_1 = \"hyperfide brief — load repo state, active task, and prior decisions.\"\n"
+"step_2 = \"hyperfide spec next — take the lowest-wave eligible task.\"\n"
+"step_3 = \"hyperfide spec start <id> — claim it.\"\n"
+"step_4 = \"hyperfide context <area> — pull the code you need in one call.\"\n"
+"step_5 = \"Implement, and hyperfide remember anything worth keeping.\"\n"
+"step_6 = \"hyperfide commit -m <msg> — snapshot, auto-tagged with the task.\"\n"
+"step_7 = \"hyperfide spec done <id> — qualification runs; done means proven.\"\n"
 "\n"
 "[memory]\n"
-"recall   = \"cg recall at session start.\"\n"
+"recall   = \"hyperfide recall at session start.\"\n"
 "remember = \"Persist decisions and constraints as they occur.\"\n"
 "\n"
 "[status_values]\n"
@@ -3941,7 +3941,7 @@ static const char *FEATURE_TEMPLATE =
 static int spec_new_cmd(const char *root_ov, const char *feature, bool json) {
     for (const char *p = feature; *p; p++) {
         if (!isalnum((unsigned char)*p) && *p != '_' && *p != '-') {
-            fprintf(stderr, "cg spec: feature names may use letters, digits, "
+            fprintf(stderr, "hyperfide spec: feature names may use letters, digits, "
                     "'-' and '_' only\n");
             return 1;
         }
@@ -3960,11 +3960,11 @@ static int spec_new_cmd(const char *root_ov, const char *feature, bool json) {
 
     struct stat st;
     if (stat(fpath, &st) == 0) {
-        fprintf(stderr, "cg spec: %s already exists\n", fpath);
+        fprintf(stderr, "hyperfide spec: %s already exists\n", fpath);
         return 1;
     }
     if (mkdirs(fdir) != 0) {
-        fprintf(stderr, "cg spec: cannot create %s\n", fdir);
+        fprintf(stderr, "hyperfide spec: cannot create %s\n", fdir);
         return 1;
     }
 
@@ -3974,7 +3974,7 @@ static int spec_new_cmd(const char *root_ov, const char *feature, bool json) {
         const char *rel = config_spec_rel(root);
         sb_printf(&b, WORKFLOW_TEMPLATE, "Spec Workflow", feature, rel, rel);
         if (write_entire_file(wfpath, b.p, b.len) != 0) {
-            fprintf(stderr, "cg spec: cannot write %s\n", wfpath);
+            fprintf(stderr, "hyperfide spec: cannot write %s\n", wfpath);
             sb_free(&b);
             return 1;
         }
@@ -3987,7 +3987,7 @@ static int spec_new_cmd(const char *root_ov, const char *feature, bool json) {
     int rc = write_entire_file(fpath, b.p, b.len);
     sb_free(&b);
     if (rc != 0) {
-        fprintf(stderr, "cg spec: cannot write %s\n", fpath);
+        fprintf(stderr, "hyperfide spec: cannot write %s\n", fpath);
         return 1;
     }
     if (!made_wf) kvx_set_string(wfpath, "meta", "active_feature", feature);
@@ -4045,18 +4045,18 @@ typedef struct {
 static int spec_add_cmd(Spec *s, const char *id, const TaskSpec *t,
                         bool json) {
     if (!t->title) {
-        fprintf(stderr, "cg spec add: --title is required\n");
+        fprintf(stderr, "hyperfide spec add: --title is required\n");
         return 1;
     }
     for (const char *p = id; *p; p++) {
         if (!isdigit((unsigned char)*p) && *p != '.') {
-            fprintf(stderr, "cg spec add: task ids are dotted numbers "
+            fprintf(stderr, "hyperfide spec add: task ids are dotted numbers "
                     "(e.g. 2.1)\n");
             return 1;
         }
     }
     if (task_exists(s, id)) {
-        fprintf(stderr, "cg spec add: [task.%s] already exists in %s\n",
+        fprintf(stderr, "hyperfide spec add: [task.%s] already exists in %s\n",
                 id, s->fpath);
         return 1;
     }
@@ -4064,7 +4064,7 @@ static int spec_add_cmd(Spec *s, const char *id, const TaskSpec *t,
     task_sec(sec, sizeof sec, id);
 
     if (kvx_set_string(s->fpath, sec, "title", t->title) != 0) {
-        fprintf(stderr, "cg spec add: cannot write %s\n", s->fpath);
+        fprintf(stderr, "hyperfide spec add: cannot write %s\n", s->fpath);
         return 1;
     }
     kvx_set_string(s->fpath, sec, "status", "pending");
@@ -4488,7 +4488,7 @@ int cmd_spec(int argc, char **argv, bool json) {
     }
     if (strcmp(sub, "new") == 0) {
         if (npos != 1) {
-            fprintf(stderr, "usage: cg spec new <feature>\n");
+            fprintf(stderr, "usage: hyperfide spec new <feature>\n");
             return 1;
         }
         return spec_new_cmd(root_ov, pos[0], json);
@@ -4498,7 +4498,7 @@ int cmd_spec(int argc, char **argv, bool json) {
         char root[4096];
         if (root_ov) snprintf(root, sizeof root, "%s", root_ov);
         else if (spec_find_root(root, sizeof root) != 0) {
-            fprintf(stderr, "cg spec: no spec/workflow.kvx found here or in "
+            fprintf(stderr, "hyperfide spec: no spec/workflow.kvx found here or in "
                     "any parent directory\n");
             return 1;
         }
@@ -4508,21 +4508,21 @@ int cmd_spec(int argc, char **argv, bool json) {
 
     if (strcmp(sub, "mode") == 0) {
         if (npos != 1) {
-            fprintf(stderr, "usage: cg spec mode <prod|standard>\n");
+            fprintf(stderr, "usage: hyperfide spec mode <prod|standard>\n");
             return 1;
         }
         Spec s;
         memset(&s, 0, sizeof s);
         if (root_ov) snprintf(s.root, sizeof s.root, "%s", root_ov);
         else if (spec_find_root(s.root, sizeof s.root) != 0) {
-            fprintf(stderr, "cg spec: no spec/workflow.kvx found here or in "
+            fprintf(stderr, "hyperfide spec: no spec/workflow.kvx found here or in "
                     "any parent directory\n");
             return 1;
         }
         config_workflow_path(s.root, s.wfpath, sizeof s.wfpath);
         s.wf = kvx_parse(s.wfpath);
         if (!s.wf) {
-            fprintf(stderr, "cg spec: cannot parse %s\n", s.wfpath);
+            fprintf(stderr, "hyperfide spec: cannot parse %s\n", s.wfpath);
             return 1;
         }
         int rc = spec_mode_cmd(&s, pos[0], json);
@@ -4539,7 +4539,7 @@ int cmd_spec(int argc, char **argv, bool json) {
         strcmp(sub, "claim") != 0 && strcmp(sub, "release") != 0 &&
         strcmp(sub, "ready") != 0 && strcmp(sub, "claim-next") != 0 &&
         strcmp(sub, "heartbeat") != 0 && strcmp(sub, "reconcile") != 0) {
-        fprintf(stderr, "usage: cg spec [render [--check] | status | next | "
+        fprintf(stderr, "usage: hyperfide spec [render [--check] | status | next | "
                 "new <feature> | add <id> --title T [--wave N] [--requires a,b]"
                 " [--symbols a,b] [--touches a,b] [--verify CMD] [--do \"a;b\"]"
                 " [--reqs a,b] | lint | mode <standard|prod|parallel> | start <id> | "
@@ -4583,7 +4583,7 @@ int cmd_spec(int argc, char **argv, bool json) {
     if (strcmp(sub, "status") == 0) {
         rc = spec_status_cmd(&s, json);
     } else if (strcmp(sub, "add") == 0) {
-        if (npos < 1) { fprintf(stderr, "usage: cg spec add <id> --title T\n");
+        if (npos < 1) { fprintf(stderr, "usage: hyperfide spec add <id> --title T\n");
                         rc = 1; }
         else rc = spec_add_cmd(&s, pos[0], &ts, json);
     } else if (strcmp(sub, "lint") == 0) {
@@ -4592,7 +4592,7 @@ int cmd_spec(int argc, char **argv, bool json) {
         rc = spec_wave_cmd(&s, json);
     } else if (strcmp(sub, "claim") == 0 || strcmp(sub, "release") == 0) {
         if (npos < 1) {
-            fprintf(stderr, "usage: cg spec %s <id> [--agent NAME] "
+            fprintf(stderr, "usage: hyperfide spec %s <id> [--agent NAME] "
                     "[--ttl MIN]\n", sub);
             rc = 1;
         } else {
@@ -4609,7 +4609,7 @@ int cmd_spec(int argc, char **argv, bool json) {
                                  ttl > 0 ? ttl : 30, json);
     } else if (strcmp(sub, "heartbeat") == 0) {
         if (npos != 1) {
-            fprintf(stderr, "usage: cg spec heartbeat <id> [--agent NAME] "
+            fprintf(stderr, "usage: hyperfide spec heartbeat <id> [--agent NAME] "
                             "[--attempt ID] [--fence N] [--ttl MIN]\n");
             rc = 1;
         } else {
@@ -4626,23 +4626,23 @@ int cmd_spec(int argc, char **argv, bool json) {
     } else if (strcmp(sub, "trace") == 0) {
         rc = spec_trace_cmd(&s, npos >= 1 ? pos[0] : NULL, !no_sync, json);
     } else if (strcmp(sub, "start") == 0) {
-        if (npos < 1) { fprintf(stderr, "usage: cg spec start <id>\n"); rc = 1; }
+        if (npos < 1) { fprintf(stderr, "usage: hyperfide spec start <id>\n"); rc = 1; }
         else if (strcmp(pos[0], CG_DOC_TASK) == 0)
             rc = spec_docs_cmd(&s, "start", cg_agent_name(agent), attempt, fence, json);
         else rc = spec_start_cmd(&s, pos[0], force, ahead, json);
     } else if (strcmp(sub, "implemented") == 0) {
         if (force) {
-            fprintf(stderr, "cg spec implemented does not support --force\n");
+            fprintf(stderr, "hyperfide spec implemented does not support --force\n");
             rc = 1;
         } else if (npos != 1) {
-            fprintf(stderr, "usage: cg spec implemented <id>\n");
+            fprintf(stderr, "usage: hyperfide spec implemented <id>\n");
             rc = 1;
         } else {
             rc = spec_implemented_cmd(&s, pos[0], cg_agent_name(agent),
                                       attempt, fence, json);
         }
     } else {
-        if (npos < 1) { fprintf(stderr, "usage: cg spec done <id>\n"); rc = 1; }
+        if (npos < 1) { fprintf(stderr, "usage: hyperfide spec done <id>\n"); rc = 1; }
         else rc = spec_done_cmd(&s, pos[0], cg_agent_name(agent), attempt,
                                 fence, force, json);
     }
