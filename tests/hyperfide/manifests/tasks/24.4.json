@@ -78,8 +78,8 @@
     },
     {
       "path": "services/hyperfide/dist/storage/recovery_probes.js",
-      "sha256": "d2869b2ced00f6a21573741a9a648d8195ae138d87444d532e0d287810e6a8e1",
-      "size": 43547
+      "sha256": "3a6d4e4f9e832a0759b77b0c5e559286bf9ff090b3a6bfdaaddb6d9d07f54058",
+      "size": 44029
     },
     {
       "path": "services/hyperfide/dist/transport/protocol.js",
@@ -113,8 +113,8 @@
     },
     {
       "path": "services/hyperfide/src/storage/recovery_probes.ts",
-      "sha256": "77a194d1cad282f84756833933c7aec386406084a6f0b3ab4111389593609565",
-      "size": 41048
+      "sha256": "0262bee66e959d2961f397f63c816f93338178337441e21d7e9cff2f4ad7b132",
+      "size": 41493
     },
     {
       "path": "services/hyperfide/tsconfig.json",

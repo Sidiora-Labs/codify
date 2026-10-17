@@ -223,7 +223,10 @@ async function objectDrill(ctx:LocalContext):Promise<LocalOutcome>{
 }
 
 async function gitDrill(ctx:LocalContext):Promise<LocalOutcome>{
- const env={...SAFE_ENV,HOME:ctx.root,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_TERMINAL_PROMPT:'0',GIT_AUTHOR_NAME:'hyperfide-drill',GIT_AUTHOR_EMAIL:'drill@hyperfide.invalid',GIT_COMMITTER_NAME:'hyperfide-drill',GIT_COMMITTER_EMAIL:'drill@hyperfide.invalid'};
+ const env={...SAFE_ENV,HOME:ctx.root,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_TERMINAL_PROMPT:'0',
+  // Detached auto-maintenance would outlive the drill; hooks never run in the owned fixture.
+  GIT_CONFIG_COUNT:'3',GIT_CONFIG_KEY_0:'gc.auto',GIT_CONFIG_VALUE_0:'0',GIT_CONFIG_KEY_1:'maintenance.auto',GIT_CONFIG_VALUE_1:'false',GIT_CONFIG_KEY_2:'core.hooksPath',GIT_CONFIG_VALUE_2:'/dev/null',
+  GIT_AUTHOR_NAME:'hyperfide-drill',GIT_AUTHOR_EMAIL:'drill@hyperfide.invalid',GIT_COMMITTER_NAME:'hyperfide-drill',GIT_COMMITTER_EMAIL:'drill@hyperfide.invalid'};
  const log:unknown[]=[];
  const git=async(cwd:string,args:string[],input?:string,allow=false)=>{const result=await run('/usr/bin/git',args,{cwd,env,input});log.push({args,code:result.code,stderr:result.stderr.slice(0,512)});if(!allow)must(result.code===0,'git '+args[0]+' failed: '+result.stderr.slice(0,200));return result;};
  const origin=path.join(ctx.root,'origin.git');
@@ -244,9 +247,10 @@ async function gitDrill(ctx:LocalContext):Promise<LocalOutcome>{
  const custody=path.join(ctx.root,'custody.bundle');await git(origin,['bundle','create','-q',custody,'refs/heads/feature']);
  const intents=[{ref:'refs/heads/feature',commit:c3,state:'PENDING'}];
  await fs.rm(origin,{recursive:true});
- const unavailable=await git(ctx.root,['ls-remote',origin],undefined,true);
+ // rev-parse observes the loss in-process; ls-remote would leave an unreaped upload-pack shell behind.
+ const unavailable=await git(ctx.root,['--git-dir='+origin,'rev-parse','--verify','refs/heads/main'],undefined,true);
  must(unavailable.code!==0,'Lost repository remained reachable');
- await ctx.save('unavailability.json',{repository:'origin.git',ls_remote_exit:unavailable.code,stderr:unavailable.stderr.slice(0,512)});
+ await ctx.save('unavailability.json',{repository:'origin.git',rev_parse_exit:unavailable.code,stderr:unavailable.stderr.slice(0,512)});
  await git(ctx.root,['clone','-q','--bare',backup,origin]);
  await git(origin,['fsck','--full','--strict']);
  const recoveryEpoch=randomUUID();await fence.rotate(pre,recoveryEpoch);
