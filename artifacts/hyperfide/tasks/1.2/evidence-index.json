@@ -1,0 +1,9 @@
+{
+  "task": "1.2",
+  "commit": "3fe3d4d005e53a931a4853c68fb4bd710363c6f7",
+  "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-001 --manifest tests/hyperfide/manifests/tasks/1.2.json && python3 tests/hyperfide/qualify.py --case V-008 --manifest tests/hyperfide/manifests/tasks/1.2.json",
+  "exit_code": 0,
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"e3388567-c29a-4306-9b11-3591bdd83842\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/1.2/campaigns/9f6dbd8110b08d525d891f9ce580ef29a072963ce6011be29854015d8959f791\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"497cf597-7cc9-423f-8762-6d694706d6f6\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/1.2/campaigns/9f6dbd8110b08d525d891f9ce580ef29a072963ce6011be29854015d8959f791\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T09:21:06Z",
+  "ran_as": "hf (repository owner); as root the independent checker's hardened git call rejects the hf-owned checkout as dubious ownership"
+}
