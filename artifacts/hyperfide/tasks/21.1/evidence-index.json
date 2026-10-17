@@ -1,9 +1,9 @@
 {
   "task": "21.1",
-  "commit": "6a91b0130b1d6a09407f5f786b975545dcdc937b",
+  "commit": "0f2e867d972e85cec2d5020714dcdf748f914260",
   "requalified_on": "6a91b0130b1d6a09407f5f786b975545dcdc937b",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-045 --manifest tests/hyperfide/manifests/tasks/21.1.json && python3 tests/hyperfide/qualify.py --case V-024 --manifest tests/hyperfide/manifests/tasks/21.1.json",
-  "exit_code": 1,
-  "stdout_tail": "{\"status\": \"FAIL\", \"receipt_id\": \"576a4c2e-c2f7-4e2d-895e-6327aa9eb4d4\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/21.1/campaigns/030ce56d6b0a45a32bc1d029bead920cc66e1174e9e8065f3cbfb7d98bfbc0fd\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": [\"independent checker rejected candidate; inspect checks artifacts\"]}\nChecker: assertion coverage/order is incomplete or unexpected. All 48 assertions PASS; emitted legacy-submit-real-job, legacy-egress-denied-abstains, egress-denied-never-accepted before stale-real-job-capture and accepted-source-preserved, unlike registration order. Responsible: tests/hyperfide/cases/tasks/21_4.py:447-466; tests/hyperfide/check-evidence.py:322. V-024 not run because V-045 failed.",
-  "ran_at": "2026-10-17T18:18:45.886609+00:00"
+  "exit_code": 0,
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"326183d0-34df-47e5-8f65-1c5ebc6f508a\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/21.1/campaigns/411f7ff2b52a089d3abee81a3f013f0419698e7f9cf3f7cb61b8bff6ca8ff583\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"26aa893a-04e3-4841-bc20-820fb7762070\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/21.1/campaigns/411f7ff2b52a089d3abee81a3f013f0419698e7f9cf3f7cb61b8bff6ca8ff583\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T18:24:49.926837+00:00"
 }
