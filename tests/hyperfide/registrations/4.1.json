@@ -9,6 +9,7 @@
   ],
   "assertion_ids": [
     "storage.service.describe",
+    "storage.migration.operator-required",
     "storage.migration.bootstrap",
     "storage.migration.replay",
     "storage.service.inspect",
