@@ -2,7 +2,7 @@
 
 When several agents work on several branches at once, the question nobody
 can answer from one worktree is: what does main look like if all of this
-merged right now, and where does it collide? `cg projection build` answers it
+merged right now, and where does it collide? `hyperfide projection build` answers it
 with a real git commit. It folds every active branch onto the base with
 `git merge-tree`, includes each worktree's uncommitted work, and writes the
 result to `refs/codify/projection`. Anyone can `git log`, `git diff`, or
@@ -12,6 +12,11 @@ A conflict does not stop the fold. The branch goes in with git's conflict
 markers in the affected files, and the path is recorded with every branch
 that touched it. Two agents learn they collide before either of them merges.
 
+`hyperfide` is the command; `cg` is the deprecated compatibility alias from
+the same executable, with identical arguments, JSON and exit codes. The ref
+and branch names below (`refs/codify/projection`, `codify/projection`) keep
+their Codify names in this build.
+
 The implementation is in `src/projection.c`, with the git plumbing in
 `src/gitint.c` and the findings in `src/conflicts.c`. The tests are
 `tests/integration/51_projection.sh` and `52_conflicts.sh`.
@@ -20,16 +25,16 @@ The implementation is in `src/projection.c`, with the git plumbing in
 
 | Command | What it does |
 |---|---|
-| `cg projection build` | Fold the active branches onto the base and update the ref. A no-op that says so when nothing changed. |
-| `cg projection build --force` | Rebuild even when the inputs are unchanged. |
-| `cg projection build --strict` | Leave a branch whose merge step conflicts out of the projection, and say so, instead of folding it with markers. |
-| `cg projection build --branch NAME` | Fold NAME too, whether or not it is active. Repeatable. A branch the registry does not know is folded from its ref. |
-| `cg projection build --index` | Also check the projection out and index it as branch `codify/projection` (see below). |
-| `cg projection build --wait MS` | How long to wait for a build that is already running (default 5000). |
-| `cg projection status` | The last build, from the database, without rebuilding. |
-| `cg projection diff [branch]` | `git diff --stat` of the projection against the base head it was built on, or against the named branch. |
-| `cg projection show` | The paths the projection changes against the base, with git's status letter. |
-| `cg projection findings` | The live conflict findings between branches, with their branches, agents, lines, advice, and age (see [Findings](#findings)). |
+| `hyperfide projection build` | Fold the active branches onto the base and update the ref. A no-op that says so when nothing changed. |
+| `hyperfide projection build --force` | Rebuild even when the inputs are unchanged. |
+| `hyperfide projection build --strict` | Leave a branch whose merge step conflicts out of the projection, and say so, instead of folding it with markers. |
+| `hyperfide projection build --branch NAME` | Fold NAME too, whether or not it is active. Repeatable. A branch the registry does not know is folded from its ref. |
+| `hyperfide projection build --index` | Also check the projection out and index it as branch `codify/projection` (see below). |
+| `hyperfide projection build --wait MS` | How long to wait for a build that is already running (default 5000). |
+| `hyperfide projection status` | The last build, from the database, without rebuilding. |
+| `hyperfide projection diff [branch]` | `git diff --stat` of the projection against the base head it was built on, or against the named branch. |
+| `hyperfide projection show` | The paths the projection changes against the base, with git's status letter. |
+| `hyperfide projection findings` | The live conflict findings between branches, with their branches, agents, lines, advice, and age (see [Findings](#findings)). |
 
 Every command takes `--json`. The projection needs git 2.38 or newer, the
 release that added `git merge-tree --write-tree`. Without a git repository,
@@ -37,9 +42,9 @@ or with an older git, the command says exactly that and exits 1.
 
 ## How a build works
 
-1. **The base.** `[projection] base` in `codify.kvx`, else `[hierarchy] main`
+1. **The base.** `[projection] base` in the project configuration, else `[hierarchy] main`
    in `spec/workflow.kvx`, else `main`.
-2. **The active branches.** Every branch in the registry (`cg branches`)
+2. **The active branches.** Every branch in the registry (`hyperfide branches`)
    whose worktree still exists and is still on that branch, and that either
    has a live agent or was indexed within `[projection] stale` (default 24h).
    An agent is live when its row in the agents table was seen within
@@ -66,8 +71,10 @@ or with an older git, the command says exactly that and exits 1.
    <contribution>` and writes a commit of the resulting tree with two
    parents — the previous projection commit and the contribution — and the
    message `projection: + <branch>`. A contribution already contained in the
-   projection adds nothing and is marked merged. With no active branch the
-   projection is the base's own commit.
+   projection adds nothing. Either way the branch is marked `merged`
+   (folded into the projection); a branch skipped by `--strict` or a failed
+   git step is not. With no active branch the projection is the base's own
+   commit.
 6. **Conflicts.** Each conflicted path of a step is recorded with the branch
    being folded, the earlier folded branches that changed the same path
    against the base (`git diff base...contribution`), and the kind:
@@ -104,7 +111,7 @@ an `index` object is added (below).
 
 Every build is a row in the `projections` table: `built`, `base`,
 `base_head`, `commit_id`, `fingerprint`, `branches` (JSON), `conflicts`
-(JSON), `ms`. The last hundred are kept. `cg projection status` prints the
+(JSON), `ms`. The last hundred are kept. `hyperfide projection status` prints the
 newest one.
 
 The fingerprint is a hash of the base head, every folded branch's name and
@@ -140,9 +147,10 @@ How they are found:
 
 - **Hunks.** For each folded branch, the zero-context diff
   `base...contribution` (so uncommitted work counts through the shadow
-  commit), with both sides' line ranges. Codify's own bookkeeping (the spec
-  directory, `AGENTS.md`, `CLAUDE.md`, `.codify/`, `codify.kvx`, …) is left
-  out, as spec drift leaves it out, so every worker flipping a task status
+  commit), with both sides' line ranges. The workflow's own bookkeeping
+  (the spec directory, `AGENTS.md`, `CLAUDE.md`, `.codify/`, the configured
+  context directory, `.codegraph/`, `.gitignore`, `hyperfide.kvx`,
+  `codify.kvx`) is left out, as spec drift leaves it out, so every worker flipping a task status
   does not collide.
 - **Symbols.** Each hunk's head-side lines are mapped onto the symbol spans
   the graph holds for *that branch* (`files.branch_id`), keeping the
@@ -171,7 +179,7 @@ live fleet and native agents on those branches, by branch or worktree) and a
 one-line `advice`; an interface finding also names its `changer`.
 
 ```
-$ cg projection findings
+$ hyperfide projection findings
 findings:
   symbol    src/core.c  compute  — feat-a (agent claude:aaaaaaaa), feat-b (agent claude:bbbbbbbb)  (2m)
       lines: feat-a 2; feat-b 8
@@ -203,7 +211,7 @@ symbol, and branch set, with `first_seen`, `last_seen`, and `resolved`
 ### Steering the agents involved
 
 When a finding appears, every live agent on each of its branches is
-steered once, through the channel `cg fleet steer` uses (`driver_steer`, an
+steered once, through the channel `hyperfide fleet steer` uses (`driver_steer`, an
 `agent.steer` event), which a Claude Code session reads at its next
 post-edit hook:
 
@@ -225,23 +233,26 @@ use runs `git worktree add --detach`; later builds run
 commit did not change. The tree is then indexed into the shared graph as
 branch `codify/projection`. A detached HEAD has no branch name, so the build
 registers the name itself and runs the index pass as that branch, the same
-way a linked worktree's own `cg sync` writes its rows.
+way a linked worktree's own `hyperfide sync` writes its rows.
 
 From then on every read command answers for the projection:
 
 ```
-cg search Handler --branch codify/projection
-cg context src/server.c --branch codify/projection
-cg impact parse_config --branch codify/projection
+hyperfide search Handler --branch codify/projection
+hyperfide context src/server.c --branch codify/projection
+hyperfide impact parse_config --branch codify/projection
 ```
 
 The `index` object in `--json` carries `worktree`, `branch`,
 `checked_out`, `files_seen`, `files_indexed`, and `ok`. The worktree belongs
-to Codify; do not edit it.
+to Hyperfide; do not edit it.
 
 ## Configuration
 
-`[projection]` in `codify.kvx` (see [config.md](config.md)):
+`[projection]` in the project configuration, `hyperfide.kvx` (a legacy
+`codify.kvx` is read when it is the only one; see [config.md](config.md)).
+`hyperfide config get projection.min_interval` prints the value in effect
+(`15s` by default):
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -262,10 +273,10 @@ requirements live on other task and wave branches, and the projection
 already has them folded in. The worker's prompt tells it to:
 
 - read code with `--branch codify/projection`;
-- watch `cg projection findings` for what its work collides with.
+- watch `hyperfide projection findings` for what its work collides with.
 
-A build runs after every `cg fleet land` and every successful
-`cg fleet sync`, so the projection follows main as waves land. When the
+A build runs after every `hyperfide fleet land` and every successful
+`hyperfide fleet sync`, so the projection follows main as waves land. When the
 supervisor's forward merge of main into a wave branch conflicts, the
 escalation to the wave manager names the live finding on the conflicting
 path, if there is one. That is the conflict the projection predicted
@@ -273,17 +284,17 @@ before the land.
 
 ## Following the work {#live}
 
-Nobody has to run `cg projection build`. Work marks the projection dirty
+Nobody has to run `hyperfide projection build`. Work marks the projection dirty
 (the note is `.codegraph/projection.dirty`), and the next trigger starts one
-background `cg projection build --quiet`. The build is detached, prints
+background `hyperfide projection build --quiet`. The build is detached, prints
 nothing, and gives way to a build that already holds the lock.
 
 | Trigger | When |
 |---|---|
-| `cg hook post-edit` | after every edit, once the graph is synced |
-| `cg hook event` | on `PostToolUse`, `Stop`, `SubagentStop`, `SessionEnd`, `WorktreeCreate`, and `WorktreeRemove`; session starts and prompts are not work |
-| `cg watch`, `cg watch --fleet` | when edits settle and the sync has run |
-| `cg serve` | on its refresh, after a `fleet.merge`, `fleet.land`, `fleet.begin`, or spawn event |
+| `hyperfide hook post-edit` | after every edit, once the graph is synced |
+| `hyperfide hook event` | on `PostToolUse`, `Stop`, `SubagentStop`, `SessionEnd`, `WorktreeCreate`, and `WorktreeRemove`; session starts and prompts are not work |
+| `hyperfide watch`, `hyperfide watch --fleet` | when edits settle and the sync has run |
+| `hyperfide serve` | on its refresh, after a `fleet.merge`, `fleet.land`, `fleet.begin`, or spawn event |
 | the fleet supervisor | on its tick, after the same events |
 
 A trigger starts a build only when all of these hold:
@@ -294,34 +305,34 @@ A trigger starts a build only when all of these hold:
 - the last build, or the last build started, is older than `[projection] min_interval` (15s)
 
 A trigger held back by the interval is not lost. The note stays, so the
-next trigger after the interval builds. `cg watch` also retries on its own
+next trigger after the interval builds. `hyperfide watch` also retries on its own
 when the interval ends.
 
 ### Where the findings show
 
-- **`cg projection status`** shows the last build and its age, then every
+- **`hyperfide projection status`** shows the last build and its age, then every
   live finding grouped under each branch it involves, with that branch's
   worktree. `--json` adds
   `findings: {findings, count, by_branch: {name: {worktree, findings}}}`.
-- **`cg brief` and `cg state`** add the line
+- **`hyperfide brief` and `hyperfide state`** add the line
   `projection: N branches folded, M findings — the first two named — built
   Ns ago`. Under `--json` this is
   `projection: {commit, built, age, branches, findings, first}`, or `null`
   before the first build.
-- **`cg fleet tree --json`** adds
+- **`hyperfide fleet tree --json`** adds
   `projection: {ref, commit, base, built, age, folded, findings, count,
   branches: [{name, worktree, findings}]}`. The `findings` field inside
   `branches` is that branch's count.
 - **The MCP tool `projection_status`** returns the same JSON as
-  `cg projection status --json`.
-- **`cg serve`** pushes `projection.built`, `projection.conflict`, and
+  `hyperfide projection status --json`.
+- **`hyperfide serve`** pushes `projection.built`, `projection.conflict`, and
   `projection.resolved` to subscribers, for example with
   `{"kinds": "projection.*"}`.
 - **The editor's fleet view** shows a Projection node. It lists each finding
   with its branches, and each branch row opens the file in that branch's
   worktree. Agent and session rows on an involved branch carry an
   `N findings` badge.
-- **`cg fleet merge-up` and `cg fleet land`** print the branch's known
+- **`hyperfide fleet merge-up` and `hyperfide fleet land`** print the branch's known
   findings before they merge. With `--json` the findings go to stderr. The
   findings are advice and never block the merge.
 
@@ -332,3 +343,26 @@ The steer a build sends reaches a Claude Code session in the
 |---|---|---|
 | `auto` | `true` | Hooks, watch, serve, and the supervisor start a background build when work happens. |
 | `min_interval` | `15s` | An automatic build waits this long after the last one. |
+
+## The Hyperfide control plane
+
+The projection is the binary's: it folds local branches and worktrees with
+local git and writes a local ref (`src/projection.c`, `src/conflicts.c`).
+The control service has no equivalent. In distributed authority mode (a
+`.hyperfide/authority.json` descriptor, or `HYPERFIDE_AUTHORITY_DESCRIPTOR`;
+`hyperfide authority mode` prints the mode), `hyperfide projection` refuses
+with `DISTRIBUTED_COMMAND_UNSUPPORTED`, exit 78 (`src/hyperfide/client.c`).
+`hyperfide work projection` is routed to the service instead, and the
+service answers with its hierarchy view and
+`folded_branch_projection: {available: false, reason:
+"NO_EQUIVALENT_REMOTE_BRANCH_FOLDING_AUTHORITY"}`
+(`services/hyperfide/src/migration/workflow.ts`).
+
+What the service does own is different in kind: remote graph generations,
+whose `projection.*` actions compute graph deltas between source revisions
+rather than branch folds (`services/hyperfide/src/graph/projection.ts`),
+immutable integration candidates (`services/hyperfide/src/integration/candidates.ts`),
+and the sole publication gateway to protected targets
+(`services/hyperfide/src/integration/publication.ts`). Tasks 7.3, 19.1, 19.2
+and 25.3 are `pending` in `spec/hyperfide/spec.kvx`, so that path is not
+qualified in this revision.
