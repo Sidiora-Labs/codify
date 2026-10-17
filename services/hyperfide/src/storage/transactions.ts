@@ -150,7 +150,8 @@ export class TransactionGateway {
         return value;
       }catch(error){
         const code=codeOf(error),knownAbort=code==='40001'||code==='40P01';
-        if(phase==='commit'&&!knownAbort){
+        const serverError=typeof error==='object'&&error!==null&&'severity' in error&&typeof error.severity==='string';
+        if(phase==='commit'&&!knownAbort&&!serverError){
           healthy=false;
           throw new StorageError('COMMIT_AMBIGUOUS','Commit acknowledgement was lost; reconcile the durable operation identity before retry','unknown',attempt,false);
         }
