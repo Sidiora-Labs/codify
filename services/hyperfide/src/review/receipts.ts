@@ -105,7 +105,16 @@ async function watcherReservation(db:ReviewDb,binding:ReviewScope,actor:string,s
  const found=await db.query(`SELECT session.id FROM hyperfide.agent_sessions session JOIN hyperfide.sandboxes box ON box.organisation_id=session.organisation_id AND box.id=session.sandbox_id AND box.boot_generation=session.sandbox_boot_generation JOIN hyperfide.worker_slots slot ON slot.organisation_id=session.organisation_id AND slot.id=session.slot_id AND slot.sandbox_id=box.id AND slot.boot_generation=box.boot_generation WHERE session.organisation_id=$1 AND session.run_id=$2 AND session.id=$3 AND session.sandbox_id=$4 AND session.sandbox_boot_generation=$5 AND session.role='COMMIT_WATCHER' AND session.state IN ('REGISTERED','RUNNING') AND box.observed_state='RUNNING' AND slot.capacity_kind IN ('REVIEW','TEST') AND slot.state IN ('READY','ALLOCATED') FOR SHARE OF session,box,slot`,[binding.organisation_id,binding.run_id,actor,sandbox,boot]);
  if(!found.rows.length)fail('REVIEW_RESERVATION_REQUIRED','Watcher needs a current independent review slot and boot');
 }
+// Decision models (domain 20/21 ranking) may rank risk or flag insufficient evidence
+// but never certify correctness; such fields cannot ride on a review receipt.
+const DECISION_MODEL_FIELDS=['risk_rank','risk_score','rank','confidence','certified','certifies_correctness','decision_model','decision_id','ranking'];
+export const REVIEW_CERTIFICATION={certifies_correctness:false,decision_model_role:'ADVISORY_RISK_RANK_ONLY',coverage_authority:'ASSIGNED_INDEPENDENT_WATCHER_RECEIPT'};
+function refuseDecisionCertification(value:unknown):void{
+ if(value&&typeof value==='object'&&!Array.isArray(value)&&DECISION_MODEL_FIELDS.some(key=>Object.hasOwn(value,key)))
+  fail('REVIEW_INPUT_INVALID','Decision-model rank or confidence is advisory and cannot certify review correctness');
+}
 export async function submitReviewReceipt(context:ComponentContext,value:unknown):Promise<unknown>{
+ refuseDecisionCertification(value);
  const v=obj(value,['organisation_id','run_id','request_id','obligation_id','generation','lease_generation','input_manifest_digest','candidate_digest','rubric_digest','outcome','limitations','evidence_ids','observations']);
  const binding=scope(v),trusted=authorizeReview(context,binding,['COMMIT_WATCHER']),actor=uuid(trusted.invocation.principal.actor_id);
  const requestId=uuid(v.request_id),obligationId=uuid(v.obligation_id),generation=decimal(v.generation),
@@ -136,6 +145,9 @@ export async function submitReviewReceipt(context:ComponentContext,value:unknown
    fail('REVIEW_INDEPENDENCE_REQUIRED','Only the assigned independent watcher can satisfy this exact rubric');
   if(!await reviewInputCurrent(db,binding,obligation.snapshot))fail('REVIEW_INPUTS_STALE','Current spec, dependency, contract, graph or environment input changed');
   if(prior.rows[0])return {receipt_id:prior.rows[0].id,replayed:true,current:prior.rows[0].id===obligation.current_receipt_id};
+  // Duplicate activity is not coverage: a second distinct receipt cannot replace the
+  // current one for the same obligation generation and inputs.
+  if(obligation.current_receipt_id)fail('REVIEW_DUPLICATE_ACTIVITY','Obligation generation already has a current receipt; duplicate review activity cannot add coverage');
   if(obligation.lease_generation!==leaseGeneration||obligation.lease_session_id!==actor||!obligation.lease_current||obligation.lease_sandbox_id!==trusted.invocation.principal.sandbox_id||obligation.lease_boot_generation!==trusted.invocation.principal.boot_generation)fail('REVIEW_LEASE_STALE','Receipt owner, reservation or boot no longer owns this exact review job lease');
   await watcherReservation(db,binding,actor,obligation.lease_sandbox_id!,obligation.lease_boot_generation!);
   await assertReviewExecutionAllowed(context,db,binding,obligation.snapshot.source_set as Source[],obligation.lease_sandbox_id,'CHECKPOINT');
@@ -170,7 +182,7 @@ export async function submitReviewReceipt(context:ComponentContext,value:unknown
   const state=outcome!=='INCONCLUSIVE'&&!boundedLimitations.length?'COMPLETE':'PENDING';
   await db.query('UPDATE hyperfide.review_obligations SET current_receipt_id=$4,state=$5,lease_session_id=NULL,lease_sandbox_id=NULL,lease_boot_generation=NULL,lease_expires_at=NULL WHERE organisation_id=$1 AND run_id=$2 AND id=$3',
    [binding.organisation_id,binding.run_id,obligationId,receiptId,state]);
-  return {receipt_id:receiptId,observation_ids:observationIds,replayed:false,obligation_state:state,qualification_status:'UNRUN'};
+  return {receipt_id:receiptId,observation_ids:observationIds,replayed:false,obligation_state:state,qualification_status:'UNRUN',...REVIEW_CERTIFICATION};
  });
 }
 export async function claimReviewObligation(context:ComponentContext,value:unknown):Promise<unknown>{
@@ -221,7 +233,7 @@ export function createComponent(_context:ComponentContext):Component{
     if(row.rows.length!==1)fail('REVIEW_RECEIPT_MISSING','Receipt is unavailable in this run');
     const evidence=await db.query('SELECT evidence_id FROM hyperfide.review_receipt_evidence WHERE organisation_id=$1 AND run_id=$2 AND receipt_id=$3 ORDER BY evidence_id',[binding.organisation_id,binding.run_id,uuid(v.receipt_id)]);
     const observations=await db.query('SELECT id FROM hyperfide.review_observations WHERE organisation_id=$1 AND run_id=$2 AND review_receipt_id=$3 ORDER BY id',[binding.organisation_id,binding.run_id,uuid(v.receipt_id)]);
-    return {receipt:row.rows[0],evidence_ids:evidence.rows.map(item=>item.evidence_id),observation_ids:observations.rows.map(item=>item.id)};
+    return {receipt:row.rows[0],evidence_ids:evidence.rows.map(item=>item.evidence_id),observation_ids:observations.rows.map(item=>item.id),...REVIEW_CERTIFICATION};
    });
   }),
   'review.inputs.reconcile':guarded(async(ctx,input)=>{
