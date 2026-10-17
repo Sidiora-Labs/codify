@@ -1,10 +1,12 @@
-# Codify for VS Code
+# Hyperfide for VS Code
 
-The whole Codify workflow, inside the editor. Everything is driven by the `cg` binary — the extension holds no state and never parses specs or code itself, so it cannot disagree with the CLI.
+The whole Hyperfide workflow, inside the editor. Everything is driven by the `hyperfide` binary — the extension holds no state and never parses specs or code itself, so it cannot disagree with the CLI. `cg` is a deprecated compatibility alias of the same executable, with identical arguments, JSON and exit codes; it stays for the compatibility window of the approved release, and some extension paths still launch it by default (see [Requirements](#requirements)).
+
+The extension keeps its historical identifiers: the package is `codify-workflow`, command ids are `codify.*` (each is also registered as `hyperfide.*` for keybindings), and settings stay under `codify.*` apart from `hyperfide.binaryPath`. The palette titles read **Hyperfide: …**. It drives the local `hyperfide` CLI only; it does not talk to the Hyperfide control service described in [docs/hyperfide/operations.md](../../docs/hyperfide/operations.md).
 
 ## Code navigation from the graph
 
-The extension runs `cg lsp` and speaks the Language Server Protocol to it, so files with extracted symbols and references get graph-backed navigation with **no compiler, no toolchain, and no project configuration**. File-only formats have no symbol navigation; [indexing coverage](../../docs/indexing.md#extraction-coverage) gives the boundary for each family:
+The extension runs `hyperfide lsp` and speaks the Language Server Protocol to it, so files with extracted symbols and references get graph-backed navigation with **no compiler, no toolchain, and no project configuration**. File-only formats have no symbol navigation; [indexing coverage](../../docs/indexing.md#extraction-coverage) gives the boundary for each family:
 
 | Feature | Backed by |
 |---|---|
@@ -14,20 +16,20 @@ The extension runs `cg lsp` and speaks the Language Server Protocol to it, so fi
 | Code lens | Reference count and test-reference count above every function, so coverage gaps are visible while reading |
 | Problems | kvx parse errors, and files edited outside the in-progress task's declared `touches` |
 
-That last row is the point. **Scope drift shows up as a squiggle at the moment of the edit** — for you and for whatever agent is working alongside you — instead of waiting for someone to run a command. It is a warning, never an error: Codify advises, and only `--strict` enforces.
+That last row is the point. **Scope drift shows up as a squiggle at the moment of the edit** — for you and for whatever agent is working alongside you — instead of waiting for someone to run a command. It is a warning, never an error: Hyperfide advises, and only `--strict` enforces.
 
 Turn it off with `codify.languageServer` if you want the task board alone.
 
 ## Task board
 
-A "Codify" container in the activity bar, with four views: **Tasks**, **Agent**, **Memory**, and **Fleet** (the last two collapsed until you open them).
+A "Hyperfide" container in the activity bar, with four views: **Tasks**, **Agent**, **Memory**, and **Fleet** (the last two collapsed until you open them).
 
-**Tasks** shows the active feature's plan the way Codify sees it:
+**Tasks** shows the active feature's plan the way Hyperfide sees it:
 
-- Tasks group by **feature → section → wave** — the way the spec is written, and the way a fleet divides work. Each level carries its own progress, and a wave names the branch its worker takes (`wave/<feature>/<n>`, from `cg fleet plan`).
+- Tasks group by **feature → section → wave** — the way the spec is written, and the way a fleet divides work. Each level carries its own progress, and a wave names the branch its worker takes (`wave/<feature>/<n>`, from `hyperfide fleet plan`).
 - Each row says whether you can pick it up: status icon, the agent holding the lease with its role, the branch work is on, and the requires that are not met yet (*blocked by 3.2*). The next eligible task is marked; `implemented` tasks read as *qualification pending* rather than done.
 - **Filter** the tree by status (including *blocked* and *open*), wave or owner, and **search** it by id, title, section, owner, symbol or path. The active filter is shown in the view title with a count badge, and is remembered per workspace — a filter that hides work never hides silently.
-- Inline actions run the real workflow — start, mark implemented, complete. `cg spec done` is refused when `verify_cmd` or the graph checks fail, with the failing checks shown in the Codify output and a deliberately awkward, modal "Force done anyway" escape hatch.
+- Inline actions run the real workflow — start, mark implemented, complete. `hyperfide spec done` is refused when `verify_cmd` or the graph checks fail, with the failing checks shown in the output channel (still named `Codify`) and a deliberately awkward, modal "Force done anyway" escape hatch.
 - In parallel mode, tasks show who holds their lease, and claim/release actions appear. **Open Task Branch or Worktree** opens the worktree the fleet created for the task (in this window or a new one); with no worktree here it offers the branch name or the `git switch` line rather than checking out for you.
 
 ### Task detail
@@ -35,55 +37,59 @@ A "Codify" container in the activity bar, with four views: **Tasks**, **Agent**,
 Clicking a task opens its detail panel beside the editor — one panel per task, repainted from the same refresh as the tree:
 
 - Its **acceptance criteria** (the `[req.*]` clauses its `reqs` name) and its **do-steps**, read from the spec file.
-- Its declared **symbols**, each with the location, kind and reference count the graph resolved — click one to jump to it, or to run `cg symbol` when the graph has not seen it yet — and its **touched paths**, each marked with whether a matching change exists.
+- Its declared **symbols**, each with the location, kind and reference count the graph resolved — click one to jump to it, or to run `hyperfide symbol` when the graph has not seen it yet — and its **touched paths**, each marked with whether a matching change exists.
 - Its **verify command**, with **Run verify** to run it in a terminal (in the task's own worktree when the fleet gave it one), the **commits** tagged with the task, and the **memories** written under it.
 - Buttons for start, complete, claim, release, open branch, trace, open in spec, and **Copy resume prompt** — a briefing built from the task's own declaration (steps, scope, criteria, verify command, lease) to paste into any agent.
 
 The panel is part of the zero-dependency promise: no bundler, no remote fonts or scripts, and a content security policy that allows exactly one nonce and nothing else.
 
-**Memory** lists recent decisions, constraints and facts, grouped by type, with the task each was written under. Add one from anywhere with **Codify: Remember a Decision** — if a file is open, it is anchored to that file automatically.
+**Memory** lists recent decisions, constraints and facts, grouped by type, with the task each was written under. Add one from anywhere with **Hyperfide: Remember a Decision** — if a file is open, it is anchored to that file automatically.
 
 ## The agent view
 
-The Codify sidebar has an **Agent** view — a persistent chat with Claude Code or Codex, always there, no task required. The extension speaks the [Agent Client Protocol](https://agentclientprotocol.com) to the agent's ACP adapter (`claude-code-acp` or the maintained `@agentclientprotocol/codex-acp`). A lightweight connection on view open discovers past sessions; a working session starts when you send or restore one. Every working session runs in the workspace with **Codify's own MCP server injected** (`cg mcp`), so the agent has the full graph, spec, and memory toolset without any per-repo MCP config. A **provider picker** in the header switches between Codex, Claude Code, and a Custom ACP command for the next chat; the choice is remembered per workspace. The **⚙** gear next to it (also *Codify: Configure Agent Provider*) is a quick pick that switches provider, edits each adapter's launch command in place, or opens the `codify.acp` settings. The **＋ New Agent Chat** button on the view resets to a fresh session.
+The Hyperfide sidebar has an **Agent** view — a persistent chat with Claude Code or Codex, always there, no task required. The extension speaks the [Agent Client Protocol](https://agentclientprotocol.com) to the agent's ACP adapter (`claude-code-acp` or the maintained `@agentclientprotocol/codex-acp`). A lightweight connection on view open discovers past sessions; a working session starts when you send or restore one. Every working session runs in the workspace with **an MCP server named `codify` injected** — `<binary> mcp`, where the binary is `codify.binaryPath` (default `cg`; see [Requirements](#requirements)), so the agent has the full graph, spec, and memory toolset without any per-repo MCP config. A **provider picker** in the header switches between Codex, Claude Code, and a Custom ACP command for the next chat; the choice is remembered per workspace. The **⚙** gear next to it (also *Hyperfide: Configure Agent Provider*) is a quick pick that switches provider, edits each adapter's launch command in place, or opens the `codify.acp` settings. The **＋ New Agent Chat** button on the view resets to a fresh session.
 
 The **Past sessions** selector merges compact workspace history remembered by the extension with the adapter's ACP `session/list` results. Titles are cleaned before they are shown: harness prefixes such as Claude Code's local-command caveat are stripped, a `/clear` session is titled by its command, and a session that begins with a context-compaction summary is titled `↻ continued: <what the work was about>`, since Claude Code opens a new session file at every compaction. Selecting one uses `session/load` for transcript replay, or `session/resume` when the adapter only supports context restoration; that limitation is stated inline. Refresh asks the selected adapter again. Adapters without session lifecycle support leave locally known entries visible but never claim that history was restored.
 
-The session bar shows the connected adapter and injected `codify` MCP server. Agent-provided ACP modes and session options appear as native controls, so Codex and Claude Code can expose their own plan/agent mode, model, or reasoning choices without extension-specific wiring. The bar also follows agent-generated session titles and context-window usage. Agent-native slash commands join the composer palette; collisions are namespaced as `/agent-<name>` so commands such as Codify's `/review` always keep their meaning.
+The session bar shows the connected adapter and injected `codify` MCP server. Agent-provided ACP modes and session options appear as native controls, so Codex and Claude Code can expose their own plan/agent mode, model, or reasoning choices without extension-specific wiring. The bar also follows agent-generated session titles and context-window usage. Agent-native slash commands join the composer palette; collisions are namespaced as `/agent-<name>` so commands such as the extension's own `/review` always keep their meaning.
 
 The view streams replies and collapsed thinking, renders each tool call as an expandable card — kind badge and colour, status tick, elapsed time, the raw input, locations, and diffs — tracks the plan, and surfaces **permission requests as buttons** — allow once, always, reject — answered inline, never in a modal. **Sub-agents** (Claude Code `Task` calls, ACP `agent` tool kinds, or any delegation-shaped call) get their own card showing the delegated prompt, and the tools they run nest underneath with a running count. A compact activity line keeps the current turn, tool totals, sub-agents, plan progress, permissions, and queued follow-ups visible even when their detailed cards are collapsed; beneath it a **tool timeline** draws one dot per call this turn (pulsing while running, green or red when finished; click one to jump to its card) and a **now line** names the call in flight. When the turn ends, a summary pill states whether it completed, how many tools ran and failed, how many sub-agents were used, how many files were touched, and how long it took. Context-window usage is drawn as a bar that turns amber past 70% and red past 90%. File reads and writes requested over ACP are workspace-scoped; paths outside the root are refused. **Stop** cancels the in-flight turn (`session/cancel`), while messages typed during work are visibly queued for the next turn; **↻ Retry** (also `/retry`) re-sends the last prompt once the agent is idle. Terminal output from a tool is rendered as terminal text with ANSI already stripped, and the session bar carries a running **cost** for the adapters that price their turns — absent means unknown, not free.
 
 Text the harness injected into the user role during a replayed session (the local-command caveat, `<command-name>` blocks, and compaction summaries) never becomes a user bubble: commands appear as a one-line note, and a compaction summary collapses into a labelled note whose text can still be opened. Replies render as safe markdown — headings, emphasis, nested and task lists, tables, quotes, inline code, and fenced code blocks with a copy button and the language on the rail. Any file path the agent mentions (`src/graph.c`, `editors/vscode/acp.js:42`) opens at that line, tool locations do the same, and web links open through VS Code rather than navigating the webview. The context bars, transcript, cards, permissions, and composer reflow for a narrow sidebar and use a centered reading width in a wide editor panel. The composer grows with your message, and `↑` recalls what you sent before.
 
-### Codify commands in the chat
+### Hyperfide commands in the chat
 
-A **Codify toolbar** sits above the transcript: brief, next, status, review, check, guard, changes, and remember are one click each, and once a task is attached, **implemented**, **done**, and **handoff** appear beside them. `done` runs the real `cg spec done` qualification; its output card is marked green or red and a refusal is left open and handed to the agent to fix. Type `/` for the command palette. Each one runs the real `cg` verb in the workspace, shows the output as a collapsible card, and hands the same output to the agent as context with a short instruction — so the agent works from the graph rather than from a guess.
+A **toolbar** sits above the transcript: brief, next, status, review, check, guard, changes, and remember are one click each, and once a task is attached, **implemented**, **done**, and **handoff** appear beside them. `done` runs the real `hyperfide spec done` qualification; its output card is marked green or red and a refusal is left open and handed to the agent to fix. Type `/` for the command palette. Each one runs the real `hyperfide` verb in the workspace, shows the output as a collapsible card, and hands the same output to the agent as context with a short instruction — so the agent works from the graph rather than from a guess.
 
 | Command | Runs |
 |---|---|
-| `/brief` | `cg brief` — session state: task, changes, decisions |
-| `/next` | `cg spec next` — the next eligible task |
-| `/status` | `cg spec status` — the board for the active feature |
+| `/brief` | `hyperfide brief` — session state: task, changes, decisions |
+| `/next` | `hyperfide spec next` — the next eligible task |
+| `/status` | `hyperfide spec status` — the board for the active feature |
 | `/task [id]` | Claim, start, and attach a task, then brief the agent with its resume packet |
-| `/context <query>` | `cg context` — symbols, snippets and edges in one call |
-| `/search <query>` | `cg search` — find code by name across the graph |
-| `/impact <name>` | `cg impact` — callers and callees |
-| `/why <name>` | `cg why` — commits, tasks, decisions behind a symbol |
-| `/changes` | `cg changes` — impact radius of the uncommitted edits |
-| `/review` | `cg review` — changed symbols vs the task's acceptance criteria |
-| `/tests [symbol]` | `cg test-impact` — the tests that exercise it |
-| `/check` | `cg check` — the gate: render, lint, evidence, tree |
-| `/guard` | `cg guard` — the uncommitted edits against the attached task's declared scope |
-| `/implemented` | `cg spec implemented` — mark the attached task coded, qualification pending |
-| `/done` | `cg spec done` — qualify the attached task: verify_cmd and graph checks must pass |
-| `/remember <text>` | `cg remember` — save a decision to project memory |
-| `/handoff` | `cg handoff` — record where you stopped on the attached task |
+| `/context <query>` | `hyperfide context` — symbols, snippets and edges in one call |
+| `/search <query>` | `hyperfide search` — find code by name across the graph |
+| `/impact <name>` | `hyperfide impact` — callers and callees |
+| `/why <name>` | `hyperfide why` — commits, tasks, decisions behind a symbol |
+| `/changes` | `hyperfide changes` — impact radius of the uncommitted edits |
+| `/review` | `hyperfide review` — changed symbols vs the task's acceptance criteria |
+| `/tests [symbol]` | `hyperfide test-impact` — the tests that exercise it |
+| `/check` | `hyperfide check` — the gate: render, lint, evidence, tree |
+| `/guard` | `hyperfide guard` — the uncommitted edits against the attached task's declared scope |
+| `/implemented` | `hyperfide spec implemented` — mark the attached task coded, qualification pending |
+| `/done` | `hyperfide spec done` — qualify the attached task: verify_cmd and graph checks must pass |
+| `/remember <text>` | `hyperfide remember` — save a decision to project memory |
+| `/handoff` | `hyperfide handoff` — record where you stopped on the attached task |
 | `/open <path>` | Open a file in the editor |
+| `/sessions` | List chats and switch between them |
+| `/cancel`, `/retry` | Stop the turn in flight (also Esc); send the last prompt again |
 | `/new`, `/help` | Fresh chat; the palette itself |
+
+Four documentation verbs also run when typed, although the palette does not list them: `/docs` (`hyperfide docs status`), `/docplan` (`hyperfide docs plan`), `/doccheck` (`hyperfide docs check`) and `/doctrace` (`hyperfide docs trace`).
 
 `/brief`, `/next`, `/review`, `/check` and `/task` are also one-click chips on the empty chat.
 
-**Every served tool is a slash command too.** The palette also lists every tool `cg` serves — the same table the MCP server exposes — generated from the tool list, so a Codify capability is reachable from the chat the day it ships. The argument hint and parsing come from each tool's input schema: one required text field takes the whole line (`/get_context auth flow`), otherwise `key=value` pairs are typed by the schema (`/spec_claim id=2.1 ttl=20`). Results render as cards. Where a built-in command and a tool share a name, the built-in wins.
+**Every served tool is a slash command too.** The palette also lists every tool `hyperfide` serves — the same table the MCP server exposes — generated from the tool list, so a Hyperfide capability is reachable from the chat the day it ships. The argument hint and parsing come from each tool's input schema: one required text field takes the whole line (`/get_context auth flow`), otherwise `key=value` pairs are typed by the schema (`/spec_claim id=2.1 ttl=20`). Results render as cards. Where a built-in command and a tool share a name, the built-in wins.
 
 **The fleet, from the chat.**
 
@@ -102,8 +108,8 @@ Approval requests and escalations also arrive on their own as actionable cards, 
 
 The board *drives* the same chat. **Start Agent Session on Task** (task node or palette) runs the whole pickup into the Agent view:
 
-1. In parallel mode the task is claimed first (`cg spec claim <id> --agent vscode-acp-<n>`), then started. A claim someone else holds is refused, not stolen.
-2. A resume packet is generated with `cg resume --task <id> --prompt` (degrading to the session brief on an older `cg`) and sent as the opening prompt.
+1. In parallel mode the task is claimed first (`hyperfide spec claim <id> --agent vscode-acp-<n>`), then started. A claim someone else holds is refused, not stolen.
+2. A resume packet is generated with `hyperfide resume --task <id> --prompt` (degrading to the session brief on an older `hyperfide`) and sent as the opening prompt.
 3. The view's header shows the task id, title, and live board status while the agent works it.
 
 If the view already has a chat going, you choose: replace it (with the usual handoff/release offer for an attached task) or **open beside** — an editor panel running a second concurrent session. When any session ends with its task not yet qualified, the extension offers to record a handoff or release the claim — the same discipline as the terminal path.
@@ -115,55 +121,55 @@ The rest of the lifecycle:
 | Command | What it does |
 |---|---|
 | Run Agent Headless on Task | Same claim + prompt, but runs `codex exec --sandbox workspace-write` (or `claude -p`) as a VS Code task; the exit is reported with the task's resulting status |
-| Hand Off Task | Records what is done, what is next, and what is blocked (`cg handoff`) so a fresh session can pick up cleanly |
-| Resume Task in Agent Session | Quick-picks an in-progress task and opens a new driver terminal seeded from `cg resume --prompt` — the fresh-session half of a handoff |
-| Run Wave with Agents | Opens a terminal running `cg spec run -n <codify.agent.parallelism> --driver <driver>` — the built-in orchestrator works the whole eligible frontier |
+| Hand Off Task | Records what is done, what is next, and what is blocked (`hyperfide handoff`) so a fresh session can pick up cleanly |
+| Resume Task in Agent Session | Quick-picks an in-progress task and opens a new driver terminal seeded from `hyperfide resume --prompt` — the fresh-session half of a handoff |
+| Run Wave with Agents | Opens a terminal running `<binary> spec run -n <codify.agent.parallelism> --driver <driver>`, where the binary is `codify.binaryPath` (default `cg`) — the built-in orchestrator works the whole eligible frontier |
 | Stop Agent Session | Closes the session's terminal (or terminates the headless task) |
 
-When a session's terminal closes — or a headless run exits — with the task not yet `done` or `implemented`, the extension offers to release the claim so the task returns to the frontier. Work done by agents outside the editor shows up without a manual refresh: pushed over `cg serve`, or, without it, through a 10-second poll while any tracked session exists. Tasks with a live claim show `$(person)` plus the agent name; `$(terminal)` marks tasks with a tracked terminal session and `$(comment-discussion)` marks tasks with a live agent panel in this window.
+When a session's terminal closes — or a headless run exits — with the task not yet `done` or `implemented`, the extension offers to release the claim so the task returns to the frontier. Work done by agents outside the editor shows up without a manual refresh: pushed over `hyperfide serve`, or, without it, through a 10-second poll while any tracked session exists. Tasks with a live claim show `$(person)` plus the agent name; `$(terminal)` marks tasks with a tracked terminal session and `$(comment-discussion)` marks tasks with a live agent panel in this window.
 
 ## How the board stays fresh
 
-**Live, with a current `cg`.** The extension keeps one `cg serve` child open for the whole window. Every `cg` call it makes goes down that one pipe, and every change in the repository — a task status, a claim, an agent's tool call, a merge, a stall, an approval — comes back up it as a pushed event. The task, memory, and fleet views patch themselves from those events, so the polls below are switched off while the connection is up; the headless test measures an event reaching the view model in under 300 ms. If the server goes away the extension reconnects with a backoff and takes one full refresh, because events pushed while the pipe was down are gone. Set `codify.serve` to `false`, or run a `cg` without `serve`, and the Codify output says so and everything below applies unchanged.
+**Live, with a current `hyperfide`.** The extension keeps one `hyperfide serve` child open for the whole window. Every `hyperfide` call it makes goes down that one pipe, and every change in the repository — a task status, a claim, an agent's tool call, a merge, a stall, an approval — comes back up it as a pushed event. The task, memory, and fleet views patch themselves from those events, so the polls below are switched off while the connection is up; `tests/integration/14_vscode.sh` asserts that a claim made by another process reaches the view model within 300 ms (a test bound, not a field measurement). If the server goes away the extension reconnects with a backoff and takes one full refresh, because events pushed while the pipe was down are gone. Set `codify.serve` to `false`, or run a binary without `serve`, and the `Codify` output channel says so and everything below applies unchanged.
 
-**The fallback.** Every refresh — a spec file changing, an agent's turn ending, a command finishing, a poll — goes through one scheduler. It runs a single short chain of `cg` calls at a time (`sync --max-age 3000 --background --wait 0`, `spec status`, `spec trace --no-sync`, `recall`, `guard`), debounces bursts into one run, keeps at least two seconds between runs unless a command asked for one, and queues at most one trailing run behind a chain in flight. The sync is a no-op when a whole-tree pass ran in the last three seconds; otherwise it is one low-priority pass that never waits on another process's pass. The extension does not watch `.codegraph/graph.db`, because its own sync writes it and a watcher there turned each refresh into the next. Claims and evidence written by agents outside the editor, which touch no spec file, arrive through the 10-second poll while a session is tracked and a 60-second poll while the window is focused; regaining focus refreshes once.
+**The fallback.** Every refresh — a spec file changing, an agent's turn ending, a command finishing, a poll — goes through one scheduler. It runs a single short chain of `hyperfide` calls at a time (`sync --max-age 3000 --background --wait 0`, `spec status`, `spec trace --no-sync`, `recall`, `guard`), debounces bursts into one run, keeps at least two seconds between runs unless a command asked for one, and queues at most one trailing run behind a chain in flight. The sync is a no-op when a whole-tree pass ran in the last three seconds; otherwise it is one low-priority pass that never waits on another process's pass. The extension does not watch `.codegraph/graph.db`, because its own sync writes it and a watcher there turned each refresh into the next. Claims and evidence written by agents outside the editor, which touch no spec file, arrive through the 10-second poll while a session is tracked and a 60-second poll while the window is focused; regaining focus refreshes once.
 
 ## Memory
 
-**Codify: Browse Project Memories** opens the memory browser: project memory as a place you can search rather than a list you scroll.
+**Hyperfide: Browse Project Memories** opens the memory browser: project memory as a place you can search rather than a list you scroll.
 
-The tree in the sidebar answers *what was decided lately*. The panel answers *what do we know about X* — full text across the memories, with filters for type, Jev class, task, branch and date, and a detail pane whose symbols and files are links back into the code. Filtering is client-side over one `cg recall`, so it is instant and does not re-query on every keystroke.
+The tree in the sidebar answers *what was decided lately*. The panel answers *what do we know about X* — full text across the memories, with filters for type, Jev class, task, branch and date, and a detail pane whose symbols and files are links back into the code. Filtering is client-side over one `hyperfide recall`, so it is instant and does not re-query on every keystroke; Enter in the search box asks `hyperfide recall` across every memory.
 
-From a memory: **supersede** it with a newer note, **forget** it, **classify** the store with Jev (`cg memory classify`), **promote** a memory classed `skill` into `.agents/skills/<slug>/SKILL.md`, and open that file. See [docs/jev.md](../../docs/jev.md#memory-classification-and-skills) for what the classes mean.
+From a memory: **supersede** it with a newer note, **forget** it, **classify** the store with Jev (`hyperfide memory classify`), **promote** a memory classed `skill` into `.agents/skills/<slug>/SKILL.md`, and open that file. See [docs/jev.md](../../docs/jev.md#memory-classification-and-skills) for what the classes mean.
 
-The panel is a CSP-strict, nonce-only webview with no remote anything, and owns no timer and no watcher: it loads when it opens, after an action it ran itself, and from the same refresh chain as everything else. Against an older `cg` that does not know `memory classify` or `skills`, it says so plainly instead of failing silently.
+The panel is a CSP-strict, nonce-only webview with no remote anything, and owns no timer and no watcher: it loads when it opens, after an action it ran itself, and from the same refresh chain as everything else. Against an older binary that does not know `memory classify` or `skills`, it says so plainly instead of failing silently.
 
 ## Fleet
 
 ### Start the fleet
 
-A feature's `spec.kvx` carries two CodeLenses on its `[meta]` line: **Start fleet** and **Fleet plan**. The same Start is on the Fleet view's title bar and in the palette (**Codify: Start the Fleet**). Before anything runs you see the plan, as a markdown document beside the editor, built from cg's own answers:
+A feature's `spec.kvx` carries two CodeLenses on its `[meta]` line: **Start fleet** and **Fleet plan**. The same Start is on the Fleet view's title bar and in the palette (**Hyperfide: Start the Fleet**). Before anything runs you see the plan, as a markdown document beside the editor, built from the CLI's own answers:
 
-- the roles and what each may do and spend (`cg fleet roles`): driver, model, concurrency, wall-clock, spend, retries, stall window, approval gates;
-- the agents and branches a dry run would spawn (`cg spec run --fleet --dry-run`);
-- the tasks predicted to collide, which will run one after the other (`cg drift collisions`);
-- anything already running (`cg fleet runs`).
+- the roles and what each may do and spend (`hyperfide fleet roles`): driver, model, concurrency, wall-clock, spend, retries, stall window, approval gates;
+- the agents and branches a dry run would spawn (`hyperfide spec run --fleet --dry-run`);
+- the tasks predicted to collide, which will run one after the other (`hyperfide drift collisions`);
+- anything already running (`hyperfide fleet runs`).
 
-Confirm, pick the number of worker slots, and the extension runs `cg fleet up`: a detached supervisor spawns the manager and workers and keeps them going until every task is qualified and merged. **Stop** (now, or drain — let live agents finish first), **Pause**, and **Resume** are on the view. The whole contract is in [docs/hierarchy.md](../../docs/hierarchy.md#running-the-tree-cg-fleet-up).
+Confirm, pick the number of worker slots, and the extension runs `hyperfide fleet up`: a detached supervisor spawns the manager and workers and keeps them going until every task is qualified and merged. **Stop** (now, or drain — let live agents finish first), **Pause**, and **Resume** are on the view. The whole contract is in [docs/hierarchy.md](../../docs/hierarchy.md#running-the-tree-cg-fleet-up).
 
 ### The live tree
 
-The **Fleet** view draws the agent hierarchy live: Main Gideon on the main branch, a feature manager on `feature/<name>`, and workers on their wave or task branches, each with its branch, worktree, current attempt, heartbeat age, and whether its branch is already merged into its base. Folded onto each agent from the event stream: its current step and last output line, its tokens and cost, and badges when the supervisor nudged it, restarted it, retried the task, or escalated it. Pending approvals appear as rows — **Codify: Decide a Fleet Approval** approves or rejects one, with an optional note — and clicking an agent opens its transcript (the driver's log under `.codegraph/agents/`).
+The **Fleet** view draws the agent hierarchy live: Main Gideon on the main branch, a manager per wave on `wave/<feature>/<n>` and a worker per task on `task/<feature>/<id>` (a workflow whose branch templates name neither `{wave}` nor `{task}` keeps the older shape: one feature manager on `feature/<name>`, wave workers on `wave/<feature>/<n>`), each with its branch, worktree, current attempt, heartbeat age, and whether its branch is already merged into its base. Folded onto each agent from the event stream: its current step and last output line, its tokens and cost, and badges when the supervisor nudged it, restarted it, retried the task, or escalated it. Pending approvals appear as rows — **Hyperfide: Decide a Fleet Approval** approves or rejects one, with an optional note — and clicking an agent opens its transcript (the driver's log under `.codegraph/agents/`).
 
-`cg` knows all of that across three commands — the agent registry, the live claims, and the branch registry — and the view joins them into one tree. Actions on a node: begin a task in the fleet, merge a wave branch up, land the feature, open its pull request, checkpoint the open ones, refresh, and open an agent's worktree in a window.
+`hyperfide fleet tree` reports the hierarchy directly; what it does not cover — waves nobody has started, the tasks in each, and whether a branch is already in its base — is joined from `hyperfide fleet status` (the agent registry), `hyperfide spec status` (the live claims), `hyperfide fleet plan` and `hyperfide branches` (the branch registry). Agent sessions the host started on its own (not planned fleet roles) appear under a separate **Sessions** root, and the projection's findings under a **Projection** root. Actions on a node: begin a task in the fleet, merge a wave branch up, land the feature, open its pull request, checkpoint the open ones, refresh, and open an agent's worktree in a window.
 
-Two refusals are deliberate. A refresh never runs `cg fleet pr`, because that command *opens* a pull request — open PRs are shown from what an explicit action reported, never discovered by polling. And merge state is only what the registry can prove: equal heads mean the base already contains the branch, and the view never invents a commit count it was not given. Every call goes through the one refresh scheduler and is raced against a timeout, so the view cannot sit on a spinner.
+Two refusals are deliberate. A refresh never runs `hyperfide fleet pr`, because that command *opens* a pull request — open PRs are shown from what an explicit action reported, never discovered by polling. And merge state is only what the registry can prove: equal heads mean the base already contains the branch, and the view never invents a commit count it was not given. Every call goes through the one refresh scheduler and is raced against a timeout, so the view cannot sit on a spinner.
 
-The same thing from the terminal is `cg fleet tree`, `cg fleet status`, and `cg fleet plan`; see [docs/hierarchy.md](../../docs/hierarchy.md).
+The same thing from the terminal is `hyperfide fleet tree`, `hyperfide fleet status`, and `hyperfide fleet plan`; see [docs/hierarchy.md](../../docs/hierarchy.md).
 
 ## The rest of the workflow
 
-Click the status bar item, or run **Codify: Actions…**, for one menu covering the whole loop:
+Click the status bar item, or run **Hyperfide: Actions…**, for one menu covering the whole loop:
 
 | Command | What it does |
 |---|---|
@@ -172,10 +178,12 @@ Click the status bar item, or run **Codify: Actions…**, for one menu covering 
 | Tests Touching This Change | Which tests exercise the symbol under the cursor, or everything you have changed |
 | Why Does This Exist? | Provenance for the symbol under the cursor: commits, the tasks they implemented, the decisions behind them |
 | Check the Repository | The full gate — render staleness, spec lint, task evidence, claim consistency |
-| Check Edit Scope | What `cg guard` sees right now |
+| Check Edit Scope | What `hyperfide guard` sees right now |
 | New Feature Spec / Add Task | Create a plan without leaving the editor |
 | Lint Spec | Requires cycles, unknown ids, missing criteria, dead globs |
-| Snapshot the Working Tree | `cg commit`, auto-tagged with the in-progress task |
+| Documentation Plan / Check Documentation / Trace Documentation | `hyperfide docs plan`, `docs check`, `docs trace` for the active feature; plan and trace open as reports |
+| Sync the Index | `hyperfide sync` |
+| Snapshot the Working Tree | `hyperfide commit`, auto-tagged with the in-progress task |
 | Install Hooks | Wire the agent and git hooks so the graph stays fresh on its own |
 
 Reports open as rendered markdown previews rather than console dumps.
@@ -193,10 +201,11 @@ Beyond syntax highlighting:
 
 ## Requirements
 
-- `cg` on `PATH`, or set `codify.binaryPath`.
+- `hyperfide` on `PATH`, or set `hyperfide.binaryPath`. The language server, `hyperfide serve` and every board call use `hyperfide.binaryPath`; an explicitly set `codify.binaryPath` is still honoured when `hyperfide.binaryPath` is not set, and two conflicting explicit values are refused.
+- `cg` on `PATH` as well, or `codify.binaryPath` set, for the MCP server injected into agent sessions and for Run Wave with Agents: those two read only `codify.binaryPath`, whose default is `cg`.
 - `npx` for the default Codex ACP launcher, or set `codify.acp.codexCommand` to an installed ACP adapter.
 - For the task board: a workspace containing `spec/workflow.kvx`.
-- For code navigation: a workspace with `.codegraph/` — run `cg init`.
+- For code navigation: a workspace with `.codegraph/` — run `hyperfide init`.
 
 Neither is required for the other. kvx highlighting works everywhere.
 
@@ -204,11 +213,12 @@ Neither is required for the other. kvx highlighting works everywhere.
 
 | Setting | Default | Description |
 |---|---|---|
-| `codify.binaryPath` | `cg` | Path to the cg binary |
-| `codify.serve` | `true` | Keep one `cg serve` connection open for every call and live events (no polling). Off, or with an older cg, the extension shells out and polls |
+| `hyperfide.binaryPath` | `hyperfide` | Canonical executable for the language server, `serve` and board calls. A conflicting explicit `codify.binaryPath` is refused |
+| `codify.binaryPath` | `cg` | Legacy path, honoured for board calls when `hyperfide.binaryPath` is unset; the injected MCP server and Run Wave with Agents use only this setting |
+| `codify.serve` | `true` | Keep one `hyperfide serve` connection open for every call and live events (no polling). Off, or with a binary without `serve`, the extension shells out and polls |
 | `codify.acp.diffStyle` | `unified` | How a file edit opens in the agent chat: one unified column, or old and new side by side. Each diff can still be flipped in place |
 | `codify.feature` | *(empty)* | Feature override, passed to every spec command as `-f` |
-| `codify.languageServer` | `true` | Run `cg lsp` for navigation, hover, code lens and diagnostics |
+| `codify.languageServer` | `true` | Run `hyperfide lsp` for navigation, hover, code lens and diagnostics |
 | `codify.agentName` | *(empty)* | Default name used when claiming a task in parallel mode |
 | `codify.agent.driver` | `codex` | Which provider drives sessions: `codex`, `claude`, or `custom` (the Agent view's picker sets it for the next chat) |
 | `codify.agent.interface` | `panel` | How a session opens: the ACP agent panel or a seeded terminal |
@@ -219,7 +229,7 @@ Neither is required for the other. kvx highlighting works everywhere.
 | `codify.agent.claudePath` | `claude` | Path to the Claude Code CLI |
 | `codify.agent.codexArgs` | *(empty)* | Extra arguments passed to codex when starting a session |
 | `codify.agent.claudeArgs` | *(empty)* | Extra arguments passed to claude when starting a session |
-| `codify.agent.parallelism` | `2` | Agent slots used by Run Wave with Agents (`cg spec run -n`) |
+| `codify.agent.parallelism` | `2` | Agent slots used by Run Wave with Agents (`hyperfide spec run -n`) |
 
 ## Install
 
@@ -234,10 +244,10 @@ code --install-extension codify-workflow-2.0.0-dev.vsix --force
 The Marketplace identity is `SidioraLabs.codify-workflow`. In a Remote SSH,
 WSL, or container window, install the VSIX on the **remote** extension host,
 not only the local UI side. The Agent header shows the running version (for
-example `v1.6.0`), so a stale host is immediately visible after reload.
+example `v2.0.0-dev`), so a stale host is immediately visible after reload.
 
 For development, open `editors/vscode/` in VS Code and press F5.
 
 ## Note on other kvx extensions
 
-If another extension also claims the `.kvx` extension (for example a grammar for a different kvx dialect), VS Code lets the last-installed one win. This grammar targets the Ion spec dialect that Codify parses: `[section]` headers, `key = "value"`, lists, and quote-toggled comments.
+If another extension also claims the `.kvx` extension (for example a grammar for a different kvx dialect), VS Code lets the last-installed one win. This grammar targets the Ion spec dialect that Hyperfide parses: `[section]` headers, `key = "value"`, lists, and quote-toggled comments.
