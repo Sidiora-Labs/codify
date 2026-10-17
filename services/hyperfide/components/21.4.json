@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "21.4",
+  "task": "21.4",
+  "roles": [
+    "control"
+  ],
+  "module": "decisions/audit.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "decision.audit.describe",
+    "decision.audit.record",
+    "decision.audit.inspect",
+    "decision.audit.outcome",
+    "decision.audit.capture"
+  ],
+  "requires": [
+    "4.2",
+    "20.4"
+  ]
+}

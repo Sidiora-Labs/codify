@@ -1,17 +1,21 @@
-# Codify — agent-native code graph + version control, pure C11.
+# Hyperfide — agent-native code graph + version control, pure C11.
 # Targets: all (default), test, unit, integration, install, uninstall, clean
 
 CC       ?= cc
 CFLAGS   ?= -O2
 CFLAGS   += -std=gnu11 -Wall -Wextra -pthread
 CFLAGS   += -Ivendor/tree-sitter/lib/include -Ivendor/tree-sitter/lib/src
-LDLIBS    = -lsqlite3 -lpthread -lm
+LDLIBS    = -lsqlite3 -lpthread -lm -lcurl -lcrypto
 PREFIX   ?= /usr/local
 BUILD     = build
 
-BIN       = cg
-SRCS      = $(wildcard src/*.c)
-SRC_HEADERS = $(wildcard src/*.h)
+BIN       = hyperfide
+COMPAT_BIN = cg
+NATIVE_SRCS = $(shell python3 scripts/hyperfide-native-components.py --sources)
+NATIVE_HEADERS = $(shell python3 scripts/hyperfide-native-components.py --headers)
+NATIVE_LIBRARIES = $(shell python3 scripts/hyperfide-native-components.py --libraries)
+SRCS      = $(sort $(wildcard src/*.c) $(NATIVE_SRCS))
+SRC_HEADERS = $(wildcard src/*.h) $(NATIVE_HEADERS)
 OBJS      = $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS))
 TS_RUNTIME = $(BUILD)/vendor/tree-sitter-lib.o
 # Family-owned grammar directories are discovered without a shared manifest
@@ -24,12 +28,16 @@ LIB       = $(BUILD)/libcg.a          # everything except main.o, for tests
 UNIT_SRCS = $(wildcard tests/unit/test_*.c)
 UNIT_BINS = $(patsubst tests/unit/%.c,$(BUILD)/%,$(UNIT_SRCS))
 
-all: $(BIN)
+all: $(BIN) $(COMPAT_BIN)
 
-$(BIN): $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LDLIBS)
+$(BIN): $(OBJS) Makefile
+	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--disable-new-dtags,-rpath,'$$ORIGIN/../lib/hyperfide' -o $@ $(OBJS) $(LDLIBS) $(NATIVE_LIBRARIES)
+
+$(COMPAT_BIN): $(BIN)
+	cp $(BIN) $(COMPAT_BIN)
 
 $(BUILD)/%.o: src/%.c $(SRC_HEADERS) | $(BUILD)
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD)/vendor/tree-sitter-lib.o: vendor/tree-sitter/lib/src/lib.c | $(BUILD)
@@ -48,7 +56,7 @@ $(LIB): $(filter-out $(BUILD)/main.o,$(OBJS))
 	ar rcs $@ $^
 
 $(BUILD)/test_%: tests/unit/test_%.c $(LIB)
-	$(CC) $(CFLAGS) -Isrc -o $@ $< $(filter-out $(BUILD)/main.o,$(OBJS)) $(LDLIBS)
+	$(CC) $(CFLAGS) -Isrc -o $@ $< $(filter-out $(BUILD)/main.o,$(OBJS)) $(LDLIBS) $(NATIVE_LIBRARIES)
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -61,14 +69,14 @@ integration: $(BIN)
 
 test: unit integration
 
-install: $(BIN)
+install: $(BIN) $(COMPAT_BIN)
 	install -m 755 $(BIN) $(PREFIX)/bin/$(BIN)
 
 uninstall:
-	rm -f $(PREFIX)/bin/$(BIN)
+	rm -f $(DESTDIR)$(PREFIX)/bin/$(BIN) $(DESTDIR)$(PREFIX)/bin/$(COMPAT_BIN)
 
 clean:
-	rm -rf $(BUILD) $(BIN)
+	rm -rf $(BUILD) $(BIN) $(COMPAT_BIN)
 
 .PHONY: all unit integration test install uninstall clean release
 
@@ -94,5 +102,5 @@ hyperfide-native:
 	@mkdir -p $(BUILD)
 	@rm -f $(BUILD)/hyperfide-native $(BUILD)/hyperfide-native.tmp
 	python3 scripts/hyperfide-native-components.py --generate $(BUILD)/hyperfide-native-registry.inc
-	$(CC) $(CFLAGS) -Isrc/hyperfide -I$(BUILD) -o $(BUILD)/hyperfide-native.tmp src/hyperfide/component_main.c src/sha256.c $$(python3 scripts/hyperfide-native-components.py --sources) $(LDLIBS) $$(python3 scripts/hyperfide-native-components.py --libraries)
+	$(CC) $(CFLAGS) -Isrc/hyperfide -I$(BUILD) $(LDFLAGS) -Wl,--disable-new-dtags,-rpath,'$$ORIGIN/../lib/hyperfide' -o $(BUILD)/hyperfide-native.tmp src/hyperfide/component_main.c src/sha256.c $$(python3 scripts/hyperfide-native-components.py --sources) $(LDLIBS) $$(python3 scripts/hyperfide-native-components.py --libraries)
 	mv $(BUILD)/hyperfide-native.tmp $(BUILD)/hyperfide-native

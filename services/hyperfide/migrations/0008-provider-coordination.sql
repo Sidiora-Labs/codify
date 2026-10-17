@@ -276,6 +276,7 @@ CREATE TABLE hyperfide.runtime_environment_observations (
  readiness_digest hyperfide.digest NOT NULL,
  source_digest hyperfide.digest NOT NULL,
  source_manifest_digest hyperfide.digest NOT NULL,
+ source_manifest_artifact_digest hyperfide.digest NOT NULL,
  source_state_digest hyperfide.digest NOT NULL,
  readiness_input jsonb NOT NULL CHECK(jsonb_typeof(readiness_input)='object' AND octet_length(readiness_input::text)<=1048576),
  readiness_input_digest hyperfide.digest NOT NULL,
@@ -302,6 +303,7 @@ CREATE TABLE hyperfide.runtime_environment_observations (
  CHECK(expires_at>observed_at),
  CHECK(state<>'READY' OR failure_code IS NULL),
  CHECK(source_digest=source_manifest_digest),
+ CHECK(source_manifest_digest=source_manifest_artifact_digest),
  PRIMARY KEY(organisation_id,run_id,id),
  FOREIGN KEY(organisation_id,run_id) REFERENCES hyperfide.runs(organisation_id,id),
  FOREIGN KEY(organisation_id,sandbox_id,boot_generation) REFERENCES hyperfide.sandbox_boots(organisation_id,sandbox_id,boot_generation),
@@ -313,6 +315,7 @@ CREATE TABLE hyperfide.runtime_environment_observations (
  FOREIGN KEY(organisation_id,run_id,execution_receipt_artifact_digest) REFERENCES hyperfide.artifacts(organisation_id,run_id,digest),
  FOREIGN KEY(organisation_id,run_id,verification_receipt_artifact_digest) REFERENCES hyperfide.artifacts(organisation_id,run_id,digest),
  FOREIGN KEY(organisation_id,run_id,stdout_artifact_digest) REFERENCES hyperfide.artifacts(organisation_id,run_id,digest),
+ FOREIGN KEY(organisation_id,run_id,source_manifest_artifact_digest) REFERENCES hyperfide.artifacts(organisation_id,run_id,digest),
  FOREIGN KEY(organisation_id,run_id,manifest_artifact_digest) REFERENCES hyperfide.artifacts(organisation_id,run_id,digest)
 );
 CREATE INDEX runtime_environment_latest ON hyperfide.runtime_environment_observations(organisation_id,run_id,sandbox_id,boot_generation,slot_id,observed_at DESC,created_at DESC);
@@ -388,6 +391,7 @@ CREATE TABLE hyperfide.provider_profile_lineage (
  UNIQUE(organisation_id,pool_id,configuration_digest,derived_profile_id,derived_preparation_digest),
  CHECK(parent_profile_id<>derived_profile_id AND parent_preparation_digest<>derived_preparation_digest),
  CHECK(expires_at>observed_at),
+ CHECK(source_manifest_digest=source_manifest_artifact_digest),
  FOREIGN KEY(organisation_id,pool_id,configuration_digest) REFERENCES hyperfide.provider_pool_configurations(organisation_id,pool_id,configuration_digest),
  FOREIGN KEY(organisation_id,parent_profile_id) REFERENCES hyperfide.environment_profiles(organisation_id,id),
  FOREIGN KEY(organisation_id,derived_profile_id) REFERENCES hyperfide.environment_profiles(organisation_id,id),

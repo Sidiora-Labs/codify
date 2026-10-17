@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "20.2",
+  "task": "20.2",
+  "roles": [
+    "control"
+  ],
+  "module": "decisions/results.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "decision.result.validate",
+    "decision.result.evaluate"
+  ],
+  "requires": [
+    "20.1"
+  ]
+}

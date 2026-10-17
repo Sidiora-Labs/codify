@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "variant": "task:21.1",
+  "task": "21.1",
+  "scope": "task-component",
+  "cases": [
+    "V-045",
+    "V-024"
+  ],
+  "assertion_ids": [
+    "critique.service-linked",
+    "critique.source-linked",
+    "critique.mandatory-contract",
+    "critique.missing-clause",
+    "critique.duplicate-clause",
+    "critique.valid-proposal",
+    "critique.outside-source",
+    "critique.authority-injection",
+    "critique.validation-nonaccepting",
+    "critique.validation-authority-forgery",
+    "critique.validation-dispatch-forgery",
+    "critique.validation-full-impact-digest",
+    "critique.validation-bounded-impact",
+    "critique.source-immutable"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/21_1.py"
+  ],
+  "timeout_seconds": 240,
+  "required_env": [],
+  "fixtures": [
+    "services/hyperfide/dist/decisions/audit.js"
+  ],
+  "resources": [],
+  "required_artifacts": [],
+  "source_files": [
+    "services/hyperfide/package.json",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/tsconfig.json",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/cases/tasks/4_1.py",
+    "tests/hyperfide/cases/tasks/21_4.py",
+    "tests/hyperfide/cases/tasks/21_1.py",
+    "tests/hyperfide/registrations/21.1.json"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "actions": []
+}

@@ -1,5 +1,5 @@
 /*
- * Codify — agent-native code graph + content-addressed version control.
+ * Hyperfide — agent-native code graph + content-addressed version control.
  * Single shared header. C11, POSIX. Linux-first (inotify); watcher has a
  * platform layer with stubs for FSEvents / ReadDirectoryChangesW.
  */
@@ -21,7 +21,11 @@
 #define CG_OBJECTS  ".codegraph/objects"
 #define CG_HEAD     ".codegraph/HEAD"
 #define CG_IGNORE   ".cgignore"
-#define CG_VERSION  "1.6.0"
+#ifndef HYPERFIDE_VERSION
+#define HYPERFIDE_VERSION "2.0.0-dev"
+#endif
+#define CG_VERSION HYPERFIDE_VERSION
+#define HYPERFIDE_PRODUCT "Hyperfide"
 #define CG_MCP_VERSION "2025-11-25"
 #define CG_AGENT_CONTEXT ".codify/agent-context.md"
 #define CG_DOC_TASK "@docs"
@@ -271,7 +275,9 @@ int  cg_schema_upgrade(Cg *cg);
  * cg->root for the tree being worked on, cg->shared where a caller reads the
  * main tree's spec. Loaded once per tree per process; a missing file or key
  * is the built-in default. Paths are root-relative and normalized. */
-#define CG_CONFIG_FILE "codify.kvx"
+#define CG_CONFIG_FILE "hyperfide.kvx"
+#define CG_LEGACY_CONFIG_FILE "codify.kvx"
+int hyperfide_environment_aliases(void);
 enum { CFG_SYNC_AUTO, CFG_PATH_SPEC, CFG_PATH_CONTEXT, CFG_PATH_SKILLS,
        CFG_PATH_CODEMAP, CFG_INDEX_WORKERS,
        /* codify-v15 3.1 */

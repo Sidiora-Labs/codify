@@ -1,0 +1,27 @@
+[Unit]
+Description=Hyperfide control authority
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+User=hyperfide
+Group=hyperfide
+WorkingDirectory=/opt/hyperfide/current
+EnvironmentFile=/etc/hyperfide/control.env
+ExecStart=/opt/hyperfide/current/runtime/node /opt/hyperfide/current/services/dist/control.js --mode https --host ${HYPERFIDE_LISTEN_HOST} --port ${HYPERFIDE_LISTEN_PORT} --tls-cert /etc/hyperfide/control.crt --tls-key /etc/hyperfide/control.key --policy /etc/hyperfide/control-policy.json --spec-revision ${HYPERFIDE_SPEC_REVISION}
+Restart=on-failure
+RestartSec=3
+KillMode=control-group
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/hyperfide
+Environment=HYPERFIDE_SUPERVISOR_PYTHON=/opt/hyperfide/current/runtime/python/bin/python3
+Environment=HYPERFIDE_RELEASE_PYTHON=/opt/hyperfide/current/runtime/python/bin/python3
+Environment=HYPERFIDE_RELEASE_QUALIFIED_PROOF_ROOT=/opt/hyperfide/current/services/proof
+Environment=LD_LIBRARY_PATH=/opt/hyperfide/current/lib/hyperfide
+UMask=0077
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "21.3",
+  "task": "21.3",
+  "roles": [
+    "control"
+  ],
+  "module": "decisions/ranking.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "decision.ranking.describe",
+    "decision.ranking.packet",
+    "decision.ranking.recommend"
+  ],
+  "requires": [
+    "4.2",
+    "5.4",
+    "21.4",
+    "20.4",
+    "finding-registry"
+  ]
+}

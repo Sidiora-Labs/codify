@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "variant": "task:21.3",
+  "task": "21.3",
+  "scope": "task-component",
+  "cases": [
+    "V-045"
+  ],
+  "assertion_ids": [
+    "ranking.service-linked",
+    "ranking.eligible-order",
+    "ranking.reject-ineligible",
+    "ranking.reject-missing-choice",
+    "ranking.mandatory-preserved",
+    "ranking.all-reviewers-preserved",
+    "ranking.original-findings-preserved",
+    "ranking.unknown-finding",
+    "ranking.incomplete-intent",
+    "ranking.shortlist-bound",
+    "ranking.typed-noul",
+    "ranking.finding-snapshot-flat-contract",
+    "ranking.finding-snapshot-scope-and-digest",
+    "ranking.finding-observation-identities",
+    "ranking.finding-shortlist-bound",
+    "ranking.finding-unavailable-explicit",
+    "ranking.deterministic-fallback"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/21_3.py"
+  ],
+  "timeout_seconds": 240,
+  "required_env": [],
+  "fixtures": [
+    "services/hyperfide/dist/decisions/audit.js"
+  ],
+  "resources": [],
+  "required_artifacts": [],
+  "source_files": [
+    "services/hyperfide/package.json",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/tsconfig.json",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/cases/tasks/4_1.py",
+    "tests/hyperfide/cases/tasks/21_4.py",
+    "tests/hyperfide/cases/tasks/21_3.py",
+    "tests/hyperfide/registrations/21.3.json"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "actions": []
+}

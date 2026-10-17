@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "8.3-accounting",
+  "task": "8.3",
+  "roles": [
+    "control"
+  ],
+  "module": "providers/reconcile.js",
+  "entry": "createAccountingComponent",
+  "api_version": 1,
+  "actions": [
+    "provider.accounting.describe"
+  ],
+  "requires": [
+    "8.3",
+    "5.4"
+  ]
+}

@@ -153,7 +153,7 @@ export class ComponentRegistry {
             names.some(name => typeof (value.actions as Record<string, unknown>)[name] !== 'function'))
           throw new Error('Factory actions differ from declared operations');
         if(value.capabilities!==undefined&&(!object(value.capabilities)||
-            Object.keys(value.capabilities).some(name=>!/^[A-Za-z][A-Za-z0-9._\/-]{0,127}$/.test(name))))throw new Error('Invalid component capabilities');
+            Object.keys(value.capabilities).some(name=>!actionName.test(name))))throw new Error('Invalid component capabilities');
         const capabilities=Object.freeze({...value.capabilities as Record<string,unknown>|undefined});
         const actions = Object.freeze({ ...value.actions }) as Record<string, Action>;
         this.instances.set(id, Object.freeze({ apiVersion: 1, actions,capabilities }));

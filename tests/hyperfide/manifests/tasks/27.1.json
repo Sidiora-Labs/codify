@@ -3,7 +3,7 @@
     "allowed_actions": [],
     "approved": true
   },
-  "campaign_id": "hyperfide-harness-required-artifact-history-v2",
+  "campaign_id": "hyperfide-harness-portable-proof-v1-child-runtime",
   "case_ids": [
     "V-056"
   ],
@@ -60,7 +60,22 @@
     "harness.artifact.required-per-receipt",
     "harness.artifact.old-snapshot-tamper",
     "harness.artifact.logical-alias-forgery",
-    "harness.cleanup.immutable-absence-reference"
+    "harness.cleanup.immutable-absence-reference",
+    "harness.proof.component-inspection-is-not-authority",
+    "harness.proof.component-cannot-satisfy-full",
+    "harness.proof.exact-anchor-and-source",
+    "harness.proof.case-and-closed-policy-binding",
+    "harness.proof.path-escape-and-symlink",
+    "harness.proof.duplicate-and-unknown-request-keys",
+    "harness.proof.real-canonical-artifact-tamper",
+    "harness.proof.portable-real-source-and-executable-checks",
+    "harness.proof.portable-rejects-missing-map-and-changed-tool",
+    "harness.proof.portable-rejects-wrong-commit-and-escape",
+    "harness.proof.postcheck-bytes-are-rechecked",
+    "harness.proof.git-filter-no-execution",
+    "harness.proof.external-campaign-closed-environment",
+    "harness.proof.private-staging-lock",
+    "harness.proof.immutable-child-runtime-assets"
   ],
   "inputs": [
     {
@@ -70,13 +85,13 @@
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
-      "sha256": "ee8df7d7218bcfbe0229a96bd2c039fe74516bb51a7093fc85e3f1724ef019f9",
-      "size": 28641
+      "sha256": "cc8de56fb25bea153490b4143a231f1ff6f4dac758baaea4bf90fb7d9ba236a0",
+      "size": 30633
     },
     {
       "path": "tests/hyperfide/selftest_harness.py",
-      "sha256": "e9d87abe2420dde60da99a64860712885acda617440fde227ec26cde47d430d8",
-      "size": 31610
+      "sha256": "62e964148c0d8e9cfc6450bc96f3c4ff5e663668507fb0e238a0c2d963c4b840",
+      "size": 34865
     },
     {
       "path": "tests/hyperfide/cases/tasks/27_1.py",
@@ -92,6 +107,21 @@
       "path": "tests/hyperfide/test_required_artifact_receipts.py",
       "sha256": "8a2bc11c8262a64a20604d3c74372067cc98cb40f38747d901bf63d5b4eb54cc",
       "size": 6123
+    },
+    {
+      "path": "tests/hyperfide/inspect-proof.py",
+      "sha256": "c23e6e4c23379d138d8b59268035ebaa7d7c4825002a30d0b5ca0bc3f519346d",
+      "size": 12271
+    },
+    {
+      "path": "tests/hyperfide/proof_relocation.py",
+      "sha256": "dc5d5e1c96bcd792a69460bbe3f4d6045c467e7b347a835117a6a6ec9513a97c",
+      "size": 10796
+    },
+    {
+      "path": "tests/hyperfide/test_inspect_proof.py",
+      "sha256": "d919fc37821cf8917d55acab003a04d0e461ec7f9b91e82085a41809b1b6c511",
+      "size": 16297
     }
   ],
   "policy": {

@@ -67,7 +67,18 @@ const REFRESH_FRESH_MS = 3000;
 const IDLE_POLL_MS = 60000;
 
 function config() { return vscode.workspace.getConfiguration('codify'); }
-function binary() { return config().get('binaryPath') || 'cg'; }
+function binary() {
+    const modern = vscode.workspace.getConfiguration('hyperfide');
+    const explicit = (cfg) => {
+        const item = cfg.inspect('binaryPath');
+        return item && [item.workspaceFolderValue,item.workspaceValue,item.globalValue]
+            .find((value) => value !== undefined);
+    };
+    const canonical = explicit(modern), legacy = explicit(config());
+    if (canonical !== undefined && legacy !== undefined && canonical !== legacy)
+        throw new Error('Hyperfide: conflicting hyperfide.binaryPath / codify.binaryPath settings');
+    return canonical !== undefined ? canonical : legacy !== undefined ? legacy : 'hyperfide';
+}
 
 function workspaceRoot() {
     const f = vscode.workspace.workspaceFolders;

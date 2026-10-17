@@ -9,12 +9,12 @@
   "entry": "createComponent",
   "api_version": 1,
   "actions": [
-    "provider.placement.probe",
     "provider.placement.record-failure",
     "provider.relocation.plan",
     "provider.relocation.confirm-enrollment"
   ],
   "requires": [
-    "8.2"
+    "8.2",
+    "14.1"
   ]
 }

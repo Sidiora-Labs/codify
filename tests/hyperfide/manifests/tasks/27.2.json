@@ -1,0 +1,151 @@
+{
+  "approval": {
+    "allowed_actions": [],
+    "approved": true
+  },
+  "campaign_id": "hyperfide-driver-component-27-2-v3-journal-v1",
+  "case_ids": [
+    "V-024",
+    "V-047",
+    "V-048",
+    "V-049"
+  ],
+  "expected_assertion_ids": [
+    "campaign.deterministic.exact1500-reference",
+    "campaign.deterministic.200-simultaneous",
+    "campaign.deterministic.72-virtual-hours",
+    "campaign.deterministic.complete-inventory",
+    "campaign.deterministic.reject-conflicting-owner",
+    "campaign.deterministic.detect-false-acceptance",
+    "campaign.deterministic.stale-generation-fenced",
+    "campaign.deterministic.slot-limit",
+    "campaign.deterministic.replica-cannot-grant",
+    "campaign.deterministic.unknown-create-reservation",
+    "campaign.deterministic.duplicate-provider-object",
+    "campaign.deterministic.destroying-is-not-clean",
+    "campaign.deterministic.duplicate-effects",
+    "campaign.deterministic.git-cas-lost-ack",
+    "campaign.deterministic.worker-push-rejected",
+    "campaign.deterministic.restore-fences-old-proof",
+    "campaign.deterministic.submission-retains-custody",
+    "campaign.deterministic.qualification-custody-fenced",
+    "campaign.deterministic.custody-expiry-releases-task",
+    "campaign.deterministic.restore-rejects-old-effects",
+    "campaign.deterministic.restore-resets-epoch-generations",
+    "campaign.deterministic.restore-preserves-effect-idempotency",
+    "campaign.deterministic.fresh-uuid-is-not-authority",
+    "campaign.deterministic.activation-predecessor-cas",
+    "campaign.deterministic.actual-activation-request-digest",
+    "campaign.deterministic.fenced-writer-is-identity-not-boolean",
+    "campaign.deterministic.superseded-uuid-cannot-return",
+    "campaign.deterministic.reordered-observations",
+    "campaign.deterministic.unknown-event",
+    "campaign.deterministic.duplicate-json-rejected",
+    "campaign.deterministic.nonfinite-json-rejected",
+    "campaign.deterministic.seeded-schedule",
+    "campaign.deterministic.schedule-workload-count",
+    "campaign.deterministic.baseline-descriptive",
+    "campaign.deterministic.incomparable-baseline",
+    "campaign.deterministic.histogram-bound-semantics",
+    "campaign.deterministic.quantile-semantics-not-interchangeable",
+    "campaign.deterministic.metric-dimensions-preserved",
+    "campaign.deterministic.nonfinite-measurement-rejected",
+    "campaign.deterministic.quantile-order-preserved",
+    "campaign.deterministic.corpus-pin",
+    "campaign.deterministic.corpus-tamper",
+    "campaign.deterministic.actual-command-boundary",
+    "campaign.deterministic.command-failure",
+    "campaign.deterministic.wrong-request-binding",
+    "campaign.deterministic.missing-auth-blocks",
+    "campaign.deterministic.timeout-is-unknown",
+    "campaign.deterministic.unknown-intent-retained",
+    "campaign.deterministic.normal-exit-detached-child",
+    "campaign.deterministic.timeout-detached-child",
+    "campaign.deterministic.interrupted-detached-child",
+    "campaign.deterministic.constructor-interruption-is-unknown",
+    "campaign.deterministic.definite-preexec-failure",
+    "campaign.deterministic.unpinned-executable",
+    "campaign.deterministic.pinned-source-manifest",
+    "campaign.authority.actual-campaign-refuses-legacy-contract",
+    "campaign.deterministic.unapproved-manifest",
+    "campaign.deterministic.actual19-digest-prefix",
+    "campaign.deterministic.approved-corpus-required",
+    "campaign.deterministic.source-set-hash-mismatch",
+    "campaign.deterministic.missing-real-bridges-block",
+    "campaign.authority.boolean-isolation-and-wrong-operation-are-not-identity",
+    "campaign.authority.current-attestation-must-match-published-head",
+    "campaign.authority.current-contract-modes-are-metadata-only",
+    "campaign.authority.current-reference-never-downgrades-missing-journal",
+    "campaign.authority.database-predecessor-must-be-observed-revoked",
+    "campaign.authority.duplicate-nonfinite-and-invalid-timestamp-refused",
+    "campaign.authority.exact-raw-proof-bytes-are-bound",
+    "campaign.authority.fence-expiry-and-clock-skew-match-primary-milliseconds",
+    "campaign.authority.fixture-deployment-cannot-rotate-live-reference",
+    "campaign.authority.missing-pending-cannot-be-replaced-by-active-head",
+    "campaign.authority.opaque-unsealed-or-unknown-contract-cannot-pass",
+    "campaign.authority.original-journal-bytes-and-absence-are-bound",
+    "campaign.authority.pending-must-precede-positive-commit-and-publication",
+    "campaign.authority.reference-consumes-current-restore-and-fences-old-owner",
+    "campaign.authority.resealed-history-cannot-reuse-epoch-or-drop-lineage",
+    "campaign.authority.restore-cannot-reconstruct-missing-external-journal",
+    "campaign.authority.restored-database-is-distinct-from-external-head",
+    "campaign.authority.retained-older-candidate-can-reconcile-positive-commit",
+    "campaign.authority.sorted-request-hash-cannot-replace-actual-ordered-json-stringify",
+    "campaign.authority.unseen-database-lineage-rejected-even-with-valid-document-seal"
+  ],
+  "inputs": [
+    {
+      "path": "tests/hyperfide/qualify.py",
+      "sha256": "8aa17f5e2572c8557f15353f7267e98600547fb0f2693486c0e0f2fc1abce8c2",
+      "size": 37538
+    },
+    {
+      "path": "tests/hyperfide/check-evidence.py",
+      "sha256": "cc8de56fb25bea153490b4143a231f1ff6f4dac758baaea4bf90fb7d9ba236a0",
+      "size": 30633
+    },
+    {
+      "path": "tests/hyperfide/manifest.schema.json",
+      "sha256": "3407092d7e6e452bb288e996f840bd5bab22d6c0f494a49bf944cd73c18078b8",
+      "size": 3216
+    },
+    {
+      "path": "tests/hyperfide/registry.json",
+      "sha256": "77d72fc82aa56142b5cd19b93b0e8ecc469c01ed6182ea3d5ae53b2955580e61",
+      "size": 8284
+    },
+    {
+      "path": "tests/hyperfide/campaigns/deterministic.py",
+      "sha256": "69f2b5803b785a177847c3719c0fba0515b1b494bdbdca1cedd4c8a0de5b546c",
+      "size": 45929
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/27_2.py",
+      "sha256": "95bda9619595547ec7929a133ca0985dceb85a5d06b67e5700a387ab4134f513",
+      "size": 26278
+    },
+    {
+      "path": "tests/hyperfide/campaigns/authority.py",
+      "sha256": "1e6c2ba995bffa4eb765e98926ac35de3dd366d7c49a9ca8eaa9706eab6bdc3a",
+      "size": 16901
+    },
+    {
+      "path": "tests/hyperfide/test_authority_campaign.py",
+      "sha256": "49b9414c9c25923e8f96e926c79d0829b029c80b49037c5e3129ff81d3666d1e",
+      "size": 14728
+    }
+  ],
+  "policy": {
+    "evidence_scope": "DRIVER_COMPONENT_ONLY",
+    "fixture_scope": "Public synthetic component validation plus actual bounded subprocess/canonical-checker boundaries; no live fleet occupancy",
+    "full_campaign_source_binding": "policy.source_manifest_digest must equal actual19 integratedRepositoryManifest sha256-prefixed digest",
+    "full_campaigns": "UNRUN; require actual signed API bridges and approved pinned corpus/auth/profile/SLO inputs",
+    "full_case_status": "INCOMPLETE",
+    "authority_contract": "Actual campaign execution requires04-journal-v1; legacy ordinary reference is diagnostic component-only."
+  },
+  "registered_variant": "task:27.2",
+  "resources": [],
+  "schema_version": 1,
+  "scope": "task-component",
+  "seed": 17
+}

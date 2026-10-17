@@ -6,6 +6,102 @@
  */
 #include "cg.h"
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
+
+/* Preserve unknown/user files and a durable byte-identical backup before
+ * replacing generator-owned text. Old and new ownership markers both qualify. */
+static int owned_write_at(const char *,const char *,size_t,const char *,bool);
+int hyperfide_owned_write(const char *filename,const char *data,size_t length,
+                         const char *marker,bool force) {
+    char absolute[5800],parent[5800],allowed[5800];
+    if(strlen(filename)>=sizeof absolute)return -1;
+    if(filename[0]=='/')snprintf(absolute,sizeof absolute,"%s",filename);
+    else {if(!getcwd(absolute,sizeof absolute))return -1;size_t n=strlen(absolute);snprintf(absolute+n,sizeof absolute-n,"/%s",filename);}
+    const char *boundary=getenv("HYPERFIDE_GENERATION_ROOT");
+    if(boundary){
+        if(!realpath(boundary,allowed))return -1;
+        size_t n=strlen(allowed);
+        if(strncmp(absolute,allowed,n)||absolute[n]!='/')return -1;
+    }
+    snprintf(parent,sizeof parent,"%s",absolute);
+    char *last=strrchr(parent,'/');if(!last||!last[1])return -1;
+    char leaf[512];if(strlen(last+1)>=sizeof leaf)return -1;snprintf(leaf,sizeof leaf,"%s",last+1);*last=0;
+    if(!strcmp(leaf,".")||!strcmp(leaf,".."))return -1;
+    int directory=open("/",O_RDONLY|O_DIRECTORY|O_NOFOLLOW);if(directory<0)return -1;
+    char *state=NULL;
+    for(char *part=strtok_r(parent,"/",&state);part;part=strtok_r(NULL,"/",&state)){
+        if(!strcmp(part,"."))continue;
+        if(!strcmp(part,"..")){close(directory);return -1;}
+        int next=openat(directory,part,O_RDONLY|O_DIRECTORY|O_NOFOLLOW);
+        if(next<0&&errno==ENOENT){
+            if(mkdirat(directory,part,0755)&&errno!=EEXIST){close(directory);return -1;}
+            next=openat(directory,part,O_RDONLY|O_DIRECTORY|O_NOFOLLOW);
+        }
+        if(next<0){close(directory);return -1;}
+        close(directory);directory=next;
+    }
+    char anchored[700];snprintf(anchored,sizeof anchored,"/proc/self/fd/%d/%s",directory,leaf);
+    int rc=owned_write_at(anchored,data,length,marker,force);
+    close(directory);return rc;
+}
+static int owned_write_at(const char *filename,const char *data,size_t length,
+                         const char *marker,bool force) {
+    struct stat info;bool exists=lstat(filename,&info)==0;
+    if(exists&&!S_ISREG(info.st_mode))return -1;
+    size_t old_length=0;char *old=exists?read_entire_file(filename,&old_length):NULL;
+    if(exists&&!old)return -1;
+    if(old){
+        char legacy[160],canonical[160];
+        snprintf(legacy,sizeof legacy,"codify-owned: %s",marker);
+        snprintf(canonical,sizeof canonical,"hyperfide-owned: %s",marker);
+        if(!force&&!strstr(old,legacy)&&!strstr(old,canonical)){free(old);return -1;}
+        if(old_length==length&&!memcmp(old,data,length)){free(old);return 0;}
+    }
+    char parent[5200],backup_dir[5400],backup[6400],temporary[6400],hash[65];
+    snprintf(parent,sizeof parent,"%s",filename);
+    char *slash=strrchr(parent,'/');
+    if(slash){if(slash==parent)slash[1]=0;else *slash=0;}else snprintf(parent,sizeof parent,".");
+    if(mkdirs(parent)) {free(old);return -1;}
+    if(old){
+        sha256_hex(old,old_length,hash);
+        const char *base=strrchr(filename,'/');base=base?base+1:filename;
+        char leaf[512];if(strlen(base)>=sizeof leaf){free(old);return -1;}
+        snprintf(leaf,sizeof leaf,"%s",base);
+        snprintf(backup_dir,sizeof backup_dir,"%s/.hyperfide-backups",parent);
+        if(mkdirs(backup_dir)){free(old);return -1;}
+        snprintf(backup,sizeof backup,"%s/%s.%s",backup_dir,leaf,hash);
+        int fd=open(backup,O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW,0600);
+        if(fd<0&&errno==EEXIST){
+            struct stat backup_info;
+            if(lstat(backup,&backup_info)||!S_ISREG(backup_info.st_mode)||backup_info.st_nlink!=1){free(old);return -1;}
+            size_t n=0;char *prior=read_entire_file(backup,&n);
+            bool same=prior&&n==old_length&&!memcmp(prior,old,n);free(prior);
+            if(!same){free(old);return -1;}
+        }else if(fd<0){free(old);return -1;}
+        else {
+            size_t written=0;
+            while(written<old_length){ssize_t n=write(fd,old+written,old_length-written);if(n<=0){close(fd);free(old);return -1;}written+=(size_t)n;}
+            int synced=fsync(fd),closed=close(fd);
+            if(synced||closed){free(old);return -1;}
+        }
+        int directory=open(backup_dir,O_RDONLY|O_DIRECTORY);
+        if(directory<0){free(old);return -1;}
+        int status=fsync(directory);close(directory);if(status){free(old);return -1;}
+    }
+    free(old);sha256_hex(data,length,hash);
+    snprintf(temporary,sizeof temporary,"%s.hyperfide-new-%ld-%ld-%s",filename,(long)getpid(),now_ms(),hash);
+    int fd=open(temporary,O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW,exists?(info.st_mode&0777):0644);
+    if(fd<0)return -1;
+    size_t written=0;
+    while(written<length){ssize_t n=write(fd,data+written,length-written);if(n<=0){close(fd);unlink(temporary);return -1;}written+=(size_t)n;}
+    int synced=fsync(fd),closed=close(fd);
+    if(synced||closed){unlink(temporary);return -1;}
+    if(rename(temporary,filename)){unlink(temporary);return -1;}
+    int directory=open(parent,O_RDONLY|O_DIRECTORY);if(directory<0)return -1;
+    int status=fsync(directory);close(directory);return status;
+}
 
 typedef struct { char name[128]; int files; long lines;
                  char top_lang[32]; int top_lang_n;
@@ -58,10 +154,10 @@ int cmd_agentmd(Cg *cg, bool write_files) {
     base = base && base[1] ? base + 1 : cg->root;
 
     sb_printf(&md, "# %s — Agent Context\n\n", base);
-    sb_puts(&md, "<!-- codify-owned: graph-agent-context v1 -->\n\n"
-                 "_Generated graph context owned by `cg agentmd`. Regenerate "
-                 "with `cg agentmd --write` after significant changes. "
-                 "Workflow instructions remain owned by `cg spec render`._\n\n");
+    sb_puts(&md, "<!-- hyperfide-owned: graph-agent-context v1 -->\n\n"
+                 "_Generated graph context owned by `hyperfide agentmd`. Regenerate "
+                 "with `hyperfide agentmd --write` after significant changes. "
+                 "Workflow instructions remain owned by `hyperfide spec render`._\n\n");
 
     /* ---- language table ---- */
     sb_puts(&md, "## Languages\n\n| Language | Files | Lines |\n|---|---:|---:|\n");
@@ -235,26 +331,25 @@ int cmd_agentmd(Cg *cg, bool write_files) {
         "cg changes              # impact radius of uncommitted edits\n"
         "```\n\n"
         "All of the above accept `--json`. The graph auto-syncs via "
-        "`cg watch`, or connect over MCP with `cg mcp-install`.\n\n"
+        "`hyperfide watch`, or connect over MCP with `hyperfide mcp-install`.\n\n"
         "Over MCP, use `grep_code`, `find_files`, `search_code`, and "
-        "`get_context` before any shell search: `cg grep` and `cg files` "
+        "`get_context` before any shell search: `hyperfide grep` and `hyperfide files` "
         "answer what grep, rg, and find would, ranked and capped to a token "
         "budget.\n\n"
         /* an agent that re-runs a queued write duplicates it, and one that
          * does not re-run an exit 75 loses it: the two must not blur */
         "When another process (an editor's indexer) holds the database, "
-        "`cg remember`, `cg handoff`, and the bookkeeping behind "
-        "`cg spec done` say **queued**: the write is kept in "
+        "`hyperfide remember`, `hyperfide handoff`, and the bookkeeping behind "
+        "`hyperfide spec done` say **queued**: the write is kept in "
         "`.codegraph/journal/` and the next `cg` command applies it — do not "
         "re-run it. Exit 75 (a claim) means nothing changed: re-run the same "
-        "command. `cg journal` lists what is queued.\n");
+        "command. `hyperfide journal` lists what is queued.\n");
 
     if (write_files) {
         char dir[4700], path[4900];
         config_context_dir(cg->root, dir, sizeof dir);
         config_context_path(cg->root, "agent-context.md", path, sizeof path);
-        if (mkdirs(dir) == 0 &&
-            write_entire_file(path, md.p, md.len) == 0)
+        if (hyperfide_owned_write(path, md.p, md.len, "graph-agent-context v1", false) == 0)
             printf("wrote %s\n", path);
         else {
             fprintf(stderr, "cg: cannot write %s\n", path);

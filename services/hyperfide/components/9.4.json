@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "9.4",
+  "task": "9.4",
+  "roles": [
+    "provisioner"
+  ],
+  "module": "providers/railway/reconciliation.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "railway.reconciliation.create",
+    "railway.inventory.list",
+    "railway.sessions.list"
+  ],
+  "requires": [
+    "9.3",
+    "8.2",
+    "14.2",
+    "15.2"
+  ]
+}

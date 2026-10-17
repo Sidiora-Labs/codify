@@ -40,3 +40,12 @@ tmp/
 /services/hyperfide/dist/
 **/__pycache__/
 *.pyc
+
+# Hyperfide generated executables and private rollback material.
+/hyperfide
+**/.hyperfide-backups/
+**/.hyperfide/migrations/
+
+# Historical integration backups may contain private MCP configuration.
+*.codify.bak
+**/.hyperfide/context/

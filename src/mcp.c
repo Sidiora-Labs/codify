@@ -1,3 +1,5 @@
+#include <stdio.h>
+extern int hf_client_authority_guard(const char *operation, FILE *output);
 /*
  * MCP (Model Context Protocol) stdio server + auto-install.
  *
@@ -5,7 +7,7 @@
  *                    exposing the graph as tools. The graph is incrementally
  *                    refreshed before reads when configured, with source
  *                    validation reported independently of refresh status.
- * `cg mcp-install` — writes/merges Codify into the MCP configs of popular
+ * `cg mcp-install` — writes/merges Hyperfide into the MCP configs of popular
  *                    coding agents (Claude Code, Cursor, VS Code, Windsurf,
  *                    Gemini CLI, Codex CLI).
  */
@@ -17,6 +19,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <ctype.h>
 
 /* ---------------- tool table ---------------- */
 
@@ -830,7 +833,7 @@ static int t_codemap(void *v) {
                  "\"path\":{\"type\":\"string\",\"description\":" \
                  "\"an export file\"}," \
                  "\"from\":{\"type\":\"string\",\"description\":" \
-                 "\"another Codify project's directory, read-only\"}," \
+                 "\"another Hyperfide project's directory, read-only\"}," \
                  "\"data\":{\"type\":\"string\",\"description\":" \
                  "\"the export text itself\"}," \
                  "\"dry_run\":{\"type\":\"boolean\"}," \
@@ -968,7 +971,7 @@ static const struct {
       "the codebase, optionally filtered.",
       S_FILTER, A_READ, "List routes", t_routes, true },
     { "vcs_status",
-      "Working-tree status vs the last Codify snapshot (added/modified/"
+      "Working-tree status vs the last Hyperfide snapshot (added/modified/"
       "deleted files).",
       S_EMPTY, A_READ, "Working tree status", t_status, false },
     { "index_status",
@@ -978,7 +981,7 @@ static const struct {
       S_EMPTY, A_READ, "Index status", t_index_status, false },
     { "state",
       "Truthful state across independent authorities: Git working tree, "
-      "Codify snapshot, spec declarations, this agent's live attempt, and "
+      "Hyperfide snapshot, spec declarations, this agent's live attempt, and "
       "stale declarations. Use this when diagnosing apparent task drift.",
       S_EMPTY, A_READ, "Agent control-plane state", t_state, false },
     { "projection_status",
@@ -1023,10 +1026,10 @@ static const struct {
       "their external callers. Run before committing.",
       S_LIMIT, A_READ, "Change impact", t_changes, true },
     { "vcs_log",
-      "Snapshot history (Codify's local version control).",
+      "Snapshot history (Hyperfide's local version control).",
       S_LIMIT, A_READ, "Snapshot history", t_log, false },
     { "vcs_commit",
-      "Snapshot the working tree into Codify's local, content-addressed "
+      "Snapshot the working tree into Hyperfide's local, content-addressed "
       "version control. Automatically tagged with the in-progress spec task "
       "when one exists.",
       S_MSG, A_WRITE, "Snapshot the tree", t_commit, false },
@@ -1099,7 +1102,7 @@ static const struct {
       S_EMPTY, A_WRITE, "Close documentation", t_docs_close, false },
     { "remember",
       "Save a durable project memory — a decision, constraint, outcome, "
-      "preference, or fact worth knowing in later sessions — into Codify's "
+      "preference, or fact worth knowing in later sessions — into Hyperfide's "
       "database. Automatically linked to the in-progress spec task unless "
       "a task is given. Never store secrets.",
       S_REMEMBER, A_WRITE, "Save a memory", t_remember, false },
@@ -1116,7 +1119,7 @@ static const struct {
       S_MEMEXPORT, A_READ, "Export memories", t_memory_export, false },
     { "memory_import",
       "Import memories from an export (path or data) or straight from "
-      "another Codify project (from). Adds only what this graph lacks, by "
+      "another Hyperfide project (from). Adds only what this graph lacks, by "
       "content id, keeps creation time and class, restores supersession, "
       "and reports imported, skipped, and invalid counts. dry_run writes "
       "nothing.",
@@ -1219,8 +1222,8 @@ static const struct {
       S_EMPTY, A_READ, "List skills", t_skills_list, false },
     { "skills_promote",
       "Render one memory as a portable .agents/skills/<slug>/SKILL.md "
-      "carrying Codify's ownership marker and a link back to the memory. "
-      "Never overwrites a file Codify did not generate.",
+      "carrying Hyperfide's ownership marker and a link back to the memory. "
+      "Never overwrites a file Hyperfide did not generate.",
       S_PROMOTE, A_WRITE, "Promote a memory to a skill", t_skills_promote,
       false },
     { "codemap",
@@ -1240,23 +1243,23 @@ static const struct {
 static const struct {
     const char *uri, *rel, *name, *desc, *mime;
 } RESOURCES[] = {
-    { "codify://spec/workflow", "spec/workflow.kvx", "Spec workflow",
+    { "hyperfide://spec/workflow", "spec/workflow.kvx", "Spec workflow",
       "How work is driven in this repository: principles, loop, hard rules.",
       "text/plain" },
-    { "codify://tasks", "spec/tasks.md", "Task board",
+    { "hyperfide://tasks", "spec/tasks.md", "Task board",
       "Rendered task list for the active feature.", "text/markdown" },
-    { "codify://agent-context", CG_AGENT_CONTEXT, "Graph context",
+    { "hyperfide://agent-context", CG_AGENT_CONTEXT, "Graph context",
       "Generated orientation: languages, layout, entry points, key symbols. "
       "Owned only by cg agentmd.", "text/markdown" },
     { NULL, NULL, NULL, NULL, NULL }
 };
 
-/* The workflow loop, shipped as prompts so Codify's opinion reaches any
+/* The workflow loop, shipped as prompts so Hyperfide's opinion reaches any
  * client — not only the ones whose users read the README. */
 static const struct { const char *name, *title, *desc, *body; } PROMPTS[] = {
     { "start-work", "Start the next task",
       "Load session state, take the next eligible task, and gather context.",
-      "Use Codify to begin the next piece of work in this repository:\n"
+      "Use Hyperfide to begin the next piece of work in this repository:\n"
       "1. Call `brief` for project state, the active task, and prior decisions.\n"
       "2. Call `spec_next` (or `spec_wave` if you are dispatching several "
       "agents) and pick a task.\n"
@@ -1291,7 +1294,7 @@ static const struct { const char *name, *title, *desc, *body; } PROMPTS[] = {
     { "orient", "Orient in an unfamiliar repository",
       "Build a working picture of a codebase you have not seen before.",
       "Orient yourself in this repository before doing anything else:\n"
-      "1. Call `brief`, then read `codify://agent-context` when present.\n"
+      "1. Call `brief`, then read `hyperfide://agent-context` when present.\n"
       "2. Call `list_routes` to find the externally reachable surface.\n"
       "3. Call `get_context` for each area the task at hand touches; use "
       "`grep_code`, `find_files`, and `search_code` before any shell search "
@@ -1350,7 +1353,7 @@ static void mcp_list_resources(Cg *cg, StrBuf *r) {
             if (!path_format(kv, sizeof kv, "%s/%s/spec.kvx", specdir, e->d_name)) continue;
             if (stat(kv, &kst) != 0) continue;
             char uri[512], nm[300];
-            snprintf(uri, sizeof uri, "codify://spec/%s", e->d_name);
+            snprintf(uri, sizeof uri, "hyperfide://spec/%s", e->d_name);
             snprintf(nm, sizeof nm, "spec: %s", e->d_name);
             if (nr++) sb_putc(r, ',');
             sb_puts(r, "{\"uri\":");  sb_json_str(r, uri);
@@ -1519,6 +1522,7 @@ static void reply_error(const char *id, int code, const char *msg) {
 }
 
 int cmd_mcp(Cg *cg, const SysInfo *si) {
+    { int authority_rc = hf_client_authority_guard("mcp", stderr); if (authority_rc) return authority_rc; }
     char *line = NULL;
     size_t cap = 0;
     ssize_t n;
@@ -1548,9 +1552,9 @@ int cmd_mcp(Cg *cg, const SysInfo *si) {
                         "\"tools\":{\"listChanged\":false},"
                         "\"resources\":{\"listChanged\":false,\"subscribe\":false},"
                         "\"prompts\":{\"listChanged\":false}},"
-                        "\"serverInfo\":{\"name\":\"codify\",\"version\":\""
+                        "\"serverInfo\":{\"name\":\"hyperfide\",\"version\":\""
                         CG_VERSION "\"},"
-                        "\"instructions\":\"Codify is this repository's "
+                        "\"instructions\":\"Hyperfide is this repository's "
                         "local control plane. Start task work with `work_open`; "
                         "keep its opaque revision and call `work_update` for "
                         "deltas. Use `state` when authorities disagree and "
@@ -1598,11 +1602,21 @@ int cmd_mcp(Cg *cg, const SysInfo *si) {
             char *params = json_get_object(line, "params");
             char *uri = params ? json_get_string(params, "uri") : NULL;
             char rel[1024] = "";
-            for (int i = 0; uri && RESOURCES[i].uri; i++)
-                if (strcmp(uri, RESOURCES[i].uri) == 0)
+            /* Preserve legacy resource references against the same implementation. */
+            char canonical_uri[2048];
+            const char *lookup=uri;
+            if(uri&&!strncmp(uri,"codify://",9)){
+                snprintf(canonical_uri,sizeof canonical_uri,"hyperfide://%s",uri+9);lookup=canonical_uri;
+            }
+            for (int i = 0; lookup && RESOURCES[i].uri; i++)
+                if (strcmp(lookup, RESOURCES[i].uri) == 0)
                     snprintf(rel, sizeof rel, "%s", RESOURCES[i].rel);
-            if (uri && !rel[0] && strncmp(uri, "codify://spec/", 14) == 0)
-                snprintf(rel, sizeof rel, "spec/%s/spec.kvx", uri + 14);
+            if (lookup && !rel[0] && strncmp(lookup, "hyperfide://spec/", 17) == 0) {
+                const char *feature=lookup+17;bool valid=*feature&&strcmp(feature,".")&&strcmp(feature,"..");
+                for(const unsigned char *p=(const unsigned char *)feature;*p;p++)
+                    if(!isalnum(*p)&&*p!='-'&&*p!='_'&&*p!='.')valid=false;
+                if(valid)snprintf(rel,sizeof rel,"spec/%s/spec.kvx",feature);
+            }
             if (!rel[0]) {
                 reply_error(id, -32602, "unknown resource");
             } else {
@@ -1746,7 +1760,7 @@ int cmd_mcp_install(Cg *cg) {
     const char *home = getenv("HOME");
     char path[4600];
 
-    printf("connecting Codify MCP server (%s mcp) to coding agents:\n", bin);
+    printf("connecting Hyperfide MCP server (%s mcp) to coding agents:\n", bin);
 
     /* project-scoped configs */
     snprintf(path, sizeof path, "%s/.mcp.json", cg->root);

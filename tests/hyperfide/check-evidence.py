@@ -16,6 +16,9 @@ import subprocess
 import sys
 import uuid
 
+# Isolated Python imports only this qualified verifier directory and stdlib.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 
 class InvalidEvidence(Exception):
     pass
@@ -116,6 +119,17 @@ def command_shape(command):
 
 
 
+RELOCATION = None
+
+def physical_file(path):
+    return RELOCATION.file(path) if RELOCATION else Path(path)
+
+def physical_directory(path):
+    return RELOCATION.directory(path) if RELOCATION else Path(path)
+
+def logical_file(path):
+    return RELOCATION.logical(path) if RELOCATION else Path(path)
+
 def command_pass(command):
     require(command["exit_code"] == 0 and command["timed_out"] is False, "command failed or timed out")
     require(command.get("leaked_descendants") == [] and command.get("remaining_descendants") == [], "command left or leaked descendant processes")
@@ -123,11 +137,13 @@ def command_pass(command):
     require(isinstance(executable, dict), "actual executable identity is missing")
     executable_path = executable.get("path")
     require(isinstance(executable_path, str) and Path(executable_path).is_absolute(), "executable path is not absolute")
-    path = Path(executable_path)
+    path = RELOCATION.executable(command, executable_path) if RELOCATION else Path(executable_path)
     require(path.is_file() and not path.is_symlink(), "actual executable is absent or symbolic")
     sha(executable.get("sha256"), "actual executable hash")
     positive_integer(executable.get("size"), "actual executable size")
     require(digest_file(path) == (executable["sha256"], executable["size"]), "actual executable bytes changed")
+    if RELOCATION:
+        return
     argv0 = command["argv"][0]
     if "/" in argv0:
         resolved = (Path(command["cwd"]) / argv0).resolve()
@@ -230,6 +246,8 @@ def verify_receipt_integrity(root, receipt, manifest_hash, registry_hash, regist
 
 
 def source_inventory(workspace, registration, campaign):
+    workspace = physical_directory(workspace)
+    campaign = physical_directory(campaign)
     roots = identifiers(registration.get("source_roots"), "reviewed source roots")
     candidates = set()
     for relative in roots:
@@ -244,16 +262,20 @@ def source_inventory(workspace, registration, campaign):
             require(not path.is_symlink(), "symbolic source inventory entry")
             if path.is_file():
                 candidates.add(path.resolve())
-    return [{"original_path": str(path), "sha256": digest_file(path)[0], "size": digest_file(path)[1]} for path in sorted(candidates, key=str)]
+    return [{"original_path": str(logical_file(path)), "sha256": digest_file(path)[0], "size": digest_file(path)[1]} for path in sorted(candidates, key=str)]
 
 
 def worktree_inventory(workspace, campaign, commit, inventory):
+    logical_workspace = workspace
+    workspace = physical_directory(workspace)
+    campaign = physical_directory(campaign)
     excluded = [str(campaign.relative_to(workspace))] if campaign.is_relative_to(workspace) else []
     entries = []
     diff_sha256 = None
     if commit is not None:
         def git(arguments):
-            result = subprocess.run(["git", "-C", str(workspace)] + arguments, capture_output=True, timeout=30)
+            from proof_relocation import safe_git
+            result = safe_git(workspace, arguments, require, portable=RELOCATION is not None)
             require(result.returncode == 0, "cannot independently inspect Git worktree")
             return result.stdout
         changed = set(filter(None, git(["diff", "--name-only", "-z", "HEAD", "--"]).decode("utf-8").split("\0")))
@@ -276,7 +298,7 @@ def worktree_inventory(workspace, campaign, commit, inventory):
         kind = "git"
     else:
         kind = "directory"
-        entries = [{"path": str(Path(item["original_path"]).relative_to(workspace)), "status": "file", "sha256": item["sha256"], "size": item["size"]} for item in inventory]
+        entries = [{"path": str(Path(item["original_path"]).relative_to(logical_workspace)), "status": "file", "sha256": item["sha256"], "size": item["size"]} for item in inventory]
         entries.sort(key=lambda item: item["path"])
     return {"kind": kind, "entries": entries, "excluded": excluded, "digest": hashlib.sha256(canonical(entries)).hexdigest(), "diff_sha256": diff_sha256}
 
@@ -318,6 +340,8 @@ def verify_selected(root, receipt, manifest, registry, registration, events, art
     source = receipt["source"]
     require(isinstance(source.get("workspace"), str) and Path(source["workspace"]).is_absolute(), "source workspace is invalid")
     workspace = Path(source["workspace"])
+    if RELOCATION:
+        require(workspace == RELOCATION.original, "sealed workspace differs from trusted relocation")
     require(command["cwd"] == str(workspace), "command source workspace mismatch")
     require(type(source.get("dirty")) is bool or source.get("dirty") is None, "source dirty identity invalid")
     commit = source.get("commit")
@@ -326,19 +350,20 @@ def verify_selected(root, receipt, manifest, registry, registration, events, art
     else:
         require(isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit), "source commit identity invalid")
         require(source.get("unversioned") is False, "source version identity inconsistent")
-        result = subprocess.run(["git", "-C", str(workspace), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=15)
-        require(result.returncode == 0 and result.stdout.strip() == commit, "current source revision differs from candidate")
+        from proof_relocation import safe_git
+        result = safe_git(physical_directory(workspace), ["rev-parse", "HEAD"], require, portable=RELOCATION is not None)
+        require(result.returncode == 0 and result.stdout.decode("utf-8").strip() == commit, "current source revision differs from candidate")
     originals = set()
     for record in source["files"]:
         original = record.get("original_path")
         require(isinstance(original, str) and Path(original).is_absolute(), "source original path is invalid")
         require(original not in originals, "duplicate source identity")
         originals.add(original)
-        path = Path(original)
+        path = physical_file(original)
         require(path.is_file() and not path.is_symlink(), "current source file missing or symbolic")
         require(digest_file(path) == (record["sha256"], record["size"]), "current source bytes differ from candidate")
-    require(str(Path(__file__).resolve()) in originals, "executing independent checker is not source-pinned")
-    require(str(Path(__file__).resolve().with_name("qualify.py")) in originals, "canonical runner revision is not source-pinned")
+    require(str(RELOCATION.checker_original if RELOCATION else Path(__file__).resolve()) in originals, "executing independent checker is not source-pinned")
+    require(str(RELOCATION.runner_original if RELOCATION else Path(__file__).resolve().with_name("qualify.py")) in originals, "canonical runner revision is not source-pinned")
     for argument in command["argv"]:
         if argument.endswith(".py"):
             require(str((workspace / argument).resolve()) in originals, "probe executable is not source-pinned")
@@ -348,8 +373,9 @@ def verify_selected(root, receipt, manifest, registry, registration, events, art
     task_identity = receipt.get("task")
     require(isinstance(task_identity, str) and re.fullmatch(r"[0-9]+\.[0-9]+", task_identity), "task identity cannot define an exclusion")
     default_exclusion = (workspace / "artifacts" / "hyperfide" / "tasks" / task_identity).resolve()
-    require(exclusion == root or exclusion == default_exclusion, "source inventory exclusion is not an approved campaign location")
-    require(root == exclusion or root.is_relative_to(exclusion), "campaign is outside declared source exclusion")
+    logical_root = RELOCATION.campaign_original if RELOCATION else root
+    require(exclusion == logical_root or exclusion == default_exclusion, "source inventory exclusion is not an approved campaign location")
+    require(logical_root == exclusion or logical_root.is_relative_to(exclusion), "campaign is outside declared source exclusion")
     require(exclusion != workspace and not workspace.is_relative_to(exclusion), "evidence output cannot exclude the source workspace")
     for declared_source in identifiers(registration.get("source_files"), "reviewed explicit source files"):
         require(not (workspace / declared_source).resolve().is_relative_to(exclusion), "evidence output contains a reviewed source file")
@@ -374,7 +400,7 @@ def verify_selected(root, receipt, manifest, registry, registration, events, art
     for item in receipt["inputs"]:
         original = item.get("original_path")
         require(isinstance(original, str) and original not in observed_inputs, "duplicate/invalid input identity")
-        original_file = (workspace / original).resolve()
+        original_file = physical_file((workspace / original) if RELOCATION else (workspace / original).resolve())
         require(original_file.is_file() and digest_file(original_file) == (item["sha256"], item["size"]), "current fixture bytes differ from immutable inputs")
         observed_inputs[original] = (item["sha256"], item["size"])
     require(observed_inputs == pinned_inputs, "input inventory differs from immutable manifest")
@@ -416,8 +442,18 @@ def verify_selected(root, receipt, manifest, registry, registration, events, art
 
 
 def check(args):
+    global RELOCATION
+    RELOCATION = None
     root = Path(args.campaign).resolve()
     require(root.is_dir(), "campaign directory does not exist")
+    if args.relocation:
+        from proof_relocation import Relocation
+        mapping_path = Path(args.relocation)
+        require(mapping_path.is_absolute() and not mapping_path.is_symlink(), "trusted absolute relocation file required")
+        mapping_raw = mapping_path.read_bytes()
+        require(len(mapping_raw) <= 1024 * 1024, "relocation policy exceeds size bound")
+        RELOCATION = Relocation(decode(mapping_raw), mapping_path.parent, require)
+        RELOCATION.campaign_staged = root
     manifest_path = relative_file(root, "manifest.json")
     if args.manifest:
         require(digest_file(Path(args.manifest)) == digest_file(manifest_path), "external manifest differs from immutable campaign manifest")
@@ -451,7 +487,8 @@ def check(args):
         selected = matches[0]
     receipt, events, artifacts, path = selected
     verify_selected(root, receipt, manifest, registry, registration, events, artifacts)
-    return {"schema_version": 1, "checked": True, "receipt_id": receipt["receipt_id"], "receipt_sha256": digest_file(path)[0], "scope": receipt["scope"], "observed_outcome": receipt["outcome"], "full_case_status": receipt["full_case_status"], "receipt_count": len(receipts), "seal_authentication": "unanchored-consistency-only"}
+    import proof_relocation
+    return {"schema_version": 1, "checked": True, "receipt_id": receipt["receipt_id"], "receipt_sha256": digest_file(path)[0], "scope": receipt["scope"], "observed_outcome": receipt["outcome"], "full_case_status": receipt["full_case_status"], "receipt_count": len(receipts), "seal_authentication": "unanchored-consistency-only", "git_executable": proof_relocation.GIT_IDENTITY}
 
 
 def main():
@@ -459,6 +496,7 @@ def main():
     parser.add_argument("--campaign", required=True)
     parser.add_argument("--manifest")
     parser.add_argument("--receipt")
+    parser.add_argument("--relocation", help="server-owned explicit immutable staging policy; never accept from an untrusted request")
     args = parser.parse_args()
     try:
         result = check(args)

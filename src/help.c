@@ -22,7 +22,7 @@ typedef struct {
     const char *group;    /* key into GROUPS */
     const char *name;     /* "search", or "spec next" for a subcommand */
     const char *args;     /* principal arguments, for the overview column */
-    const char *usage;    /* the full usage line, after "cg " */
+    const char *usage;    /* the full usage line, after "hyperfide " */
     const char *summary;  /* one line */
     const char *detail;   /* paragraphs separated by \n */
     const char *flags;    /* "FLAG\tdescription\n" per flag */
@@ -56,13 +56,13 @@ static const HelpCmd HELP[] = {
   .detail = "Creates .codegraph/ in the current directory and builds the "
     "initial index. In a linked git worktree of an initialized repository "
     "it joins the repository's shared graph under this branch instead and "
-    "creates nothing here.\nIt refuses inside an enclosing Codify project, "
+    "creates nothing here.\nIt refuses inside an enclosing Hyperfide project, "
     "which would otherwise capture this directory, and in your home "
     "directory, where every project underneath would bind to it.",
   .flags = "--nested\tmake this directory its own project even inside "
     "another one, or in a linked worktree\n"
     "--force\tinitialize in your home directory anyway\n",
-  .examples = "cg init\ncg init --nested",
+  .examples = "hyperfide init\ncg init --nested",
   .related = "index,sync,root,branches" },
 { .group = "graph", .name = "index", .args = "[--full]",
   .usage = "index [--full] [--workers N]",
@@ -73,7 +73,7 @@ static const HelpCmd HELP[] = {
   .flags = "--full\treparse every file, not only the changed ones\n"
     "--workers N\tparse workers for this pass; beats CG_INDEX_WORKERS and "
     "[index] workers in codify.kvx (1 to 64, 0 = auto)\n",
-  .examples = "cg index\ncg index --full --workers 8",
+  .examples = "hyperfide index\ncg index --full --workers 8",
   .related = "sync,watch,info,config" },
 { .group = "graph", .name = "sync", .args = "[paths] [--wait MS]",
   .usage = "sync [paths] [--max-age MS] [--background] [--wait MS] [--auto] "
@@ -91,7 +91,7 @@ static const HelpCmd HELP[] = {
     "[sync] auto = false\n"
     "--workers N\tparse workers for this pass; beats CG_INDEX_WORKERS and "
     "[index] workers (1 to 64, 0 = auto)\n",
-  .examples = "cg sync\ncg sync src/main.c --json\ncg sync --auto --background",
+  .examples = "hyperfide sync\ncg sync src/main.c --json\ncg sync --auto --background",
   .related = "index,watch,hook" },
 { .group = "graph", .name = "search", .args = "<query> [-n N]",
   .usage = "search <query> [-n N] [--path GLOB] [--lang L] [--kind K] "
@@ -109,7 +109,7 @@ static const HelpCmd HELP[] = {
     "--kind K\tonly symbols of kind K\n"
     "--name N\tonly symbols whose name contains N\n"
     "--no-tests\tleave test files out\n",
-  .examples = "cg search \"export memory\"\ncg search index_pass -n 5 --json",
+  .examples = "hyperfide search \"export memory\"\ncg search index_pass -n 5 --json",
   .related = "symbol,context,show" },
 { .group = "graph", .name = "grep", .args = "<pattern> [-E] [-i]",
   .usage = "grep <pattern> [-E|--regex] [-i] [--path GLOB]... [--lang L] "
@@ -137,7 +137,7 @@ static const HelpCmd HELP[] = {
     "--count\tthe total only\n"
     "-n N\tmost hits shown (default 50)\n"
     "--budget TOKENS\ttoken budget (default 4000)\n",
-  .examples = "cg grep cg_index_ex\ncg grep -E 'TODO|FIXME' --no-tests --files"
+  .examples = "hyperfide grep cg_index_ex\ncg grep -E 'TODO|FIXME' --no-tests --files"
     "\ncg grep -i 'busy timeout' --path 'src/*.c' -C 2",
   .related = "search,context,show" },
 { .group = "graph", .name = "symbol", .args = "<name>",
@@ -167,8 +167,8 @@ static const HelpCmd HELP[] = {
     "--max-ms N\tmaximum traversal time (up to 2000 ms)\n"
     "--max-output BYTES\tmaximum traversal JSON bytes (1024 to 131072); "
     "source-health metadata is additional\n",
-  .examples = "cg flow callees parse_file --json\n"
-    "cg flow paths handler save_record --depth 5 --json",
+  .examples = "hyperfide flow callees parse_file --json\n"
+    "hyperfide flow paths handler save_record --depth 5 --json",
   .related = "impact,symbol,context" },
 { .group = "graph", .name = "inspect", .args = "<hierarchy|unused>",
   .usage = "inspect <hierarchy|unused> [name] [-n N] [--path GLOB]",
@@ -177,8 +177,8 @@ static const HelpCmd HELP[] = {
     "symbols without known incoming references from internally referenced "
     "islands outside known roots, with explicit exclusion reasons. "
     "A missing graph edge never proves code safe to delete.",
-  .examples = "cg inspect hierarchy Service --json\n"
-    "cg inspect unused --path 'src/*' -n 20 --json",
+  .examples = "hyperfide inspect hierarchy Service --json\n"
+    "hyperfide inspect unused --path 'src/*' -n 20 --json",
   .related = "symbol,impact" },
 { .group = "graph", .name = "inspect hierarchy", .args = "<name> [-n N]",
   .usage = "inspect hierarchy <name> [-n N]",
@@ -207,7 +207,7 @@ static const HelpCmd HELP[] = {
     "--kind K\tonly symbols of kind K\n"
     "--name N\tonly symbols whose name contains N\n"
     "--no-tests\tleave test files out\n",
-  .examples = "cg context \"journal replay\"\ncg context src/help.c",
+  .examples = "hyperfide context \"journal replay\"\ncg context src/help.c",
   .related = "survey,search,show" },
 { .group = "graph", .name = "survey", .args = "[scope]",
   .usage = "survey [path|query] [--budget N] [--path GLOB] [--lang L] "
@@ -221,7 +221,7 @@ static const HelpCmd HELP[] = {
     "--path GLOB\tonly paths under GLOB or a directory (repeatable)\n"
     "--lang L\tonly files of language L (c, python, go, ts...)\n"
     "--no-tests\tleave test files out\n",
-  .examples = "cg survey src/\ncg survey \"spec workflow\"",
+  .examples = "hyperfide survey src/\ncg survey \"spec workflow\"",
   .related = "context,anchors" },
 { .group = "graph", .name = "files", .args = "[pattern]",
   .usage = "files [pattern] [--dirs] [--depth N] [-n N] [--path GLOB] "
@@ -240,8 +240,8 @@ static const HelpCmd HELP[] = {
     "--path GLOB\tonly paths under GLOB or a directory (repeatable)\n"
     "--lang L\tonly files of language L (c, python, go, ts...)\n"
     "--no-tests\tleave test files out\n",
-  .examples = "cg files 'src/**/*.c'\ncg files sync gate\ncg files --dirs\n"
-    "cg files --lang python -n 10",
+  .examples = "hyperfide files 'src/**/*.c'\ncg files sync gate\ncg files --dirs\n"
+    "hyperfide files --lang python -n 10",
   .related = "search,survey,context" },
 { .group = "graph", .name = "show", .args = "<symbol|path:line>",
   .usage = "show <symbol|path:line> [--full]",
@@ -283,7 +283,7 @@ static const HelpCmd HELP[] = {
   .related = "sync,hook" },
 { .group = "graph", .name = "root", .args = "",
   .usage = "root",
-  .summary = "print the tree cg operates on",
+  .summary = "print the tree hyperfide operates on",
   .detail = "--json adds the shared project, the worktree flag, and the "
     "branch.",
   .related = "info,branches" },
@@ -306,7 +306,7 @@ static const HelpCmd HELP[] = {
     "--task <id>\ttag with this in-progress task\n"
     "--amend\treplace the last snapshot\n"
     "--git\talso make a real git commit with the same tag\n",
-  .examples = "cg commit -m \"help: one table\"\ncg commit -m fix --git",
+  .examples = "hyperfide commit -m \"help: one table\"\ncg commit -m fix --git",
   .related = "log,status,diff,spec done" },
 { .group = "vc", .name = "log", .args = "[-n N]",
   .usage = "log [-n N]",
@@ -340,14 +340,14 @@ static const HelpCmd HELP[] = {
   .usage = "git-sync [-n N]",
   .summary = "ingest git history for provenance and ranking",
   .detail = "Commits, authors, and per-file churn, which then rank search "
-    "and context and answer cg why.",
+    "and context and answer hyperfide why.",
   .flags = "-n N\thow many commits (default 2000)\n",
   .related = "why,changelog" },
 { .group = "vc", .name = "state", .args = "",
   .usage = "state",
   .summary = "Git, snapshot, spec, live ownership, staleness",
   .detail = "The four authorities side by side, each labelled, none taken "
-    "as proof of another: Git state, Codify snapshot state, declared spec "
+    "as proof of another: Git state, Hyperfide snapshot state, declared spec "
     "state, and live fenced attempts.",
   .related = "status,spec reconcile,brief" },
 { .group = "vc", .name = "events", .args = "[--since N] [--follow]",
@@ -363,14 +363,14 @@ static const HelpCmd HELP[] = {
     "--follow, -f\tkeep streaming new events\n"
     "--for SECONDS\tstop following after this long\n"
     "--head\tprint the newest sequence number\n",
-  .examples = "cg events --kind fleet. -n 20\ncg events --follow --json",
+  .examples = "hyperfide events --kind fleet. -n 20\ncg events --follow --json",
   .related = "event,serve" },
 { .group = "vc", .name = "event", .args = "ingest|history|progress",
   .usage = "event [ingest [--source HOST] | history [-n N] | progress]",
   .summary = "normalized lifecycle evidence from agent hosts",
-  .detail = "Native host hooks feed JSON to cg event ingest. Each event gets "
+  .detail = "Native host hooks feed JSON to hyperfide event ingest. Each event gets "
     "a stable identity, the exact workspace revision, and an evidence "
-    "delta; cg event progress classifies repeated failure, oscillation, "
+    "delta; hyperfide event progress classifies repeated failure, oscillation, "
     "and no-evidence windows.",
   .related = "events,work" },
 { .group = "vc", .name = "event ingest", .args = "[--source HOST]",
@@ -404,7 +404,7 @@ static const HelpCmd HELP[] = {
     "--symbols a,b\tanchor to these symbols\n"
     "--files x,y\tanchor to these files\n"
     "--supersedes <id>\tretire a reversed decision (kept as history)\n",
-  .examples = "cg remember \"help text lives in help.c\" --type decision",
+  .examples = "hyperfide remember \"help text lives in help.c\" --type decision",
   .related = "recall,forget,memory" },
 { .group = "memory", .name = "recall", .args = "[query] [-n N]",
   .usage = "recall [query] [-n N] [--task T] [--type T] [--near <file>]",
@@ -454,7 +454,7 @@ static const HelpCmd HELP[] = {
   .summary = "add the memories this graph lacks, by content id",
   .detail = "One transaction; creation time, class, and supersession "
     "travel. --from reads another project's graph read-only.",
-  .flags = "--from DIR\tread another Codify project's graph\n"
+  .flags = "--from DIR\tread another Hyperfide project's graph\n"
     "--dry-run\treport, write nothing\n"
     "--keep-branch\tkeep branch names this graph does not track\n"
     "--retask OLD=NEW\trewrite a task-tag prefix\n",
@@ -511,7 +511,7 @@ static const HelpCmd HELP[] = {
 { .group = "agentic", .name = "work open", .args = "[--task ID]",
   .usage = "work open [--task ID]",
   .summary = "objective, criteria, scope, state, context in one packet",
-  .detail = "Its opaque revision feeds cg work update.", .hide = true },
+  .detail = "Its opaque revision feeds hyperfide work update.", .hide = true },
 { .group = "agentic", .name = "work update", .args = "REVISION",
   .usage = "work update REVISION",
   .summary = "only what changed since REVISION", .hide = true },
@@ -555,7 +555,7 @@ static const HelpCmd HELP[] = {
   .summary = "the wired edit hook: sync + guard (stdin payload)",
   .detail = "Reads the host's payload on stdin and does one targeted "
     "background sync plus a guard of the edited path, in one process. "
-    "Outside a Codify project it does nothing and succeeds.",
+    "Outside a Hyperfide project it does nothing and succeeds.",
   .hide = true },
 { .group = "agentic", .name = "hook event", .args = "[--host claude|codex]",
   .usage = "hook event [--host claude|codex] [--json]",
@@ -565,17 +565,17 @@ static const HelpCmd HELP[] = {
     "WorktreeCreate, WorktreeRemove, ...) and records the session and its "
     "subagents in the agents registry with their worktree, branch, task, "
     "and last tool, emits agent.native.* events, and feeds the payload to "
-    "cg event ingest --source <host>. Always exits 0; a malformed payload "
+    "hyperfide event ingest --source <host>. Always exits 0; a malformed payload "
     "is logged to .codegraph/hooks.log.",
   .hide = true },
 /* codify-v15 1.4 */
 { .group = "agentic", .name = "hook pre-bash", .args = "",
   .usage = "hook pre-bash",
-  .summary = "the wired Bash hook: a shell search pointed at cg grep/files",
+  .summary = "the wired Bash hook: a shell search pointed at hyperfide grep/files",
   .detail = "Reads a PreToolUse payload on stdin. When the Bash command runs "
     "grep, rg, ag, ack, find, fd, or ls -R over the tree (first word, or "
-    "after |, ;, &&), answers with additionalContext naming the cg grep or "
-    "cg files command that does the same from the graph, once per session "
+    "after |, ;, &&), answers with additionalContext naming the hyperfide grep or "
+    "hyperfide files command that does the same from the graph, once per session "
     "per command. Never a permission decision: the command still runs. "
     "Silent for CG_SHELL_ADVICE=0, [hooks] shell_advice = false, a path "
     "outside the tree, or a payload that is not Bash. Always exits 0.",
@@ -608,7 +608,7 @@ static const HelpCmd HELP[] = {
 { .group = "agentic", .name = "serve", .args = "",
   .usage = "serve",
   .summary = "one JSON-RPC connection (stdio) for editors",
-  .detail = "Every MCP tool, any cg command (exec), cancel, and pushed "
+  .detail = "Every MCP tool, any hyperfide command (exec), cancel, and pushed "
     "event subscriptions from a sequence number. Idle, it holds no lock.",
   .related = "lsp,events" },
 { .group = "agentic", .name = "tool", .args = "list | call <name> [json]",
@@ -648,14 +648,14 @@ static const HelpCmd HELP[] = {
 { .group = "agentic", .name = "mcp-install", .args = "",
   .usage = "mcp-install",
   .summary = "connect Claude Code, Cursor, VS Code, and more",
-  .detail = "Compatibility alias for cg integrate apply: Claude Code, "
+  .detail = "Compatibility alias for hyperfide integrate apply: Claude Code, "
     "Cursor, VS Code, Windsurf, Gemini CLI, Codex CLI.",
   .related = "integrate" },
 { .group = "agentic", .name = "agentmd", .args = "[--write]",
   .usage = "agentmd [--write]",
   .summary = "generate .codify/agent-context.md",
   .detail = "Graph orientation for agents. Root AGENTS.md and CLAUDE.md "
-    "stay owned by cg spec render.",
+    "stay owned by hyperfide spec render.",
   .flags = "--write\twrite the file instead of printing it\n",
   .related = "codemap,spec render" },
 { .group = "agentic", .name = "codemap", .args = "[-o FILE|-] [--check]",
@@ -666,9 +666,9 @@ static const HelpCmd HELP[] = {
     "overwrites a file it did not generate.",
   .flags = "-o FILE|-\twrite here, - for stdout\n"
     "--budget N\ttoken budget (default 8000)\n"
-    "--force\toverwrite a file Codify did not generate\n"
+    "--force\toverwrite a file Hyperfide did not generate\n"
     "--check\texit 1 when CODEMAP.md is missing or stale; write nothing\n",
-  .examples = "cg codemap\ncg codemap --check",
+  .examples = "hyperfide codemap\ncg codemap --check",
   .related = "agentmd,brief" },
 { .group = "agentic", .name = "changelog", .args = "[-n N] [-o F]",
   .usage = "changelog [-n N] [-o FILE] [--unreleased] [--tag V] "
@@ -684,7 +684,7 @@ static const HelpCmd HELP[] = {
     "--snapshots\tthe snapshot-chain form, with symbol-level diffs\n"
     "--summarize\tinsist on Highlights\n"
     "--no-summarize\tkeep the model out\n",
-  .examples = "cg changelog -o CHANGELOG.md\ncg changelog --unreleased",
+  .examples = "hyperfide changelog -o CHANGELOG.md\ncg changelog --unreleased",
   .related = "git-sync,recap" },
 { .group = "agentic", .name = "recap", .args = "[--sessions N]",
   .usage = "recap [--sessions N] [--since DAYS] [--budget CHARS] [-o FILE] "
@@ -738,12 +738,12 @@ static const HelpCmd HELP[] = {
     "[--agent N] [--attempt ID] [--fence N] [--ttl M] | "
     "reconcile [--repair] | docs [status|auto|manual|off|start|"
     "block|reset|done]] [-f <feature>]",
-  .summary = "the task board; cg help spec lists every subcommand",
+  .summary = "the task board; hyperfide help spec lists every subcommand",
   .detail = "Specs are kvx files under spec/, independent of .codegraph/. "
-    "The loop: spec next, spec start <id>, implement, cg commit, spec done "
+    "The loop: spec next, spec start <id>, implement, hyperfide commit, spec done "
     "<id>. Every subcommand takes -f <feature> to name a feature other "
     "than the active one, and --root DIR for another tree.",
-  .examples = "cg spec\ncg spec next\ncg spec done 4.1",
+  .examples = "hyperfide spec\ncg spec next\ncg spec done 4.1",
   .related = "brief,commit,fleet" },
 { .group = "spec", .name = "spec status", .args = "",
   .usage = "spec status",
@@ -815,7 +815,7 @@ static const HelpCmd HELP[] = {
   .flags = "-n N\tslots\n--driver D\tcodex, claude, or custom\n"
     "--dry-run\tshow what would run\n--max-fail K\tstop after K "
     "failures\n--agent-prefix P\tagent name prefix\n--fleet\tthe "
-    "hierarchical form (see cg fleet up)\n",
+    "hierarchical form (see hyperfide fleet up)\n",
   .related = "fleet up,spec claim-next" },
 { .group = "spec", .name = "spec render", .args = "[--check]",
   .usage = "spec render [--check]",
@@ -875,15 +875,15 @@ static const HelpCmd HELP[] = {
     "--wait MS\twait this long for a build already running (default 5000)\n"
     "--quiet\tbackground use: print nothing; a build already running is "
     "left to it\n",
-  .examples = "cg projection build\ncg projection build --index --json\n"
-    "cg search Handler --branch codify/projection",
+  .examples = "hyperfide projection build\ncg projection build --index --json\n"
+    "hyperfide search Handler --branch codify/projection",
   .related = "projection status,projection diff,projection show,branches" },
 { .group = "fleet", .name = "projection status", .args = "",
   .usage = "projection status",
   .summary = "the last build and the live findings by branch",
   .detail = "The last build and its age, then every live finding grouped by "
     "the branch it involves, with that branch's worktree. Nothing is "
-    "rebuilt: hooks, cg watch, cg serve and the fleet supervisor start a "
+    "rebuilt: hooks, hyperfide watch, hyperfide serve and the fleet supervisor start a "
     "background build when work happens, at most once per [projection] "
     "min_interval (15s), unless [projection] auto = false.",
   .related = "projection findings,brief,state" },
@@ -905,7 +905,7 @@ static const HelpCmd HELP[] = {
     "their agents, the lines, and one line of advice. The agents on both "
     "branches are steered once per new finding unless [projection] steer = "
     "false. See docs/projection.md.",
-  .examples = "cg projection findings\ncg projection findings --json",
+  .examples = "hyperfide projection findings\ncg projection findings --json",
   .related = "projection build,fleet steer" },
 { .group = "fleet", .name = "fleet", .args = "<subcommand>",
   .usage = "fleet roles | status | plan [-f F] | "
@@ -951,7 +951,7 @@ static const HelpCmd HELP[] = {
     "creates or completes the native agent rows hooks did not report, never "
     "overwriting a field a hook wrote. Worktrees named in meta.json are "
     "registered; a transcript untouched for 15 minutes marks its agent "
-    "stale. fleet status, fleet tree, cg serve and cg watch --fleet run it "
+    "stale. fleet status, fleet tree, hyperfide serve and hyperfide watch --fleet run it "
     "first under [fleet] discover (default true), at most once per 10 s; "
     "--no-discover skips that.",
   .flags = "--since DUR\ttranscripts changed within DUR (default 24h)\n",
@@ -998,7 +998,7 @@ static const HelpCmd HELP[] = {
   .summary = "open the pull request through gh" },
 { .group = "fleet", .name = "fleet checkpoint", .args = "[--dry-run]",
   .usage = "fleet checkpoint [--dry-run]",
-  .summary = "merge the open Codify pull requests in order" },
+  .summary = "merge the open Hyperfide pull requests in order" },
 { .group = "fleet", .name = "fleet approvals", .args = "[--all]",
   .usage = "fleet approvals [--all]",
   .summary = "what waits at an opt-in gate ([role.*] approve)" },
@@ -1053,7 +1053,7 @@ static const HelpCmd HELP[] = {
   .usage = "config [init | get <section.key> | "
     "set <section.key> <value> | check] [--json]",
   .summary = "every codify.kvx setting with its origin",
-  .detail = "Works before cg init and in a spec-only repository.",
+  .detail = "Works before hyperfide init and in a spec-only repository.",
   .related = "info", .aliases = "config list,config show" },
 { .group = "config", .name = "config init", .args = "",
   .usage = "config init",
@@ -1084,7 +1084,7 @@ static const HelpCmd HELP[] = {
 { .group = "config", .name = "help", .args = "[<command>] [--all]",
   .usage = "help [<command>] [--all] [--json]",
   .summary = "this map, one command's detail, or all of them",
-  .detail = "cg <command> --help and cg <command> -h show the same detail.",
+  .detail = "hyperfide <command> --help and hyperfide <command> -h show the same detail.",
   .flags = "--all\tevery command's detail, in group order\n"
     "--json\tevery command and subcommand, for menus\n",
   .aliases = "-h,--help" },
@@ -1214,7 +1214,7 @@ static const HelpCmd *help_find(const char *name) {
 }
 
 /* main asks before it opens the graph, so an unknown command gets its
- * suggestion outside a project too instead of "not inside a Codify project" */
+ * suggestion outside a project too instead of "not inside a Hyperfide project" */
 bool help_known(const char *name) { return help_find(name) != NULL; }
 
 /* the subcommands of a top-level name: rows named "<parent> <word>" */
@@ -1276,11 +1276,11 @@ void help_overview(void) {
     Out o; o_init(&o);
     int lcol = left_col(&o);
     char head[256];
-    snprintf(head, sizeof head, "Codify %s — code graph, version control, "
+    snprintf(head, sizeof head, "Hyperfide %s — code graph, version control, "
              "and the agent workflow, local-first", CG_VERSION);
     o_on(&o, BOLD); o_wrap(&o, head, 0); o_on(&o, OFF); o_nl(&o);
     o_nl(&o);
-    o_wrap(&o, "usage: cg <command> [args]", 0); o_nl(&o);
+    o_wrap(&o, "usage: hyperfide <command> [args]", 0); o_nl(&o);
     for (int g = 0; g < NGROUPS; g++) {
         o_nl(&o);
         o_on(&o, BOLD); o_str(&o, GROUPS[g].title); o_on(&o, OFF);
@@ -1295,8 +1295,8 @@ void help_overview(void) {
     o_on(&o, BOLD); o_str(&o, "global flags"); o_on(&o, OFF); o_nl(&o);
     flags_block(&o, GLOBAL_FLAGS, lcol);
     o_nl(&o);
-    o_wrap(&o, "cg help <command> (or cg <command> --help) for its usage, "
-           "flags, and examples; cg help --all for every command", 0);
+    o_wrap(&o, "hyperfide help <command> (or hyperfide <command> --help) for its usage, "
+           "flags, and examples; hyperfide help --all for every command", 0);
     o_nl(&o);
     o_flush(&o, stdout);
 }
@@ -1308,7 +1308,7 @@ static void section(Out *o, const char *title) {
 
 static void detail(Out *o, const HelpCmd *c) {
     int lcol = left_col(o);
-    o_on(o, BOLD); o_str(o, "usage: cg "); o_wrap(o, c->usage, 4);
+    o_on(o, BOLD); o_str(o, "usage: hyperfide "); o_wrap(o, c->usage, 4);
     o_on(o, OFF); o_nl(o);
     o_nl(o);
     o_pad(o, 2); o_wrap(o, c->summary, 2); o_nl(o);
@@ -1342,7 +1342,7 @@ static void detail(Out *o, const HelpCmd *c) {
             char word[128];
             snprintf(word, sizeof word, "%scg %.*s", first ? "" : ", ",
                      (int)n, p);
-            /* keep "cg spec trace" on one line: wrap per name, not word */
+            /* keep "hyperfide spec trace" on one line: wrap per name, not word */
             if (o->col + dwidth(word, strlen(word)) > o->width) {
                 o_nl(o); o_pad(o, 2);
                 if (!first) { memmove(word, word + 2, strlen(word) - 1); }
@@ -1394,12 +1394,12 @@ void help_suggest(const char *name) {
         }
     }
     if (!nb) {
-        fprintf(stderr, "  cg help lists every command\n");
+        fprintf(stderr, "  hyperfide help lists every command\n");
         return;
     }
     fprintf(stderr, "  did you mean:");
     for (int i = 0; i < nb; i++)
-        fprintf(stderr, "%s cg %s", i ? "," : "", HELP[best[i]].name);
+        fprintf(stderr, "%s hyperfide %s", i ? "," : "", HELP[best[i]].name);
     fprintf(stderr, "?\n");
 }
 
@@ -1421,7 +1421,7 @@ static const HelpCmd *find_words(int n, char **w) {
 int help_command(const char *name) {
     const HelpCmd *c = help_find(name);
     if (!c) {
-        fprintf(stderr, "cg help: no command named '%s'\n", name);
+        fprintf(stderr, "hyperfide help: no command named '%s'\n", name);
         help_suggest(name);
         return 1;
     }
@@ -1514,7 +1514,7 @@ static void help_json(void) {
         } else sb_puts(&b, "null");
         sb_puts(&b, ",\"usage\":");
         StrBuf u; sb_init(&u);
-        sb_printf(&u, "cg %s", c->usage);
+        sb_printf(&u, "hyperfide %s", c->usage);
         sb_json_str(&b, u.p);
         sb_free(&u);
         sb_puts(&b, ",\"args\":");
@@ -1551,7 +1551,7 @@ static void help_json(void) {
 /* main's bad-argument line, from the same row cg help shows */
 void help_usage(const char *name) {
     const HelpCmd *c = help_find(name);
-    fprintf(stderr, "usage: cg %s\n", c ? c->usage : name);
+    fprintf(stderr, "usage: hyperfide %s\n", c ? c->usage : name);
 }
 
 /* cg help [--all] [--json] [<name> ...] */
