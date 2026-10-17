@@ -3,7 +3,7 @@
     "allowed_actions": [],
     "approved": true
   },
-  "campaign_id": "hyperfide-task-26.3-names-migration-v1",
+  "campaign_id": "hyperfide-task-26.3-names-migration-v1-requal-12aa390190b3",
   "case_ids": [
     "V-026",
     "V-055"
@@ -77,8 +77,8 @@
     },
     {
       "path": "services/hyperfide/src/components/service.ts",
-      "sha256": "9bc9b235ca40944692bae091e2028715330d52930fcf2051ddf9e0c05a2736a1",
-      "size": 10773
+      "sha256": "529bdc90d091c4a05e9d1c16431c41b2d617e029f4d5f3d43354e19afffbacf7",
+      "size": 10886
     },
     {
       "path": "services/hyperfide/src/policy/programme.ts",
@@ -97,8 +97,8 @@
     },
     {
       "path": "services/hyperfide/dist/components/service.js",
-      "sha256": "d48dba209b9803a09a9b09326803142e28bf416bf2dbf14d99aba69d57b35677",
-      "size": 11025
+      "sha256": "4e1b95193fb0d67bc3720d8ef2c520392e5b6136ac1764815da218ff5ef88dd0",
+      "size": 11138
     },
     {
       "path": "services/hyperfide/dist/policy/programme.js",
@@ -112,28 +112,28 @@
     },
     {
       "path": "src/config.c",
-      "sha256": "5a921f51eab4b9fa48ddddb210bc88274d06f4df6a3761ff19347f258e99d2e9",
-      "size": 44651
+      "sha256": "787d77c31863855ac530c15acf81a3fc84cac2b0691f31433fa31174414530cc",
+      "size": 45187
     },
     {
       "path": "src/cg.h",
-      "sha256": "6c58363f66c65e4e7f91960845596626a41abbbf966ea75e0f70523c1635cb3d",
-      "size": 93626
+      "sha256": "feb03659cfb42cfbecc796aca90b467dd954e44065b18dcc2526f8899c991e4a",
+      "size": 93698
     },
     {
       "path": "src/main.c",
-      "sha256": "0608c434dcf49b89d1a5ffe3a074b0663495d01af860a515ef150b505e4da943",
-      "size": 35178
+      "sha256": "9c653b59bc08e14d813cd023daf36ce30afa3711da86824a85dd63fe7533b3d1",
+      "size": 36052
     },
     {
       "path": "hyperfide",
-      "sha256": "528dc352fa30b2a1b0acfb7922d7d69af045b6cd3a69042465c8a2613ddf2800",
-      "size": 69086576
+      "sha256": "08127e8ff517a8f67819f0538a592c2f5a362d1131092cab83a340860332f87e",
+      "size": 69285024
     },
     {
       "path": "cg",
-      "sha256": "528dc352fa30b2a1b0acfb7922d7d69af045b6cd3a69042465c8a2613ddf2800",
-      "size": 69086576
+      "sha256": "08127e8ff517a8f67819f0538a592c2f5a362d1131092cab83a340860332f87e",
+      "size": 69285024
     },
     {
       "path": "/usr/bin/flock",
