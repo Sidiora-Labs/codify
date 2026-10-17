@@ -32,6 +32,16 @@ def main():
                 value=f.ask("evaluation.drift.check",{"gate_id":gate["artifact_id"],"scorecard_id":score["artifact_id"],"current_profile":changed})
                 require(not value["model_action_policy_enabled"]and"model_route_or_rubric_changed"in value["reasons"]and value["retain_existing_workers"]and not value["alter_accepted_evidence"],"drift did not preserve fallback/history")
             check("evaluation.promotion.version-drift-disables",drift)
+            def drift_replay():
+                changed=copy.deepcopy(candidate);changed["model"]="drifted/model"
+                value=f.ask("evaluation.drift.check",{"gate_id":gate["artifact_id"],"scorecard_id":score["artifact_id"],"current_profile":changed})
+                q=value["requalification"]
+                require(value["replay_required"]is True and value["requalification_required"]is True and q is not None,"drift did not demand replay/requalification")
+                require(q["profile_digest"]==digest(changed)and q["approved_profile_digest"]==digest(candidate)and q["profile_digest"]!=q["approved_profile_digest"],"affected profile not named")
+                require(q["approved_scorecard_id"]==score["artifact_id"]and q["observed_scorecard_id"]==score["artifact_id"]and q["policy_version"]==payload["version"],"scorecard/policy identity not named")
+                require(q["replay"]=={"dataset_id":score["dataset_id"],"holdout_digest":dataset["holdout_digest"],"split":"holdout"}and q["required_cases"]==payload["required_cases"],"replay scope not pinned to approved holdout and cases")
+                require(not value["model_action_policy_enabled"]and value["deterministic_core_continue"],"policy left active pending requalification")
+            check("evaluation.promotion.drift-requires-replay",drift_replay)
             def expired_qualification():
                 bad=copy.deepcopy(request);proof=bad["route_qualification"]
                 proof["body"]["payload"]["expires_at"]=utc(f.now-timedelta(minutes=1))
@@ -91,6 +101,7 @@ def main():
                 def optional(requested=requested):
                     value=f.ask("evaluation.selfhost.optional",{"requested":requested})
                     require(not value["enabled"]and not value["hosted_baseline_blocked"],"optional selfhost silently activated")
+                    require(value["replay_required_before_capability_change"]is requested and (set(value["qualification_dimensions"])=={"remote_gpu","licence","engine","correctness","overload","restart"})is requested,"self-host qualification dimensions not separated")
                 check("evaluation.promotion.optional-selfhost-"+str(requested).lower(),optional)
         finally:f.close()
     print(json.dumps({"type":"cleanup","resources":[],"complete":True}),flush=True)
