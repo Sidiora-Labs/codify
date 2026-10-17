@@ -776,7 +776,8 @@ def scenario(p):
           len(p.ledger("SELECT id FROM launches WHERE id IN (?,?)", (L2, L4))) == 2 and p.cstate()["acks"].get(start2["id"] + ":2", {}).get("state") == "UNCERTAIN")
     cancel3 = p.instruction("CANCEL", L3, {}, attempt3)
     cancel6 = p.instruction("CANCEL", L6, {}, attempt6)
-    stopped = wait_for(lambda: p.launch(L3)["state"] == "STOPPED" and p.launch(L6)["state"] == "STOPPED", 15)
+    stopped = wait_for(lambda: p.launch(L3)["state"] == "STOPPED" and p.launch(L6)["state"] == "STOPPED" and
+                       p.events(L3, "instruction.cancel") and p.events(L6, "instruction.cancel"), 15)
     deliveries = [e["data"]["delivery"] for e in p.events(L3, "instruction.cancel") + p.events(L6, "instruction.cancel")]
     check("cancel.orphan-stopped-without-broker", stopped and deliveries == ["STOPPED_WITHOUT_BROKER"] * 2 and not p.uid_processes(p.slot["S3"]["uid"]) and
           not p.uid_processes(p.slot["S6"]["uid"]), deliveries)
