@@ -89,7 +89,7 @@
     "viewsWelcome": [
       {
         "view": "codifyTasks",
-        "contents": "No Hyperfide spec found.\nA task board appears here when the workspace contains spec/workflow.kvx and the cg binary is on PATH (or set codify.binaryPath).\n[Create a feature spec](command:codify.newFeature)\n[Refresh](command:codify.refresh)"
+        "contents": "No Hyperfide spec found.\nA task board appears here when the workspace contains spec/workflow.kvx and the hyperfide binary is on PATH (or set hyperfide.binaryPath).\n[Create a feature spec](command:codify.newFeature)\n[Refresh](command:codify.refresh)"
       },
       {
         "view": "codifyMemories",
@@ -804,12 +804,12 @@
         "codify.serve": {
           "type": "boolean",
           "default": true,
-          "description": "Keep one `cg serve` connection open for every call and live events (no polling). Off, or with an older cg, the extension shells out and polls as before."
+          "description": "Keep one `hyperfide serve` connection open for every call and live events (no polling). Off, or with an older hyperfide, the extension shells out and polls as before."
         },
         "codify.binaryPath": {
           "type": "string",
           "default": "cg",
-          "description": "Path to the cg binary."
+          "description": "Deprecated: use hyperfide.binaryPath. An explicit value is honoured only when hyperfide.binaryPath is unset."
         },
         "codify.feature": {
           "type": "string",
@@ -819,7 +819,7 @@
         "codify.languageServer": {
           "type": "boolean",
           "default": true,
-          "description": "Run `cg lsp` for go-to-definition, references, hover, code lens, and scope diagnostics. Turn off to use the task board alone."
+          "description": "Run `hyperfide lsp` for go-to-definition, references, hover, code lens, and scope diagnostics. Turn off to use the task board alone."
         },
         "codify.agentName": {
           "type": "string",
@@ -892,7 +892,7 @@
         "codify.agent.parallelism": {
           "type": "number",
           "default": 2,
-          "description": "Agent slots used by Hyperfide: Run Wave with Agents (cg spec run -n)."
+          "description": "Agent slots used by Hyperfide: Run Wave with Agents (hyperfide spec run -n)."
         },
         "hyperfide.binaryPath": {
           "type": "string",

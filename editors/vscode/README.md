@@ -47,7 +47,7 @@ The panel is part of the zero-dependency promise: no bundler, no remote fonts or
 
 ## The agent view
 
-The Hyperfide sidebar has an **Agent** view — a persistent chat with Claude Code or Codex, always there, no task required. The extension speaks the [Agent Client Protocol](https://agentclientprotocol.com) to the agent's ACP adapter (`claude-code-acp` or the maintained `@agentclientprotocol/codex-acp`). A lightweight connection on view open discovers past sessions; a working session starts when you send or restore one. Every working session runs in the workspace with **an MCP server named `codify` injected** — `<binary> mcp`, where the binary is `codify.binaryPath` (default `cg`; see [Requirements](#requirements)), so the agent has the full graph, spec, and memory toolset without any per-repo MCP config. A **provider picker** in the header switches between Codex, Claude Code, and a Custom ACP command for the next chat; the choice is remembered per workspace. The **⚙** gear next to it (also *Hyperfide: Configure Agent Provider*) is a quick pick that switches provider, edits each adapter's launch command in place, or opens the `codify.acp` settings. The **＋ New Agent Chat** button on the view resets to a fresh session.
+The Hyperfide sidebar has an **Agent** view — a persistent chat with Claude Code or Codex, always there, no task required. The extension speaks the [Agent Client Protocol](https://agentclientprotocol.com) to the agent's ACP adapter (`claude-code-acp` or the maintained `@agentclientprotocol/codex-acp`). A lightweight connection on view open discovers past sessions; a working session starts when you send or restore one. Every working session runs in the workspace with **an MCP server named `codify` injected** — `<binary> mcp`, where the binary is `hyperfide.binaryPath` (default `hyperfide`; see [Requirements](#requirements)), so the agent has the full graph, spec, and memory toolset without any per-repo MCP config. A **provider picker** in the header switches between Codex, Claude Code, and a Custom ACP command for the next chat; the choice is remembered per workspace. The **⚙** gear next to it (also *Hyperfide: Configure Agent Provider*) is a quick pick that switches provider, edits each adapter's launch command in place, or opens the `codify.acp` settings. The **＋ New Agent Chat** button on the view resets to a fresh session.
 
 The **Past sessions** selector merges compact workspace history remembered by the extension with the adapter's ACP `session/list` results. Titles are cleaned before they are shown: harness prefixes such as Claude Code's local-command caveat are stripped, a `/clear` session is titled by its command, and a session that begins with a context-compaction summary is titled `↻ continued: <what the work was about>`, since Claude Code opens a new session file at every compaction. Selecting one uses `session/load` for transcript replay, or `session/resume` when the adapter only supports context restoration; that limitation is stated inline. Refresh asks the selected adapter again. Adapters without session lifecycle support leave locally known entries visible but never claim that history was restored.
 
@@ -123,7 +123,7 @@ The rest of the lifecycle:
 | Run Agent Headless on Task | Same claim + prompt, but runs `codex exec --sandbox workspace-write` (or `claude -p`) as a VS Code task; the exit is reported with the task's resulting status |
 | Hand Off Task | Records what is done, what is next, and what is blocked (`hyperfide handoff`) so a fresh session can pick up cleanly |
 | Resume Task in Agent Session | Quick-picks an in-progress task and opens a new driver terminal seeded from `hyperfide resume --prompt` — the fresh-session half of a handoff |
-| Run Wave with Agents | Opens a terminal running `<binary> spec run -n <codify.agent.parallelism> --driver <driver>`, where the binary is `codify.binaryPath` (default `cg`) — the built-in orchestrator works the whole eligible frontier |
+| Run Wave with Agents | Opens a terminal running `<binary> spec run -n <codify.agent.parallelism> --driver <driver>`, where the binary is `hyperfide.binaryPath` (default `hyperfide`) — the built-in orchestrator works the whole eligible frontier |
 | Stop Agent Session | Closes the session's terminal (or terminates the headless task) |
 
 When a session's terminal closes — or a headless run exits — with the task not yet `done` or `implemented`, the extension offers to release the claim so the task returns to the frontier. Work done by agents outside the editor shows up without a manual refresh: pushed over `hyperfide serve`, or, without it, through a 10-second poll while any tracked session exists. Tasks with a live claim show `$(person)` plus the agent name; `$(terminal)` marks tasks with a tracked terminal session and `$(comment-discussion)` marks tasks with a live agent panel in this window.
@@ -201,8 +201,7 @@ Beyond syntax highlighting:
 
 ## Requirements
 
-- `hyperfide` on `PATH`, or set `hyperfide.binaryPath`. The language server, `hyperfide serve` and every board call use `hyperfide.binaryPath`; an explicitly set `codify.binaryPath` is still honoured when `hyperfide.binaryPath` is not set, and two conflicting explicit values are refused.
-- `cg` on `PATH` as well, or `codify.binaryPath` set, for the MCP server injected into agent sessions and for Run Wave with Agents: those two read only `codify.binaryPath`, whose default is `cg`.
+- `hyperfide` on `PATH`, or set `hyperfide.binaryPath`. The language server, `hyperfide serve`, every board call, the MCP server injected into agent sessions and Run Wave with Agents use `hyperfide.binaryPath`; an explicitly set `codify.binaryPath` is still honoured when `hyperfide.binaryPath` is not set, and two conflicting explicit values are refused.
 - `npx` for the default Codex ACP launcher, or set `codify.acp.codexCommand` to an installed ACP adapter.
 - For the task board: a workspace containing `spec/workflow.kvx`.
 - For code navigation: a workspace with `.codegraph/` — run `hyperfide init`.
@@ -214,7 +213,7 @@ Neither is required for the other. kvx highlighting works everywhere.
 | Setting | Default | Description |
 |---|---|---|
 | `hyperfide.binaryPath` | `hyperfide` | Canonical executable for the language server, `serve` and board calls. A conflicting explicit `codify.binaryPath` is refused |
-| `codify.binaryPath` | `cg` | Legacy path, honoured for board calls when `hyperfide.binaryPath` is unset; the injected MCP server and Run Wave with Agents use only this setting |
+| `codify.binaryPath` | `cg` | Deprecated path, honoured when `hyperfide.binaryPath` is unset |
 | `codify.serve` | `true` | Keep one `hyperfide serve` connection open for every call and live events (no polling). Off, or with a binary without `serve`, the extension shells out and polls |
 | `codify.acp.diffStyle` | `unified` | How a file edit opens in the agent chat: one unified column, or old and new side by side. Each diff can still be flipped in place |
 | `codify.feature` | *(empty)* | Feature override, passed to every spec command as `-f` |

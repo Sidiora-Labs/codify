@@ -206,7 +206,7 @@ AcpClient.prototype.initialize = function (clientInfo) {
                 auth: { terminal: false },
             },
             clientInfo: clientInfo ||
-                { name: 'codify', title: 'Codify', version: extensionVersion() },
+                { name: 'codify', title: 'Hyperfide', version: extensionVersion() },
         }, 30000))
         .then((res) => {
             if (!res || res.protocolVersion !== PROTOCOL_VERSION) {
@@ -253,7 +253,7 @@ function normalizeCodexAdapterCommand(value) {
 
 /* ---------------- PANEL: everything below needs VS Code ---------------- */
 
-let deps;                    /* {cg, cgJson, refresh, workspaceRoot, startTerminal} */
+let deps;                    /* {cg, cgJson, binary, refresh, workspaceRoot, startTerminal} */
 let extensionCtx;            /* VS Code ExtensionContext for workspace history */
 const panels = new Map();    /* task id -> editor-panel session */
 let permitSeq = 0;
@@ -426,8 +426,7 @@ function rememberSession(sess, extra) {
 }
 
 function mcpServers() {
-    const binary = config().get('binaryPath') || 'cg';
-    return [{ name: 'codify', command: binary, args: ['mcp'], env: [] }];
+    return [{ name: 'codify', command: deps.binary(), args: ['mcp'], env: [] }];
 }
 
 /* The session's fs bridge: serve workspace files, refuse everything else.
@@ -489,19 +488,19 @@ async function resumePrompt(id) {
         ? await deps.cg(['docs', 'packet'])
         : await deps.cg(['resume', '--task', id, '--prompt']);
     if (id === '@docs' && r.code === 0 && r.stdout.trim()) {
-        return 'You own Codify\'s final @docs closure. Update only configured ' +
+        return 'You own Hyperfide\'s final @docs closure. Update only configured ' +
             'documentation targets from this evidence, keep user, developer, ' +
-            'and release coverage explicit, then finish with `cg docs close`. ' +
-            'Do not run `cg spec run` or `cg spec done @docs`.\n\n' + r.stdout;
+            'and release coverage explicit, then finish with `hyperfide docs close`. ' +
+            'Do not run `hyperfide spec run` or `hyperfide spec done @docs`.\n\n' + r.stdout;
     }
     if (r.code === 0 && r.stdout.trim()) return r.stdout;
     if (id === '@docs') throw new Error('Documentation evidence packet failed: ' + r.stderr);
     const b = await deps.cg(['brief']);
-    return `You are resuming Codify task ${id}.\n\n` +
+    return `You are resuming Hyperfide task ${id}.\n\n` +
         (b.stdout || '').trimEnd() + '\n\n' +
-        'Use `cg context <area>` to load relevant code, run ' +
-        `\`cg spec implemented ${id}\` or \`cg spec done ${id}\` when finished, ` +
-        'and `cg handoff` if you stop early.\n';
+        'Use `hyperfide context <area>` to load relevant code, run ' +
+        `\`hyperfide spec implemented ${id}\` or \`hyperfide spec done ${id}\` when finished, ` +
+        'and `hyperfide handoff` if you stop early.\n';
 }
 
 function panelPost(sess, msg) {
@@ -705,7 +704,7 @@ async function endOfSession(sess, why) {
     if (sess.claimed) items.push('Release claim');
     items.push('Keep');
     const pick = await vscode.window.showWarningMessage(
-        `Codify: agent session on ${sess.taskId} ended (${why}) without the ` +
+        `Hyperfide: agent session on ${sess.taskId} ended (${why}) without the ` +
         'task qualifying.', ...items);
     if (pick === 'Record handoff') {
         await vscode.commands.executeCommand('codify.agent.handoff', sess.taskId);
@@ -714,7 +713,7 @@ async function endOfSession(sess, why) {
             ['spec', 'release', sess.taskId, '--agent', sess.agent]);
         if (r.code !== 0) {
             vscode.window.showErrorMessage(
-                `Codify: release of ${sess.taskId} failed — ` +
+                `Hyperfide: release of ${sess.taskId} failed — ` +
                 firstLine(r.stderr || r.stdout));
         }
     }
@@ -828,7 +827,7 @@ async function openLocation(p, line) {
                 vscode.TextEditorRevealType.InCenterIfOutsideViewport);
         }
     } catch (e) {
-        vscode.window.showWarningMessage(`Codify: cannot open ${p} — ${e.message}`);
+        vscode.window.showWarningMessage(`Hyperfide: cannot open ${p} — ${e.message}`);
     }
 }
 
@@ -881,7 +880,7 @@ const CG_CMDS = {
 async function boardInfo() {
     const st = await deps.cgJson(['spec', 'status']);
     return st && st.feature
-        ? { feature: st.feature, mode: st.mode || '' } : { feature: 'codify', mode: '' };
+        ? { feature: st.feature, mode: st.mode || '' } : { feature: 'hyperfide', mode: '' };
 }
 
 /* Run a Codify command, show its output in the transcript, and hand the
@@ -906,7 +905,7 @@ async function runCgSlash(sess, cmd, args, send) {
         return;
     }
     const ask = (spec.zero && args) ? args : spec.ask;
-    const prompt = `\`cg ${argv.join(' ')}\` says:\n\n\`\`\`\n${out}\n\`\`\`\n\n${ask}`;
+    const prompt = `\`hyperfide ${argv.join(' ')}\` says:\n\n\`\`\`\n${out}\n\`\`\`\n\n${ask}`;
     await send(prompt, echo);
 }
 
@@ -1099,7 +1098,7 @@ async function taskLifecycle(sess, verb, send) {
     if (status) surfacePost(sess, { type: 'task_status', status });
     deps.refresh();
     if (r.code !== 0 && send) {
-        await send(`\`cg ${argv.join(' ')}\` was refused:\n\n\`\`\`\n${out}\n\`\`\`\n\n` +
+        await send(`\`hyperfide ${argv.join(' ')}\` was refused:\n\n\`\`\`\n${out}\n\`\`\`\n\n` +
             'Fix what it reports, then say when it is ready to run again.',
         `/${verb}`);
     }
@@ -1111,7 +1110,7 @@ async function pickTaskId(placeHolder) {
         .filter((t) => t.status === 'pending' || t.status === 'in_progress')
         .map((t) => ({ label: `${t.id}  ${t.title}`, description: t.status, id: t.id }));
     if (!items.length) {
-        vscode.window.showInformationMessage('Codify: no eligible tasks.');
+        vscode.window.showInformationMessage('Hyperfide: no eligible tasks.');
         return undefined;
     }
     const pick = await vscode.window.showQuickPick(items, { placeHolder });
@@ -1234,7 +1233,7 @@ async function showSessions(sess) {
 async function switchSession(sess, sessionId, driver) {
     if (!(await focusView())) {
         surfacePost(sess, { type: 'status',
-            text: 'open the Codify Agent view to switch sessions' });
+            text: 'open the Hyperfide Agent view to switch sessions' });
         return;
     }
     await restorePastSession(sessionId, driver);
@@ -1326,7 +1325,7 @@ async function sessionSlash(sess, cmd, args) {
          * rather than silently resetting a different surface */
         if (sess.panel) {
             surfacePost(sess, { type: 'status',
-                text: 'this is a task panel — start a new chat from the Codify Agent view' });
+                text: 'this is a task panel — start a new chat from the Hyperfide Agent view' });
             return;
         }
         await resetViewSession();
@@ -1359,7 +1358,7 @@ async function openAgentPanel(id, agent, promptText, claimed) {
     const { driver } = adapterCommand();
     const task = await taskRow(id);
     const panel = vscode.window.createWebviewPanel(
-        'codifyAgent', `codify: ${driver} ${id}`,
+        'codifyAgent', `hyperfide: ${driver} ${id}`,
         vscode.ViewColumn.Beside, { enableScripts: true, retainContextWhenHidden: true });
     panel.webview.html = panelHtml(panel.webview);
 
@@ -1394,7 +1393,7 @@ async function openAgentPanel(id, agent, promptText, claimed) {
         /* the terminal path stays the fallback when no adapter is available */
         const items = deps.startTerminal ? ['Use terminal session'] : [];
         const pick = await vscode.window.showErrorMessage(
-            `Codify: agent session on ${id} failed to start — ${why}`, ...items);
+            `Hyperfide: agent session on ${id} failed to start — ${why}`, ...items);
         if (pick === 'Use terminal session') {
             try { panel.dispose(); } catch (_) { /* already gone */ }
             await deps.startTerminal(id);
@@ -1413,7 +1412,7 @@ async function startPanelSession(id) {
         const existing = panels.get(id);
         if (existing.panel) existing.panel.reveal();
         else vscode.window.showInformationMessage(
-            `Codify: a panel session is already starting for ${id}.`);
+            `Hyperfide: a panel session is already starting for ${id}.`);
         return;
     }
     const agent = `vscode-acp-${++permitSeq}`;
@@ -1425,7 +1424,7 @@ async function startPanelSession(id) {
         if (c.code !== 0) {
             panels.delete(id);
             vscode.window.showErrorMessage(
-                `Codify: claim of ${id} refused — ${firstLine(c.stderr || c.stdout)}`);
+                `Hyperfide: claim of ${id} refused — ${firstLine(c.stderr || c.stdout)}`);
             return;
         }
         claimed = true;
@@ -1435,7 +1434,7 @@ async function startPanelSession(id) {
         : await deps.cg(['spec', 'start', id]);
     if (s.code !== 0) {
         vscode.window.showWarningMessage(
-            `Codify: spec start ${id}: ${firstLine(s.stderr || s.stdout)}`);
+            `Hyperfide: spec start ${id}: ${firstLine(s.stderr || s.stdout)}`);
     }
     const prompt = await resumePrompt(id);
     /* openAgentPanel overwrites the reservation with the live entry, so the
@@ -1606,7 +1605,7 @@ async function startChatSession(firstText, taskOpts, echo) {
         const items = sess.taskId && deps.startTerminal
             ? ['Use terminal session'] : [];
         const pick = await vscode.window.showErrorMessage(
-            `Codify: ${driver} agent failed to start — ${why}`, ...items);
+            `Hyperfide: ${driver} agent failed to start — ${why}`, ...items);
         if (pick === 'Use terminal session') await deps.startTerminal(sess.taskId);
         return;
     }
@@ -1629,7 +1628,7 @@ async function startTaskInView(id) {
         if (c.code !== 0) {
             viewSession = null;
             vscode.window.showErrorMessage(
-                `Codify: claim of ${id} refused — ${firstLine(c.stderr || c.stdout)}`);
+                `Hyperfide: claim of ${id} refused — ${firstLine(c.stderr || c.stdout)}`);
             return;
         }
         claimed = true;
@@ -1639,7 +1638,7 @@ async function startTaskInView(id) {
         : await deps.cg(['spec', 'start', id]);
     if (s.code !== 0) {
         vscode.window.showWarningMessage(
-            `Codify: spec start ${id}: ${firstLine(s.stderr || s.stdout)}`);
+            `Hyperfide: spec start ${id}: ${firstLine(s.stderr || s.stdout)}`);
     }
     const task = await taskRow(id);
     postView({ type: 'task',
@@ -1778,7 +1777,7 @@ async function cmdConfigure() {
         key: 'acp.claudeCommand', description: 'codify.acp.claudeCommand' });
     items.push({ label: 'Edit custom agent command…', act: 'edit',
         key: 'acp.customCommand', description: 'codify.acp.customCommand (empty removes it)' });
-    items.push({ label: '$(settings-gear) Open Codify agent settings', act: 'settings' });
+    items.push({ label: '$(settings-gear) Open Hyperfide agent settings', act: 'settings' });
     const pick = await vscode.window.showQuickPick(items,
         { placeHolder: `Agent provider: ${cur} — choose or configure` });
     if (!pick) return;
@@ -1861,7 +1860,7 @@ async function cmdOpenPanel(arg) {
             .filter((t) => t.status === 'pending' || t.status === 'in_progress')
             .map((t) => ({ label: `${t.id}  ${t.title}`, description: t.status, id: t.id }));
         if (!items.length) {
-            vscode.window.showInformationMessage('Codify: no matching tasks.');
+            vscode.window.showInformationMessage('Hyperfide: no matching tasks.');
             return;
         }
         const pick = await vscode.window.showQuickPick(items,
@@ -1881,7 +1880,7 @@ async function cmdOpenPanel(arg) {
         else await startPanelSession(id);   /* view unavailable: open beside */
     } else {
         const pick = await vscode.window.showWarningMessage(
-            `Codify: the agent view already has a chat. Start ${id} where?`,
+            `Hyperfide: the agent view already has a chat. Start ${id} where?`,
             'Replace current chat', 'Open beside');
         if (pick === 'Replace current chat') {
             await resetViewSession();

@@ -368,7 +368,7 @@ const card = approvalCard({ kind: 'approval.request', payload: { id: 7, gate: 'l
 check(card.type === 'approval' && card.id === 7 && /land fc on main/.test(card.title), card.title);
 check(/asked by fm-fc/.test(card.detail), card.detail);
 check(card.options.map((o) => o.action).join(',') === 'approve,reject', 'two options');
-check(card.commands[0] === 'cg fleet approve 7' && /--reject/.test(card.commands[1]), 'the commands behind the buttons');
+check(/^(?:cg|hyperfide) fleet approve 7$/.test(card.commands[0]) && /--reject/.test(card.commands[1]), 'the commands behind the buttons');
 check(approvalCard({ payload: { id: 8, gate: 'drift', subject: 'fc/2.1', state: 'approved' } }).options.length === 0, 'a decided approval has no buttons');
 // the real pending approval is what /approvals would draw
 const pending = JSON.parse(run('fleet', 'approvals', '--json').stdout).approvals;
@@ -592,6 +592,74 @@ if (/setInterval|createFileSystemWatcher/.test(
 const activePoll = /ACTIVE_POLL_MS = (\d+)/.exec(ag);
 if (!activePoll || Number(activePoll[1]) < 10000) {
     throw new Error('agent poll is faster than 10 s');
+}
+// binary() in extension.js is the one place that resolves hyperfide.binaryPath
+// against the legacy codify.binaryPath; the agent modules must receive it
+for (const f of ['agents.js', 'acp.js']) {
+    if (/binaryPath/.test(fs.readFileSync(path.join(dir, f), 'utf8'))) {
+        throw new Error(`${f} reads binaryPath itself instead of deps.binary()`);
+    }
+}
+const vm = require('vm');
+const extension = fs.readFileSync(path.join(dir, 'extension.js'), 'utf8');
+const acpSource = fs.readFileSync(path.join(dir, 'acp.js'), 'utf8');
+const panel = fs.readFileSync(path.join(dir, 'agentpanel.html'), 'utf8');
+const functionSource = (source, name) => {
+    const match = source.match(new RegExp(`(?:async )?function ${name}\\([^]*?\\n\\}`));
+    if (!match) throw new Error(`missing ${name}`);
+    return match[0];
+};
+for (const module of ['agents', 'acp']) {
+    if (!new RegExp(`${module}\\.register\\(ctx, \\{[^}]*\\bbinary\\b`).test(extension))
+        throw new Error(`${module} is not given the shared binary resolver`);
+}
+(async () => {
+    for (const [modern, legacy, expected] of [
+        [undefined, undefined, 'hyperfide'],
+        ['/opt/hyperfide', undefined, '/opt/hyperfide'],
+        [undefined, '/opt/cg', '/opt/cg'],
+        ['/opt/shared', '/opt/shared', '/opt/shared'],
+        ['/opt/hyperfide', '/opt/cg', null],
+    ]) {
+        const sent = [];
+        const sandbox = {
+            vscode: { workspace: { getConfiguration: (name) => ({
+                inspect: () => ({ globalValue: name === 'hyperfide' ? modern : legacy }),
+            }) }, window: { createTerminal: () => ({
+                show() {}, sendText: (text) => sent.push(text),
+            }) } },
+            config: () => ({ get: () => 2, inspect: () => ({ globalValue: legacy }) }),
+            sessions: new Map(), seq: 0, driverName: () => 'codex', ensurePolling() {},
+        };
+        vm.createContext(sandbox);
+        vm.runInContext(functionSource(extension, 'binary'), sandbox);
+        sandbox.deps = { binary: sandbox.binary, workspaceRoot: () => '/workspace' };
+        vm.runInContext(functionSource(acpSource, 'mcpServers'), sandbox);
+        vm.runInContext(functionSource(ag, 'cmdRunWave'), sandbox);
+        if (expected === null) {
+            for (const run of [() => sandbox.mcpServers(), () => sandbox.cmdRunWave()]) {
+                let refused = false;
+                try { await run(); } catch (e) { refused = /conflicting/.test(e.message); }
+                if (!refused) throw new Error('agent launch accepted conflicting binary settings');
+            }
+            if (sent.length || sandbox.sessions.size)
+                throw new Error('wave launched or reserved a session with conflicting binary settings');
+        } else {
+            const server = sandbox.mcpServers()[0];
+            if (server.command !== expected || server.name !== 'codify' || server.args[0] !== 'mcp')
+                throw new Error('MCP executable or compatibility identity changed');
+            await sandbox.cmdRunWave();
+            if (sent[0] !== `${expected} spec run -n 2 --driver codex`)
+                throw new Error('wave did not use the shared binary resolver');
+        }
+    }
+    console.log('agent executable settings: defaults, canonical, legacy, equal, conflict');
+})().catch((e) => { console.error(e); process.exitCode = 1; });
+if (!/createOutputChannel\('Hyperfide'\)/.test(extension) ||
+    !/aria-label="Hyperfide actions"/.test(panel) ||
+    !/Hyperfide agent/.test(panel) ||
+    !pkg.contributes.viewsWelcome[0].contents.includes('hyperfide binary')) {
+    throw new Error('residual legacy branding in extension welcome/output');
 }
 console.log('manifest coherent:', declared.length, 'commands');
 JS
