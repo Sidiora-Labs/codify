@@ -143,7 +143,7 @@ function tools(p:BlaxelImagePlan):Array<{name:string;version:string}>{
  for(const pin of pins){if(map.has(pin.name)&&map.get(pin.name)!==pin.version)fail('IMAGE_TOOL_MISMATCH','Conflicting mandatory pins');map.set(pin.name,pin.version);}return[...map].map(([name,version])=>({name,version}));
 }
 function shell(v:string):string{return "'"+v.replaceAll("'","'\\''")+"'";}
-export function blaxelCredentials(ctx:ComponentContext):{workspace:string;apiKey:string}{
+export function blaxelCredentials(ctx:Pick<ComponentContext,'env'>):{workspace:string;apiKey:string}{
  if(ctx.env.HF_BLAXEL_LIVE_ENABLED!=='true'||!ctx.env.HF_BLAXEL_WORKSPACE||!ctx.env.HF_BLAXEL_API_KEY)fail('BLAXEL_CREDENTIALS_UNAVAILABLE','Live credentials and operator enablement unavailable');
  return{workspace:ctx.env.HF_BLAXEL_WORKSPACE,apiKey:ctx.env.HF_BLAXEL_API_KEY};
 }
@@ -167,7 +167,7 @@ export interface BlaxelRuntimeSDK {
  SandboxInstance:{get(name:string):Promise<{process:{exec(request:{command:string;workingDir:string;waitForCompletion:boolean;timeout:number;keepAlive:boolean}):Promise<unknown>}}>};
 }
 
-export async function configuredBlaxelSDK(ctx:ComponentContext):Promise<BlaxelRuntimeSDK>{
+export async function configuredBlaxelSDK(ctx:Pick<ComponentContext,'env'>):Promise<BlaxelRuntimeSDK>{
  await assertSDKConfiguration();
  const auth=blaxelCredentials(ctx);if(configuredWorkspace&&configuredWorkspace!==auth.workspace)fail('BLAXEL_IMAGE_INVALID','Provisioner cannot switch workspaces');
  // The vendor root declarations import unrelated incompatible browser/MCP types.
