@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "19.3",
+  "task": "19.3",
+  "roles": [
+    "control"
+  ],
+  "module": "integration/closure.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "integration.closure.evaluate",
+    "integration.closure.verify",
+    "integration.closure.inspect",
+    "integration.closure.reconcile"
+  ],
+  "requires": [
+    "19.2",
+    "16.3",
+    "finding-remediation"
+  ]
+}
