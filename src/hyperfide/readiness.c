@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #include "components.h"
 #include "preparation_support.h"
+#include <ctype.h>
 #include <dirent.h>
 #include <netdb.h>
 #include <poll.h>
@@ -374,9 +375,456 @@ static int tools_ready(const char *profile, const char *workspace,
   free(config);
   return ok;
 }
+/* Verify tracked bytes against Git objects without trusting the worker index or
+ * invoking filters. */
+static int source_same_stat(const struct stat *a, const struct stat *b) {
+  return a->st_dev == b->st_dev && a->st_ino == b->st_ino &&
+         a->st_mode == b->st_mode && a->st_nlink == b->st_nlink &&
+         a->st_size == b->st_size && a->st_mtim.tv_sec == b->st_mtim.tv_sec &&
+         a->st_mtim.tv_nsec == b->st_mtim.tv_nsec &&
+         a->st_ctim.tv_sec == b->st_ctim.tv_sec &&
+         a->st_ctim.tv_nsec == b->st_ctim.tv_nsec;
+}
+static int source_parent(int root, const char *relative,
+                         char leaf[NAME_MAX + 1]) {
+  if (!hp_relative(relative))
+    return -1;
+  char *copy = strdup(relative);
+  if (!copy)
+    return -1;
+  char *last = strrchr(copy, '/');
+  int parent;
+  if (last) {
+    *last = 0;
+    parent = hp_open_dir(root, copy, 0);
+    last++;
+  } else {
+    parent = dup(root);
+    last = copy;
+  }
+  if (strlen(last) > NAME_MAX) {
+    if (parent >= 0)
+      close(parent);
+    free(copy);
+    return -1;
+  }
+  strcpy(leaf, last);
+  free(copy);
+  return parent;
+}
+static int source_metadata_open(int root, const char *relative) {
+  if (!relative || !*relative || relative[0] == '/' ||
+      strlen(relative) >= PATH_MAX)
+    return -1;
+  char *copy = strdup(relative), *save = NULL;
+  int current = dup(root);
+  if (!copy)
+    return -1;
+  for (char *part = strtok_r(copy, "/", &save); part && current >= 0;
+       part = strtok_r(NULL, "/", &save)) {
+    if (!strcmp(part, ".") || !strcmp(part, "..")) {
+      close(current);
+      current = -1;
+      break;
+    }
+    int next =
+        openat(current, part, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    close(current);
+    current = next;
+  }
+  free(copy);
+  return current;
+}
+static int source_metadata_safe(const char *repository, const char *workspace) {
+  int root = open(repository, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC),
+      metadata = -1;
+  if (root < 0)
+    return 0;
+  struct stat info;
+  if (fstatat(root, ".git", &info, AT_SYMLINK_NOFOLLOW))
+    goto done;
+  if (S_ISDIR(info.st_mode))
+    metadata =
+        openat(root, ".git", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  else if (S_ISREG(info.st_mode) && info.st_nlink == 1 && info.st_size > 8 &&
+           info.st_size < PATH_MAX) {
+    int fd = openat(root, ".git", O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    char data[PATH_MAX], candidate[PATH_MAX], resolved[PATH_MAX];
+    ssize_t n = fd >= 0 ? read(fd, data, sizeof data - 1) : -1;
+    struct stat after;
+    int stable =
+        fd >= 0 && fstat(fd, &after) == 0 && source_same_stat(&info, &after);
+    if (fd >= 0)
+      close(fd);
+    if (!stable || n != info.st_size)
+      goto done;
+    data[n] = 0;
+    if (strncmp(data, "gitdir: ", 8) || strchr(data + 8, '\r'))
+      goto done;
+    data[strcspn(data, "\n")] = 0;
+    int written = data[8] == '/'
+                      ? snprintf(candidate, sizeof candidate, "%s", data + 8)
+                      : snprintf(candidate, sizeof candidate, "%s/%s",
+                                 repository, data + 8);
+    size_t length = strlen(workspace);
+    if (written < 0 || written >= (int)sizeof candidate ||
+        !realpath(candidate, resolved) ||
+        strncmp(resolved, workspace, length) || resolved[length] != '/')
+      goto done;
+    int workspace_fd =
+        open(workspace, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (workspace_fd >= 0) {
+      metadata = source_metadata_open(workspace_fd, resolved + length + 1);
+      close(workspace_fd);
+    }
+  }
+  if (metadata >= 0) {
+    const char *denied[] = {"commondir", "objects/info/alternates",
+                            "objects/info/http-alternates", "info/grafts",
+                            "refs/replace"};
+    for (unsigned i = 0; i < sizeof denied / sizeof denied[0]; i++) {
+      char leaf[NAME_MAX + 1];
+      int parent = source_parent(metadata, denied[i], leaf);
+      if (parent < 0) {
+        if (errno == ENOENT)
+          continue;
+        close(metadata);
+        metadata = -1;
+        break;
+      }
+      int found = fstatat(parent, leaf, &info, AT_SYMLINK_NOFOLLOW) == 0;
+      int saved = errno;
+      close(parent);
+      if (found || saved != ENOENT) {
+        close(metadata);
+        metadata = -1;
+        break;
+      }
+    }
+  }
+done:
+  close(root);
+  if (metadata < 0)
+    return 0;
+  close(metadata);
+  return 1;
+}
+static int source_git(const char *repository, const char *diagnostics,
+                      int *sequence, char *const tail[],
+                      char output[PATH_MAX]) {
+  struct stat executable;
+  if (stat("/usr/bin/git", &executable) || !S_ISREG(executable.st_mode) ||
+      executable.st_uid != 0 || (executable.st_mode & 022))
+    return 0;
+  if (snprintf(output, PATH_MAX, "%s/content-%06d.txt", diagnostics,
+               (*sequence)++) >= PATH_MAX)
+    return 0;
+  char *argv[96];
+  int n = 0;
+  argv[n++] = "/usr/bin/git";
+  argv[n++] = "--no-pager";
+  argv[n++] = "-c";
+  argv[n++] = "core.hooksPath=/dev/null";
+  argv[n++] = "-c";
+  argv[n++] = "core.fsmonitor=false";
+  argv[n++] = "-c";
+  argv[n++] = "protocol.allow=never";
+  for (int i = 0; tail[i]; i++) {
+    if (n >= 94)
+      return 0;
+    argv[n++] = tail[i];
+  }
+  argv[n] = NULL;
+  char *extra[] = {"GIT_NO_LAZY_FETCH=1", "GIT_NO_REPLACE_OBJECTS=1", NULL};
+  return hp_spawn_env(repository, argv, output,
+                      !strcmp(tail[0], "fsck") ? 300 : 30, extra) == 0;
+}
+static int source_config_safe(const char *repository, const char *diagnostics,
+                              int *sequence) {
+  char log[PATH_MAX];
+  char *args[] = {"config",      "--local", "--no-includes",
+                  "--name-only", "--list",  NULL};
+  if (!source_git(repository, diagnostics, sequence, args, log))
+    return 0;
+  FILE *file = fopen(log, "r");
+  if (!file)
+    return 0;
+  char line[8192];
+  int ok = 1;
+  while (fgets(line, sizeof line, file)) {
+    if (!strchr(line, '\n') && !feof(file)) {
+      ok = 0;
+      break;
+    }
+    for (char *p = line; *p; p++)
+      *p = (char)tolower((unsigned char)*p);
+    line[strcspn(line, "\r\n")] = 0;
+    size_t n = strlen(line);
+    if (!strncmp(line, "include.", 8) || !strncmp(line, "includeif.", 10) ||
+        !strncmp(line, "fsck.", 5) || !strncmp(line, "fetch.fsck.", 11) ||
+        !strncmp(line, "receive.fsck.", 13) ||
+        !strcmp(line, "extensions.partialclone") ||
+        !strcmp(line, "extensions.worktreeconfig") ||
+        (n >= 9 && !strcmp(line + n - 9, ".promisor"))) {
+      ok = 0;
+      break;
+    }
+  }
+  if (ferror(file))
+    ok = 0;
+  fclose(file);
+  return ok;
+}
+static int source_blob_at(int root, const char *relative, const char *mode,
+                          const char *expected, char sha256[72],
+                          uint64_t *size) {
+  char leaf[NAME_MAX + 1];
+  int parent = source_parent(root, relative, leaf), fd = -1, ok = 0;
+  struct stat before, after, named;
+  if (parent < 0)
+    return 0;
+  if (fstatat(parent, leaf, &before, AT_SYMLINK_NOFOLLOW))
+    goto done;
+  int link = !strcmp(mode, "120000");
+  if (link ? !S_ISLNK(before.st_mode) : !S_ISREG(before.st_mode))
+    goto done;
+  if (before.st_size < 0 || before.st_size > 2147483648LL ||
+      (!link &&
+       (((before.st_mode & S_IXUSR) != 0) != (strcmp(mode, "100755") == 0))))
+    goto done;
+  EVP_MD_CTX *git = EVP_MD_CTX_new(), *raw = EVP_MD_CTX_new();
+  if (!git || !raw) {
+    EVP_MD_CTX_free(git);
+    EVP_MD_CTX_free(raw);
+    goto done;
+  }
+  const EVP_MD *algorithm = strlen(expected) == 40 ? EVP_sha1() : EVP_sha256();
+  char header[96];
+  int header_size =
+      snprintf(header, sizeof header, "blob %lld", (long long)before.st_size);
+  ok = header_size > 0 && EVP_DigestInit_ex(git, algorithm, NULL) &&
+       EVP_DigestInit_ex(raw, EVP_sha256(), NULL) &&
+       EVP_DigestUpdate(git, header, (size_t)header_size + 1);
+  uint64_t total = 0;
+  if (link) {
+    char target[65536];
+    ssize_t n = readlinkat(parent, leaf, target, sizeof target);
+    ok = ok && n == before.st_size && n >= 0 && (size_t)n < sizeof target;
+    if (ok) {
+      ok = EVP_DigestUpdate(git, target, (size_t)n) &&
+           EVP_DigestUpdate(raw, target, (size_t)n);
+      total = (uint64_t)n;
+    }
+  } else {
+    fd = openat(parent, leaf, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0)
+      ok = 0;
+    if (ok && (fstat(fd, &after) || !source_same_stat(&before, &after)))
+      ok = 0;
+    unsigned char buffer[65536];
+    while (ok) {
+      if (hp_cancelled) {
+        ok = 0;
+        break;
+      }
+      ssize_t n = read(fd, buffer, sizeof buffer);
+      if (n < 0 && errno == EINTR)
+        continue;
+      if (n < 0) {
+        ok = 0;
+        break;
+      }
+      if (!n)
+        break;
+      total += (uint64_t)n;
+      if (total > (uint64_t)before.st_size) {
+        ok = 0;
+        break;
+      }
+      ok = EVP_DigestUpdate(git, buffer, (size_t)n) &&
+           EVP_DigestUpdate(raw, buffer, (size_t)n);
+    }
+    if (ok && (fstat(fd, &after) || !source_same_stat(&before, &after)))
+      ok = 0;
+  }
+  unsigned char git_bytes[EVP_MAX_MD_SIZE], raw_bytes[EVP_MAX_MD_SIZE];
+  unsigned git_size = 0, raw_size = 0;
+  if (ok)
+    ok = total == (uint64_t)before.st_size &&
+         EVP_DigestFinal_ex(git, git_bytes, &git_size) &&
+         EVP_DigestFinal_ex(raw, raw_bytes, &raw_size) && raw_size == 32;
+  EVP_MD_CTX_free(git);
+  EVP_MD_CTX_free(raw);
+  if (ok) {
+    char actual[129];
+    for (unsigned i = 0; i < git_size; i++)
+      snprintf(actual + i * 2, 3, "%02x", git_bytes[i]);
+    strcpy(sha256, "sha256:");
+    for (unsigned i = 0; i < 32; i++)
+      snprintf(sha256 + 7 + i * 2, 3, "%02x", raw_bytes[i]);
+    *size = total;
+    ok = !strcmp(actual, expected) ? 1 : 2;
+    if (fstatat(parent, leaf, &named, AT_SYMLINK_NOFOLLOW) ||
+        !source_same_stat(&before, &named))
+      ok = 0;
+  }
+done:
+  if (fd >= 0)
+    close(fd);
+  close(parent);
+  return ok;
+}
+static int source_lfs_matches(const char *repository, const char *oid,
+                              const char *actual, uint64_t size,
+                              const char *diagnostics, int *sequence) {
+  char log[PATH_MAX];
+  char *args[] = {"cat-file", "blob", (char *)oid, NULL};
+  if (!source_git(repository, diagnostics, sequence, args, log))
+    return 0;
+  struct stat info;
+  if (stat(log, &info) || info.st_size < 1 || info.st_size > 1024)
+    return 0;
+  FILE *file = fopen(log, "r");
+  char data[1025], hex[65], length[32];
+  if (!file)
+    return 0;
+  size_t n = fread(data, 1, sizeof data - 1, file);
+  int ok = !ferror(file) && n == (size_t)info.st_size;
+  fclose(file);
+  data[n] = 0;
+  if (!ok || memchr(data, 0, n))
+    return 0;
+  int consumed = 0;
+  if (sscanf(data,
+             "version https://git-lfs.github.com/spec/v1\noid "
+             "sha256:%64[0-9a-f]\nsize %31[0-9]\n%n",
+             hex, length, &consumed) != 2 ||
+      strlen(hex) != 64 || consumed != (int)n)
+    return 0;
+  char expected[1025], raw[72];
+  uint64_t declared;
+  if ((length[0] == '0' && length[1]) || strlen(length) > 20)
+    return 0;
+  errno = 0;
+  char *end = NULL;
+  declared = strtoull(length, &end, 10);
+  if (errno || !end || *end || declared != size ||
+      snprintf(raw, sizeof raw, "sha256:%s", hex) >= (int)sizeof raw ||
+      strcmp(raw, actual))
+    return 0;
+  int written = snprintf(
+      expected, sizeof expected,
+      "version https://git-lfs.github.com/spec/v1\noid sha256:%s\nsize %s\n",
+      hex, length);
+  return written == (int)n && !memcmp(data, expected, n);
+}
+static int source_tree_clean(const char *repository, const char *commit,
+                             const char *workspace, const char *diagnostics,
+                             int *sequence, int lfs, int depth, int *budget) {
+  if (hp_cancelled || depth > 32 || --*budget < 0 ||
+      !source_metadata_safe(repository, workspace) ||
+      !source_config_safe(repository, diagnostics, sequence))
+    return 0;
+  char log[PATH_MAX];
+  char *fsck[] = {"fsck",          "--full",        "--no-reflogs",
+                  "--no-dangling", "--no-progress", NULL};
+  if (!source_git(repository, diagnostics, sequence, fsck, log))
+    return 0;
+  char *head[] = {"rev-parse", "--verify", "HEAD", NULL};
+  if (!source_git(repository, diagnostics, sequence, head, log))
+    return 0;
+  FILE *file = fopen(log, "r");
+  char observed[128];
+  int ok = file && fgets(observed, sizeof observed, file);
+  if (file)
+    fclose(file);
+  if (!ok)
+    return 0;
+  observed[strcspn(observed, "\r\n")] = 0;
+  if (strcmp(observed, commit))
+    return 0;
+  char *index_args[] = {
+      "diff-index",    "--cached",     "--quiet", "--no-ext-diff",
+      "--no-textconv", (char *)commit, "--",      NULL};
+  if (!source_git(repository, diagnostics, sequence, index_args, log))
+    return 0;
+  char *args[] = {"ls-tree", "-r", "-z", (char *)commit, NULL};
+  if (!source_git(repository, diagnostics, sequence, args, log))
+    return 0;
+  struct stat listing;
+  if (stat(log, &listing) || listing.st_size < 0 ||
+      listing.st_size > 16 * 1024 * 1024)
+    return 0;
+  file = fopen(log, "rb");
+  if (!file)
+    return 0;
+  char *entries = malloc((size_t)listing.st_size + 1);
+  if (!entries) {
+    fclose(file);
+    return 0;
+  }
+  size_t bytes = fread(entries, 1, (size_t)listing.st_size, file);
+  ok = !ferror(file) && bytes == (size_t)listing.st_size;
+  fclose(file);
+  entries[bytes] = 0;
+  int root = open(repository, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  if (root < 0)
+    ok = 0;
+  size_t offset = 0;
+  while (ok && offset < bytes) {
+    char *entry = entries + offset;
+    size_t n = strnlen(entry, bytes - offset);
+    if (n == bytes - offset) {
+      ok = 0;
+      break;
+    }
+    offset += n + 1;
+    char *tab = strchr(entry, '\t'), mode[8], type[16], oid[65], extra;
+    if (!tab) {
+      ok = 0;
+      break;
+    }
+    *tab = 0;
+    if (sscanf(entry, "%7s %15s %64s %c", mode, type, oid, &extra) != 3 ||
+        !hp_oid(oid) || !hp_relative(tab + 1)) {
+      ok = 0;
+      break;
+    }
+    if (!strcmp(mode, "160000") && !strcmp(type, "commit")) {
+      char child[PATH_MAX];
+      int child_fd = hp_open_dir(root, tab + 1, 0);
+      if (child_fd < 0 || snprintf(child, sizeof child, "%s/%s", repository,
+                                   tab + 1) >= (int)sizeof child) {
+        if (child_fd >= 0)
+          close(child_fd);
+        ok = 0;
+        break;
+      }
+      close(child_fd);
+      ok = source_tree_clean(child, oid, workspace, diagnostics, sequence, lfs,
+                             depth + 1, budget);
+    } else if ((!strcmp(mode, "100644") || !strcmp(mode, "100755") ||
+                !strcmp(mode, "120000")) &&
+               !strcmp(type, "blob")) {
+      char actual[72];
+      uint64_t size = 0;
+      int content = source_blob_at(root, tab + 1, mode, oid, actual, &size);
+      ok = content == 1 || (content == 2 && lfs && strcmp(mode, "120000") &&
+                            source_lfs_matches(repository, oid, actual, size,
+                                               diagnostics, sequence));
+    } else
+      ok = 0;
+  }
+  if (root >= 0)
+    close(root);
+  free(entries);
+  return ok;
+}
+
 static int source_ready(const char *profile, const char *workspace,
                         const char *diagnostics, int *sequence,
-                        int inventory_verified, char **bindings) {
+                        int inventory_verified, int source_only,
+                        char **bindings) {
   char *captured = NULL;
   size_t captured_size = 0;
   FILE *capture = open_memstream(&captured, &captured_size);
@@ -419,6 +867,9 @@ static int source_ready(const char *profile, const char *workspace,
          log[PATH_MAX];
     ok = repo && hp_text(repo, "id", id, sizeof id) && hp_id(id) &&
          hp_text(repo, "commit", commit, sizeof commit) && hp_oid(commit);
+    char *lfs_value = repo ? hp_field(repo, "lfs") : NULL;
+    int allow_lfs = lfs_value && !strcmp(lfs_value, "true");
+    free(lfs_value);
     free(repo);
     if (!ok)
       break;
@@ -440,15 +891,16 @@ static int source_ready(const char *profile, const char *workspace,
       ok = 0;
       break;
     }
-    char *argv[] = {"git",
-                    "-c",
-                    "core.hooksPath=/dev/null",
-                    "-c",
-                    "core.fsmonitor=false",
-                    "rev-parse",
-                    "--verify",
-                    "HEAD",
-                    NULL};
+    if (!source_metadata_safe(directory, workspace) ||
+        !source_config_safe(directory, diagnostics, sequence)) {
+      ok = 0;
+      break;
+    }
+    char *argv[] = {"/usr/bin/git", "--no-replace-objects",
+                    "-c",           "core.hooksPath=/dev/null",
+                    "-c",           "core.fsmonitor=false",
+                    "rev-parse",    "--verify",
+                    "HEAD",         NULL};
     if (hp_spawn(directory, argv, log, 30)) {
       ok = 0;
       break;
@@ -465,15 +917,11 @@ static int source_ready(const char *profile, const char *workspace,
     if (ok) {
       snprintf(log, sizeof log, "%s/source-%06d.txt", diagnostics,
                (*sequence)++);
-      char *tree_args[] = {"git",
-                           "-c",
-                           "core.hooksPath=/dev/null",
-                           "-c",
-                           "core.fsmonitor=false",
-                           "rev-parse",
-                           "--verify",
-                           "HEAD^{tree}",
-                           NULL};
+      char *tree_args[] = {"/usr/bin/git", "--no-replace-objects",
+                           "-c",           "core.hooksPath=/dev/null",
+                           "-c",           "core.fsmonitor=false",
+                           "rev-parse",    "--verify",
+                           "HEAD^{tree}",  NULL};
       char tree[128];
       if (hp_spawn(directory, tree_args, log, 30)) {
         ok = 0;
@@ -502,25 +950,17 @@ static int source_ready(const char *profile, const char *workspace,
     if (ok) {
       snprintf(log, sizeof log, "%s/source-%06d.txt", diagnostics,
                (*sequence)++);
-      char *diff[] = {"git",
-                      "-c",
-                      "core.hooksPath=/dev/null",
-                      "-c",
-                      "core.fsmonitor=false",
-                      "diff",
-                      "--quiet",
-                      "--exit-code",
-                      "HEAD",
-                      "--",
-                      NULL};
-      ok = hp_spawn(directory, diff, log, 30) == 0;
+      int budget = 256;
+      ok = source_tree_clean(directory, commit, workspace, diagnostics,
+                             sequence, allow_lfs, 0, &budget);
     }
 
     if (ok && !inventory_verified) {
       for (int ignored = 0; ignored < 2 && ok; ignored++) {
         snprintf(log, sizeof log, "%s/source-%06d.txt", diagnostics,
                  (*sequence)++);
-        char *untracked[] = {"git",
+        char *untracked[] = {"/usr/bin/git",
+                             "--no-replace-objects",
                              "-c",
                              "core.hooksPath=/dev/null",
                              "-c",
@@ -531,7 +971,8 @@ static int source_ready(const char *profile, const char *workspace,
                              "-z",
                              "--",
                              NULL};
-        char *ignored_files[] = {"git",
+        char *ignored_files[] = {"/usr/bin/git",
+                                 "--no-replace-objects",
                                  "-c",
                                  "core.hooksPath=/dev/null",
                                  "-c",
@@ -580,15 +1021,16 @@ static int source_ready(const char *profile, const char *workspace,
         }
         snprintf(log, sizeof log, "%s/source-%06d.txt", diagnostics,
                  (*sequence)++);
-        char *head[] = {"git",
-                        "-c",
-                        "core.hooksPath=/dev/null",
-                        "-c",
-                        "core.fsmonitor=false",
-                        "rev-parse",
-                        "--verify",
-                        "HEAD",
-                        NULL};
+        if (!source_metadata_safe(child, workspace) ||
+            !source_config_safe(child, diagnostics, sequence)) {
+          ok = 0;
+          break;
+        }
+        char *head[] = {"/usr/bin/git", "--no-replace-objects",
+                        "-c",           "core.hooksPath=/dev/null",
+                        "-c",           "core.fsmonitor=false",
+                        "rev-parse",    "--verify",
+                        "HEAD",         NULL};
         if (hp_spawn(child, head, log, 30)) {
           ok = 0;
           break;
@@ -605,27 +1047,20 @@ static int source_ready(const char *profile, const char *workspace,
         if (ok) {
           snprintf(log, sizeof log, "%s/source-%06d.txt", diagnostics,
                    (*sequence)++);
-          char *diff[] = {"git",
-                          "-c",
-                          "core.hooksPath=/dev/null",
-                          "-c",
-                          "core.fsmonitor=false",
-                          "diff",
-                          "--quiet",
-                          "--exit-code",
-                          "HEAD",
-                          "--",
-                          NULL};
-          ok = hp_spawn(child, diff, log, 30) == 0;
+          int budget = 256;
+          ok = source_tree_clean(child, expected, workspace, diagnostics,
+                                 sequence, allow_lfs, 0, &budget);
         }
       }
       char *lfs = description ? hp_field(description, "lfs") : NULL;
-      if (ok && lfs && !strcmp(lfs, "true")) {
+      if (ok && !source_only && lfs && !strcmp(lfs, "true")) {
         snprintf(log, sizeof log, "%s/source-%06d.txt", diagnostics,
                  (*sequence)++);
-        char *verify[] = {"git",        "-c",   "core.hooksPath=/dev/null",
-                          "lfs",        "fsck", "--objects",
-                          "--pointers", "HEAD", NULL};
+        char *verify[] = {"/usr/bin/git", "--no-replace-objects",
+                          "-c",           "core.hooksPath=/dev/null",
+                          "lfs",          "fsck",
+                          "--objects",    "--pointers",
+                          "HEAD",         NULL};
         ok = hp_spawn(directory, verify, log, 60) == 0;
       }
       free(lfs);
@@ -854,8 +1289,9 @@ int hf_component_11_3(const char *action, const char *request, FILE *output) {
                                      "minimum_free_bytes",
                                      "minimum_free_inodes",
                                      "network_timeout_milliseconds"};
-  if (strcmp(action, "environment.readiness") || !hp_valid(request) ||
-      !hp_shape(request, keys, 10))
+  int source_only = !strcmp(action, "environment.source.verify");
+  if ((!source_only && strcmp(action, "environment.readiness")) ||
+      !hp_valid(request) || !hp_shape(request, keys, 10))
     return 2;
   int version, timeout;
   char workspace_name[2049], base_name[2049], manifest_name[2049], boot[97],
@@ -979,8 +1415,11 @@ int hf_component_11_3(const char *action, const char *request, FILE *output) {
     goto restore;
   reason = "SOURCE_MISMATCH";
   if (!source_ready(profile, workspace, diagnostics, &sequence,
-                    workspace_inventory_verified, &source_bindings))
+                    workspace_inventory_verified, source_only,
+                    &source_bindings))
     goto restore;
+  if (source_only)
+    goto final_checks;
   reason = "TOOLCHAIN_MISMATCH";
   if (!tools_ready(profile, workspace, diagnostics, &sequence))
     goto restore;
@@ -1050,6 +1489,7 @@ int hf_component_11_3(const char *action, const char *request, FILE *output) {
   free(capabilities);
   if (!ok)
     goto restore;
+final_checks:
   reason = "CANCELLED";
   if (hp_cancelled)
     goto restore;
@@ -1072,7 +1512,8 @@ int hf_component_11_3(const char *action, const char *request, FILE *output) {
   }
   reason = "SOURCE_MISMATCH";
   if (!source_ready(profile, workspace, diagnostics, &sequence,
-                    workspace_inventory_verified, &source_bindings))
+                    workspace_inventory_verified, source_only,
+                    &source_bindings))
     goto restore;
   ready = 1;
   reason = "CHECKS_PASSED";
@@ -1081,7 +1522,8 @@ restore:
   sigaction(SIGINT, &old_int, NULL);
 done:
   fprintf(output, "{\"schema_version\":1,\"state\":\"%s\",\"reason\":",
-          ready ? "READY" : "NOT_READY");
+          source_only ? (ready ? "SOURCE_VERIFIED" : "SOURCE_INVALID")
+                      : (ready ? "READY" : "NOT_READY"));
   hp_quote(output, reason);
   fputs(",\"boot_id\":", output);
   hp_quote(output, boot);

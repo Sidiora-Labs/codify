@@ -276,8 +276,9 @@ static inline int hp_open_dir(int anchor, const char *relative, int create) {
       close(fd);
       return -1;
     }
-    int next =
-        openat(fd, part, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    int next = openat(fd, part,
+                      ((save && *save) ? O_PATH : O_RDONLY) | O_DIRECTORY |
+                          O_NOFOLLOW | O_CLOEXEC);
     close(fd);
     fd = next;
     if (fd < 0)
@@ -466,7 +467,8 @@ static inline int hp_spawn_env(const char *cwd, char *const argv[],
             drain_deadline = 0;
   size_t written = 0;
   const size_t log_limit = 16 * 1024 * 1024;
-  int status = 0, finished = 0, failure = 0, eof = 0;
+  int status = 0, finished = 0, reaped = 0, identity_lost = 0, failure = 0,
+      eof = 0;
   for (;;) {
     unsigned char buffer[65536];
     for (;;) {
@@ -502,13 +504,19 @@ static inline int hp_spawn_env(const char *cwd, char *const argv[],
       written += (size_t)n;
     }
     if (!finished) {
-      pid_t observed = waitpid(pid, &status, WNOHANG);
-      if (observed == pid) {
+      siginfo_t observed;
+      memset(&observed, 0, sizeof observed);
+      int waited =
+          waitid(P_PID, (id_t)pid, &observed, WEXITED | WNOHANG | WNOWAIT);
+      if (waited == 0 && observed.si_pid == pid) {
         finished = 1;
+        /* Keep the exited leader unreaped until every group signal is complete.
+         */
         kill(-pid, SIGKILL);
         drain_deadline = hp_millis() + 200;
-      } else if (observed < 0 && errno != EINTR) {
+      } else if (waited < 0 && errno != EINTR) {
         failure = 126;
+        identity_lost = 1;
         finished = 1;
       }
     }
@@ -517,10 +525,17 @@ static inline int hp_spawn_env(const char *cwd, char *const argv[],
     if (!finished && hp_millis() > deadline)
       failure = 124;
     if (failure) {
-      kill(-pid, SIGKILL);
-      if (!finished)
-        while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
-        }
+      if (!identity_lost)
+        kill(-pid, SIGKILL);
+      if (!identity_lost && !reaped) {
+        pid_t waited;
+        do {
+          waited = waitpid(pid, &status, 0);
+        } while (waited < 0 && errno == EINTR);
+        reaped = waited == pid;
+        if (!reaped)
+          failure = 126;
+      }
       break;
     }
     if (finished && (eof || hp_millis() > drain_deadline))
@@ -528,12 +543,27 @@ static inline int hp_spawn_env(const char *cwd, char *const argv[],
     struct pollfd ready = {channel[0], POLLIN | POLLHUP, 0};
     if (poll(&ready, 1, 10) < 0 && errno != EINTR) {
       failure = 126;
-      kill(-pid, SIGKILL);
-      if (!finished)
-        while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
-        }
+      if (!identity_lost)
+        kill(-pid, SIGKILL);
+      if (!identity_lost && !reaped) {
+        pid_t waited;
+        do {
+          waited = waitpid(pid, &status, 0);
+        } while (waited < 0 && errno == EINTR);
+        reaped = waited == pid;
+        if (!reaped)
+          failure = 126;
+      }
       break;
     }
+  }
+  if (!identity_lost && !reaped) {
+    pid_t waited;
+    do {
+      waited = waitpid(pid, &status, 0);
+    } while (waited < 0 && errno == EINTR);
+    if (waited != pid)
+      failure = 126;
   }
   close(channel[0]);
   if (fsync(fd))

@@ -503,8 +503,9 @@ static int git_metadata_digest(const char *repo, const char *temporary,
         parent = -1;
         break;
       }
-      int child =
-          openat(parent, part, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+      int child = openat(parent, part,
+                         ((save && *save) ? O_PATH : O_RDONLY) | O_DIRECTORY |
+                             O_NOFOLLOW | O_CLOEXEC);
       close(parent);
       parent = child;
     }

@@ -27,12 +27,15 @@ interface ScanPolicy { secret_canaries: string[]; identity_canaries: string[]; l
 interface ScanDeclaration {
   policy_version: 1; canary_counts: { secret: number; identity: number; lease: number }; checks: string[];
 }
+export interface SymlinkEntry { path: string; target: string; digest: string }
+export interface HardlinkGroup { paths: string[] }
 export interface PreparationManifest {
-  schema_version: 1; profile: EnvironmentProfile; files: InventoryEntry[]; directories: DirectoryEntry[];
-  scan: ScanDeclaration; digest: string;
+  schema_version: 1 | 2; profile: EnvironmentProfile; files: InventoryEntry[]; directories: DirectoryEntry[];
+  symlinks?: SymlinkEntry[]; hardlinks?: HardlinkGroup[]; scan: ScanDeclaration; digest: string;
 }
+type InventoryContext = Pick<ComponentContext, 'env' | 'signal'>;
 const JSON_BYTES = 16 * 1024 * 1024;
-function operatingLimits(context: ComponentContext): { files: number; fileBytes: number; totalBytes: number; depth: number; directories: number } {
+function operatingLimits(context: InventoryContext): { files: number; fileBytes: number; totalBytes: number; depth: number; directories: number } {
   const read = (name: string, fallback: number, maximum: number): number => {
     const value = context.env['HF_PREPARATION_' + name];
     if (value === undefined) return fallback;
@@ -50,7 +53,7 @@ const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 const checks = ['sensitive_paths', 'private_key_markers', 'authority_json', 'designated_canaries'];
 function fail(reason: string): never { throw new Error('Preparation refused: ' + reason); }
 function record(value: unknown, keys: string[]): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype)
+  if (!value || typeof value !== 'object' || Array.isArray(value) || (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null))
     fail('object schema');
   const result = value as Record<string, unknown>;
   if (Object.keys(result).length !== keys.length || keys.some(key => !Object.hasOwn(result, key))) fail('object fields');
@@ -264,7 +267,8 @@ function mode(info: Stat): number {
   if ((info.mode & 0o7000n) !== 0n) fail('special permissions'); return Number(info.mode & 0o777n);
 }
 function names(fd: number): string[] {
-  const result = fs.readdirSync('/proc/self/fd/' + fd).sort();
+  const raw = fs.readdirSync('/proc/self/fd/' + fd, { encoding: 'buffer' });
+  const result = raw.map(value => { const decoded = value.toString('utf8'); if (!Buffer.from(decoded, 'utf8').equals(value)) fail('directory encoding'); return decoded; }).sort();
   if (result.some(value => !value || value === '.' || value === '..' || value.includes('/') || value.includes('\\') ||
       /[\x00-\x1f\x7f]/.test(value))) fail('directory names');
   return result;
@@ -274,7 +278,7 @@ function names(fd: number): string[] {
  * Directory descriptors anchor every traversal. Scanning is bounded and detects known state/canaries;
  * it does not establish absence of arbitrary unknown secrets or perform later readiness probes.
  */
-async function inventory(candidate: string, context: ComponentContext, policy: ScanPolicy): Promise<{ files: InventoryEntry[]; directories: DirectoryEntry[] }> {
+async function inventory(candidate: string, context: InventoryContext, policy: ScanPolicy, allowSymlinks: boolean): Promise<{ files: InventoryEntry[]; directories: DirectoryEntry[]; symlinks: SymlinkEntry[]; hardlinks: HardlinkGroup[] }> {
   const root = context.env.HF_PREPARATION_ALLOWED_ROOT;
   const LIMIT = operatingLimits(context);
   if (process.platform !== 'linux' || !root || !path.posix.isAbsolute(root) || root === '/' ||
@@ -283,11 +287,16 @@ async function inventory(candidate: string, context: ComponentContext, policy: S
   if (rootParts.some(value => !value || value === '.' || value === '..')) fail('trusted preparation root');
   const held: number[] = [];
   const links: { parent: number; name: string; fd: number; before: Stat; strict: boolean }[] = [];
-  const files: InventoryEntry[] = [], directories: DirectoryEntry[] = [];
+  const files: InventoryEntry[] = [], directories: DirectoryEntry[] = [], symlinks: SymlinkEntry[] = [];
+  const inspectedSymlinks: { parent: number; name: string; before: Stat; target: Buffer }[] = [];
+  const inodeGroups = new Map<string, { before: Stat; paths: string[]; digest: string }>();
+  const directoryInodes = new Set<string>();
+  const hardlinks: HardlinkGroup[] = [];
   const inspectedFiles: { parent: number; name: string; before: Stat }[] = [];
+  const inspectedDirectories: { fd: number; before: Stat; names: string[] }[] = [];
   let total = 0;
   const openDirectory = (parent: number, name: string, strict = true): number => {
-    const fd = fs.openSync('/proc/self/fd/' + parent + '/' + name, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
+    const fd = fs.openSync('/proc/self/fd/' + parent + '/' + name, (strict ? fs.constants.O_RDONLY : 0x200000 /* Linux O_PATH: execute-only trusted ancestors. */) | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
     held.push(fd); const before = stat(fd);
     if (!before.isDirectory()) fail('directory type');
     links.push({ parent, name, fd, before, strict }); return fd;
@@ -296,6 +305,10 @@ async function inventory(candidate: string, context: ComponentContext, policy: S
     if (context.signal.aborted) fail('scan cancelled');
     if (depth > LIMIT.depth || directories.length >= LIMIT.directories) fail('inventory limit');
     const before = stat(fd), initialNames = names(fd);
+    const directoryIdentity = before.dev.toString() + ':' + before.ino.toString();
+    if (directoryInodes.has(directoryIdentity)) fail('directory alias');
+    directoryInodes.add(directoryIdentity);
+    inspectedDirectories.push({ fd, before, names: initialNames });
     directories.push({ path: prefix || '.', mode: mode(before) });
     let entryCount = 0;
     for (const name of initialNames) {
@@ -306,13 +319,27 @@ async function inventory(candidate: string, context: ComponentContext, policy: S
       scanBytes(Buffer.from(filename, 'utf8'), policy, false);
       const pathname = '/proc/self/fd/' + fd + '/' + name;
       const entry = fs.lstatSync(pathname, { bigint: true });
-      if (entry.isSymbolicLink()) fail('symlink');
+      if (entry.isSymbolicLink()) {
+        if (!allowSymlinks || symlinks.length + files.length >= LIMIT.files || entry.nlink !== 1n) fail('symlink type or limit');
+        // Procfs magic links are kernel references, not portable filesystem links.
+        if (fs.statfsSync('/proc/self/fd/' + fd, { bigint: true }).type === 0x9fa0n) fail('magic link');
+        const target = fs.readlinkSync(pathname, { encoding: 'buffer' });
+        const decoded = target.toString('utf8');
+        if (!target.length || target.length > 4096 || !Buffer.from(decoded, 'utf8').equals(target) ||
+            decoded.startsWith('/') || decoded.includes('\\') || /[\x00-\x1f\x7f]/.test(decoded)) fail('symlink target');
+        scanBytes(target, policy, false);
+        if (!same(entry, fs.lstatSync(pathname, { bigint: true })) ||
+            !target.equals(fs.readlinkSync(pathname, { encoding: 'buffer' }))) fail('symlink changed');
+        total += target.length; if (total > LIMIT.totalBytes) fail('inventory byte limit');
+        symlinks.push({ path: filename, target: decoded, digest: sha(target) });
+        inspectedSymlinks.push({ parent: fd, name, before: entry, target }); continue;
+      }
       if (entry.isDirectory()) {
         const child = openDirectory(fd, name);
         if (!same(entry, stat(child))) fail('directory changed');
         await visit(child, filename, depth + 1); continue;
       }
-      if (!entry.isFile() || entry.nlink !== 1n || entry.size > BigInt(LIMIT.fileBytes) || files.length >= LIMIT.files) fail('file type or limit');
+      if (!entry.isFile() || entry.nlink < 1n || (!allowSymlinks && entry.nlink !== 1n) || entry.size > BigInt(LIMIT.fileBytes) || files.length + symlinks.length >= LIMIT.files) fail('file type or limit');
       const file = fs.openSync(pathname, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
       try {
         const opened = stat(file);
@@ -346,7 +373,14 @@ async function inventory(candidate: string, context: ComponentContext, policy: S
         }
         if (!same(opened, stat(file)) || !same(opened, fs.lstatSync(pathname, { bigint: true }))) fail('file changed');
         if (isJSON) scanBytes(Buffer.concat(jsonChunks), policy, true);
-        files.push({ path: filename, mode: mode(opened), size: opened.size.toString(), digest: 'sha256:' + hash.digest('hex') });
+        const contentDigest = 'sha256:' + hash.digest('hex');
+        files.push({ path: filename, mode: mode(opened), size: opened.size.toString(), digest: contentDigest });
+        if (opened.nlink > 1n) {
+          const key = opened.dev.toString() + ':' + opened.ino.toString(), prior = inodeGroups.get(key);
+          if (prior && (!same(prior.before, opened) || prior.digest !== contentDigest)) fail('hardlink changed');
+          if (prior) prior.paths.push(filename);
+          else inodeGroups.set(key, { before: opened, paths: [filename], digest: contentDigest });
+        }
         inspectedFiles.push({ parent: fd, name, before: opened });
       } finally { fs.closeSync(file); }
     }
@@ -360,6 +394,12 @@ async function inventory(candidate: string, context: ComponentContext, policy: S
     for (let index = 0; index < candidateParts.length; index++)
       current = openDirectory(current, candidateParts[index]!, index === candidateParts.length - 1);
     await visit(current, '', 0);
+    for (const group of inodeGroups.values()) {
+      if (BigInt(group.paths.length) !== group.before.nlink) fail('unmeasured hardlink alias');
+      hardlinks.push({ paths: group.paths.sort() });
+    }
+    hardlinks.sort((a,b) => a.paths[0]! < b.paths[0]! ? -1 : a.paths[0]! > b.paths[0]! ? 1 : 0);
+    await validateLinkGraph(files, directories, symlinks, context.signal);
     let closureCount = 0;
     for (const link of links) {
       if (++closureCount % 64 === 0) await new Promise<void>(resolve => setImmediate(resolve));
@@ -377,49 +417,218 @@ async function inventory(candidate: string, context: ComponentContext, policy: S
       if (!same(file.before, fs.lstatSync('/proc/self/fd/' + file.parent + '/' + file.name, { bigint: true })))
         fail('file changed before publication');
     }
+    for (const link of inspectedSymlinks) {
+      if (++closureCount % 64 === 0) await new Promise<void>(resolve => setImmediate(resolve));
+      if (context.signal.aborted) fail('scan cancelled');
+      const pathname = '/proc/self/fd/' + link.parent + '/' + link.name;
+      if (!same(link.before, fs.lstatSync(pathname, { bigint: true })) ||
+          !link.target.equals(fs.readlinkSync(pathname, { encoding: 'buffer' }))) fail('symlink changed before publication');
+    }
+    // The PREPARATION owner must quiesce writers before publishing inventory.
+    // This final pass detects mutations during the yielding file/link closure;
+    // a multi-file scan itself is not an atomic filesystem snapshot.
+    for (const directory of inspectedDirectories) {
+      if (++closureCount % 64 === 0) await new Promise<void>(resolve => setImmediate(resolve));
+      if (context.signal.aborted) fail('scan cancelled');
+      if (!same(directory.before, stat(directory.fd)) ||
+          canonicalJSON(directory.names) !== canonicalJSON(names(directory.fd))) fail('directory changed before publication');
+    }
     if (!files.length) fail('empty candidate');
     files.sort((a,b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
     directories.sort((a,b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-    return { files, directories };
+    symlinks.sort((a,b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+    return { files, directories, symlinks, hardlinks };
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('Preparation refused:')) throw error;
     // Filesystem error messages often contain local paths. Never expose them through the component.
     return fail('filesystem scan');
   } finally { for (const fd of held.reverse()) { try { fs.closeSync(fd); } catch { /* best-effort descriptor cleanup */ } } }
 }
+/**
+ * Resolve against the complete physical inventory, never by opening a link.
+ * Active expansion detects actual resolution loops; directory aliases and
+ * normal cyclic package dependency graphs do not cause recursive traversal.
+ */
+async function validateLinkGraph(files: InventoryEntry[], directories: DirectoryEntry[], links: SymlinkEntry[], signal: AbortSignal): Promise<void> {
+  const kinds = new Map<string, 'file' | 'directory' | 'link'>([['.', 'directory']]);
+  for (const value of directories) kinds.set(value.path, 'directory');
+  for (const value of files) kinds.set(value.path, 'file');
+  const targets = new Map(links.map(link => [link.path, link.target]));
+  for (const value of links) kinds.set(value.path, 'link');
+  const lookup = (parts: string[]): string => parts.length ? parts.join('/') : '.';
+  const expand = (key: string, active: Set<string>, budget: { remaining: number }): string[] => {
+    if (active.has(key) || --budget.remaining < 0) fail('symlink resolution loop or limit');
+    const target = targets.get(key);
+    if (target === undefined) fail('symlink target');
+    const next = new Set(active); next.add(key);
+    let position = key.split('/').slice(0, -1);
+    for (const part of target.split('/')) {
+      if (kinds.get(lookup(position)) !== 'directory') fail('symlink non-directory');
+      if (!part || part === '.') continue;
+      if (part === '..') { if (!position.length) fail('symlink escape'); position.pop(); continue; }
+      const candidate = [...position, part], selected = lookup(candidate), kind = kinds.get(selected);
+      if (kind === undefined) fail('dangling symlink');
+      position = kind === 'link' ? expand(selected, next, budget) : candidate;
+    }
+    return position;
+  };
+  let count = 0;
+  for (const link of links) {
+    if (++count % 64 === 0) await new Promise<void>(resolve => setImmediate(resolve));
+    if (signal.aborted) fail('scan cancelled');
+    expand(link.path, new Set(), { remaining: 40 });
+  }
+}
+
 function pinInventory(profile: EnvironmentProfile, files: InventoryEntry[]): void {
   const byPath = new Map(files.map(file => [file.path, file.digest]));
   const required = [profile.recipe, ...profile.generated_inputs, ...profile.build_config, ...profile.preparation_evidence,
     ...profile.package_managers.flatMap(manager => manager.locks)];
   for (const pin of required) if (byPath.get(pin.path) !== pin.digest) fail('pinned content mismatch');
 }
-async function make(input: unknown, context: ComponentContext, verifying: boolean): Promise<PreparationManifest> {
+async function make(input: unknown, context: InventoryContext, verifying: boolean): Promise<PreparationManifest> {
   const item = record(input, verifying ? ['candidate_path','manifest','scan_policy'] : ['candidate_path','profile','scan_policy']);
   const candidate = relative(item.candidate_path), policy = scanPolicy(item.scan_policy);
   let provided: Record<string, unknown> | undefined;
+  let schemaVersion: 1 | 2 = 2;
   if (verifying) {
-    provided = record(item.manifest, ['schema_version','profile','files','directories','scan','digest']);
-    if (provided.schema_version !== 1) fail('manifest schema');
+    if (!item.manifest || typeof item.manifest !== 'object' || Array.isArray(item.manifest)) fail('manifest schema');
+    const version = (item.manifest as Record<string, unknown>).schema_version;
+    if (version !== 1 && version !== 2) fail('manifest schema');
+    schemaVersion = version;
+    provided = record(item.manifest, version === 1 ? ['schema_version','profile','files','directories','scan','digest'] :
+      ['schema_version','profile','files','directories','symlinks','hardlinks','scan','digest']);
     digest(provided.digest);
   }
   const profile = validateProfile(verifying ? provided!.profile : item.profile);
   if (!verifying && Date.parse(profile.policy.expires_at) <= Date.now()) fail('expired profile');
   scanBytes(Buffer.from(canonicalJSON(profile)), policy, true);
-  const entries = await inventory(candidate, context, policy);
+  const entries = await inventory(candidate, context, policy, schemaVersion === 2);
   pinInventory(profile, entries.files);
-  const body = { schema_version: 1 as const, profile, ...entries, scan: declaration(policy) };
+  const body = { schema_version: schemaVersion, profile, files: entries.files, directories: entries.directories,
+    ...(schemaVersion === 2 ? { symlinks: entries.symlinks, hardlinks: entries.hardlinks } : {}), scan: declaration(policy) };
   const manifest: PreparationManifest = { ...body, digest: sha(canonicalJSON(body)) };
   if (provided && canonicalJSON(provided) !== canonicalJSON(manifest)) fail('manifest content mismatch');
   return manifest;
 }
-export async function createManifest(input: unknown, context: ComponentContext): Promise<PreparationManifest> { return make(input, context, false); }
+export async function createManifest(input: unknown, context: InventoryContext): Promise<PreparationManifest> { return make(input, context, false); }
 /** Byte/profile integrity only: expired historical artifacts may verify; reuse needs current policy admission. */
-export async function verifyManifest(input: unknown, context: ComponentContext): Promise<{ valid: true; digest: string; file_count: number }> {
+export async function verifyManifest(input: unknown, context: InventoryContext): Promise<{ valid: true; digest: string; file_count: number }> {
   const manifest = await make(input, context, true); return { valid: true, digest: manifest.digest, file_count: manifest.files.length };
 }
-export function createComponent(_context: ComponentContext): Component {
+export function createComponent(_context: InventoryContext): Component {
   return { apiVersion: 1, actions: {
     'preparation.manifest.create': createManifest,
     'preparation.manifest.verify': verifyManifest
   } };
+}
+
+
+/** Metadata/compatibility validation grants no filesystem, runtime or ownership authority. */
+function metadataHash(value:unknown):string{return sha(canonicalJSON(value));}
+function metadataText(value:unknown,pattern:RegExp,max=256):string{
+ if(typeof value!=='string'||!value.length||value.length>max||!pattern.test(value))fail('manifest metadata');return value;
+}
+function metadataInteger(value:unknown,min:number,max:number):number{
+ if(typeof value!=='number'||!Number.isSafeInteger(value)||value<min||value>max)fail('manifest metadata');return value;
+}
+function metadataDecimal(value:unknown):string{
+ const result=metadataText(value,/^(0|[1-9][0-9]{0,18})$/,19);if(BigInt(result)>9223372036854775807n)fail('manifest metadata');return result;
+}
+export function validateManifestMetadata(value:unknown):PreparationManifest{
+ const version=value&&typeof value==='object'?(value as Record<string,unknown>).schema_version:undefined;
+ const row=record(value,version===2?['schema_version','profile','files','directories','symlinks','hardlinks','scan','digest']:['schema_version','profile','files','directories','scan','digest']);
+ if((row.schema_version!==1&&row.schema_version!==2)||!Array.isArray(row.files)||!Array.isArray(row.directories)||
+   (row.schema_version===2&&(!Array.isArray(row.symlinks)||!Array.isArray(row.hardlinks))))fail('PREPARATION_MANIFEST_INVALID');
+ validateProfile(row.profile);digest(row.digest);
+ const body={schema_version:row.schema_version,profile:row.profile,files:row.files,directories:row.directories,
+  ...(row.schema_version===2?{symlinks:row.symlinks,hardlinks:row.hardlinks}:{}),scan:row.scan};
+ if(metadataHash(body)!==row.digest)fail('PREPARATION_MANIFEST_INVALID');
+ const paths=new Set<string>(),directories=new Set<string>(),fileDigests=new Map<string,string>();let previous='';
+ const validPath=(value:unknown,root=false):string=>{
+  if(root&&value==='.')return '.';
+  const path=metadataText(value,/^[^\x00-\x1f\x7f\\]+$/,4096);
+  if(path.startsWith('/')||path.split('/').some(part=>!part||part==='.'||part==='..'))fail('PREPARATION_MANIFEST_INVALID');
+  return path;
+ };
+ if(!row.files.length||row.files.length>1000000||!row.directories.length||row.directories.length>1000000)fail('PREPARATION_MANIFEST_INVALID');
+ for(const entry of row.directories){
+  const directory=record(entry,['path','mode']),path=validPath(directory.path,true);
+  if(directories.has(path)||path<=previous)fail('PREPARATION_MANIFEST_INVALID');
+  directories.add(path);previous=path;metadataInteger(directory.mode,0,511);
+ }
+ if(!directories.has('.'))fail('PREPARATION_MANIFEST_INVALID');
+ previous='';
+ for(const entry of row.files){
+  const file=record(entry,['path','mode','size','digest']),path=validPath(file.path);
+  if(paths.has(path)||directories.has(path)||path<=previous)fail('PREPARATION_MANIFEST_INVALID');
+  paths.add(path);previous=path;metadataInteger(file.mode,0,511);metadataDecimal(file.size);fileDigests.set(path,digest(file.digest));
+ }
+ if(row.schema_version===2){
+  let previousLink='';const linked=new Set<string>();
+  for(const value of row.symlinks as unknown[]){
+   const link=record(value,['path','target','digest']),path=validPath(link.path),target=metadataText(link.target,/^[^\x00-\x1f\x7f\\]+$/,4096);
+   if(path<=previousLink||paths.has(path)||directories.has(path)||target.startsWith('/')||
+      Buffer.from(target,'utf8').toString('utf8')!==target||digest(link.digest)!=='sha256:'+createHash('sha256').update(target,'utf8').digest('hex'))fail('PREPARATION_MANIFEST_INVALID');
+   previousLink=path;paths.add(path);
+  }
+  let previousGroup='';
+  for(const value of row.hardlinks as unknown[]){
+   const group=record(value,['paths']);
+   if(!Array.isArray(group.paths)||group.paths.length<2)fail('PREPARATION_MANIFEST_INVALID');
+   let prior='';let common:string|undefined;
+   for(const item of group.paths){
+    const path=validPath(item),content=fileDigests.get(path);
+    if(path<=prior||!content||linked.has(path)||(common!==undefined&&common!==content))fail('PREPARATION_MANIFEST_INVALID');
+    linked.add(path);prior=path;common=content;
+   }
+   const first=group.paths[0] as string;
+   if(first<=previousGroup)fail('PREPARATION_MANIFEST_INVALID');previousGroup=first;
+  }
+ }
+ for(const path of [...paths,...directories]){
+  if(path==='.')continue;
+  const slash=path.lastIndexOf('/'),parent=slash<0?'.':path.slice(0,slash);
+  if(!directories.has(parent))fail('PREPARATION_MANIFEST_INVALID');
+ }
+ const scan=record(row.scan,['policy_version','canary_counts','checks']);
+ const counts=record(scan.canary_counts,['secret','identity','lease']);
+ if(scan.policy_version!==1||canonicalJSON(scan.checks)!==canonicalJSON(['sensitive_paths','private_key_markers','authority_json','designated_canaries']))fail('PREPARATION_MANIFEST_INVALID');
+ for(const kind of ['secret','identity','lease'])metadataInteger(counts[kind],0,64);
+ const profile=row.profile as EnvironmentProfile;
+ for(const pin of [profile.recipe,...profile.generated_inputs,...profile.build_config,...profile.preparation_evidence,
+   ...profile.package_managers.flatMap(manager=>manager.locks)])
+  if(fileDigests.get(pin.path)!==pin.digest)fail('PREPARATION_MANIFEST_INVALID');
+ return value as PreparationManifest;
+}
+function compatibilitySortedPins<T extends {name:string}>(values:T[]):T[]{return [...values].sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0);}
+function compatibilitySoftware(profile:EnvironmentProfile):unknown {
+ return {os:profile.os,recipe:profile.recipe,toolchains:compatibilitySortedPins(profile.toolchains),
+  package_managers:compatibilitySortedPins(profile.package_managers).map(manager=>({...manager,locks:[...manager.locks].sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0)})),
+  native_agents:compatibilitySortedPins(profile.native_agents),connectors:compatibilitySortedPins(profile.connectors),
+  supervisor:profile.supervisor,hyperfide:profile.hyperfide,system_packages:compatibilitySortedPins(profile.system_packages),
+  repositories:[...profile.repositories].sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0),
+  generated_inputs:[...profile.generated_inputs].sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0),
+  build_config:[...profile.build_config].sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0)};
+}
+/** This compares pinned preparation inputs. It grants neither readiness nor ownership.
+ * Actual tool/resource/network/credential probes must still pass on the target boot. */
+export async function compareEnvironmentCompatibility(source:unknown,target:unknown):Promise<{
+ compatible:boolean;evidence_digest:string;source_digest:string;target_digest:string;scope:'pinned-preparation-compatibility'
+}>{
+ const from=validateManifestMetadata(source),to=validateManifestMetadata(target);
+ let compatible=canonicalJSON(compatibilitySoftware(from.profile))===canonicalJSON(compatibilitySoftware(to.profile));
+ for(const capability of from.profile.required_capabilities)if(!to.profile.required_capabilities.includes(capability))compatible=false;
+ for(const key of ['memory_bytes','disk_bytes','persistent_volume_bytes'] as const)
+  if(BigInt(to.profile.resources[key])<BigInt(from.profile.resources[key]))compatible=false;
+ if(to.profile.resources.cpu_millis<from.profile.resources.cpu_millis)compatible=false;
+ const targetFiles=new Map(to.files.map(file=>[file.path,file.digest]));
+ const pins=[...from.profile.generated_inputs,...from.profile.build_config,
+  ...from.profile.package_managers.flatMap(manager=>manager.locks)];
+ for(const pin of pins)if(targetFiles.get(pin.path)!==pin.digest)compatible=false;
+ const evidence={schema_version:1,scope:'pinned-preparation-compatibility' as const,
+  source_digest:from.digest,target_digest:to.digest,source_projection:compatibilitySoftware(from.profile),
+  target_projection:compatibilitySoftware(to.profile),compatible};
+ return {compatible,evidence_digest:metadataHash(evidence),source_digest:from.digest,target_digest:to.digest,
+  scope:'pinned-preparation-compatibility'};
 }
