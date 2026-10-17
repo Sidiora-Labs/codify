@@ -40,7 +40,13 @@
     "review.audit.closed-run-nonprivileged-read-denied",
     "review.reproduction.independent-allocation-and-slot-generations",
     "review.reproduction.dispatched-slot-pin-immutable",
-    "review.reproduction.unassigned-renewal-refused"
+    "review.reproduction.unassigned-renewal-refused",
+    "review.reproduction.projection-conflict-uncertain-guidance",
+    "review.reproduction.invalid-projection-conflict-refused",
+    "review.reproduction.integrated-failure-exact-commit-set",
+    "review.reproduction.executed-replay-no-redispatch",
+    "review.placement.remote-test-slot-only",
+    "review.placement.no-control-host-execution"
   ],
   "argv": [
     "python3",
@@ -86,6 +92,7 @@
   "source_files": [
     "tests/hyperfide/cases/tasks/17_4.py",
     "tests/hyperfide/cases/tasks/17_1.py",
+    "tests/hyperfide/cases/tasks/15_2.py",
     "tests/hyperfide/support/identity_fixture.py",
     "services/hyperfide/src/review/reproductions.ts",
     "services/hyperfide/src/review/coverage.ts",
