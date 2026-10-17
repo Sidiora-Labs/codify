@@ -7,7 +7,7 @@ sparse materialisation and slice qualification in a separate remote provisioner 
 removes anything a crashed run left behind and reports observed absence.
 """
 from __future__ import annotations
-import base64, concurrent.futures, copy, hashlib, importlib.util, json, os, shutil, socket, subprocess, sys, tempfile, threading, time, traceback
+import base64, concurrent.futures, copy, ctypes, hashlib, importlib.util, json, os, shutil, socket, subprocess, sys, tempfile, threading, time, traceback
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -130,6 +130,10 @@ class Signer:
 
 class Probe:
     def __init__(self):
+        # Git transport helpers can orphan an exited shell when their service shuts down.
+        # Own and reap those descendants here instead of leaking zombies to the qualification gate.
+        if ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:
+            raise RuntimeError("Slice fixture requires Linux child-subreaper support")
         self.root = Path(tempfile.mkdtemp(prefix="hf-slices-")); ledger(paths=[str(self.root)])
         self.signer = Signer(); self.f = None; self.p = None; self.state = {}
     # ------------------------------------------------------------------------------------------------ services
@@ -298,6 +302,22 @@ class Probe:
             except Exception as error: errors.append(str(error))
         try: self.signer.close()
         except Exception as error: errors.append(str(error))
+        reaped = []
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                pid, status = os.waitpid(-1, os.WNOHANG)
+            except ChildProcessError:
+                OBSERVATIONS["process_cleanup"] = {"complete": True, "reaped": reaped}
+                break
+            if pid:
+                reaped.append({"pid": pid, "status": status})
+            elif time.monotonic() >= deadline:
+                OBSERVATIONS["process_cleanup"] = {"complete": False, "reaped": reaped}
+                errors.append("Fixture descendants remained after service shutdown")
+                break
+            else:
+                time.sleep(.02)
         shutil.rmtree(self.root, ignore_errors=True)
         if errors: raise AssertionError("; ".join(errors)[:1000])
 
@@ -669,6 +689,7 @@ def main():
         try: probe.close()
         except Exception as error: print("close failed: " + str(error), file=sys.stderr)
         def absent():
+            expect(OBSERVATIONS.get("process_cleanup", {}).get("complete") is True, "fixture descendants remain")
             if database: expect(probe.f.sql("SELECT count(*)::int AS n FROM pg_database WHERE datname=$1", [database], admin=True)[0]["n"] == 0, "fixture database remains")
             expect(not root.exists(), "fixture root remains")
             for port in ports:
