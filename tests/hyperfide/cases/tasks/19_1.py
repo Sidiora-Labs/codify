@@ -30,13 +30,13 @@ D="sha256:"+"c"*64
 IDS={
 "19.1":["candidate.registered-wire","candidate.strict-input","candidate.scope-denied","candidate.real-merge","candidate.deterministic-objects","candidate.conflict-refused","candidate.typed-generations","candidate.immutable-request","candidate.empty-targets-refused","candidate.authenticated-run-bound","candidate.remote-gates-required","candidate.combined-fail-rejected","candidate.successor-not-released","candidate.level-status-explicit","candidate.input-change-invalidates","candidate.history-intact","candidate.cleanup-reconciles","candidate.cleanup-idempotent"],
 "19.2":["publication.registered-wire","publication.strict-input","publication.role-denied","publication.unsigned-push-denied","publication.target-unchanged","publication.immutable-admission","publication.target-lock-exclusive","publication.effective-hook-path-pinned","publication.github-configured-boundary","publication.github-sole-publisher","publication.github-worker-bypass-refused","publication.github-force-bypass-refused","publication.github-unknown-bypass-refused","publication.client-hook-suppressed","publication.server-hook-still-enforced","publication.token-persist-failure-revokes","publication.askpass-failure-revokes","publication.orphan-remains-unknown","publication.custody-preflight-no-mint","publication.source-url-rewrite-isolated","publication.https-source-config-isolated","publication.invalid-token-response-revokes"],
-"19.3":["closure.registered-wire","closure.level-required","closure.wave-required","closure.programme-cannot-narrow","closure.policy-requires-gates","closure.policy-requires-acceptance","closure.evaluation-immutable","closure.unregistered-assertions-refused","closure.declared-coverage-bound","closure.policy-valid-shape"],
+"19.3":["closure.registered-wire","closure.level-required","closure.wave-required","closure.programme-cannot-narrow","closure.policy-requires-gates","closure.policy-requires-acceptance","closure.evaluation-immutable","closure.unregistered-assertions-refused","closure.declared-coverage-bound","closure.policy-valid-shape","closure.policy-programme-cases-registered","closure.dependency-qualified-milestone-only","closure.lease-expiry-keeps-admitted-work","closure.competing-custody-refused","closure.wave-held-without-accepted-candidate","closure.dependency-integrated-after-acceptance","closure.wave-held-despite-passing-tasks","closure.wave-lists-open-blocking-finding","closure.downstream-activation-withheld","closure.levels-report-own-status","closure.programme-requires-end-to-end-rehearsal","closure.programme-end-to-end-rehearsal-current","closure.programme-requires-each-wave-closed"],
 "19.4":["release.registered-wire","release.strict-input","release.empty-set-refused","release.caller-cannot-claim-published","release.immutable-manifest","release.partial-remains-explicit"]
 }
 ACTIONS={
 "19.1":["integration.candidate.create","integration.candidate.inspect","integration.candidate.verify","integration.candidate.admit","integration.candidate.status","integration.candidate.cleanup"],
 "19.2":["integration.publication.capabilities","integration.publication.authorize","integration.publication.execute","integration.publication.reconcile","integration.publication.inspect"],
-"19.3":["integration.closure.evaluate","integration.closure.verify","integration.closure.inspect"],
+"19.3":["integration.closure.evaluate","integration.closure.verify","integration.closure.inspect","integration.closure.reconcile"],
 "19.4":["integration.release.create","integration.release.inspect","integration.release.evaluate"]
 }
 def expect(condition,message):
@@ -432,7 +432,68 @@ else{const result=await adapter.publish(intent,repo);if(minted!==1||revoked<1||r
     for index,mode in [(15,"persist"),(16,"askpass"),(17,"orphan"),(18,"preflight"),(21,"invalid")]:
         check(IDS[TASK][index],lambda mode=mode:node(fault_source,[f.repository,f.base_oid,f.feature_oid,f.base/("github-fault-"+mode),mode]))
 
+def closure_uuid():return str(__import__("uuid").uuid4())
+def closure_digest(label):return "sha256:"+hashlib.sha256(label.encode()).hexdigest()
+def closure_seed(f):
+    """Seed one actual wave-1 task with qualified custody and wave-2 dependents bound at declared milestones."""
+    a=f.auth;org,run,spec=a.ids["organisation"],a.ids["run"],a.ids["spec"];x={k:closure_uuid() for k in ["repository","package1","package2","task","dependent_q","dependent_i","attempt","custody","branch","candidate","intent","publication","package_owner","finding","account","reservation","job"]}
+    crit=closure_digest("closure-criteria");x["criteria"]=crit
+    a.sql("INSERT INTO hyperfide.repositories(organisation_id,id,project_id,name,url) VALUES($1,$2,$3,'closure-fixture','https://example.invalid/closure.git')",[org,x["repository"],a.ids["project"]])
+    a.sql("INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id) VALUES($1,$2,$3),($1,$2,$4)",[org,x["repository"],f.base_oid,f.feature_oid])
+    a.sql("INSERT INTO hyperfide.run_repositories(organisation_id,run_id,repository_id,source_object_id,integration_ref) VALUES($1,$2,$3,$4,'refs/heads/main')",[org,run,x["repository"],f.base_oid])
+    for key,wave in (("package1",1),("package2",2)):a.sql("INSERT INTO hyperfide.feature_packages(organisation_id,run_id,id,package_key,wave) VALUES($1,$2,$3,$4,$5)",[org,run,x[key],"closure-"+key,wave])
+    for key,name,package,wave in (("task","closure.alpha","package1",1),("dependent_q","closure.after-qualified","package2",2),("dependent_i","closure.after-integrated","package2",2)):
+        a.sql("INSERT INTO hyperfide.tasks(organisation_id,run_id,id,task_key,feature_package_id,spec_revision_id,spec_generation,criteria_digest,definition,wave) VALUES($1,$2,$3,$4,$5,$6,1,$7,'{}',$8)",[org,run,x[key],name,x[package],spec,crit,wave])
+    a.sql("INSERT INTO hyperfide.attempts(organisation_id,run_id,id,task_id,generation,authority_epoch,input_packet_digest,compute_authority,execution_state) VALUES($1,$2,$3,$4,1,$5,$6,'RELEASED','SUBMITTED')",[org,run,x["attempt"],x["task"],a.ids["epoch"],closure_digest("closure-packet")])
+    a.sql("INSERT INTO hyperfide.submission_custodies(organisation_id,run_id,id,task_id,source_attempt_id,source_generation,custody_generation,authority_epoch,repository_id,source_object_id,source_manifest_digest,evidence_manifest_digest,criteria_digest,qualification_outcome) VALUES($1,$2,$3,$4,$5,1,1,$6,$7,$8,$9,$10,$11,'PASS')",[org,run,x["custody"],x["task"],x["attempt"],a.ids["epoch"],x["repository"],f.feature_oid,closure_digest("closure-source"),closure_digest("closure-evidence"),crit])
+    a.sql("UPDATE hyperfide.tasks SET current_custody_id=$3,state='QUALIFIED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$4",[org,run,x["custody"],x["task"]])
+    a.sql("INSERT INTO hyperfide.task_dependencies(organisation_id,run_id,task_id,predecessor_run_id,predecessor_task_id,milestone,revision,binding_schema_version,predecessor_spec_generation,predecessor_spec_revision_id,predecessor_repository_id,integration_ref) VALUES($1,$2,$3,$2,$4,'QUALIFIED',1,1,1,$5,NULL,NULL),($1,$2,$6,$2,$4,'INTEGRATED',1,1,1,$5,$7,'refs/heads/main')",[org,run,x["dependent_q"],x["task"],spec,x["dependent_i"],x["repository"]])
+    return x
+def closure_publish(f,x):
+    """Record the actual published candidate of the qualified custody (19.2 publication rows), without acceptance."""
+    a=f.auth;org,run=a.ids["organisation"],a.ids["run"]
+    a.sql("INSERT INTO hyperfide.branch_authorities(organisation_id,run_id,id,repository_id,branch_ref,branch_generation,authority_epoch,expected_old_head) VALUES($1,$2,$3,$4,'refs/heads/main',1,$5,$6)",[org,run,x["branch"],x["repository"],a.ids["epoch"],f.base_oid])
+    manifest={"version":1,"repository_id":x["repository"],"target_ref":"refs/heads/main","candidate_head":f.feature_oid,"expected_old_head":f.base_oid,"contributors":[{"task_id":x["task"],"custody_id":x["custody"],"custody_generation":"1","criteria_digest":x["criteria"]}]}
+    a.sql("INSERT INTO hyperfide.integration_candidates(organisation_id,run_id,id,task_id,custody_id,custody_generation,repository_id,branch_authority_id,branch_generation,expected_old_head,candidate_head,input_manifest_digest,request_id,state) VALUES($1,$2,$3,$4,$5,1,$6,$7,1,$8,$9,$10,$11,'PUBLISHED')",[org,run,x["candidate"],x["task"],x["custody"],x["repository"],x["branch"],f.base_oid,f.feature_oid,closure_digest(json.dumps(manifest,sort_keys=True)),closure_uuid()])
+    a.sql("INSERT INTO hyperfide.integration_candidate_manifests(organisation_id,run_id,candidate_id,manifest) VALUES($1,$2,$3,$4::jsonb)",[org,run,x["candidate"],json.dumps(manifest)])
+    a.sql("INSERT INTO hyperfide.publication_intents(organisation_id,run_id,id,candidate_id,intent_digest) VALUES($1,$2,$3,$4,$5)",[org,run,x["intent"],x["candidate"],closure_digest("closure-intent")])
+    a.sql("INSERT INTO hyperfide.publication_operations(organisation_id,run_id,id,publication_intent_id,candidate_id,branch_authority_id,branch_generation,authority_epoch,repository_id,expected_old_head,candidate_head,request_id,state,observed_head) VALUES($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10,$11,'PUBLISHED',$10)",[org,run,x["publication"],x["intent"],x["candidate"],x["branch"],a.ids["epoch"],x["repository"],f.base_oid,f.feature_oid,closure_uuid()])
+    a.sql("UPDATE hyperfide.tasks SET state='INTEGRATING',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,run,x["task"]])
+def closure_accept(f,x):
+    """Mirror the 19.2 accept writes: release custody, mark INTEGRATED and persist the ACCEPTED receipt."""
+    a=f.auth;org,run=a.ids["organisation"],a.ids["run"]
+    a.sql("UPDATE hyperfide.submission_custodies SET authority='RELEASED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,run,x["custody"]])
+    a.sql("UPDATE hyperfide.tasks SET state='INTEGRATED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,run,x["task"]])
+    a.sql("INSERT INTO hyperfide.publication_acceptance_receipts(organisation_id,run_id,id,operation_id,outcome,reasons,manifest) VALUES($1,$2,$3,$4,'ACCEPTED',ARRAY[]::text[],'{}'::jsonb)",[org,run,closure_uuid(),x["publication"]])
+def closure_open_finding(f,x):
+    a=f.auth;org,run=a.ids["organisation"],a.ids["run"]
+    a.sql("INSERT INTO hyperfide.findings(organisation_id,run_id,id,dedup_digest,owner_package_id,repository_id,source_object_id,severity,summary) VALUES($1,$2,$3,$4,$5,$6,$7,'CRITICAL','Open blocking closure finding')",[org,run,x["finding"],closure_digest("closure-finding"),x["package1"],x["repository"],f.feature_oid])
+def closure_expire_lease(f,x):
+    a=f.auth;a.sql("UPDATE hyperfide.attempts SET compute_authority='EXPIRED',lease_expires_at=clock_timestamp()-interval '1 hour',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[a.ids["organisation"],a.ids["run"],x["attempt"]])
+def closure_programme_receipt(f,x,gate,covered,digest):
+    """Seed one succeeded PROGRAMME scope job receipt (bounded synthetic stand-in for an executed full-case gate)."""
+    a=f.auth;org,run=a.ids["organisation"],a.ids["run"]
+    if "account_seeded" not in x:
+        a.sql("INSERT INTO hyperfide.capacity_accounts(organisation_id,id,pool_id,dimension,capacity_class,configured_limit,reserved,provenance_digest,qualification_state) VALUES($1,$2,$3,'CPU_MILLIS','EXECUTION',100,1,$4,'QUALIFIED')",[org,x["account"],a.ids["pool"],closure_digest("closure-capacity")])
+        a.sql("INSERT INTO hyperfide.reservations(organisation_id,run_id,id,request_id,capacity_account_id,quantity,expires_at) VALUES($1,$2,$3,$4,$5,1,clock_timestamp()+interval '1 hour')",[org,run,x["reservation"],closure_uuid(),x["account"]]);x["account_seeded"]=True
+    job=closure_uuid()
+    a.sql("INSERT INTO hyperfide.integration_scope_jobs(organisation_id,run_id,id,executor_id,reservation_id,level,wave,input_manifest_digest,state) VALUES($1,$2,$3,$4,$5,'PROGRAMME',NULL,$6,'SUCCEEDED')",[org,run,job,closure_uuid(),x["reservation"],digest])
+    a.sql("INSERT INTO hyperfide.integration_scope_receipts(organisation_id,run_id,id,level,wave,input_manifest_digest,manifest,gate_id,covered_ids,outcome,exit_code,assertion_count,stdout,stderr,job_id) VALUES($1,$2,$3,'PROGRAMME',NULL,$4,'{}'::jsonb,$5,$6::text[],'PASS',0,1,'','',$7)",[org,run,closure_uuid(),digest,gate,covered,job])
+def closure_policy_file(f):
+    """Specify programme end-to-end and activation/rehearsal obligations in the trusted closure policy before first use."""
+    policy=json.loads(json.dumps(f.cfg["closure"]))
+    rehearsal={**f.gate,"id":"activation-rehearsal","covers":["V-055"],"proof":{**f.gate["proof"],"case_ids":["V-055"]}}
+    policy["programme_gates"].append(rehearsal);policy["end_to_end_ids"]=["V-034"];policy["activation_rehearsal_ids"]=["V-055"]
+    current=json.loads(f.config.read_text());current["closure"]=policy;f.config.write_text(json.dumps(current))
+    return {**f.cfg,"closure":policy}
+def closure_evaluate(f,**scope):
+    row=f.invoke(TASK,"integration.closure.evaluate",{**SCOPE,**scope})
+    expect(row.get("ok") is True,"Closure evaluation refused: "+json.dumps(row)[:600])
+    return row.get("result",row.get("output",{}))
+def closure_unmet(result):return set(result["status"]["unmet_obligations"])
+def closure_release(result,key):return [d for d in result["dependency_release"] if d["task_key"]==key]
 def closure_cases(f):
+    specified=closure_policy_file(f)
     check(IDS[TASK][0],f.wire)
     check(IDS[TASK][1],lambda:f.reject(TASK,"integration.closure.evaluate",SCOPE,"INTEGRATION_INVALID"))
     check(IDS[TASK][2],lambda:f.reject(TASK,"integration.closure.evaluate",{**SCOPE,"level":"WAVE"},"CLOSURE_INVALID"))
@@ -457,6 +518,97 @@ def closure_cases(f):
         node("import {closurePolicy} from "+json.dumps(module)+";let denied=false;try{closurePolicy(JSON.parse(process.argv[1]))}catch(e){denied=e.code==='CLOSURE_POLICY_INVALID'}if(!denied)throw Error('Unrelated registered full case claimed coverage');",[json.dumps(wrong)])
     check(IDS[TASK][8],mismatch)
     check(IDS[TASK][9],lambda:node("import {closurePolicy} from "+json.dumps(module)+";closurePolicy(JSON.parse(process.argv[1]));",[json.dumps(f.cfg)]))
+    def programme_cases_registered():
+        accepted=node("import {closurePolicy} from "+json.dumps(module)+";const p=closurePolicy(JSON.parse(process.argv[1]));console.log(JSON.stringify(p));",[json.dumps(specified)])
+        expect(json.loads(accepted.stdout)["activation_rehearsal_ids"]==["V-055"],"Specified rehearsal obligation dropped")
+        wrong=json.loads(json.dumps(specified));wrong["closure"]["activation_rehearsal_ids"]=["V-019"]
+        node("import {closurePolicy} from "+json.dumps(module)+";let denied=false;try{closurePolicy(JSON.parse(process.argv[1]))}catch(e){denied=e.code==='CLOSURE_POLICY_INVALID'}if(!denied)throw Error('Unregistered rehearsal obligation accepted');",[json.dumps(wrong)])
+    check(IDS[TASK][10],programme_cases_registered)
+    state={}
+    def qualified_only():
+        state["x"]=x=closure_seed(f)
+        result=closure_evaluate(f,level="WAVE",wave=1);state["qualified"]=result
+        expect([d["released"] for d in closure_release(result,"closure.after-qualified")]==[True],"QUALIFIED-milestone dependent not released by current qualified custody")
+        expect([(d["released"],d["code"]) for d in closure_release(result,"closure.after-integrated")]==[(False,"DEPENDENCY_NOT_INTEGRATED")],"Isolated task qualification released an INTEGRATED-milestone dependent")
+    check(IDS[TASK][11],qualified_only)
+    def lease_expiry():
+        x=state["x"];before=closure_evaluate(f,level="TASK",task_id=x["task"]);closure_expire_lease(f,x)
+        after=closure_evaluate(f,level="TASK",task_id=x["task"])
+        expect([(o["id"],o["met"],o.get("detail")) for o in before["obligations"]]==[(o["id"],o["met"],o.get("detail")) for o in after["obligations"]],"Coding lease expiry changed task qualification")
+        expect(after["task_statuses"][0]["milestone"]=="QUALIFIED" and [d["released"] for d in closure_release(after,"closure.after-qualified")]==[True],"Coding lease expiry invalidated admitted qualified work")
+    check(IDS[TASK][12],lease_expiry)
+    def competing_custody():
+        x=state["x"];a=f.auth;org,run=a.ids["organisation"],a.ids["run"];attempt=closure_uuid()
+        a.sql("INSERT INTO hyperfide.attempts(organisation_id,run_id,id,task_id,generation,authority_epoch,input_packet_digest,compute_authority,execution_state) VALUES($1,$2,$3,$4,2,$5,$6,'RELEASED','SUBMITTED')",[org,run,attempt,x["task"],a.ids["epoch"],closure_digest("closure-replacement")])
+        refused=False
+        try:a.sql("INSERT INTO hyperfide.submission_custodies(organisation_id,run_id,id,task_id,source_attempt_id,source_generation,custody_generation,authority_epoch,repository_id,source_object_id,source_manifest_digest,evidence_manifest_digest,criteria_digest,qualification_outcome) VALUES($1,$2,$3,$4,$5,2,2,$6,$7,$8,$9,$10,$11,'PASS')",[org,run,closure_uuid(),x["task"],attempt,a.ids["epoch"],x["repository"],f.feature_oid,closure_digest("other-source"),closure_digest("other-evidence"),x["criteria"]])
+        except AssertionError:refused=True
+        expect(refused,"Competing replacement custody admitted beside the admitted one")
+        result=closure_evaluate(f,level="TASK",task_id=x["task"])
+        expect([o.get("detail") for o in result["obligations"] if o["id"]=="task.current-custody:closure.alpha"]==[{"custody_id":x["custody"]}],"Task qualification not computed from the admitted current custody")
+    check(IDS[TASK][13],competing_custody)
+    def without_acceptance():
+        x=state["x"];closure_publish(f,x);result=closure_evaluate(f,level="WAVE",wave=1);state["published"]=result
+        unmet=closure_unmet(result)
+        expect(result["outcome"]=="HELD" and result["wave_closed"] is False and "wave.accepted-candidate:closure.alpha" in unmet and "wave.integration-receipt:closure.alpha" not in unmet,"Published but unaccepted candidate closed or mislabelled the wave")
+        expect([(d["released"],d["code"]) for d in closure_release(result,"closure.after-integrated")]==[(False,"DEPENDENCY_NOT_INTEGRATED")],"Unaccepted publication released an INTEGRATED-milestone dependent")
+    check(IDS[TASK][14],without_acceptance)
+    def accepted():
+        x=state["x"];closure_accept(f,x);result=closure_evaluate(f,level="WAVE",wave=1);state["accepted"]=result
+        expect([d["released"] for d in closure_release(result,"closure.after-integrated")]==[True],"Declared INTEGRATED milestone reached but dependent withheld")
+    check(IDS[TASK][15],accepted)
+    def held_despite_tasks():
+        result=state["accepted"];unmet=closure_unmet(result)
+        expect(all(t["milestone"]=="INTEGRATED" for t in result["task_statuses"]) and result["status"]["lower_levels_complete"] is True,"Fixture tasks did not all pass")
+        expect(result["outcome"]=="HELD" and result["wave_closed"] is False,"Passing tasks silently closed the wave")
+        expect({"wave.criteria-current:closure.alpha","wave.gate:actual-test"}<=unmet and any(u.startswith("wave.reviews-current:") for u in unmet) and not any(u.startswith("wave.accepted-candidate:") for u in unmet),"Wave did not list its own unmet criteria/review/gate obligations")
+    check(IDS[TASK][16],held_despite_tasks)
+    def blocking_finding():
+        x=state["x"];before=closure_unmet(state["accepted"]);closure_open_finding(f,x)
+        result=closure_evaluate(f,level="WAVE",wave=1);state["finding"]=result;key="wave.blocking-findings:"+x["repository"]
+        expect(key not in before and key in closure_unmet(result),"Open blocking finding did not hold the wave")
+        detail=[o for o in result["unmet_obligations"] if o["id"]==key][0]
+        expect(detail["reason"]=="BLOCKING_FINDING_OPEN:"+x["repository"] and x["finding"] in [b["finding_id"] for b in detail["detail"]],"Open blocking finding not listed")
+    check(IDS[TASK][17],blocking_finding)
+    def withheld():
+        for name in ("qualified","published","accepted","finding"):
+            result=state[name]
+            expect(result["downstream_release_authorized"] is False and result["external_activation_authorized"] is False and result["programme_qualified"] is False,"Held wave authorized downstream or activation release: "+name)
+    check(IDS[TASK][18],withheld)
+    def own_status():
+        x=state["x"];task=closure_evaluate(f,level="TASK",task_id=x["task"]);wave=closure_evaluate(f,level="WAVE",wave=1);programme=closure_evaluate(f,level="PROGRAMME");state["programme"]=programme
+        for level,prefix,result in (("TASK","task.",task),("WAVE","wave.",wave),("PROGRAMME","programme.",programme)):
+            expect(result["status"]["level"]==level and result["status"]["closes_higher_levels"] is False and all(o["level"]==level and o["id"].startswith(prefix) for o in result["obligations"]),"Level did not report its own obligations: "+level)
+            row=f.invoke(TASK,"integration.closure.inspect",{**SCOPE,"evaluation_id":result["evaluation_id"]});stored=row.get("result",row.get("output",{}))
+            expect(row.get("ok") is True and stored["level"]==level and stored["outcome"]==result["outcome"] and stored["manifest"]["status"]["unmet_obligations"]==result["status"]["unmet_obligations"],"Persisted evaluation lost its own level status")
+        expect([o["met"] for o in task["obligations"] if o["id"] in ("task.integration-receipt:closure.alpha","task.accepted-candidate:closure.alpha")]==[True,True],"Task-level integration receipts not reported")
+        expect(wave["outcome"]=="HELD" and programme["outcome"]=="HELD" and programme["wave_closed"] is False,"Higher level closed")
+    check(IDS[TASK][19],own_status)
+    def requires_programme_cases():
+        result=state["programme"];unmet=closure_unmet(result)
+        expect({"programme.end-to-end:V-034","programme.activation-rehearsal:V-055"}<=unmet and not {"programme.end-to-end-specified","programme.activation-rehearsal-specified"}&unmet,"Programme closure did not require specified end-to-end/rehearsal obligations")
+        expect(not any(o["id"].startswith(("programme.end-to-end","programme.activation-rehearsal")) for o in state["finding"]["obligations"]),"Wave closure claimed programme obligations")
+    check(IDS[TASK][20],requires_programme_cases)
+    def programme_cases_current():
+        x=state["x"];digest=state["programme"]["input_manifest_digest"]
+        closure_programme_receipt(f,x,"actual-test",["V-034"],"sha256:"+"e"*64)
+        stale=closure_evaluate(f,level="PROGRAMME")
+        expect(stale["input_manifest_digest"]==digest and "programme.end-to-end:V-034" in closure_unmet(stale),"Stale end-to-end receipt satisfied programme closure")
+        closure_programme_receipt(f,x,"actual-test",["V-034"],digest);closure_programme_receipt(f,x,"activation-rehearsal",["V-055"],digest)
+        result=closure_evaluate(f,level="PROGRAMME");met={o["id"] for o in result["obligations"] if o["met"]}
+        expect(result["input_manifest_digest"]==digest and {"programme.end-to-end:V-034","programme.activation-rehearsal:V-055","programme.gate:actual-test","programme.gate:activation-rehearsal"}<=met,"Current end-to-end/rehearsal receipts not recognised")
+        expect(result["outcome"]=="HELD" and result["programme_qualified"] is False and result["external_activation_authorized"] is False,"Programme closed while other obligations remain unmet")
+        state["programme"]=result
+    check(IDS[TASK][21],programme_cases_current)
+    def each_wave():
+        x=state["x"];result=state["programme"];waves={w["wave"]:w for w in result["wave_statuses"]}
+        expect(sorted(waves)==[1,2] and not any(w["closed"] for w in waves.values()) and {"programme.wave-closed:1","programme.wave-closed:2"}<=closure_unmet(result),"Programme did not require each wave's own closure")
+        a=f.auth
+        # Synthetic lower-level PASS seed: only wave 1's own current evaluation; it must not close the programme.
+        a.sql("INSERT INTO hyperfide.integration_closure_evaluations(organisation_id,run_id,id,level,wave,input_manifest_digest,outcome,manifest) VALUES($1,$2,$3,'WAVE',1,$4,'PASS','{}'::jsonb)",[a.ids["organisation"],a.ids["run"],closure_uuid(),waves[1]["input_manifest_digest"]])
+        after=closure_evaluate(f,level="PROGRAMME");unmet=closure_unmet(after)
+        expect("programme.wave-closed:1" not in unmet and "programme.wave-closed:2" in unmet and after["outcome"]=="HELD" and after["programme_qualified"] is False,"Closed lower wave silently closed the programme")
+    check(IDS[TASK][22],each_wave)
 def release_cases(f):
     check(IDS[TASK][0],f.wire)
     check(IDS[TASK][1],lambda:f.reject(TASK,"integration.release.create",{**SCOPE,"done":True},"INTEGRATION_INVALID"))
