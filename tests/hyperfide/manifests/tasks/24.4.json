@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "campaign_id": "hyperfide-task-24.4-recovery-drills-component-v1",
+  "campaign_id": "hyperfide-task-24.4-recovery-drills-component-v1-requal-12aa390190b3",
   "registered_variant": "task:24.4",
   "scope": "task-component",
   "case_ids": [
@@ -68,8 +68,8 @@
     },
     {
       "path": "services/hyperfide/dist/recovery/control.js",
-      "sha256": "61e12389fe9db286ea4869103d808b063c6046bba03912dbf31a9f3fb6c34089",
-      "size": 38886
+      "sha256": "224b810aa00f58dbf75b16934643e43c93161eb88934d4309eadc617f6492e4f",
+      "size": 45166
     },
     {
       "path": "services/hyperfide/dist/recovery/drills.js",
@@ -88,8 +88,8 @@
     },
     {
       "path": "services/hyperfide/migrations/0024-recovery.sql",
-      "sha256": "488bfa3e107470e8e7465b674a16f7ca01cab045e5de3bce6631473cf7160ee6",
-      "size": 11993
+      "sha256": "285d5d5fe0788a22231fbcf633e1ce663a4d19b0b1fad6c0dde5003ba6014eeb",
+      "size": 14970
     },
     {
       "path": "services/hyperfide/package-lock.json",
@@ -103,8 +103,8 @@
     },
     {
       "path": "services/hyperfide/src/recovery/control.ts",
-      "sha256": "e7b175db837d52486c8b18a03a4651ad6cd270dc98a055c7822a504a014a5a7d",
-      "size": 39383
+      "sha256": "98a7e1235ae2af6b321457cdbe5d28b9329820f20dde178c2717e51dcb237323",
+      "size": 45337
     },
     {
       "path": "services/hyperfide/src/recovery/drills.ts",
@@ -133,8 +133,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/24_1.py",
-      "sha256": "501cafb76358fcb20432ca8fe79a6eea0a5cdafef63ab431dec0fddf9bbc1660",
-      "size": 19848
+      "sha256": "f17e11e00c4b6d1b33e2bf488b3e09fc86d5874cfb755c18a5db3c6ba3b4a97f",
+      "size": 29503
     },
     {
       "path": "tests/hyperfide/cases/tasks/24_4.py",
