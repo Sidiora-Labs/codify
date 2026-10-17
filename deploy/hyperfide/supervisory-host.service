@@ -1,9 +1,13 @@
+# UNQUALIFIED: `hyperfide supervisory-host` is a task 26.4 deliverable that is not yet
+# implemented. Shipped for reference only: no install section, and it never
+# starts until 26.4 ships the qualification marker named below.
 [Unit]
 Description=Hyperfide restricted MAIN supervisory host
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=300
 StartLimitBurst=5
+ConditionPathExists=/opt/hyperfide/current/share/hyperfide/qualified/supervisory-host
 [Service]
 Type=exec
 User=root
@@ -25,5 +29,3 @@ ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/hyperfide
 UMask=0077
-[Install]
-WantedBy=multi-user.target
