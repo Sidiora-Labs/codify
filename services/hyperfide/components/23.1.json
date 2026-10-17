@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "23.1",
+  "task": "23.1",
+  "roles": [
+    "control"
+  ],
+  "module": "observability/views.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "fleet.views.describe",
+    "fleet.views.snapshot",
+    "fleet.views.observe",
+    "fleet.views.entities"
+  ],
+  "requires": [
+    "4.2",
+    "14.1"
+  ]
+}

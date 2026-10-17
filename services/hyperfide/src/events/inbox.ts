@@ -157,75 +157,9 @@ export async function bootstrapConsumer(tx:PrimaryTransaction,input:SnapshotBoot
     [s.organisation_id,s.run_id,consumer]);
   return result;
 }
-
-export interface DeliverySupersession extends Scope {transfer_id:string;original_event_id:string;original_consumer_id:string;
-  replacement_event_id:string;replacement_consumer_id:string}
-export async function supersedeDelivery(tx:PrimaryTransaction,input:DeliverySupersession,
-    authorize:(tx:PrimaryTransaction,events:{original:OutboxEvent;replacement:OutboxEvent})=>Promise<Record<string,unknown>>):Promise<unknown> {
-  assertPrimaryTransaction(tx);
-  const v=fields(input,['organisation_id','run_id','transfer_id','original_event_id','original_consumer_id','replacement_event_id','replacement_consumer_id']),
-    s=scope(v),transfer=uuid(v.transfer_id),originalId=uuid(v.original_event_id),originalConsumer=uuid(v.original_consumer_id),
-    replacementId=uuid(v.replacement_event_id),replacementConsumer=uuid(v.replacement_consumer_id);
-  if(originalId===replacementId||typeof authorize!=='function')
-    fail('INBOX_SUPERSESSION_INVALID','Transfer requires distinct immutable events and a trusted authority callback');
-  await lockRun(tx,s,'exclusive');
-  const rows=await tx.query(`SELECT e.*,d.consumer_id,d.state AS delivery_state FROM hyperfide.outbox_events e
-    JOIN hyperfide.event_deliveries d ON(d.organisation_id=e.organisation_id AND d.run_id=e.run_id AND d.event_id=e.id)
-    WHERE e.organisation_id=$1 AND e.run_id=$2 AND ((e.id=$3 AND d.consumer_id=$4) OR(e.id=$5 AND d.consumer_id=$6))
-    FOR UPDATE OF d`,[s.organisation_id,s.run_id,originalId,originalConsumer,replacementId,replacementConsumer]);
-  if(rows.rows.length!==2) fail('INBOX_SUPERSESSION_INVALID','Exact original and replacement obligations must already exist');
-  const decode=(r:Record<string,unknown>)=>event({...s,id:r.id,aggregate_type:r.aggregate_type,aggregate_id:r.aggregate_id,
-    aggregate_version:r.aggregate_version,event_type:r.event_type,payload:r.payload});
-  const original=decode(rows.rows.find(r=>r.id===originalId)!),replacement=decode(rows.rows.find(r=>r.id===replacementId)!);
-  if(!((original.aggregate_type==='human_command'&&original.event_type==='leader.intent.requested')||
-      (original.aggregate_type==='human_intent_transfer'&&original.event_type==='leader.intent.adopted'))||
-    replacement.aggregate_type!=='human_intent_transfer'||replacement.event_type!=='leader.intent.adopted'||
-    original.aggregate_version!=='1'||replacement.aggregate_version!=='1'||
-    replacement.payload.supersedes_event_id!==originalId||
-    replacement.payload.original_event_id!==(original.aggregate_type==='human_command'?originalId:original.payload.original_event_id)||
-    BigInt(integer(replacement.payload.leader_generation,true))<=BigInt(integer(original.payload.leader_generation,true)))
-    fail('INBOX_SUPERSESSION_INVALID','Transfer does not preserve its direct source, root intent and strictly newer leadership generation');
-  const evidence=await authorize(tx,{original,replacement});
-  if(!evidence||typeof evidence!=='object'||Array.isArray(evidence)||Object.keys(evidence).length===0)
-    fail('INBOX_SUPERSESSION_INVALID','Linked authority must produce durable replacement evidence');
-  const requestDigest=digest({...s,transfer_id:transfer,original_event_id:originalId,original_consumer_id:originalConsumer,
-    replacement_event_id:replacementId,replacement_consumer_id:replacementConsumer,
-    original_digest:eventDigest(original),replacement_digest:eventDigest(replacement)});
-  const prior=await tx.query("SELECT request_digest,state,result FROM hyperfide.command_inbox WHERE organisation_id=$1 AND run_id=$2 AND principal_scope=$3 AND operation='event.supersede' AND idempotency_key=$4",
-    [s.organisation_id,s.run_id,originalConsumer,transfer]);
-  if(prior.rows.length) {
-    if(prior.rows[0]!.request_digest!==requestDigest||prior.rows[0]!.state!=='COMPLETED')
-      fail('INBOX_IDEMPOTENCY_CONFLICT','Transfer identity was reused with different immutable event bindings');
-    return {...prior.rows[0]!.result as Record<string,unknown>,replayed:true};
-  }
-  const edge=await tx.query("SELECT request_digest FROM hyperfide.command_inbox WHERE organisation_id=$1 AND run_id=$2 AND principal_scope=$3 AND operation='event.superseded-edge' AND idempotency_key=$4",
-    [s.organisation_id,s.run_id,originalConsumer,originalId]);
-  if(edge.rows.length) fail('INBOX_SUPERSESSION_CONFLICT','The direct source already has a committed replacement; adopt that replacement to extend the chain');
-  const admission=await tx.query("SELECT id,request_digest,state FROM hyperfide.command_inbox WHERE organisation_id=$1 AND run_id=$2 AND principal_scope=$3 AND operation='event.receive' AND idempotency_key=$4 FOR UPDATE",
-    [s.organisation_id,s.run_id,originalConsumer,originalId]);
-  if(admission.rows.length&&(admission.rows[0]!.request_digest!==eventDigest(original)||admission.rows[0]!.state!=='COMPLETED'))
-    fail('INBOX_RECEIPT_INCOMPLETE','Prior original admission has conflicting or incomplete provenance');
-  const receiptId=admission.rows[0]?.id??randomUUID(),result={transfer_id:transfer,original_event_id:originalId,original_consumer_id:originalConsumer,
-    replacement_event_id:replacementId,replacement_consumer_id:replacementConsumer,inbox_id:receiptId,
-    original_retired:true,replacement_acknowledged_by_transfer:false,source_preserved:true,task_completed:false,replayed:false,evidence};
-  if(!admission.rows.length) await tx.query("INSERT INTO hyperfide.command_inbox(organisation_id,run_id,id,principal_scope,operation,idempotency_key,request_digest,state,result) VALUES($1,$2,$3,$4,'event.receive',$5,$6,'COMPLETED',$7::jsonb)",
-    [s.organisation_id,s.run_id,receiptId,originalConsumer,originalId,eventDigest(original),canonical({recorded:true,mode:'SUPERSEDED_BY_AUTHORISED_TRANSFER',transfer_id:transfer,replacement_event_id:replacementId})]);
-  await tx.query("INSERT INTO hyperfide.command_inbox(organisation_id,run_id,id,principal_scope,operation,idempotency_key,request_digest,state,result) VALUES($1,$2,$3,$4,'event.supersede',$5,$6,'COMPLETED',$7::jsonb)",
-    [s.organisation_id,s.run_id,randomUUID(),originalConsumer,transfer,requestDigest,canonical(result)]);
-  await tx.query("INSERT INTO hyperfide.command_inbox(organisation_id,run_id,id,principal_scope,operation,idempotency_key,request_digest,state,result) VALUES($1,$2,$3,$4,'event.superseded-edge',$5,$6,'COMPLETED',$7::jsonb)",
-    [s.organisation_id,s.run_id,randomUUID(),originalConsumer,originalId,requestDigest,canonical(result)]);
-  await tx.query("UPDATE hyperfide.event_deliveries SET state='ACKNOWLEDGED',acknowledged_at=clock_timestamp(),state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND event_id=$3 AND consumer_id=$4 AND state<>'ACKNOWLEDGED'",
-    [s.organisation_id,s.run_id,originalId,originalConsumer]);
-  return result;
-}
-export interface EventInboxCapability {receive:typeof receive;replay:typeof replay;bootstrapConsumer:typeof bootstrapConsumer;supersedeDelivery:typeof supersedeDelivery}
-export function isEventInboxCapability(value:unknown):value is EventInboxCapability {
-  const v=value as Partial<EventInboxCapability>|null;
-  return !!v&&typeof v.receive==='function'&&typeof v.replay==='function'&&typeof v.bootstrapConsumer==='function'&&typeof v.supersedeDelivery==='function';
-}
 export function createComponent(context:ComponentContext):Component {
   const g=gateway(context);
-  const component={apiVersion:1 as const,capabilities:{'events.inbox.v1':Object.freeze({receive,replay,bootstrapConsumer,supersedeDelivery})},actions:{
+  const component={apiVersion:1 as const,capabilities:{'events.inbox.v1':Object.freeze({receive,replay,bootstrapConsumer})},actions:{
     'inbox.describe':()=>({schema_version:1,effect:'transactional-linked-callback',duplicate_effects:false,
       gap:'defer-and-replay-or-resnapshot-required',full_case_status:'INCOMPLETE'}),
     'inbox.receive':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','DISPATCH'],tx=>receive(tx,input)),

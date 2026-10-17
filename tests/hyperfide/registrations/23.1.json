@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "variant": "task:23.1",
+  "task": "23.1",
+  "scope": "task-component",
+  "cases": [
+    "V-010",
+    "V-034"
+  ],
+  "assertion_ids": [
+    "observability.views.registered",
+    "observability.views.primary-snapshot",
+    "observability.views.cross-run-denied",
+    "observability.views.unsigned-denied",
+    "observability.views.input-closed",
+    "observability.views.page-budget",
+    "observability.views.record-observation",
+    "observability.views.desired-observed-distinct",
+    "observability.views.stale-visible",
+    "observability.views.log-volume-not-progress",
+    "observability.views.sequence-replay",
+    "observability.views.sequence-conflict",
+    "observability.views.future-time-rejected",
+    "observability.views.nonowner-observer-denied",
+    "observability.views.trusted-observer-priority",
+    "observability.views.entity-pagination",
+    "observability.views.evidence-unknown",
+    "observability.views.no-fabricated-release-count",
+    "observability.views.actual-critical-path",
+    "observability.views.integrated-label-not-terminal-proof",
+    "observability.views.cycle-explicit",
+    "observability.views.large-run-bounded"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/23_1.py"
+  ],
+  "timeout_seconds": 600,
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
+  "fixtures": [
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/transport/protocol.js",
+    "services/hyperfide/dist/observability/views.js"
+  ],
+  "resources": [
+    {
+      "id": "hf-task-23.1-database",
+      "kind": "postgresql-database",
+      "scope": "task23.1-disposable"
+    }
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/23_1.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "required_artifacts": [
+    "observability/database-absence.json",
+    "observability/observations.json",
+    "observability/assertion-inventory.json"
+  ],
+  "source_files": [
+    "services/hyperfide/components/23.1.json",
+    "services/hyperfide/migrations/0023-observability.sql",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/package.json",
+    "services/hyperfide/src/observability/views.ts",
+    "services/hyperfide/tsconfig.json",
+    "tests/hyperfide/cases/tasks/23_1.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/registrations/23.1.json",
+    "tests/hyperfide/support/identity_fixture.py"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "https.fixture.listen"
+  ]
+}

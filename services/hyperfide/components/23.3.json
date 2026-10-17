@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "23.3",
+  "task": "23.3",
+  "roles": [
+    "control"
+  ],
+  "module": "observability/metrics.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "fleet.metrics.describe",
+    "fleet.metrics.record",
+    "fleet.metrics.snapshot",
+    "fleet.metrics.compare"
+  ],
+  "requires": [
+    "23.1"
+  ]
+}

@@ -4,8 +4,7 @@
   "task": "6.2",
   "roles": [
     "control",
-    "dispatch",
-    "provisioner"
+    "dispatch"
   ],
   "module": "events/inbox.js",
   "entry": "createComponent",

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "23.2",
+  "task": "23.2",
+  "roles": [
+    "control"
+  ],
+  "module": "observability/resources.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "fleet.resources.describe",
+    "fleet.resources.profile.put",
+    "fleet.resources.observe",
+    "fleet.resources.snapshot",
+    "fleet.resources.sandbox-budgets"
+  ],
+  "requires": [
+    "23.1"
+  ]
+}
