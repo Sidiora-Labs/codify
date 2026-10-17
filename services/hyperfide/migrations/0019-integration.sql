@@ -246,3 +246,40 @@ CREATE TRIGGER immutable_scope_execution_manifest BEFORE UPDATE ON hyperfide.int
 CREATE UNIQUE INDEX one_candidate_gate_receipt_per_job ON hyperfide.integration_gate_receipts(organisation_id,run_id,job_id,gate_id);
 CREATE UNIQUE INDEX one_scope_gate_receipt_per_job ON hyperfide.integration_scope_receipts(organisation_id,run_id,job_id,gate_id);
 CREATE UNIQUE INDEX one_active_scope_job ON hyperfide.integration_scope_jobs(organisation_id,run_id,level,COALESCE(wave,0)) WHERE state IN('RUNNING','OUTCOME_UNKNOWN');
+
+-- 19.4: separate Git ref updates are never one atomic transaction. Pinned
+-- outcomes stay as created; observations, recovery decisions and compensating
+-- gateway publications are append-only audit history.
+CREATE TABLE hyperfide.integration_release_observations (
+ organisation_id uuid NOT NULL,run_id uuid NOT NULL,barrier_id uuid NOT NULL,repository_id uuid NOT NULL,
+ sequence bigint GENERATED ALWAYS AS IDENTITY,candidate_id uuid NOT NULL,operation_id uuid,
+ outcome text NOT NULL CHECK(outcome IN ('PENDING','PUBLISHED','FAILED','UNKNOWN')),observed_head hyperfide.git_oid,
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),PRIMARY KEY(organisation_id,run_id,sequence),
+ FOREIGN KEY(organisation_id,run_id,barrier_id,repository_id) REFERENCES hyperfide.integration_release_outcomes(organisation_id,run_id,barrier_id,repository_id),
+ FOREIGN KEY(organisation_id,run_id,operation_id) REFERENCES hyperfide.publication_operations(organisation_id,run_id,id)
+);
+CREATE INDEX integration_release_observation_latest ON hyperfide.integration_release_observations(organisation_id,run_id,barrier_id,repository_id,sequence DESC);
+CREATE TABLE hyperfide.integration_release_recoveries (
+ organisation_id uuid NOT NULL,run_id uuid NOT NULL,id uuid NOT NULL,barrier_id uuid NOT NULL,request_id uuid NOT NULL,request_digest hyperfide.digest NOT NULL,
+ recovery_policy text NOT NULL CHECK(recovery_policy IN ('ADVANCE_COMPATIBLE_MANIFEST','EXPLICIT_COMPENSATING_REVISION')),
+ observed_outcomes jsonb NOT NULL CHECK(jsonb_typeof(observed_outcomes)='array'),successor_barrier_id uuid,
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),PRIMARY KEY(organisation_id,run_id,id),
+ UNIQUE(organisation_id,run_id,barrier_id),UNIQUE(organisation_id,run_id,request_id),
+ FOREIGN KEY(organisation_id,run_id,barrier_id) REFERENCES hyperfide.integration_release_barriers(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,run_id,successor_barrier_id) REFERENCES hyperfide.integration_release_barriers(organisation_id,run_id,id),
+ CHECK((recovery_policy='ADVANCE_COMPATIBLE_MANIFEST')=(successor_barrier_id IS NOT NULL))
+);
+CREATE TABLE hyperfide.integration_release_compensations (
+ organisation_id uuid NOT NULL,run_id uuid NOT NULL,recovery_id uuid NOT NULL,repository_id uuid NOT NULL,
+ compensated_head hyperfide.git_oid NOT NULL,operation_id uuid NOT NULL,created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(organisation_id,run_id,recovery_id,repository_id),UNIQUE(organisation_id,run_id,operation_id),
+ FOREIGN KEY(organisation_id,run_id,recovery_id) REFERENCES hyperfide.integration_release_recoveries(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,run_id,operation_id) REFERENCES hyperfide.publication_operations(organisation_id,run_id,id)
+);
+CREATE TRIGGER immutable_release_outcome BEFORE UPDATE OR DELETE ON hyperfide.integration_release_outcomes FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','barrier_id','repository_id','candidate_id','operation_id','outcome','observed_head');
+CREATE TRIGGER immutable_release_observation BEFORE UPDATE OR DELETE ON hyperfide.integration_release_observations FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','barrier_id','repository_id','sequence','candidate_id','operation_id','outcome','observed_head');
+CREATE TRIGGER immutable_release_recovery BEFORE UPDATE OR DELETE ON hyperfide.integration_release_recoveries FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','id','barrier_id','request_id','request_digest','recovery_policy','observed_outcomes','successor_barrier_id');
+CREATE TRIGGER immutable_release_compensation BEFORE UPDATE OR DELETE ON hyperfide.integration_release_compensations FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','recovery_id','repository_id','compensated_head','operation_id');
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.integration_release_observations FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.integration_release_recoveries FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.integration_release_compensations FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
