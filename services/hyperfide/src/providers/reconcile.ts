@@ -1,4 +1,4 @@
-import {randomUUID} from 'node:crypto';
+import {randomUUID,createHash} from 'node:crypto';
 import type pg from 'pg';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {assertPrimaryTransaction} from '../storage/transactions.js';
@@ -64,7 +64,7 @@ export async function preparationParameters(c:PrimaryTransaction,config:Deployme
    [config.organisation_id,poolId,profileId,desired,pool.provider,scope.configuration_digest]);
   if(bases.rows.length!==1)fail('PREPARED_BASE_UNAVAILABLE','Exactly one current verified provider base must bind the desired preparation');
   const base=bases.rows[0]!;
-  const custody=await c.query("SELECT digest FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND digest=ANY($3::text[]) AND status='COMPLETE' FOR SHARE",[config.organisation_id,base.source_run_id,[...new Set([base.manifest_artifact_digest,base.execution_receipt_artifact_digest,base.verification_receipt_artifact_digest])]]);
+  const custody=await c.query("SELECT digest FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND digest=ANY($3::text[]) AND status='COMPLETE' AND completed_at IS NOT NULL FOR SHARE",[config.organisation_id,base.source_run_id,[...new Set([base.manifest_artifact_digest,base.execution_receipt_artifact_digest,base.verification_receipt_artifact_digest])]]);
   if(custody.rows.length!==new Set([base.manifest_artifact_digest,base.execution_receipt_artifact_digest,base.verification_receipt_artifact_digest]).size)fail('PREPARED_BASE_CUSTODY_UNAVAILABLE','Prepared-base manifest artifact must remain complete under admission lock');
   reference=str(obj(base.provider_reference).preparation_reference);
  }
@@ -364,8 +364,52 @@ export async function reconcileIntent(pool:ProviderDatabase,config:DeploymentCon
   const op=next('observe',{},ref),outcome=await boundedProvider(adapter.observe(op,signal),signal,op.deadline_at);await hooks.recordObservation(op,outcome);
   return{intent:await intent(pool,config.organisation_id,id),reconciled:true,absence_authorized:false};
 }
+
+export type ProviderCaptureProof=
+ {schema_version:1;scheme:'STREAM_DIGESTS_CANONICAL_JSON'}|
+ {schema_version:1;scheme:'ORDERED_CHUNKS_SHA256';chunks:Array<{stream:'stdout'|'stderr';offset_bytes:string;size_bytes:string;digest:string}>};
 export interface CapturedProviderOutput {
- stdout:Uint8Array;stderr:Uint8Array;exit_code:number;complete:true;spool_digest:string;
+ stdout:Uint8Array;stderr:Uint8Array;exit_code:number;complete:true;spool_digest:string;capture:ProviderCaptureProof;
+}
+export function verifyCapturedProviderOutput(result:import('./contract.js').ProcessResult,value:CapturedProviderOutput,maxBytes=16*1024*1024):CapturedProviderOutput{
+ if(!Number.isSafeInteger(maxBytes)||maxBytes<0||maxBytes>16*1024*1024||!(value?.stdout instanceof Uint8Array)||!(value.stderr instanceof Uint8Array)||
+ value.complete!==true||value.exit_code!==result.exit_code||result.phase!=='EXITED'||result.exit_code===null||!result.output.complete||result.output.truncated)
+  fail('REMOTE_OUTPUT_INCOMPLETE','Actual terminal complete bounded capture required');
+ const stdout=Buffer.from(value.stdout),stderr=Buffer.from(value.stderr),size=stdout.length+stderr.length;
+ if(size>maxBytes||dec(result.output.byte_count)!==String(size))fail('REMOTE_CAPTURE_MISMATCH','Actual captured byte count differs from terminal observation');
+ const bytesDigest=(bytes:Uint8Array)=>'sha256:'+createHash('sha256').update(bytes).digest('hex');
+ dg(value.spool_digest);dg(result.output.sha256);
+ const proof=obj(value.capture);let actual:string;
+ if(proof.schema_version!==1)fail('REMOTE_CAPTURE_MISMATCH','Known independent capture proof required');
+ if(proof.scheme==='STREAM_DIGESTS_CANONICAL_JSON'){
+  obj(proof,['schema_version','scheme']);
+  actual=digestDocument({stdout:bytesDigest(stdout),stderr:bytesDigest(stderr)});
+ }else if(proof.scheme==='ORDERED_CHUNKS_SHA256'){
+  obj(proof,['schema_version','scheme','chunks']);
+  if(!Array.isArray(proof.chunks)||proof.chunks.length>4096)fail('REMOTE_CAPTURE_MISMATCH','Bounded ordered actual capture ranges required');
+  const offsets={stdout:0,stderr:0},hash=createHash('sha256');
+  for(const raw of proof.chunks){
+   const chunk=obj(raw,['stream','offset_bytes','size_bytes','digest']);
+   if(chunk.stream!=='stdout'&&chunk.stream!=='stderr')fail('REMOTE_CAPTURE_MISMATCH','Unknown captured stream');
+   const stream=chunk.stream,offset=BigInt(dec(chunk.offset_bytes)),length=BigInt(dec(chunk.size_bytes)),buffer=stream==='stdout'?stdout:stderr;
+   if(length===0n||offset!==BigInt(offsets[stream])||offset+length>BigInt(buffer.length))fail('REMOTE_CAPTURE_MISMATCH','Capture ranges must cover each actual stream contiguously');
+   const bytes=buffer.subarray(Number(offset),Number(offset+length));
+   if(bytesDigest(bytes)!==dg(chunk.digest))fail('REMOTE_CAPTURE_MISMATCH','Actual range bytes differ from proof');
+   offsets[stream]+=bytes.length;hash.update(bytes);
+  }
+  if(offsets.stdout!==stdout.length||offsets.stderr!==stderr.length)fail('REMOTE_CAPTURE_MISMATCH','Incomplete actual stream coverage');
+  actual='sha256:'+hash.digest('hex');
+  if(actual!==value.spool_digest)fail('REMOTE_CAPTURE_MISMATCH','Ordered raw capture differs from independently verified spool');
+ }else fail('REMOTE_CAPTURE_MISMATCH','Unsupported or missing independent capture framing');
+ if(actual!==result.output.sha256)fail('REMOTE_CAPTURE_MISMATCH','Actual captured bytes differ from terminal output digest');
+ return{stdout,stderr,exit_code:value.exit_code,complete:true,spool_digest:value.spool_digest,capture:JSON.parse(JSON.stringify(proof)) as ProviderCaptureProof};
+}
+export function processObservationDisposition(previous:ProviderOutcome|null,next:ProviderOutcome):'ACCEPT'|'IGNORE'|'CONFLICT'{
+ if(previous?.status==='SUCCEEDED'&&'phase' in previous.result&&previous.result.phase==='EXITED'){
+  if(next.status==='SUCCEEDED'&&'phase' in next.result&&next.result.phase==='EXITED'&&digestDocument(previous.result)!==digestDocument(next.result))return'CONFLICT';
+  return'IGNORE';
+ }
+ return previous&&Date.parse(previous.observed_at)>Date.parse(next.observed_at)?'IGNORE':'ACCEPT';
 }
 export interface BoundProviderRequest {
  binding:{organisation_id:string;run_id:string;session_id:string;pool_id:string;sandbox_id:string;external_sandbox_id:string;boot_generation:string;preparation_digest:string};
@@ -472,18 +516,20 @@ export async function executeBound(pool:ProviderDatabase,config:DeploymentConfig
  };
  const record=async(observedOperation:ProviderOperation,outcome:ProviderOutcome)=>{
   validateProviderOutcome({operation:observedOperation,outcome});assertOperation(observedOperation);if(Date.parse(outcome.observed_at)>Date.now())fail('PROVIDER_OBSERVATION_FUTURE','Future process observation cannot change durable state');
-  await transaction(pool,async c=>{
+  const conflict=await transaction(pool,async c=>{
    const current=(await c.query('SELECT outcome,process_record FROM hyperfide.provider_remote_operations WHERE organisation_id=$1 AND id=$2 FOR UPDATE',[config.organisation_id,id])).rows[0];
    if(!current)fail('PROCESS_BINDING_INVALID','Durable remote operation disappeared');
    if(observedOperation.kind!=='execute'&&current.process_record?.process_ref!==logicalProcessRef)fail('PROCESS_BINDING_INVALID','Derived observation differs from persisted process claim');
    await c.query('INSERT INTO hyperfide.provider_remote_observations(organisation_id,run_id,remote_operation_id,id,observation,evidence_digest,observed_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING',
     [config.organisation_id,run,id,randomUUID(),{operation:observedOperation,outcome},digestDocument({operation:observedOperation,outcome}),outcome.observed_at]);
-   const previous=current.outcome as ProviderOutcome|null;
-   if(previous&&Date.parse(previous.observed_at)>Date.parse(outcome.observed_at)||previous?.status==='SUCCEEDED'&&'phase' in previous.result&&previous.result.phase==='EXITED'&&outcome.status!=='SUCCEEDED')return;
+   const previous=current.outcome as ProviderOutcome|null,decision=processObservationDisposition(previous,outcome);
+   if(decision==='CONFLICT'){await c.query("UPDATE hyperfide.provider_remote_operations SET state='UNKNOWN',updated_at=clock_timestamp() WHERE organisation_id=$1 AND id=$2",[config.organisation_id,id]);return true;}
+   if(decision==='IGNORE')return false;
    const phase=outcome.status==='SUCCEEDED'&&'phase' in outcome.result?(outcome.result.phase==='EXITED'?'EXITED':'RUNNING'):'UNKNOWN';
    await c.query("UPDATE hyperfide.provider_remote_operations SET state=$3,outcome=$4,process_record=CASE WHEN process_record IS NULL THEN NULL ELSE jsonb_set(process_record,'{state}',to_jsonb($5::text)) END,updated_at=clock_timestamp() WHERE organisation_id=$1 AND id=$2",
     [config.organisation_id,id,outcome.status==='UNKNOWN'?'UNKNOWN':'OBSERVED',outcome,phase]);
-  });
+   return false;
+  });if(conflict)fail('PROCESS_TERMINAL_CONFLICT','Contradictory terminal observation retained without replacing immutable process completion');
  };
  const adapter=providerAdapter(op.scope,{...remoteProcessHooks(pool,config.organisation_id,run,id),invocation:providerInvocation(pool),resolveResourceBinding:observed=>resolveSandboxBinding(pool,config,run,sandbox,observed),resolvePreparation:unavailable,assertResourceBinding:async observed=>{
   assertOperation(observed);
@@ -511,11 +557,9 @@ export async function executeBound(pool:ProviderDatabase,config:DeploymentConfig
   // Keep the raw paired observation as well as this explicit normalisation.
   const outcome={...observed,operation_id:op.identity.operation_id,payload_digest:op.identity.payload_digest} as Extract<ProviderOutcome<'execute'>,{status:'SUCCEEDED'}>;
   await record(op,outcome);
-  const captured=await boundedProvider(adapter.readCapturedOutput(op.scope,op.resource!,outcome.result.process_ref,16*1024*1024),combined,op.deadline_at);
-  if(!(captured.stdout instanceof Uint8Array)||!(captured.stderr instanceof Uint8Array)||captured.complete!==true||captured.exit_code!==outcome.result.exit_code||captured.stdout.byteLength+captured.stderr.byteLength>16*1024*1024)
-   fail('REMOTE_OUTPUT_INCOMPLETE','Actual captured bytes do not match terminal process outcome');
+  const captured=verifyCapturedProviderOutput(outcome.result,await boundedProvider(adapter.readCapturedOutput(op.scope,op.resource!,outcome.result.process_ref,16*1024*1024),combined,op.deadline_at));
   return{operation:op,outcome,completion_observation:{operation:observedOperation,outcome:observed},process_ref:outcome.result.process_ref,scope:op.scope,resource:op.resource,captured,
-   evidence_digest:digestDocument({operation:op,outcome,spool_digest:captured.spool_digest}),cleanup_confirmed:outcome.result.termination_confirmed};
+   evidence_digest:digestDocument({operation:op,outcome,spool_digest:captured.spool_digest}),provider_process_termination_confirmed:outcome.result.termination_confirmed,cleanup_confirmed:false,cleanup_evidence_scope:'PROVIDER_PROCESS_ONLY'};
  }catch(error){await record(op,unknownOutcome(op,op.resource));throw error;}
 }
 export async function observeKnownSandbox(pool:ProviderDatabase,config:DeploymentConfig,value:unknown,signal:AbortSignal):Promise<unknown>{
@@ -591,4 +635,19 @@ export function createComponent(context:ComponentContext):Component {
     'provider.inventory.observe-known':guarded(async(input,c,database)=>{provisioner();if(providerInvocation(database).principal.role!=='PROVISIONER')fail('AUTH_SCOPE_DENIED','Inventory requires the provisioner principal');return observeKnownSandbox(database,c,input,context.signal);}),
     'provider.orphans.list':guarded(async(input,c,database)=>{const i=obj(input,['pool_id']);await currentPool(database,c,uuid(i.pool_id));return(await database.query('SELECT native_sandbox_id,state,ownership_evidence_digest,first_observed_at,last_observed_at FROM hyperfide.provider_orphans WHERE organisation_id=$1 AND pool_id=$2',[c.organisation_id,i.pool_id])).rows;}),
   }};
+}
+
+/** Control composition installs a durable PG reader; provider effects stay in the provisioner. */
+export function createAccountingComponent(context:ComponentContext):Component {
+ if(context.role!=='control')fail('ROLE_FORBIDDEN','Provider accounting belongs to the control service');
+ const intents=context.dependencies.require('8.3','provider.intents.v1',isProviderIntentCapability);
+ type SchedulerProofRegistry={registerProofReader(source:'provider.absence',reader:typeof readConfirmedAbsence):()=>void};
+ const scheduler=context.dependencies.require('5.4','scheduler.resources.v1',(value):value is SchedulerProofRegistry=>
+  !!value&&typeof value==='object'&&typeof (value as SchedulerProofRegistry).registerProofReader==='function');
+ const unregister=scheduler.registerProofReader('provider.absence',intents.readConfirmedAbsence);
+ let closed=false;
+ return{apiVersion:1,actions:{'provider.accounting.describe':input=>{
+  obj(input,[]);if(closed)fail('PROVIDER_CLOSED','Provider accounting bridge is closed');
+  return{proof_source:'provider.absence',installed:true,authority:'NONE',provider_execution_available:false};
+ }},close:()=>{if(!closed){closed=true;unregister();}}};
 }

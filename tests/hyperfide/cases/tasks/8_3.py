@@ -11,6 +11,9 @@ prepared=load("provider_preparation_fixture","tests/hyperfide/cases/tasks/11_1.p
 expect=pools.expect
 IDS=["provider.intent.configure","provider.intent.seed-admission","provider.intent.persist-before-effects","provider.intent.resource-reservations-bound","provider.intent.idempotent","provider.intent.key-payload-conflict","provider.intent.no-parameter-overrides","provider.intent.no-reservation","provider.intent.duplicate-reservation","provider.intent.stale-deadline","provider.intent.wrong-run","provider.intent.wrong-preparation","provider.intent.execution-needs-qualified-base","provider.intent.operator-no-effects","provider.intent.missing-adapter-no-submission","provider.intent.recorded-reconcile-no-effects","provider.intent.crash-state-no-replay","provider.intent.unknown-state-held","provider.intent.no-caller-remote-execution","provider.intent.no-known-resource-from-model","provider.intent.empty-boot-destroy","provider.intent.destroy-idempotent","provider.intent.destroy-stops-admission","provider.intent.worked-boot-needs-custody","provider.intent.remote-history-needs-custody","provider.intent.orphans-observation-only","provider.intent.exact-primary-brand","provider.intent.absence-unproven"]
 IDS+=["provider.intent.physical-reservation-single-owner"]
+IDS+=["provider.lineage.unregistered-refused","provider.lineage.exact-derived-selection","provider.lineage.full-manifest-tamper","provider.lineage.policy-escalation","provider.lineage.stale-refused","provider.lineage.expired-refused","provider.lineage.hash-tamper","provider.lineage.retained-proof-required","provider.lineage.parent-binding","provider.lineage.v2-full-body","provider.lineage.immutable-proof"]
+IDS+=["provider.capture.stream-pair-framing","provider.capture.actual-ordered-framing","provider.capture.exact-byte-count","provider.capture.exact-output-hash","provider.capture.exact-spool-hash","provider.capture.contiguous-coverage","provider.capture.actual-range-hash","provider.capture.explicit-scheme","provider.process.terminal-absorbing","provider.process.terminal-conflict","provider.process.terminal-identical","provider.capture.immutable-byte-copy","provider.lineage.recipe-policy-immutable"]
+IDS+=["provider.accounting.installs-actual-reader","provider.accounting.unproven-absence-held","provider.accounting.teardown-unregisters","provider.accounting.provisioner-refused","provider.accounting.no-provider-effects"]
 FAILED=[]
 def check(name,fn):
  try:fn();actual="observed"
@@ -114,6 +117,148 @@ def main():
   check(IDS[26],branded)
   check(IDS[27],lambda:expect(f.sql("SELECT count(*)::int AS n FROM hyperfide.provider_observations WHERE organisation_id=$1",[org])[0]["n"]==0,"absence evidence invented without actual provider observation"))
   check(IDS[28],lambda:reject("provider.intents.prepare-create",changed(request_key=str(uuid.uuid4()),sandbox_id=str(uuid.uuid4()),deadline_at=utc()),"RESERVATION_ALREADY_BOUND"))
+  parent=f.sql("SELECT manifest FROM hyperfide.environment_profiles WHERE organisation_id=$1 AND id=$2",[org,f.profile])[0]["manifest"]
+  canonical=lambda value:json.dumps(value,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()
+  policy_script="import fs from 'node:fs';import{approvedProfilePolicyDigest}from'./services/hyperfide/dist/providers/pools.js';process.stdout.write(approvedProfilePolicyDigest(JSON.parse(fs.readFileSync(0,'utf8'))));"
+  policy=subprocess.run(["node","--input-type=module","-e",policy_script],input=json.dumps(parent["profile"]),cwd=ROOT,env=f.env,text=True,capture_output=True,timeout=10)
+  expect(policy.returncode==0,policy.stderr);parent_policy=policy.stdout
+  config_digest=f.sql("SELECT configuration_digest FROM hyperfide.provider_pool_configurations WHERE organisation_id=$1 AND pool_id=$2 AND active",[org,f.pool])[0]["configuration_digest"]
+  def child_manifest(escalate=False,v2=False,tamper=False):
+   value=copy.deepcopy(parent);value["profile"]["profile_version"]="derived-"+uuid.uuid4().hex[:8]
+   if escalate:value["profile"]["resources"]["cpu_millis"]+=1
+   if v2:value.update(schema_version=2,symlinks=[],hardlinks=[])
+   value.pop("digest");value["digest"]=sha(canonical(value));identity=str(uuid.uuid4())
+   if tamper:value["profile"]["profile_version"]="tampered-without-rehash"
+   f.sql("INSERT INTO hyperfide.environment_profiles(organisation_id,id,provider,runtime_platform,content_digest,manifest) VALUES($1,$2,'railway','linux-x86_64',$3,$4)",[org,identity,value["digest"],value])
+   return identity,value
+  def lineage(child,manifest,*,state="QUALIFIED",expired=False,tamper=False,parent_id=None):
+   artifacts=[]
+   for label in ["source","execution","verification"]:
+    raw=("COMPONENT_FIXTURE_LINEAGE_ONLY:"+label+":"+child).encode();digest=sha(raw);aid=str(uuid.uuid4());artifact=f.path/(aid+".proof");artifact.write_bytes(raw)
+    f.sql("INSERT INTO hyperfide.artifacts(organisation_id,run_id,id,digest,size_bytes,storage_backend,storage_key,status,completed_at) VALUES($1,$2,$3,$4,$5,'COMPONENT_FIXTURE',$6,'COMPLETE',clock_timestamp())",[org,run,aid,digest,str(len(raw)),str(artifact)]);artifacts.append((aid,digest))
+   identity={"organisation_id":org,"id":str(uuid.uuid4()),"pool_id":f.pool,"configuration_digest":config_digest,"parent_profile_id":parent_id or f.profile,"parent_preparation_digest":f.preparation,"derived_profile_id":child,"derived_preparation_digest":manifest["digest"],"source_run_id":run,"source_manifest_digest":artifacts[0][1],"source_manifest_artifact_digest":artifacts[0][1],"execution_receipt_artifact_digest":artifacts[1][1],"verification_receipt_artifact_digest":artifacts[2][1],"accepted_policy_digest":parent_policy,"allowed_delta":["source","dependency_pins","build_config_pins"]}
+   record={**identity,"lineage_digest":sha(b"tampered-lineage") if tamper else sha(canonical(identity)),"state":state,"observed_at":utc(-120000),"expires_at":utc(-60000 if expired else 60000)}
+   columns=list(record)
+   f.sql("INSERT INTO hyperfide.provider_profile_lineage("+",".join(columns)+") VALUES("+",".join("$"+str(i+1) for i in range(len(columns)))+")",[json.dumps(record[k]) if k=="allowed_delta" else record[k] for k in columns])
+   return record,artifacts
+  def select(child,manifest,code):
+   reject("provider.intents.prepare-create",changed(request_key=str(uuid.uuid4()),sandbox_id=str(uuid.uuid4()),profile_id=child,preparation_digest=manifest["digest"],deadline_at=utc()),code)
+  child,manifest=child_manifest()
+  check(IDS[29],lambda:select(child,manifest,"PREPARATION_MISMATCH"))
+  row,proofs=lineage(child,manifest)
+  check(IDS[30],lambda:select(child,manifest,"RESERVATION_ALREADY_BOUND"))
+  def manifest_tamper():
+   badid,bad=child_manifest(tamper=True)
+   select(badid,bad,"PREPARATION_MISMATCH")
+  check(IDS[31],manifest_tamper)
+  def escalated():
+   cid,body=child_manifest(escalate=True);lineage(cid,body);select(cid,body,"PREPARATION_MISMATCH")
+  check(IDS[32],escalated)
+  def stale():
+   cid,body=child_manifest();lineage(cid,body,state="STALE");select(cid,body,"PREPARATION_MISMATCH")
+  check(IDS[33],stale)
+  def expired():
+   cid,body=child_manifest();lineage(cid,body,expired=True);select(cid,body,"PREPARATION_MISMATCH")
+  check(IDS[34],expired)
+  def hash_tamper():
+   cid,body=child_manifest();lineage(cid,body,tamper=True);select(cid,body,"PREPARATION_MISMATCH")
+  check(IDS[35],hash_tamper)
+  def lost_custody():
+   f.sql("UPDATE hyperfide.artifacts SET status='QUARANTINED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,run,proofs[1][0]])
+   select(child,manifest,"PREPARATION_MISMATCH")
+  check(IDS[36],lost_custody)
+  def parent_binding():
+   cid,body=child_manifest();other,_=child_manifest();lineage(cid,body,parent_id=other);select(cid,body,"PREPARATION_MISMATCH")
+  check(IDS[37],parent_binding)
+  def v2_body():
+   cid,body=child_manifest(v2=True);lineage(cid,body);select(cid,body,"RESERVATION_ALREADY_BOUND")
+  check(IDS[38],v2_body)
+  def immutable_lineage():
+   try:f.sql("UPDATE hyperfide.provider_profile_lineage SET source_manifest_digest=$3 WHERE organisation_id=$1 AND id=$2",[org,row["id"],sha(b"rewrite")])
+   except AssertionError:return
+   raise AssertionError("lineage proof identity was rewritten")
+  check(IDS[39],immutable_lineage)
+
+  capture_ids=["provider.capture.stream-pair-framing","provider.capture.actual-ordered-framing","provider.capture.exact-byte-count","provider.capture.exact-output-hash","provider.capture.exact-spool-hash","provider.capture.contiguous-coverage","provider.capture.actual-range-hash","provider.capture.explicit-scheme","provider.process.terminal-absorbing","provider.process.terminal-conflict","provider.process.terminal-identical","provider.capture.immutable-byte-copy"]
+  capture_script=r"""
+import{createHash}from'node:crypto';
+import{verifyCapturedProviderOutput,processObservationDisposition}from'./services/hyperfide/dist/providers/reconcile.js';
+import{digestDocument}from'./services/hyperfide/dist/providers/pools.js';
+const ids=JSON.parse(process.env.HF_CAPTURE_ASSERTIONS),stdout=Buffer.from('abCD'),stderr=Buffer.from('!');
+const sha=b=>'sha256:'+createHash('sha256').update(b).digest('hex');
+let failed=false;const assert=(v,m)=>{if(!v)throw Error(m)},clone=v=>structuredClone(v);
+const check=(n,f)=>{try{f();console.log(JSON.stringify({type:'assertion',id:ids[n],expected:'observed',actual:'observed'}))}catch(e){failed=true;console.log(JSON.stringify({type:'assertion',id:ids[n],expected:'observed',actual:String(e)}))}};
+const reject=f=>{try{f()}catch(e){if(!['REMOTE_CAPTURE_MISMATCH','REMOTE_OUTPUT_INCOMPLETE','INVALID_REQUEST'].includes(e.code))throw e;return}throw Error('invalid capture accepted')};
+const result={process_ref:'logical',phase:'EXITED',exit_code:0,timed_out:false,termination_confirmed:true,output:{complete:true,truncated:false,byte_count:'5',sha256:digestDocument({stdout:sha(stdout),stderr:sha(stderr)})}};
+const capture={stdout,stderr,exit_code:0,complete:true,spool_digest:sha(Buffer.from('private provider receipt is a distinct identity')),capture:{schema_version:1,scheme:'STREAM_DIGESTS_CANONICAL_JSON'}};
+const ordered=clone(capture);ordered.capture={schema_version:1,scheme:'ORDERED_CHUNKS_SHA256',chunks:[{stream:'stdout',offset_bytes:'0',size_bytes:'2',digest:sha(stdout.subarray(0,2))},{stream:'stderr',offset_bytes:'0',size_bytes:'1',digest:sha(stderr)},{stream:'stdout',offset_bytes:'2',size_bytes:'2',digest:sha(stdout.subarray(2))}]};
+ordered.spool_digest=sha(Buffer.from('ab!CD'));const orderedResult=clone(result);orderedResult.output.sha256=ordered.spool_digest;
+check(0,()=>assert(verifyCapturedProviderOutput(result,capture).stdout.length===4,'actual stream digest framing failed'));
+check(1,()=>assert(verifyCapturedProviderOutput(orderedResult,ordered).stderr.length===1,'actual interleaving proof failed'));
+check(2,()=>{const r=clone(result);r.output.byte_count='6';reject(()=>verifyCapturedProviderOutput(r,capture))});
+check(3,()=>{const r=clone(result);r.output.sha256=sha(Buffer.from('different bytes'));reject(()=>verifyCapturedProviderOutput(r,capture))});
+check(4,()=>{const c=clone(ordered);c.spool_digest=sha(Buffer.from('different global order'));reject(()=>verifyCapturedProviderOutput(orderedResult,c))});
+check(5,()=>{const c=clone(ordered);c.capture.chunks[2].offset_bytes='1';reject(()=>verifyCapturedProviderOutput(orderedResult,c))});
+check(6,()=>{const c=clone(ordered);c.capture.chunks[0].digest=sha(Buffer.from('forged'));reject(()=>verifyCapturedProviderOutput(orderedResult,c))});
+check(7,()=>{const c=clone(capture);delete c.capture;reject(()=>verifyCapturedProviderOutput(result,c))});
+const terminal={status:'SUCCEEDED',observed_at:new Date().toISOString(),result:clone(result)};
+check(8,()=>{const started=clone(terminal);started.result.phase='STARTED';started.observed_at=new Date(Date.now()+1).toISOString();assert(processObservationDisposition(terminal,started)==='IGNORE','terminal process regressed to RUNNING')});
+check(9,()=>{const conflicting=clone(terminal);conflicting.result.exit_code=7;assert(processObservationDisposition(terminal,conflicting)==='CONFLICT','contradictory terminal exit accepted')});
+check(10,()=>assert(processObservationDisposition(terminal,clone(terminal))==='IGNORE','identical terminal replay changed completion'));
+check(11,()=>{const c=clone(capture),verified=verifyCapturedProviderOutput(result,c);c.stdout[0]=0;assert(verified.stdout[0]===97,'caller mutation changed verified capture bytes')});
+process.exitCode=failed?1:0;
+"""
+  probe=subprocess.run(["node","--input-type=module","-e",capture_script],cwd=ROOT,env={**f.env,"HF_CAPTURE_ASSERTIONS":json.dumps(capture_ids)},capture_output=True,text=True,timeout=20)
+  print(probe.stdout,end="",flush=True)
+  if probe.returncode:FAILED.append("provider.capture.actual-verifier");print(probe.stderr,file=sys.stderr)
+  def recipe_policy():
+   value=copy.deepcopy(parent);value["profile"]["profile_version"]="recipe-policy-change";value["profile"]["recipe"]["digest"]=sha(b"changed-approved-preparation-policy");value.pop("digest");value["digest"]=sha(canonical(value));cid=str(uuid.uuid4())
+   f.sql("INSERT INTO hyperfide.environment_profiles(organisation_id,id,provider,runtime_platform,content_digest,manifest) VALUES($1,$2,'railway','linux-x86_64',$3,$4)",[org,cid,value["digest"],value]);lineage(cid,value);select(cid,value,"PREPARATION_MISMATCH")
+  check(IDS[52],recipe_policy)
+
+
+  accounting_ids=["provider.accounting.installs-actual-reader","provider.accounting.unproven-absence-held","provider.accounting.teardown-unregisters","provider.accounting.provisioner-refused","provider.accounting.no-provider-effects"]
+  f.sql("UPDATE hyperfide.reservations SET state='RELEASE_PENDING',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,run,f.reservations[0]])
+  accounting_script=r"""
+import assert from 'node:assert/strict';
+import {createResourceContainer} from './services/hyperfide/dist/storage/runtime.js';
+import {createProviderDatabase} from './services/hyperfide/dist/providers/pools.js';
+import {createComponent as providerComponent,createAccountingComponent} from './services/hyperfide/dist/providers/reconcile.js';
+import {createComponent as schedulerComponent} from './services/hyperfide/dist/scheduler/resources.js';
+const c=JSON.parse(process.env.HF_ACCOUNTING_CONTEXT),controller=new AbortController();
+const startup={role:'control',policy:c.policy,env:process.env,signal:controller.signal},resources=createResourceContainer(startup),instances=new Map();
+const context={...startup,resources,dependencies:{require(id,name,validate){const v=instances.get(id)?.capabilities?.[name];assert(validate(v),'actual dependency unavailable');return v}}};
+let provider,scheduler,bridge;const results={};
+try{
+ instances.set('8.2',{capabilities:{'provider.pools.v1':createProviderDatabase(context)}});
+ provider=providerComponent(context);instances.set('8.3',provider);
+ scheduler=schedulerComponent(context);instances.set('5.4',scheduler);
+ const cap=scheduler.capabilities['scheduler.resources.v1'],intents=provider.capabilities['provider.intents.v1'];
+ bridge=createAccountingComponent(context);
+ assert.throws(()=>cap.registerProofReader('provider.absence',intents.readConfirmedAbsence),e=>e.code==='DUPLICATE_PROOF_READER');
+ results['provider.accounting.installs-actual-reader']=true;
+ await assert.rejects(()=>resources.gateway.withPrimaryTransaction({timeoutMs:5000},tx=>cap.release(tx,{organisation_id:c.org,run_id:c.run,reservation_ids:[c.reservation]})),e=>e.code==='QUIESCENCE_UNCONFIRMED');
+ results['provider.accounting.unproven-absence-held']=true;
+ const describe=bridge.actions['provider.accounting.describe']({},context);
+ assert.equal(describe.authority,'NONE');assert.equal(describe.provider_execution_available,false);assert.equal(Object.keys(bridge.actions).length,1);
+ results['provider.accounting.no-provider-effects']=true;
+ bridge.close();bridge.close();
+ assert.throws(()=>bridge.actions['provider.accounting.describe']({},context),e=>e.code==='PROVIDER_CLOSED');
+ const unregister=cap.registerProofReader('provider.absence',intents.readConfirmedAbsence);unregister();
+ await assert.rejects(()=>resources.gateway.withPrimaryTransaction({timeoutMs:5000},tx=>cap.release(tx,{organisation_id:c.org,run_id:c.run,reservation_ids:[c.reservation]})),e=>e.code==='DEPENDENCY_UNAVAILABLE');
+ results['provider.accounting.teardown-unregisters']=true;
+ assert.throws(()=>createAccountingComponent({...context,role:'provisioner'}),e=>e.code==='ROLE_FORBIDDEN');
+ results['provider.accounting.provisioner-refused']=true;
+ console.log(JSON.stringify(results));
+}finally{await bridge?.close?.();await scheduler?.close?.();await provider?.close?.();await resources.close();}
+"""
+  env={**f.env,"HF_ACCOUNTING_CONTEXT":json.dumps({"policy":json.loads(f.policy.read_text()),"org":org,"run":run,"reservation":f.reservations[0]})}
+  accounting=subprocess.run(["node","--input-type=module","-e",accounting_script],cwd=ROOT,env=env,capture_output=True,text=True,timeout=30)
+  try:accounting_result=json.loads(accounting.stdout) if accounting.returncode==0 else {}
+  except Exception:accounting_result={}
+  for name in accounting_ids:check(name,lambda name=name:expect(accounting_result.get(name) is True,accounting.stderr or accounting.stdout))
+  expect(f.sql("SELECT state FROM hyperfide.reservations WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,run,f.reservations[0]])[0]["state"]=="RELEASE_PENDING","unproven absence released physical capacity")
+
   f.close();f=None;cleanup=True
  finally:
   if f is not None:f.close()
