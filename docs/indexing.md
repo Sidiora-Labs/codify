@@ -1,9 +1,15 @@
-# Code indexing in Codify 1.6
+# Code indexing in Hyperfide 2.0
 
-Codify indexes source facts locally and records how it reached each graph
+Hyperfide (version `2.0.0-dev` in this tree) indexes source facts locally and records how it reached each graph
 relationship. Queries report the branch, extraction coverage, and a bounded
 check of the source files that contributed to the answer. A missing relation
 does not prove that a call or data flow cannot occur.
+
+Examples use `hyperfide`, the canonical command. `cg` is a deprecated
+compatibility alias installed from the same executable, with identical
+arguments, JSON and exit codes, kept for the compatibility window of the
+approved release. The pipeline first shipped in Codify 1.6; this guide
+describes it as built in this tree.
 
 ```mermaid
 flowchart LR
@@ -19,22 +25,34 @@ flowchart LR
 
 ## Extraction coverage
 
-| Source family | Indexing mode | Boundary |
-| --- | --- | --- |
-| JavaScript, JSX, TypeScript, TSX | Native syntax grammar | Static imports, declarations, members, calls and JSX facts; computed targets remain unresolved. |
-| C, C++, Objective-C, Go, Rust | Native syntax grammar | Macro expansion, dynamic dispatch and unknown function-pointer targets remain boundaries. |
-| Python, Ruby, PHP | Native syntax grammar | Runtime attribute assignment, reflection and dynamic imports cannot be inferred from syntax alone. |
-| Java, Kotlin, Scala, C#, Swift, Dart | Native syntax grammar | Overloads and ownership are recorded; dispatch without sufficient receiver or signature evidence stays unresolved. |
-| Lua, Luau, R, Erlang, Solidity, Terraform, Nix | Native syntax grammar | Structural facts are extracted; each language's supported relation kinds depend on the syntax evidence available. |
-| Pascal, COBOL, VB.NET, CFScript, CFQuery, ArkTS | Native syntax grammar | Error recovery can produce partial coverage; generated grammar facts do not imply runtime behavior. |
-| CFML, Vue, Svelte, Astro, MyBatis XML | Embedded or declarative adapter | Embedded facts retain source coordinates; only recognized script, template and mapping constructs receive relationships. |
-| Liquid, Razor, Delphi forms | Text or declarative adapter | Recognition is limited to supported literal constructs and references. |
-| JSON, YAML, Twig, properties | File tracking only | These files are tracked but do not provide structural symbols or call relations. |
+Every registered adapter is listed below with the parser identity it
+records. `hyperfide info --json` and `hyperfide status --json` report that
+identity per branch under `index_health.parsers` (name and file count, for
+the files the index holds), and query answers repeat it per contributing
+file in `index_health.source_validation.files[].parser`.
 
-The parser identity and status are stored per file. Native grammar support
-means that the file is parsed into syntax nodes; it does not mean that every
-language construct is modeled. If parsing fails, the heuristic fallback is
-identified separately. Syntax recovery, excessive depth or node count,
+| Source family | Indexing mode | Parser identity | Boundary |
+| --- | --- | --- | --- |
+| JavaScript, JSX, TypeScript, TSX | Native syntax grammar | `tree-sitter:javascript` (`.js`, `.jsx`, `.mjs`, `.cjs`), `tree-sitter:typescript`, `tree-sitter:tsx` | Static imports, declarations, members, calls and JSX facts; computed targets remain unresolved. |
+| C, C++, Objective-C, Go, Rust | Native syntax grammar | `tree-sitter:c`, `tree-sitter:cpp`, `tree-sitter:objc`, `tree-sitter:go`, `tree-sitter:rust` | Macro expansion, dynamic dispatch and unknown function-pointer targets remain boundaries. |
+| Python, Ruby, PHP | Native syntax grammar | `tree-sitter:python`, `tree-sitter:ruby`, `tree-sitter:php` | Runtime attribute assignment, reflection and dynamic imports cannot be inferred from syntax alone. |
+| Java, Kotlin, Scala, C#, Swift, Dart | Native syntax grammar | `tree-sitter:java`, `tree-sitter:kotlin`, `tree-sitter:scala`, `tree-sitter:csharp`, `tree-sitter:swift`, `tree-sitter:dart` | Overloads and ownership are recorded; dispatch without sufficient receiver or signature evidence stays unresolved. |
+| Lua, Luau, R, Erlang, Solidity, Terraform, Nix | Native syntax grammar | `tree-sitter/<language>/extended`, for example `tree-sitter/terraform/extended` (`.tf`, `.tfvars`, HCL grammar) | Structural facts are extracted; each language's supported relation kinds depend on the syntax evidence available. |
+| Pascal, COBOL, VB.NET, ArkTS | Native syntax grammar | `tree-sitter:pascal`, `tree-sitter:cobol`, `tree-sitter:vbnet`, `tree-sitter:arkts` | Error recovery can produce partial coverage; generated grammar facts do not imply runtime behavior. |
+| CFScript, CFQuery | Native syntax grammar, embedded | `tree-sitter:cfscript` for `.cfs` files; inside `.cfm` and `.cfc` files the CFML adapter parses `<cfscript>` and `<cfquery>` blocks with these grammars and the file records `declarative:cfml`; a script-syntax component (a file that begins with `component`) records `embedded:cfscript` | CFQuery has no file extension of its own; SQL identifiers are recorded as references, not as resolved database objects. |
+| CFML, Vue, Svelte, Astro, MyBatis XML | Embedded or declarative adapter | `declarative:cfml`, `declarative:vue`, `declarative:svelte`, `declarative:astro`, `declarative:xml` | Embedded facts retain source coordinates; only recognized script, template and mapping constructs receive relationships. |
+| Liquid, Razor, Delphi forms | Text adapter | `declarative:liquid`, `declarative:razor`, `declarative:delphi_form` | Recognition is limited to supported literal constructs and references; Liquid and Razor contribute references only. |
+| JSON, YAML, Twig, properties | File tracking only | `file-only:json`, `file-only:yaml`, `file-only:twig`, `file-only:properties` | These files are tracked but do not provide structural symbols or call relations. |
+
+The grammars are vendored under `vendor/parsers/` in six families (`web`,
+`systems`, `dynamic`, `managed`, `extended`, `mixed`) with one adapter
+source each (`src/ast_web.c`, `src/ast_systems.c`, `src/ast_dynamic.c`,
+`src/ast_managed.c`, `src/ast_extended.c`, `src/ast_mixed.c`); `src/ast.c`
+holds the shared runtime. The parser identity and status are stored per
+file. Native grammar support means that the file is parsed into syntax
+nodes; it does not mean that every language construct is modeled. If no
+adapter accepts a file, or parsing fails, the `src/lang.c` fallback records
+the parser as `heuristic`. Syntax recovery, excessive depth or node count,
 unreadable files, and unsupported input appear as partial, skipped, or
 failed coverage with reason codes. The scanner skips files above 8 MiB; the
 syntax runtime also bounds source size to 32 MiB, traversal to 500,000 nodes
@@ -61,100 +79,95 @@ they depend on registration or matching rules; their evidence records the
 channel or registration site. These links are navigation aids, not proof of
 all possible runtime flows.
 
-`cg flow callers <name>`, `cg flow callees <name>`, `cg flow impact <name>`
-and `cg flow paths <source> <target>` traverse typed branch-scoped relations.
-The query bounds depth, nodes, edges, elapsed time and output bytes; JSON
-includes source sites, provenance, dynamic boundaries and truncation reasons.
+`hyperfide flow callers <name>`, `hyperfide flow callees <name>`,
+`hyperfide flow impact <name>` and `hyperfide flow paths <source> <target>`
+traverse typed branch-scoped relations. The query bounds depth (`--depth`,
+1 to 8), nodes (`--max-nodes`, up to 256), edges (`--max-edges`, up to 512),
+elapsed time (`--max-ms`, up to 2000 ms) and output bytes (`--max-output`,
+1024 to 131072); JSON includes source sites, provenance, dynamic boundaries
+and truncation reasons. Over MCP the same traversal is the `flow` tool.
 A missing path within those limits is not proof that no runtime path exists.
-`cg search` and `cg context` accept path, language, kind and exact-name
-filters. Identifier postings make compound names searchable by segment;
-weaker typo-tolerant matches remain labelled as such.
+`hyperfide search` and `hyperfide context` accept `--path`, `--lang`,
+`--kind` and `--name` filters; `--name` keeps symbols whose name equals the
+value or contains it, ignoring case. Identifier postings make compound names
+searchable by segment; when exact names and segments find nothing, a bounded
+typo-tolerant fallback (at most 16 candidates) runs, and `--json` counts
+the hits it contributed in `weak_matches`.
 
-`cg inspect hierarchy <name>` reports bounded ancestors, subtypes and
-implementations from the typed graph. `cg inspect unused` identifies symbols
-with no known incoming reference and internally referenced islands outside
-known entry roots. Its results carry reasons for excluding exports, framework
-roots, reflection candidates, generated files and uncertain incoming
-boundaries. The CLI and MCP inspection surfaces use the current branch;
-absence from the known graph is never a safe-deletion verdict.
+`hyperfide inspect hierarchy <name>` reports bounded ancestors, subtypes and
+implementations from the typed graph. `hyperfide inspect unused` identifies
+symbols with no known incoming reference and internally referenced islands
+outside known entry roots. Its results carry reasons for excluding exports,
+framework roots, reflection candidates, generated files and uncertain
+incoming boundaries. The CLI and the MCP `inspect_hierarchy` and
+`inspect_unreferenced` tools use the current branch; absence from the known
+graph is never a safe-deletion verdict.
 
 ## Freshness and migrations
 
-`cg init` builds an index, `cg sync` updates changed files, and
-`cg index --full` requests a full pass. `cg info --json`, `cg status --json`
-and the `index_status` MCP tool show branch coverage, parser inventory,
-pending reconciliation and degraded state. Code answers classify contributing
-files as verified, stale or unchecked. The answer check has caps of 16 files,
+`hyperfide init` builds an index, `hyperfide sync` updates changed files, and
+`hyperfide index --full` requests a full pass. `hyperfide info --json`,
+`hyperfide status --json` and the `index_status` MCP tool show branch
+coverage (`complete`, `partial`, `skipped`, `failed`, `unchecked`), parser
+inventory, pending reconciliation and degraded state under `index_health`.
+Code answers classify contributing files as verified, stale or unchecked in
+`index_health.source_validation`. The answer check has caps of 16 files,
 4 MiB and 25 ms, so unchecked is a real limit rather than a freshness claim.
 
 File changes use subsecond metadata and content verification for explicitly
 dirty paths. Watcher loss creates durable reconciliation debt; the debt clears
-only after successful reconciliation. Extractor output has a version separate
-from the database schema. A version change re-extracts stale files, and
-partial or failed passes do not stamp them current. Derived index tables may
-be migrated or rebuilt; project memory, snapshots and workflow history remain
+only after successful reconciliation. Extractor output has a version
+(`CG_EXTRACTION_VERSION`, currently 3) separate from the database schema
+version (18). A version change re-extracts stale files, and partial or
+failed passes do not stamp them current. Derived index tables may be
+migrated or rebuilt; project memory, snapshots and workflow history remain
 independent of derived extraction state.
 
 Branch-specific files and graph endpoints stay isolated even when worktrees
 share storage. Resolution and synthesized relations are retried when their
 definitions, bindings or registrations change. A no-op sync skips those passes.
 
-## Reproducing the release checks
+The Hyperfide control plane (`services/hyperfide`, see
+[the operations guide](hyperfide/operations.md)) does not change this
+pipeline: each checkout or sandbox still builds and queries its own local
+index with the commands above.
+
+## Reproducing the indexing checks
 
 `tests/integration/76_semantic_conformance.sh` runs the labelled adapter,
-route and graph-convergence corpus. The labels distinguish recognized syntax,
-resolved targets and explicitly unresolved cases; a file being parsed is not
-counted as a successful relationship. `tests/integration/77_index_resources.sh`
-checks cold, no-op and incremental operations against fixed fixture limits.
-`scripts/bench-indexing.py` emits the raw timings, peak memory, database size,
-diagnostics and source-to-query latency for repeatable local inspection.
-
-`tests/integration/78_v16_release.sh` performs a clean strict build, runs the
-unit and integration suites, checks the spec, and verifies the binary version.
-Performance figures depend on the host, fixture, worker count and SQLite
-version; keep those together when reporting an individual run.
+route and graph-convergence corpus in `tests/semantic/`. The labels
+distinguish recognized syntax, resolved targets and explicitly unresolved
+cases; a file being parsed is not counted as a successful relationship. Set
+`CG` to the binary under test and `CG_SEMANTIC_REPORT_DIR` to keep the JSON
+reports. `tests/integration/77_index_resources.sh` checks cold, no-op and
+incremental operations on a small generated fixture against fixed peak-memory
+and database-size limits. `scripts/bench-indexing.py` emits the raw timings,
+peak memory, database size, diagnostics and source-to-query latency for
+repeatable local inspection; its large profile is opt-in.
 
 The labelled conformance gate contains 43 adapter cases: 37 structural,
-two reference-only, and four file-only. It also checks 37 typed relation
-cases and 16 framework cases, each with a supported example and a decoy.
-The integrated fixture run observed no labelled false positives or false
-negatives, and its 13 incremental/rebuild checkpoints had no graph-set
-differences. These are narrow micro-fixtures; they do not measure recall or
-precision on arbitrary repositories.
+two reference-only (Liquid and Razor), and four file-only. It also checks 37
+typed relation cases and 16 framework cases, each with a supported example
+and a decoy. Running it against this tree's `2.0.0-dev` binary passed with
+no labelled false positives or false negatives, every case reporting
+`complete` coverage under the parser identity in the matrix above, and no
+graph-set differences across its 13 incremental and rebuild checkpoints.
+These are narrow micro-fixtures; they do not measure recall or precision on
+arbitrary repositories.
 
-The recorded resource run used binary SHA-256
-`ab11a0a34cecd3427aa57cdd543d27d1e1891c45ea008fe6352f48172e31e92f`.
-It predates the final retrieval follow-ups, so its timings are fixture observations
-for that recorded binary rather than final-binary performance claims.
-The run used two workers, generator seed 15, Linux 6.8 on
-x86_64 with six effective cores, and SQLite 3.45.1 in contentless FTS mode.
-The small fixture had 20 requested source files and 17,170 source bytes; the
-large fixture had 1,000 files, 97,484 actual lines and 2,485,542 source bytes.
-Measured process wall time for that single run was:
+`tests/integration/78_v16_release.sh` is the Codify 1.6 release gate: a
+clean strict build, the unit and integration suites, `spec lint`, and a
+check that the binary and the VS Code extension report version `1.6.0`.
+That version check does not match this tree's `2.0.0-dev` binary, so the
+script is not a gate for this revision.
 
-| Operation | Small | Large |
-| --- | ---: | ---: |
-| Cold index | 247 ms | 19,483 ms |
-| No-op update | 40 ms | 88 ms |
-| Edit one file | 46 ms | 4,361 ms |
-| Delete one file | 33 ms | 4,113 ms |
-| Rename one file | 47 ms | 4,028 ms |
-| Replay back / forward | 63 / 49 ms | 4,342 / 4,172 ms |
-| Full reindex | 152 ms | 21,948 ms |
+## Resource measurements
 
-The large fixture's edit-to-query wall time was 4,385 ms. Its full reindex
-used about 58 MiB peak resident memory. After a sibling worktree index, its
-SQLite main file plus WAL occupied 43,222,184 bytes, about 17.4 times the
-source bytes across the two branch views. The main branch ended with 998
-complete files, two skipped files and two files with diagnostics. A separate
-160,000-comment-line Go file indexed in 835 ms with 89,340 KiB peak
-resident memory; a 600-block-deep Go file reported partial coverage. These
-figures describe those fixtures on that host, not a throughput guarantee.
-The raw output is reproducible with `scripts/bench-indexing.py`; wall time is
-authoritative because the phase timers do not include every semantic pass.
-
-The strict release build produced one `cg` executable of 68,345,504 bytes
-(about 65.2 MiB). The vendored parser source tree occupies 341,397,866 bytes
-in this checkout (about 325.6 MiB) and increases checkout and build cost;
-it adds no runtime parser package or service. These sizes are build artifacts
-from this checkout, not limits on future builds.
+No indexing time, memory or database-size figure is qualified in this
+revision. Performance depends on the host, fixture, worker count and SQLite
+version; when reporting a run of `scripts/bench-indexing.py`, keep those
+together with the binary's SHA-256. In this checkout the vendored parser
+source tree (`vendor/parsers/`) occupies 340,628,206 bytes (about 325 MiB)
+and the built `hyperfide` executable 69,276,736 bytes (about 66 MiB); the
+grammars are compiled in and add no runtime parser package or service.
+These sizes describe this checkout, not limits on future builds.

@@ -21,16 +21,31 @@ That is the default. A workflow whose templates leave out `{wave}` and
 on `feature/<feature>`, and a worker per wave on a branch cut from it (see
 [The older shape](#the-older-shape)).
 
-You can drive every step by hand, or hand the spec to `cg fleet up`: a
-durable supervisor that runs all three levels at once, supervises every
+You can drive every step by hand, or hand the spec to `hyperfide fleet up`:
+a durable supervisor that runs all three levels at once, supervises every
 Codex or Claude Code process until its work is qualified and merged, and
 survives being killed.
 
+Every example here uses `hyperfide`, the canonical command (the binary
+reports `2.0.0-dev`). `cg` is a deprecated compatibility alias from the
+same executable, with identical arguments, JSON and exit codes, kept for
+the compatibility window of the approved release. Some messages the binary
+prints still name the old command; they are quoted here as printed.
+
 Implemented in `src/fleet.c`, `src/gitint.c`, and `src/orchestrate.c`;
 covered by `tests/integration/26_fleet.sh`, `32_supervisor.sh`,
-`34_context.sh`, and the end-to-end `35_fleet_e2e.sh`. The event stream,
-`cg serve`, and the drivers are in [events.md](events.md); drift is in
-[drift.md](drift.md).
+`34_context.sh`, the end-to-end `35_fleet_e2e.sh`, and `50_discover.sh`
+for transcript discovery. The event stream, `hyperfide serve`, and the
+drivers are in [events.md](events.md); drift is in [drift.md](drift.md);
+the projection is in [projection.md](projection.md).
+
+This is the local, single-machine fleet. It is not a client of the
+Hyperfide control service and grants no distributed authority: the
+distributed leader, manager and sandboxed-worker roles described in
+[hyperfide/operations.md](hyperfide/operations.md) belong to Hyperfide
+specification tasks (role ownership 3.1, scoped fleet stop 24.3, among
+others) that are still pending, and nothing in this document is qualified
+at any fleet size in this revision.
 
 ## Declaring the hierarchy
 
@@ -44,8 +59,8 @@ enabled    = true
 main       = "main"                          # the branch everything lands on
 remote     = "origin"
 worktrees  = ".codegraph/worktrees"          # where wave/task worktrees go
-test_gate  = "make test"
-lint_gate  = "make cg CFLAGS='-O2 -Werror'"
+test_gate  = "make test"                     # the default
+lint_gate  = "make hyperfide CFLAGS='-O2 -Werror'"  # default: none
 pr         = "auto"                          # auto | manual
 checkpoint = "manual"
 main_agent = false                           # true: run Main Gideon as a process
@@ -71,9 +86,10 @@ base   = "wave/{feature}/{wave}"
 Every `[role.*]` key falls back to the default above, so a workflow that
 names only what differs still gets a whole tree. The role names are fixed —
 `main`, `manager`, `worker`. `[role.feature]` is the same section as
-`[role.manager]` under its older name, and `CG_ROLE=feature` is still how a
-manager identifies itself. A `[role.something-else]` section is reported as
-unknown rather than silently ignored.
+`[role.manager]` under its older name, and `HYPERFIDE_ROLE=feature` is still
+how a manager identifies itself. A `[role.something-else]` section is
+reported rather than silently ignored (`[role.bogus] is not main, manager
+(feature), or worker`).
 
 Templates expand `{main}`, `{remote}`, `{feature}`, `{wave}`, and `{task}`.
 `enabled = false` keeps the configuration but switches the fleet off.
@@ -107,7 +123,7 @@ In that shape a feature-level template expands `{wave}` and `{task}` to
 nothing, `merge-up` goes into `feature/<feature>`, and `land` takes the
 feature. Everything else in this document works the same way in both shapes.
 
-`cg fleet roles` prints the resolved tree:
+`hyperfide fleet roles` prints the resolved tree:
 
 ```
 hierarchy: enabled (/path/to/proj/spec/workflow.kvx)
@@ -135,7 +151,7 @@ claude_args = "--permission-mode acceptEdits"
 
 [role.main]
 model   = "opus"
-approve = ["pr", "drift"]     # stop here until `cg fleet approve`
+approve = ["pr", "drift"]     # stop here until `hyperfide fleet approve`
 
 [role.manager]
 max  = 3                      # wave managers alive at once (default: every wave)
@@ -178,7 +194,7 @@ warn: [role.worker] wall = "soon" is not a duration (90s, 30m, 2h, or seconds) �
 warn: [role.worker] approve gate "merge" is not land, pr, retry, drift, or coverage — ignored
 ```
 
-`cg fleet roles` prints the resolved capabilities under the role table, and
+`hyperfide fleet roles` prints the resolved capabilities under the role table, and
 `--json` carries them as `roles[].caps` with `wall_s`, `stall_s`, and
 `spend_usd`, plus a top-level `problems` list:
 
@@ -189,42 +205,51 @@ manager  custom  —             all     1h      —        1    30m  —
 worker   custom  —               3    10m      —        2     2s  —
 ```
 
-The supervisor started by `cg fleet up` enforces them: each spawn uses the
+The supervisor started by `hyperfide fleet up` enforces them: each spawn uses the
 role's driver, model, and args; `max` bounds the concurrency; `wall`,
 `spend`, `stall`, and `retries` drive [supervision](#supervision).
 
 ## Identity
 
-An agent's place in the tree lives in its environment, not in a file:
+An agent's place in the tree lives in its environment, not in a file.
+Each variable has a `HYPERFIDE_` name and the older `CG_` name; either is
+accepted, and at startup the binary copies the one that is set to the
+other. Setting both to different values is refused before any command
+runs (`hyperfide: conflicting variable aliases for HYPERFIDE_ROLE (values
+redacted)`, exit 78).
 
 | Variable | Meaning |
 |---|---|
-| `CG_AGENT` | this agent's name (`w-fleet-2.1`) |
-| `CG_ROLE` | `main`, `feature` (a manager), or `worker` |
-| `CG_PARENT` | the agent it reports to (`wm-fleet-1`); unset for main |
-| `CG_FEATURE` | the feature it is working |
-| `CG_WAVE` | the wave a manager or worker belongs to |
-| `CG_GH` | path or name of the `gh` binary (otherwise looked up on `PATH`) |
+| `HYPERFIDE_AGENT` / `CG_AGENT` | this agent's name (`w-fleet-2.1`) |
+| `HYPERFIDE_ROLE` / `CG_ROLE` | `main`, `feature` (a manager), or `worker` |
+| `HYPERFIDE_PARENT` / `CG_PARENT` | the agent it reports to (`wm-fleet-1`); unset for main |
+| `HYPERFIDE_FEATURE` / `CG_FEATURE` | the feature it is working |
+| `HYPERFIDE_WAVE` / `CG_WAVE` | the wave a manager or worker belongs to |
+| `HYPERFIDE_GH` / `CG_GH` | path or name of the `gh` binary (otherwise looked up on `PATH`) |
 
-Without `CG_ROLE` nothing is written to the agents registry, so a solo
-session leaves no trace and never competes for the write lock. With it,
-every claim, start, and heartbeat records who this process is — and so do
-the fleet reports, so a manager that only reads still shows up as alive.
+The rest of this document gives the `HYPERFIDE_` name only. The
+supervisor and the `next:` line `fleet begin` prints still set and spell
+the `CG_` names, which reach the child as the same identity.
 
-The identity reaches the ordinary commands too. `cg brief` gains a line:
+Without `HYPERFIDE_ROLE` nothing is written to the agents registry, so a
+solo session leaves no trace and never competes for the write lock. With
+it, every claim, start, and heartbeat records who this process is — and so
+do the fleet reports, so a manager that only reads still shows up as alive.
+
+The identity reaches the ordinary commands too. `hyperfide brief` gains a
+line:
 
 ```
 agent: w-fleet-2.1 — Task Worker, reports to wm-fleet-1 (feature fleet, wave 1)
 ```
 
-and `cg spec status` carries it into the claim:
+and `hyperfide spec status` carries it into the claim:
 
 ```
-2.1      claimed by w-fleet-2.1 [worker under wm-fleet-1] on task/fleet/2.1
-         (attempt fd4374c04e17, fence 1, 30 min left)
+  2.1      claimed by w-fleet-2.1 [worker under wm-fleet-1] on task/fleet/2.1 (attempt fd4374c04e17, fence 1, 30 min left)
 ```
 
-Attempts persist the branch, worktree, and parent (schema v16 — see
+Attempts persist the branch, worktree, and parent (added in schema v16 — see
 [branches.md](branches.md)), so the ledger answers *which branch was this
 work done on* after the session is gone.
 
@@ -240,13 +265,13 @@ worktree, where `spec/` is authoritative, where worktrees are cut from, and
 where main lives. A worker may run them from its own worktree; the branch
 it happens to be standing on is irrelevant to what they do.
 
-### `cg fleet begin <id>`
+### `hyperfide fleet begin <id>`
 
 Creates or reuses the task's branch and worktree, cut from its wave's
 branch, then claims the task for its worker.
 
 ```
-$ cg fleet begin 2.1
+$ hyperfide fleet begin 2.1
 begin 2.1 — wave 1 of fleet
   agent:    w-fleet-2.1 (worker, reports to wm-fleet-1)
   branch:   task/fleet/2.1 from wave/fleet/1 (created)   [wave/fleet/1 cut from main]
@@ -267,13 +292,13 @@ holds (`2.1 is already claimed by intruder` … `task/fleet/2.1 and
 <worktree> stay for a retry`), a task id with no wave, a task already
 `done`.
 
-### `cg fleet merge-up <id>`
+### `hyperfide fleet merge-up <id>`
 
 Merges the task's branch into its wave branch, in the wave manager's own
 worktree.
 
 ```
-$ cg fleet merge-up 2.1
+$ hyperfide fleet merge-up 2.1
 merged task/fleet/2.1 into wave/fleet/1: 1 commit (head 1484f740) at …/wave-fleet-1
   promoted 1 memory to wave/fleet/1
 ```
@@ -309,12 +334,12 @@ decision. `--json` reports it as `memories_promoted`.
 
 ### A tagged git commit counts as evidence
 
-`cg spec done` checks that the paths a task declared were actually
+`hyperfide spec done` checks that the paths a task declared were actually
 touched. Uncommitted work in the tree satisfies that, which is the usual
 case — qualify, then commit, then `merge-up`.
 
 A fleet also produces the other case: the work is already committed and the
-worktree is clean. Codify's snapshot chain cannot attribute it, because
+worktree is clean. The snapshot chain cannot attribute it, because
 every worker commits with **git** on its own branch while the snapshot
 chain is one line shared by all of them. So a plain git commit whose
 message carries the task tag is evidence too:
@@ -322,22 +347,22 @@ message carries the task tag is evidence too:
 ```sh
 git commit -m "alpha: implement [spec:fleet/2.1]"
 # ...later, or from a resumed session...
-cg spec done 2.1          # ✓ touched src/*.ts
+hyperfide spec done 2.1          # ✓ touched src/*.ts
 ```
 
 Git history is ingested before the check runs, so that commit does not need
-a `cg git-sync` first. This is what lets a worker be resumed, or its task
+a `hyperfide git-sync` first. This is what lets a worker be resumed, or its task
 qualified by its manager, after the change has already been committed.
 
-### `cg fleet land <wave|id>`
+### `hyperfide fleet land <wave|id>`
 
 Merges a wave branch into **local** main, then runs the gates. The wave is
 named by its number or by any of its task ids; `-f` names the feature when
-it is not the active one, and a wave manager's `CG_WAVE` is used when
+it is not the active one, and a wave manager's `HYPERFIDE_WAVE` is used when
 nothing is given.
 
 ```
-$ cg fleet land 1
+$ hyperfide fleet land 1
 landed wave/fleet/1 into main: 2 commits, gates green (head 67187334)
   test: `sh gate.sh` ok in 5 ms
   lint: `sh lint.sh` ok in 6 ms
@@ -365,15 +390,15 @@ there, and lands again.
 
 With `pr = "auto"` a green land opens the pull request in the same call;
 `--no-pr` lands without touching `gh`. In the older shape `land` takes the
-feature (`cg fleet land fleet`) and merges `feature/fleet`.
+feature (`hyperfide fleet land fleet`) and merges `feature/fleet`.
 
-### `cg fleet pr <wave|feature>`
+### `hyperfide fleet pr <wave|feature>`
 
 Pushes the landed branch — a wave's, or in the older shape the feature's —
 and opens the pull request against `<remote>/<main>` through `gh`.
 
 ```
-$ cg fleet pr 1
+$ hyperfide fleet pr 1
 opened https://github.com/acme/repo/pull/7 (wave/fleet/1 → main)
 ```
 
@@ -385,11 +410,16 @@ way:
 ```
 pull request (gh not found): run these to open wave/fleet/1 against origin/main:
   git -C '/path/proj' push -u 'origin' 'wave/fleet/1'
-  cd '/path/proj' && 'gh' pr create --base 'main' --head 'wave/fleet/1' \
-     --title 'wave/fleet/1' --body-file '/path/proj/.codegraph/fleet/pr-fleet-1.md'
+  cd '/path/proj' && 'gh' pr create --base 'main' --head 'wave/fleet/1' --title 'feature/fleet' --body-file '/path/proj/.codegraph/fleet/pr-fleet-1.md'
 ```
 
-The body file is one per branch — `pr-<feature>-<wave>.md` for a wave, `pr-<feature>.md` in the older shape — so two waves opening at once never hand each other their bodies. It carries the feature's title, its task list, and a readiness line:
+The title is the feature's `[meta] title`, else `feature/<feature>`, for a
+wave's pull request as for the older shape's.
+
+The body file is one per branch — `pr-<feature>-<wave>.md` for a wave,
+`pr-<feature>.md` in the older shape — so two waves opening at once never
+hand each other their bodies. It carries the feature's title, its task
+list, and a readiness line (the generated text still says "Codify"):
 
 ```markdown
 Wave 1 of feature `fleet`, landed on `main` by Codify with the test and lint gates green.
@@ -402,15 +432,15 @@ Wave 1 of feature `fleet`, landed on `main` by Codify with the test and lint gat
 Jev readiness: 0.95 (high) — 2/3 tasks qualified, 4 commits, gates not run in this command
 ```
 
-The readiness line is Jev's opinion of the state Codify can prove — branch,
+The readiness line is Jev's opinion of the state Hyperfide can prove — branch,
 base, commits ahead, and what is qualified. It is advice: a low score says
 so and still opens the pull request, and with no `OPENROUTER_API_KEY` the
 line is simply absent (`jev: OPENROUTER_API_KEY is not set — pull request
 readiness skipped`). See [jev.md](jev.md#pull-request-readiness).
 
-### `cg fleet checkpoint`
+### `hyperfide fleet checkpoint`
 
-Merges the open Codify pull requests — the ones whose head matches the
+Merges the fleet's own open pull requests — the ones whose head matches the
 manager branch template up to `{feature}`: `wave/*` by default, `feature/*`
 in the older shape —
 lowest number first, and stops at the first that will not merge, so the
@@ -419,7 +449,7 @@ order stays what a reader expects. Anything else is skipped by name
 fast-forwards to the remote when it is clean.
 
 ```
-$ cg fleet checkpoint --dry-run
+$ hyperfide fleet checkpoint --dry-run
 checkpoint (dry-run): merge the open wave/* pull requests lowest number first:
   gh pr list --base 'main' --state open --json number,headRefName,title,url
   gh pr merge <number> --merge
@@ -428,14 +458,14 @@ checkpoint (dry-run): merge the open wave/* pull requests lowest number first:
 ## Reports
 
 ```sh
-cg fleet roles              # the configured hierarchy
-cg fleet status             # who is alive in which role, on which task
-cg fleet plan [-f F]        # which manager owns each wave, which worker each task
-cg fleet tree [-f F]        # the live tree: main → wave managers → task workers
-cg fleet                    # same as status
+hyperfide fleet roles              # the configured hierarchy
+hyperfide fleet status             # who is alive in which role, on which task
+hyperfide fleet plan [-f F]        # which manager owns each wave, which worker each task
+hyperfide fleet tree [-f F]        # the live tree: main → wave managers → task workers
+hyperfide fleet                    # same as status
 ```
 
-`cg fleet plan` lays the tree over the task list — planned branches on the
+`hyperfide fleet plan` lays the tree over the task list — planned branches on the
 left, live agents on the right, a manager row per wave and a worker row per
 task under it:
 
@@ -457,36 +487,48 @@ wave 2    wm-fleet-2           wave/fleet/2                 ← main            
 the older shape there is one manager with `wave` null and a worker row per
 wave.
 
-`cg fleet tree` is the same tree with what actually happened on it —
+`hyperfide fleet tree` is the same tree with what actually happened on it —
 progress, whether each wave branch is ahead of main or already merged, and
 the state and heartbeat of every worker:
 
 ```
-$ cg fleet tree
+$ hyperfide fleet tree
 fleet tree — fleet
 main     gideon           branch main
+  wave 0   wm-fleet-0       branch wave/fleet/0         base main
+           tasks 1/1 done, 0 running  ahead 0  complete  seen -
+    (no workers yet)
   wave 1   wm-fleet-1       branch wave/fleet/1         base main
            tasks 1/2 done, 0 running  ahead 2  incomplete  seen -
-    worker w-fleet-2.1      branch                      wave 1  task 2.1  completed  hb 1s ago
+    worker w-fleet-2.1      branch                      wave 1  task 2.1  completed  hb 20s ago
   wave 2   wm-fleet-2       branch wave/fleet/2         base main
            tasks 0/1 done, 0 running  ahead 0  incomplete  seen -
     (no workers yet)
 ```
 
-It refuses in a repository with no hierarchy — *this repository runs flat* —
-rather than inventing one. `--json` returns `main`, `managers[]` — one per
-wave, each with its `wave` — with `tasks {total, done, claimed}`, `ahead`,
-`merged` and `complete`, and
-`workers[]` with `wave`, `task`, `branch`, `base`, `worktree`, `state`,
-`attempt` and `heartbeat`.
+A wave whose branch has drift findings gets a `drift N finding(s)` line
+under its progress. It refuses in a repository with no hierarchy (exit 1,
+*this repository runs flat*) rather than inventing one. `--json` returns
+`main`, `managers[]` — one per wave, each with its `wave` — with
+`tasks {total, done, claimed}`, `ahead`, `merged`, `complete` and `drift`,
+and `workers[]` with `wave`, `task`, `branch`, `base`, `worktree`,
+`state`, `attempt` and `heartbeat`, plus `native[]` (the native sessions
+below) and `projection`.
 
-All the reports take `--json`.
+All the reports take `--json`. `hyperfide fleet runs` lists supervised
+runs (see [Runs](#runs-down-pause-resume)).
+
+The projection — every active branch folded onto the base at
+`refs/codify/projection`, with the conflicts between branches by path — is
+reported by `hyperfide projection status`, `findings`, `diff [branch]` and
+`show`, and rebuilt by `hyperfide projection build`. It needs git 2.38 or
+newer; see [projection.md](projection.md).
 
 ### Native sessions in the editor
 
-The fleet roles are the agents Codify spawned. A Claude Code or Codex
+The fleet roles are the agents Hyperfide spawned. A Claude Code or Codex
 session working on the project, and every subagent it spawns through its
-own Agent tool, is recorded by `cg hook event` (see
+own Agent tool, is recorded by `hyperfide hook event` (see
 [events.md](events.md#native-agents-cg-hook-event)) and shown in the VS Code fleet view
 under a **Sessions** root beside Main Gideon — and on its own when the
 repository has no `[hierarchy]`. One row per host session, its subagents
@@ -510,9 +552,9 @@ Sessions                       2 live · 1 subagent · 1 worktree branch
 - **last tool**, and in the tooltip the model, tool-call count, cwd, and the
   subagent's last message once it stopped.
 
-The rows come from `cg fleet tree --json` (`cg fleet status --json` in a
+The rows come from `hyperfide fleet tree --json` (`hyperfide fleet status --json` in a
 flat repository) on each refresh. Between refreshes every
-`agent.native.*` event the `cg serve` connection pushes is folded by the
+`agent.native.*` event the `hyperfide serve` connection pushes is folded by the
 serve reducer and patches its row in place — a tool call moves the last
 tool and the age, a stop greys the row — so the view follows a native
 agent the moment its hook fires. **Open Native Agent Worktree** opens the
@@ -522,17 +564,17 @@ click on a row opens the transcript too. A live subagent's transcript is
 found where the host keeps it, `<session>/subagents/agent-<id>.jsonl`
 beside the session's.
 
-### Native agents from transcripts: `cg fleet discover`
+### Native agents from transcripts: `hyperfide fleet discover`
 
-`cg hook event` records a host's own sessions and subagents as native rows
+`hyperfide hook event` records a host's own sessions and subagents as native rows
 in the agents registry (see [events.md](events.md)). A host whose hooks never
 fired — an older host, a hook the user has not trusted, a session started
-before the plugin — still writes transcripts, and `cg fleet discover` reads
+before the plugin — still writes transcripts, and `hyperfide fleet discover` reads
 them:
 
 ```sh
-cg fleet discover                 # transcripts changed in the last 24h
-cg fleet discover --since 3d --json
+hyperfide fleet discover                 # transcripts changed in the last 24h
+hyperfide fleet discover --since 3d --json
 ```
 
 - **Claude Code**: `~/.claude/projects/<project path, non-alphanumerics → '-'>/`
@@ -549,7 +591,7 @@ cg fleet discover --since 3d --json
   the model from the first `turn_context`).
 - **Worktrees**: a `worktreePath` in meta.json (or a transcript cwd) inside a
   linked worktree of this project registers its branch exactly as the hook
-  does, with the session's branch as base, so `cg branches`, the shared
+  does, with the session's branch as base, so `hyperfide branches`, the shared
   graph, and the projection see it.
 - **Never over a hook**: discovery writes a column only while it is empty;
   the `discovered` column (added on first use) lists the columns it wrote,
@@ -562,12 +604,15 @@ cg fleet discover --since 3d --json
   mtime, stale}], changed: [{agent, created, fields, state, claimed}]}`;
   a second run over unchanged transcripts changes nothing.
 
-`cg fleet status`, `cg fleet tree` (the editor's refresh), `cg serve`'s
-refresh, and `cg watch --fleet` run discovery first when `[fleet] discover`
-in `codify.kvx` is true (the default), at most once per 10 seconds per
-process; `--no-discover` skips it for one command. The directory lookup is
-the one `cg recap` uses (`CG_RECAP_CLAUDE_DIR` and `CG_RECAP_CODEX_DIR`
-override both).
+`hyperfide fleet status`, `hyperfide fleet tree` (the editor's refresh), `hyperfide serve`'s
+refresh, and `hyperfide watch --fleet` run discovery first when `[fleet] discover`
+in the project configuration is true (the default), at most once per 10
+seconds per process; `--no-discover` skips it for one command. The
+configuration file is `hyperfide.kvx`; a tree that has only the legacy
+`codify.kvx` reads that one, and a tree with both is refused unless a
+completed names migration selects `hyperfide.kvx`. The directory lookup is
+the one `hyperfide recap` uses (`HYPERFIDE_RECAP_CLAUDE_DIR` and
+`HYPERFIDE_RECAP_CODEX_DIR` override both).
 
 ## A worked example
 
@@ -575,52 +620,52 @@ One feature, two waves, from nothing to merged pull requests.
 
 ```sh
 # --- Gideon, in the main checkout -------------------------------------
-cg fleet roles                       # confirm the tree before spawning anything
-cg fleet begin 2.1                   # cuts wave/fleet/1 from main, then task/fleet/2.1
-cg fleet begin 2.2                   # task/fleet/2.2, from the same wave branch
+hyperfide fleet roles                       # confirm the tree before spawning anything
+hyperfide fleet begin 2.1                   # cuts wave/fleet/1 from main, then task/fleet/2.1
+hyperfide fleet begin 2.2                   # task/fleet/2.2, from the same wave branch
 
 # --- a task worker, in its own worktree -------------------------------
 cd .codegraph/worktrees/task-fleet-2.1
-export CG_AGENT=w-fleet-2.1 CG_ROLE=worker CG_PARENT=wm-fleet-1 \
-       CG_FEATURE=fleet CG_WAVE=1
-cg spec start 2.1
+export HYPERFIDE_AGENT=w-fleet-2.1 HYPERFIDE_ROLE=worker \
+       HYPERFIDE_PARENT=wm-fleet-1 HYPERFIDE_FEATURE=fleet HYPERFIDE_WAVE=1
+hyperfide spec start 2.1
 # ...implement...
-cg spec done 2.1                     # qualification runs here, on the task branch
+hyperfide spec done 2.1                     # qualification runs here, on the task branch
 git add -A && git commit -m "alpha: implement [spec:fleet/2.1]"
-cg fleet merge-up 2.1                # task/fleet/2.1 → wave/fleet/1
+hyperfide fleet merge-up 2.1                # task/fleet/2.1 → wave/fleet/1
 # ...the worker on 2.2 does the same, beside it...
 
 # --- the wave manager of wave 1 ---------------------------------------
-cg fleet land 1                      # refused while 2.1 or 2.2 is open;
-                                     # then wave/fleet/1 → main behind the
-                                     # gates, and the PR (pr = "auto")
+hyperfide fleet land 1                      # refused while 2.1 or 2.2 is open;
+                                             # then wave/fleet/1 → main behind the
+                                             # gates, and the PR (pr = "auto")
 
 # --- wave 2 -----------------------------------------------------------
-cg fleet begin 3.1                   # wave/fleet/2 is cut from main, so it
-                                     # already has wave 1's work
-# ...worker, merge-up, cg fleet land 2...
+hyperfide fleet begin 3.1                   # wave/fleet/2 is cut from main, so it
+                                             # already has wave 1's work
+# ...worker, merge-up, hyperfide fleet land 2...
 
 # --- Gideon, at a checkpoint ------------------------------------------
-cg fleet checkpoint                  # merge the open Codify PRs in order
+hyperfide fleet checkpoint                  # merge the open wave/* PRs in order
 ```
 
-The claim on 2.1 was taken by `begin` and released by `cg spec done`, as
+The claim on 2.1 was taken by `begin` and released by `hyperfide spec done`, as
 for any other parallel-mode task — the fleet shares the same lease
 primitives, it does not add a second ownership system. See the parallel
 mode section of the [README](../README.md#parallel-mode).
 
 ## Running the tree: `cg fleet up`
 
-Everything above is the manual path. `cg fleet up` drives the same
+Everything above is the manual path. `hyperfide fleet up` drives the same
 commands for you, as a supervisor that outlives your terminal:
 
 ```
-cg fleet up [--foreground] [--resume [RUN]] [-f F | --all] [-n N]
+hyperfide fleet up [--foreground] [--resume [RUN]] [-f F | --all] [-n N]
             [--driver D] [--max-fail K] [--max-rounds R] [--dry-run]
 ```
 
 ```
-$ cg fleet up --all -n 3
+$ hyperfide fleet up --all -n 3
 fleet up: run dc70cdc5f81a — supervisor pid 2970055
   log:    /path/proj/.codegraph/fleet/supervisor-dc70cdc5f81a.log
   follow: cg events --follow   status: cg fleet runs   stop: cg fleet down
@@ -647,8 +692,8 @@ stopped.
   default), so a fleet that cannot finish stops instead of spinning. `--max-fail K` stops
   the run once failed attempts exceed K (default 2).
 - `--dry-run` plans without claiming or creating anything, in the
-  foreground. `cg spec run --fleet` is the same run as a foreground
-  command, and `cg spec run --fleet --status` prints the tree.
+  foreground. `hyperfide spec run --fleet` is the same run as a foreground
+  command, and `hyperfide spec run --fleet --status` prints the tree.
 
 A real run reports each spawn and each result, and ends on the merge rather
 than on a process exiting:
@@ -682,10 +727,11 @@ the moment `alpha` landed.
 
 The wave managers and their workers are alive together. Two processes
 merging into the same wave worktree would race, so that is a lock:
-`merge-up` and `land` take the merge lock of the branch they merge into
-(`.codegraph/fleet/merge-<name>.lock`), waiting up to two minutes
-(`CG_MERGE_LOCK_WAIT_MS`) before refusing with *another merge into …'s
-branch held the lock*.
+`merge-up` and `land` take the feature's merge lock
+(`.codegraph/fleet/merge-<feature>.lock`, one per feature, so the waves of
+one feature merge one at a time), waiting up to two minutes
+(`HYPERFIDE_MERGE_LOCK_WAIT_MS`, in milliseconds) before refusing with
+*another merge into <feature>'s branch held the lock*.
 
 Each task gets its own slot, branch, and worktree, and the tasks of a wave
 run in parallel when their declared touches are disjoint and no collision
@@ -710,7 +756,7 @@ memories, and checkpoints. Without it, "main" is you.
 ### Runs: down, pause, resume
 
 ```
-$ cg fleet runs
+$ hyperfide fleet runs
 run          feature            state     supervisor  live nodes fails  reason
 a6e57e899fc5 beta               complete  —            0     3     0  merged
 dc70cdc5f81a alpha              complete  —            0     7     2  merged
@@ -718,18 +764,25 @@ dc70cdc5f81a alpha              complete  —            0     7     2  merged
 
 | Command | Does |
 |---|---|
-| `cg fleet down` | terminate the live agents, release their claims, keep every branch; the run is `stopped` |
-| `cg fleet down --drain` | let the live agents finish, start nothing new, then stop |
-| `cg fleet pause` | freeze spawning: live agents finish, nothing new starts |
-| `cg fleet resume [RUN]` | continue a paused run, or start a supervisor for one that has none |
-| `cg fleet up --resume [RUN]` | continue the newest unfinished run (or `RUN`) under a new supervisor |
+| `hyperfide fleet down` | terminate the live agents, release their claims, keep every branch; the run is `stopped`. Waits up to `--wait SECONDS` (default 30) for the supervisor to confirm, and exits 1 if it has not |
+| `hyperfide fleet down --drain` | let the live agents finish, start nothing new, then stop; returns at once unless `--wait` is given |
+| `hyperfide fleet pause` | freeze spawning: live agents finish, nothing new starts |
+| `hyperfide fleet resume [RUN]` | continue a paused run, or start a supervisor for one that has none |
+| `hyperfide fleet up --resume [RUN]` | continue the newest unfinished run (or `RUN`) under a new supervisor |
+| `hyperfide fleet steer <agent> <message>` | a message for a running agent's next edit or prompt |
 
-There is one supervisor per project; a second `cg fleet up` is refused
+There is one supervisor per project; a second `hyperfide fleet up` is refused
 while one is alive. The supervisor column says `alive` for the run it
 owns and `GONE` for an unfinished run whose supervisor died.
 
+These controls act on the local supervisor and the processes it started.
+`hyperfide fleet down --drain` does not stop remote sandboxes; the
+distributed stop controls are described in
+[hyperfide/operations.md](hyperfide/operations.md) and belong to pending
+specification tasks.
+
 **Crash resume.** Kill the supervisor — `kill -9` in the end-to-end test —
-and `cg fleet up --resume` continues the run. Every node still marked live
+and `hyperfide fleet up --resume` continues the run. Every node still marked live
 is checked by pid *and* process start time: an agent that is still the
 process that was spawned is adopted, not respawned, and one that is gone
 is judged by its branch tip like any other exit. Retry counts and what was
@@ -773,7 +826,7 @@ is marked blocked with the reason, and an outcome memory records it — and
 the rest of the run continues.
 
 Every decision is an event (`supervisor.stall`, `supervisor.budget`,
-`supervisor.escalate`, `supervisor.blocked`), so `cg events --kind
+`supervisor.escalate`, `supervisor.blocked`), so `hyperfide events --kind
 supervisor.` is the supervision log.
 
 ## Approvals
@@ -783,12 +836,12 @@ command that reaches it stop and ask:
 
 | Gate | Stops |
 |---|---|
-| `land` | `cg fleet land`, before merging into main |
-| `pr` | `cg fleet pr`, before pushing and opening the pull request |
-| `drift` | `cg fleet merge-up`, when the branch drifted from its task's declaration |
-| `coverage` | `cg fleet land`, when an acceptance criterion has no qualified task |
+| `land` | `hyperfide fleet land`, before merging into main |
+| `pr` | `hyperfide fleet pr`, before pushing and opening the pull request |
+| `drift` | `hyperfide fleet merge-up`, when the branch drifted from its task's declaration |
+| `coverage` | `hyperfide fleet land`, when an acceptance criterion has no qualified task |
 
-Gates apply to fleet agents (a process with `CG_ROLE` set); a person
+Gates apply to fleet agents (a process with `HYPERFIDE_ROLE` set); a person
 running the same command by hand is not stopped. The agent sees:
 
 ```
@@ -798,9 +851,9 @@ cg fleet: land of alpha waits for approval #3 — a person runs `cg fleet approv
 and the command exits 4. The request is an `approval.request` event.
 
 ```sh
-cg fleet approvals            # what waits (--all includes decided ones)
-cg fleet approve 3 -m "ok"    # let it through once
-cg fleet approve 3 --reject   # stop it; the agent reports to its parent
+hyperfide fleet approvals            # what waits (--all includes decided ones)
+hyperfide fleet approve 3 -m "ok"    # let it through once
+hyperfide fleet approve 3 --reject   # stop it; the agent reports to its parent
 ```
 
 One approval covers one attempt: an approved gate is consumed by the land
@@ -810,9 +863,9 @@ again rather than riding an approval given for different code.
 ## Briefings from the graph
 
 Every spawned agent gets a prompt built from the graph, not from prose,
-fitted to a token budget (`CG_PACKET_BUDGET`, 6000 for a worker and 4000
-for a manager by default). The same worker packet is what `cg resume
---task <id> --prompt` prints:
+fitted to a token budget (`HYPERFIDE_PACKET_BUDGET`, 6000 for a worker and
+4000 for a manager by default). The same worker packet is what `hyperfide
+resume --task <id> --prompt` prints (`--budget N` sets the budget there):
 
 ```
 ## Task 2.2 — Stalls once, changes alpha
@@ -839,12 +892,12 @@ alongside you* — the touches of live sibling workers, to leave alone; the
 decisions and constraints recorded for it; and the files in scope. When
 the budget runs out, lower parts are cut before higher ones.
 
-A manager packet (`cg fleet brief <feature>`) holds its subtree's state,
+A manager packet (`hyperfide fleet brief <feature>`) holds its subtree's state,
 the live workers, failed attempts with their triage, merge conflicts to
 resolve, and pending approvals:
 
 ```
-$ cg fleet brief alpha
+$ hyperfide fleet brief alpha
 ### Your subtree: 1 of 4 task(s) done
 - 1.1 (wave 0) done — First task
 - 2.1 (wave 1) pending — Failing once
@@ -852,19 +905,22 @@ $ cg fleet brief alpha
 - 3.2 (wave 2) pending — Docs, conflicting
 ```
 
-While a worker runs, work merged upstream reaches it through `cg work
+While a worker runs, work merged upstream reaches it through `hyperfide work
 update`: when another task has merged into the wave branch since the
 attempt began, the delta gains an `upstream` list naming the task, the
 branch, and the symbols it brought, each resolved in the graph. When
 nothing merged, the delta stays as compact as before.
 
-Each child also gets its identity in the environment: `CG_ROLE`,
-`CG_PARENT`, `CG_FEATURE`, `CG_WAVE`, `CG_BRANCH`, `CG_BASE`, `CG_RUN` —
-and, for a worker, `CG_TASK`, `CG_ATTEMPT` and `CG_FENCE`. The prompts end
-on the command that moves work upward: a worker's with `cg fleet merge-up
-<id>`, a wave manager's with `cg fleet land <wave> -f <feature>` (the older
-shape's feature manager: `cg fleet land <feature>` and `cg fleet pr
-<feature>`).
+Each child also gets its identity in the environment: `AGENT`, `ROLE`,
+`PARENT`, `FEATURE`, `WAVE`, `BRANCH`, `BASE`, `RUN` — and, for a worker,
+`TASK`, `ATTEMPT` and `FENCE`. The supervisor sets them under their `CG_`
+names; the child's `hyperfide` reads them under either prefix. The prompts
+end on the commands that move work upward: a worker's with `fleet merge-up
+<id>`, a wave manager's with `fleet tree -f <feature>`, `fleet merge-up
+<id>`, `fleet land <wave> -f <feature>` and `fleet pr <wave> -f <feature>`
+(the older shape's feature manager: `fleet land <feature>` and `fleet pr
+<feature>`). The prompts still spell these commands with the compatibility
+name.
 
 ## Limitations
 
@@ -878,9 +934,9 @@ shape's feature manager: `cg fleet land <feature>` and `cg fleet pr
   qualified but was not committed looks unqualified. That is deliberate;
   `--force` exists for the exceptions.
 - `checkpoint` only recognises head branches that match the manager
-  template (`wave/*`, or `feature/*` in the older shape) as Codify's own.
+  template (`wave/*`, or `feature/*` in the older shape) as the fleet's own.
 - One supervisor per project. `--all` runs several features under it, but
-  two independent `cg fleet up` calls in one repository are refused.
+  two independent `hyperfide fleet up` calls in one repository are refused.
 - `--dry-run` previews one feature — the one named by `-f`, else the
   active feature — even with `--all`.
 - The `retry` approval gate is accepted in `approve` but nothing stops on
@@ -893,6 +949,10 @@ shape's feature manager: `cg fleet land <feature>` and `cg fleet pr
 - The supervisor spawns agents through the configured driver. It does not
   talk to any agent vendor's API itself, and it does not authenticate the
   CLIs it starts.
+- Several messages, the `next:` line of `begin`, the agents' prompts and
+  the pull request body still print the compatibility command name or
+  "Codify"; the rename of that output belongs to Hyperfide specification
+  tasks 26.1–26.4, which are pending.
 
 ## Waves side by side
 
@@ -905,33 +965,33 @@ shape:
 | `parallel` | A task may start while the tasks it `requires` are still open. The slot gate keeps the file collisions and the agent limit; it ignores `requires`. The default when git is 2.38 or newer. |
 | `sequential` | The waiting gate: a task starts only once its `requires` are done (across waves, once they have landed on main and main has been merged forward into the task's wave branch — a land merges before its gates run, so the supervisor checks the branch, not the declaration). The default on older git, where the projection cannot be built. |
 
-`cg fleet up` prints which one applies and why when it starts.
+`hyperfide fleet up` prints which one applies and why when it starts.
 
-**Starting ahead.** `cg spec start <id> --ahead` (and `cg fleet begin <id>
+**Starting ahead.** `hyperfide spec start <id> --ahead` (and `hyperfide fleet begin <id>
 --ahead`) is the only way to claim a task whose `requires` are open.
 `--force` does not do it. The lease records what the task is ahead of. A
 worker the supervisor starts this way gets an *Ahead of its requirements*
 section in its prompt. The section names the open requirements and the
 branches they live on, and points the worker at the projection
-(`--branch codify/projection`) and `cg projection findings`.
+(`--branch codify/projection`) and `hyperfide projection findings`.
 
-**Done stays strict.** `cg spec done` refuses a task while any of its
+**Done stays strict.** `hyperfide spec done` refuses a task while any of its
 `requires` is not done in the tree it runs in. Outside a fleet, `--force`
-still overrides that. Inside a fleet run (`CG_RUN` or `CG_ROLE` set),
+still overrides that. Inside a fleet run (`HYPERFIDE_RUN` or `HYPERFIDE_ROLE` set),
 `--force` does not. An ahead task qualifies once its requirements have
-landed and come in through `cg fleet sync`.
+landed and come in through `hyperfide fleet sync`.
 
 **Forward merges.** After a wave lands, the supervisor merges main
 forward into every live wave branch. It does the merge in that wave's
 manager worktree, between the manager's turns. Each live worker of that
-wave is then steered to run `cg fleet sync`, and a `fleet.forward` event
+wave is then steered to run `hyperfide fleet sync`, and a `fleet.forward` event
 records who was steered. If the merge conflicts, it is aborted and the
 manager is steered with the conflicting paths and the projection finding
 that predicted them. When the manager has resolved it (main is an ancestor
 of the wave branch again), the workers are steered then.
 
-**`cg fleet sync`.** Run it in a task worktree to merge the base branch
-(`--base`, else `CG_BASE`, else the branches registry) into the task
+**`hyperfide fleet sync`.** Run it in a task worktree to merge the base branch
+(`--base`, else `HYPERFIDE_BASE`, else the branches registry) into the task
 branch:
 
 - It is refused while an uncommitted file is also changed on the base,
