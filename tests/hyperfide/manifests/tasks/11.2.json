@@ -3,12 +3,13 @@
     "allowed_actions": [],
     "approved": true
   },
-  "campaign_id": "hyperfide-task-11.2-native-bootstrap-v1-requal-12aa390190b3",
+  "campaign_id": "hyperfide-task-11.2-native-bootstrap-v1-requal-12aa390190b3-requal-6a91b0130b1d",
   "case_ids": [
     "V-038",
     "V-039"
   ],
   "expected_assertion_ids": [
+    "bootstrap.staging.qualification-unclaimed-generation",
     "bootstrap.source.exact-multi-repository",
     "bootstrap.source.partial-download",
     "bootstrap.submodule.actual-pinned-materialization",
@@ -55,8 +56,8 @@
     },
     {
       "path": "build/hyperfide-native",
-      "sha256": "e9cafa47ac941c06fde622534b92fa1fc56470ebfb80a4a7f98977e24e725171",
-      "size": 574552
+      "sha256": "34e60efc575c70a9b25886842312809dc093580da2f7b1bd45ce750c789b05ea",
+      "size": 578648
     },
     {
       "path": "build/hyperfide-native-registry.inc",
@@ -110,8 +111,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/11_2.py",
-      "sha256": "84430391effaec81e38f12dd25751a84fd06a18e80cb20728885109fa961f362",
-      "size": 16996
+      "sha256": "d36b12f6f4997426626c4a7037344012224e29230811c43ead9593f3ee291fb4",
+      "size": 24497
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
