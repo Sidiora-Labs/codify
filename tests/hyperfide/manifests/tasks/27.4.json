@@ -3,7 +3,7 @@
     "allowed_actions": [],
     "approved": true
   },
-  "campaign_id": "hyperfide-driver-component-27-4-v3-journal-v1",
+  "campaign_id": "hyperfide-driver-component-27-4-v3-journal-v1-requal-12aa390190b3",
   "case_ids": [
     "V-002",
     "V-003",
@@ -92,8 +92,8 @@
     },
     {
       "path": "tests/hyperfide/campaigns/deterministic.py",
-      "sha256": "69f2b5803b785a177847c3719c0fba0515b1b494bdbdca1cedd4c8a0de5b546c",
-      "size": 45929
+      "sha256": "e43c5539201be7c4f6f28750f74bbeb6f973a6b3728bb694c957a7933454bf56",
+      "size": 65545
     },
     {
       "path": "tests/hyperfide/campaigns/live.py",
@@ -117,8 +117,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/27_4.py",
-      "sha256": "04964f80b45bc6f0a6b52f08f1a6dadf419d2a44306227aa5221bcc5081d6584",
-      "size": 12399
+      "sha256": "c85569dfc1b1efd7481f125190de3cb925e0181c9188f2198f89ca2db80cb487",
+      "size": 12453
     }
   ],
   "policy": {
