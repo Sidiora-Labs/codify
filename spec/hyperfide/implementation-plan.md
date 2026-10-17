@@ -2,7 +2,7 @@
 
 **Approved implementation baseline on 2026-10-16. Per-task states below are historical planning states; native `spec.kvx` owns live bootstrap progress.**
 
-This approved dependency graph contains 112 bounded implementation and qualification packages across 34 waves. It covers all 112 native acceptance clauses. The native KVX task sections are generated from [the versioned planning catalog](evidence/task-catalog.json); the IDs remain stable even when explicitly approved scope or dependency amendments revise the plan. Live native statuses and runtime metadata are never imported from historical catalog states. Each task initially owns one acceptance clause, and its concrete steps integrate the relevant cross-cutting contracts. A task can be implemented before full programme qualification, but its component receipts cannot claim a full acceptance case passed.
+This approved dependency graph contains 113 bounded implementation and qualification packages across 34 waves. It covers all 113 native acceptance clauses. The native KVX task sections are generated from [the versioned planning catalog](evidence/task-catalog.json); the IDs remain stable even when explicitly approved scope or dependency amendments revise the plan. Live native statuses and runtime metadata are never imported from historical catalog states. Each task initially owns one acceptance clause, and its concrete steps integrate the relevant cross-cutting contracts. A task can be implemented before full programme qualification, but its component receipts cannot claim a full acceptance case passed.
 
 The implementation team must re-read the pinned current source and approved architecture at task start. Proposed paths describe intended ownership, including files that do not yet exist; they are not claims about shipped modules. Current source paths named by an integration task are edited only after approval. All builds, prerequisites, indexing, implementation, tests, reproductions, integration and qualification run remotely. The main server receives verified prebuilt outputs and performs supervision.
 
@@ -199,7 +199,7 @@ These are approved implementation assignments for existing requirements, not cla
 | 12.4 | Implement runner pause, drain, cancel and verified stop | runner | 12.3, 15.2, 11.3, 5.1, 8.2, 5.2 | V-006, V-017 |
 | 13.2 | Persist native session lineage and source-linked checkpoints | connectors | 13.1, 15.1 | V-042, V-043 |
 
-### Wave 18 — 5 packages
+### Wave 18 — 6 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
@@ -208,6 +208,7 @@ These are approved implementation assignments for existing requirements, not cla
 | 13.4 | Integrate native quotas, permission profiles and autonomous escalation | connectors | 13.1, 5.4, 13.2, 5.1, 1.1, 3.4 | V-007, V-042, V-044 |
 | 16.2 | Reject false qualification from missing checks and legacy force paths | assurance | 16.1, 27.1, 12.4, 5.1, 11.4 | V-013, V-056 |
 | 17.1 | Discover every commit and enforce the full watcher obligation matrix | review | 16.1, 13.1, 14.1, 4.2 | V-031 |
+| 11.5 | Materialise packet-scoped workspace slices for very large repositories | preparation | 11.1, 11.3, 7.3, 3.2 | V-038, V-057 |
 
 ### Wave 19 — 5 packages
 
@@ -1725,6 +1726,28 @@ python3 tests/hyperfide/qualify.py --case V-007 --manifest tests/hyperfide/manif
 ```
 
 Outputs: `artifacts/hyperfide/tasks/11.4/manifest.json`, `artifacts/hyperfide/tasks/11.4/evidence-index.json`.
+
+Registered task-component variant only; all cases remain UNRUN now. This task receipt cannot replace any required full-case/provider/connector/campaign receipt.
+
+### Task 11.5 — Materialise packet-scoped workspace slices for very large repositories
+
+Planning baseline pending · wave 18 · owner `preparation` · clause `11.5`
+
+Requires: 11.1, 11.3, 7.3, 3.2.
+
+1. Derive a task's workspace slice from its packet: declared touches, the published graph generation's dependency closure (imports, build targets, test fixtures, shared contracts and registry files) and the build system's required roots; emit an immutable slice manifest (pinned commit, graph generation, included paths, excluded roots, digest) and materialise it with partial clone plus sparse checkout into the writable slot.
+2. Keep qualification exact under a slice: build, test and verify commands run against the slice; receipts record slice identity; a slice whose closure derivation is incomplete falls back to the full tree with a recorded reason; out-of-slice reads and writes during execution are detected and either refused or widened explicitly, never ignored.
+3. Inject a missing closure edge, a touch outside the slice, a build root the slice excluded, submodule/LFS paths inside the slice and a graph generation older than the pinned commit; verify refusal or explicit widening, byte identity of included paths against the full tree, and measured materialisation cost against the full-tree baseline on a fixture exceeding 20,000 files and ten languages.
+4. Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.
+5. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
+
+Verify:
+
+```sh
+python3 tests/hyperfide/qualify.py --case V-038 --manifest tests/hyperfide/manifests/tasks/11.5.json && python3 tests/hyperfide/qualify.py --case V-057 --manifest tests/hyperfide/manifests/tasks/11.5.json
+```
+
+Outputs: `artifacts/hyperfide/tasks/11.5/manifest.json`, `artifacts/hyperfide/tasks/11.5/evidence-index.json`.
 
 Registered task-component variant only; all cases remain UNRUN now. This task receipt cannot replace any required full-case/provider/connector/campaign receipt.
 

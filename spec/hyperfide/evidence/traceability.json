@@ -622,6 +622,20 @@
       ]
     },
     {
+      "id": "11.5",
+      "task_ids": [
+        "11.5"
+      ],
+      "acceptance_ids": [
+        "V-038",
+        "V-057"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "identity-security.md"
+      ]
+    },
+    {
       "id": "12.1",
       "task_ids": [
         "12.1"

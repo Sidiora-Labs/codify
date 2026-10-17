@@ -471,15 +471,15 @@ class Validator:
             self.notes.append('Task catalog, traceability baseline and dated authoring reports are historical plans. Native KVX owns bootstrap live task state. Structural validation never certifies task or runtime qualification.')
         clauses = {f'{name[4:]}.{key[3:]}' for name, values in sections.items() if name.startswith('req.')
                    for key in values if re.fullmatch(r'ac_\d+', key)}
-        expected_clauses = {f'{req}.{ac}' for req in range(1, 29) for ac in range(1, 5)}
+        expected_clauses = {f'{req}.{ac}' for req in range(1, 29) for ac in range(1, 5)} | {'11.5'}
         if clauses != expected_clauses:
-            self.errors.append(f'spec.kvx: expected 112 clauses; missing={sorted(expected_clauses-clauses)}, extra={sorted(clauses-expected_clauses)}')
+            self.errors.append(f'spec.kvx: expected 113 clauses; missing={sorted(expected_clauses-clauses)}, extra={sorted(clauses-expected_clauses)}')
         tasks = {name[5:]: values for name, values in sections.items() if name.startswith('task.')}
         verification = self.root / 'verification.md'
         case_rows = re.findall(r'^\|\s*(V-\d{3})\s*\|', verification.read_text(), re.M) if verification.exists() else []
         cases = set(case_rows)
-        if cases != {f'V-{number:03}' for number in range(1, 57)}:
-            self.errors.append('verification must define exactly V-001 through V-056 in case tables')
+        if cases != {f'V-{number:03}' for number in range(1, 58)}:
+            self.errors.append('verification must define exactly V-001 through V-057 in case tables')
         if len(case_rows) != len(cases):
             self.errors.append('verification contains duplicate acceptance case table rows')
         acceptance = {name[len('acceptance.'):]: values for name, values in sections.items() if name.startswith('acceptance.')}
@@ -487,8 +487,8 @@ class Validator:
             self.incomplete.append('native task sections not yet assembled')
         else:
             self.errors.extend(task_errors(tasks, clauses, cases, self.mode))
-            if len(tasks) != 112:
-                self.errors.append(f'expected 112 native implementation tasks, found {len(tasks)}')
+            if len(tasks) != 113:
+                self.errors.append(f'expected 113 native implementation tasks, found {len(tasks)}')
         if not acceptance:
             self.incomplete.append('native acceptance sections not yet assembled')
         else:

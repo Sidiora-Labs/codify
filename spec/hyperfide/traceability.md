@@ -52,6 +52,7 @@ The listed cases are the exact union assigned to the covering tasks. A task may 
 | 11.2 | 11.2 | V-038, V-039 | [execution-contract.md](execution-contract.md); [identity-security.md](identity-security.md) |
 | 11.3 | 11.3 | V-036, V-038, V-039 | [execution-contract.md](execution-contract.md); [identity-security.md](identity-security.md) |
 | 11.4 | 11.4 | V-007, V-038 | [execution-contract.md](execution-contract.md); [identity-security.md](identity-security.md) |
+| 11.5 | 11.5 | V-038, V-057 | [execution-contract.md](execution-contract.md); [identity-security.md](identity-security.md) |
 | 12.1 | 12.1 | V-015, V-039 | [execution-contract.md](execution-contract.md); [identity-security.md](identity-security.md) |
 | 12.2 | 12.2 | V-006, V-041, V-043 | [execution-contract.md](execution-contract.md); [identity-security.md](identity-security.md) |
 | 12.3 | 12.3 | V-007, V-044 | [execution-contract.md](execution-contract.md); [identity-security.md](identity-security.md) |

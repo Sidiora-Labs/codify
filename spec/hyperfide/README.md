@@ -13,10 +13,10 @@ The specification preserves frontier implementation agents, three decision-model
 | [Design overview](design.body.md) | The complete operating model, boundaries, one-task walkthrough, authority and deployment choices. |
 | [Schematics](schematics.md) | Ten architecture views, with thirteen standalone Mermaid sources: topology, roles, execution, state, custody, recovery, graph, reviews, fleet, migration and multiple repositories. |
 | [Decisions and qualifications](decisions.md) | Direct user requirements, recommended choices and facts that still require implementation-time evidence. |
-| [Implementation plan](implementation-plan.md) | 112 packages across 26 dependency waves, explicit ownership handoffs and verification interfaces. |
-| [Native specification](spec.kvx) | 28 requirements / 112 acceptance clauses, live implementation tasks and 56 separately tracked canonical product cases. |
+| [Implementation plan](implementation-plan.md) | 113 packages across 26 dependency waves, explicit ownership handoffs and verification interfaces. |
+| [Native specification](spec.kvx) | 28 requirements / 113 acceptance clauses, live implementation tasks and 57 separately tracked canonical product cases. |
 | [Verification](verification.md) | Strict evidence rules, fault tests, provider/native-agent qualification and actual 48/72-hour fleet campaigns. |
-| [Traceability](traceability.md) | All 112 acceptance clauses linked to implementation tasks, canonical cases and contracts. |
+| [Traceability](traceability.md) | All 113 acceptance clauses linked to implementation tasks, canonical cases and contracts. |
 | [Review report](reviews/README.md) | Review scope, findings, corrections, actual authoring checks and remaining limits. |
 
 ## Detailed contracts

@@ -99,6 +99,7 @@ ac_1 = "Environment profiles SHALL pin OS/architecture, toolchains, package mana
 ac_2 = "Bootstrap SHALL materialise exact repository commits and dependency inputs, with isolated writable workspaces and explicitly keyed dependency/build caches. Source, lock, command, configuration or toolchain changes SHALL invalidate affected cached results."
 ac_3 = "Readiness SHALL verify the actual published environment: tool availability, source identity, credentials availability, storage, network and required execution capabilities. A provider RUNNING status alone SHALL not imply task readiness."
 ac_4 = "Preparation SHALL run remotely with bounded retries, complete diagnostics and prewarming driven by eligible work. Partial downloads, package failures and obsolete preparation manifests SHALL never be published as reusable complete bases."
+ac_5 = "For repositories whose size makes full materialisation per slot the dominant cost, workspace materialisation SHALL support packet-scoped slices derived from the declared task scope and the published code graph's dependency closure (imports, build targets, test fixtures and shared contracts), materialised with partial clone and sparse checkout from the exact pinned commit under an immutable slice manifest. A slice SHALL fall back to the full tree with a recorded reason when closure derivation is incomplete, SHALL detect and record out-of-slice reads and writes, and slice qualification SHALL never be presented as full-tree qualification without the recorded slice identity."
 
 [req.12]
 title = "Sandbox supervisor and isolated worker slots"
@@ -1523,6 +1524,24 @@ do_2 = "Omit/duplicate reviews, rewrite history and replace a watcher; missing n
 do_3 = "Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate."
 do_4 = "Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes."
 
+[task.11.5]
+title = "Materialise packet-scoped workspace slices for very large repositories"
+status = "pending"
+wave = 18
+requires = ["11.1", "11.3", "7.3", "3.2"]
+touches = ["services/hyperfide/src/preparation/slices.ts", "tests/hyperfide/manifests/tasks/11.5.json", "tests/hyperfide/cases/tasks/11_5.py", "tests/hyperfide/registrations/11.5.json", "services/hyperfide/components/11.5.json", "services/hyperfide/migrations/0045-workspace-slices.sql", "tests/hyperfide/cases/support/large_repo_fixture.py"]
+verify_cmd = "python3 tests/hyperfide/qualify.py --case V-038 --manifest tests/hyperfide/manifests/tasks/11.5.json && python3 tests/hyperfide/qualify.py --case V-057 --manifest tests/hyperfide/manifests/tasks/11.5.json"
+reqs = ["11.5"]
+acceptance_ids = ["V-038", "V-057"]
+owner = "preparation"
+artifacts = ["artifacts/hyperfide/tasks/11.5/manifest.json", "artifacts/hyperfide/tasks/11.5/evidence-index.json"]
+verification_scope = "Registered task-component variant only; all cases remain UNRUN now. This task receipt cannot replace any required full-case/provider/connector/campaign receipt."
+do_1 = "Derive a task's workspace slice from its packet: declared touches, the published graph generation's dependency closure (imports, build targets, test fixtures, shared contracts and registry files) and the build system's required roots; emit an immutable slice manifest (pinned commit, graph generation, included paths, excluded roots, digest) and materialise it with partial clone plus sparse checkout into the writable slot."
+do_2 = "Keep qualification exact under a slice: build, test and verify commands run against the slice; receipts record slice identity; a slice whose closure derivation is incomplete falls back to the full tree with a recorded reason; out-of-slice reads and writes during execution are detected and either refused or widened explicitly, never ignored."
+do_3 = "Inject a missing closure edge, a touch outside the slice, a build root the slice excluded, submodule/LFS paths inside the slice and a graph generation older than the pinned commit; verify refusal or explicit widening, byte identity of included paths against the full tree, and measured materialisation cost against the full-tree baseline on a fixture exceeding 20,000 files and ten languages."
+do_4 = "Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate."
+do_5 = "Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes."
+
 [task.22.2]
 title = "Measure calibrated quality, latency and billed cost against baseline"
 status = "pending"
@@ -2565,7 +2584,7 @@ qualification = "UNRUN"
 
 [acceptance.V-038]
 feature = "hyperfide"
-reqs = ["9.1", "9.2", "10.1", "11.1", "11.2", "11.3", "11.4", "27.3"]
+reqs = ["9.1", "9.2", "10.1", "11.1", "11.2", "11.3", "11.4", "11.5", "27.3"]
 scenario = "Bootstrap from an approved image/template with pinned toolchains, native CLIs, source revisions, dependency locks and build capabilities; change one preparation input."
 expected = "Prepared artifact identity matches actual contents. Changed inputs miss/rebuild the cache appropriately. No live agent identity or secret is embedded. Failed preparation never becomes `READY`."
 contract = "verification.md"
@@ -2732,4 +2751,13 @@ scenario = "Self-qualify the harness with missing/unknown/empty selectors, missi
 expected = "Harness fails nonzero for every false-success trap and produces explicit failure/blocked evidence. Independent closure checker rejects tampered/incomplete packs. Complete pack links exact evidence for every criterion and reports unresolved qualification explicitly. Product completion cannot be inferred from spec-pack authoring checks."
 contract = "verification.md"
 test = "python3 tests/hyperfide/qualify.py --case V-056 --manifest <immutable-full-case-campaign-manifest.json> (planned)"
+qualification = "UNRUN"
+
+[acceptance.V-057]
+feature = "hyperfide"
+reqs = ["11.5", "27.3"]
+scenario = "Materialise packet-scoped slices from a repository exceeding 20,000 files and ten languages for several concurrent tasks; omit one dependency-closure edge, touch a path outside the slice, require a build root the slice excluded, include a submodule/LFS path inside the slice, and use a graph generation older than the pinned commit."
+expected = "Each slice manifest is immutable and bound to the exact commit; every included path is byte-identical to the full tree; omitted inputs, excluded build roots and out-of-slice access are detected and recorded as a refusal or an explicit widening, never a silent pass; full-tree fallback carries a recorded reason; results carry slice identity so later full-tree qualification can detect omitted inputs; materialisation cost is reported against the full-tree baseline."
+contract = "verification.md"
+test = "python3 tests/hyperfide/qualify.py --case V-057 --manifest <immutable-full-case-campaign-manifest.json> (planned)"
 qualification = "UNRUN"

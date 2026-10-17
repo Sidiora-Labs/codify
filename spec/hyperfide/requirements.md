@@ -16,7 +16,7 @@ This index summarises engineering obligations. Deployment-specific resources, pr
 | 8 | Provider abstraction and fleet inventory | 8.1–8.4 | [execution-contract.md](execution-contract.md); [identity-security.md](identity-security.md) |
 | 9 | Railway execution adapter | 9.1–9.4 | [providers/railway.md](providers/railway.md) |
 | 10 | Blaxel execution adapter | 10.1–10.4 | [providers/blaxel.md](providers/blaxel.md) |
-| 11 | Prepared environments and exact source bootstrap | 11.1–11.4 | [execution-contract.md](execution-contract.md); [identity-security.md](identity-security.md) |
+| 11 | Prepared environments and exact source bootstrap | 11.1–11.5 | [execution-contract.md](execution-contract.md); [identity-security.md](identity-security.md) |
 | 12 | Sandbox supervisor and isolated worker slots | 12.1–12.4 | [execution-contract.md](execution-contract.md); [identity-security.md](identity-security.md) |
 | 13 | Frontier agent connectors and session continuity | 13.1–13.4 | [execution-contract.md](execution-contract.md); [identity-security.md](identity-security.md) |
 | 14 | Identity, credentials and authority boundaries | 14.1–14.4 | [identity-security.md](identity-security.md) |

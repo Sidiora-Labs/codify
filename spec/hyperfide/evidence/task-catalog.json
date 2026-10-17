@@ -17,7 +17,7 @@
     "manifest_missing": "Nonzero BLOCKED; never fallback to a default variant",
     "component_registration": "Task-owned typed service/native registration fragments connect modules to real internal entrypoints; public facade integration has explicit later owner."
   },
-  "task_count": 112,
+  "task_count": 113,
   "wave_count": 34,
   "shared_path_policy": "Each task owns its declared exact paths while active; same-wave overlap is forbidden. Serialized shared paths: services/hyperfide/src/components/registry.ts owned by 1.4 -> 4.2 -> 14.1; services/hyperfide/src/components/service.ts owned by 1.4 -> 14.1; Makefile owned by 1.4 -> 12.1 -> 25.3 -> 26.2; src/hyperfide/components/schema.kvx owned by 1.4 -> 12.1; scripts/hyperfide-native-components.py owned by 1.4 -> 12.1; src/hyperfide/component_main.c owned by 1.4 -> 25.3; src/hyperfide/components.h owned by 1.4 -> 25.3; scripts/install.sh owned by 26.1 -> 26.2; scripts/release.sh owned by 26.1 -> 26.2; src/spec.c owned by 25.3 -> 26.4. Other shared-source edits require explicit serialized ownership and dependencies before work starts.",
   "tasks": [
@@ -2927,7 +2927,7 @@
         "services/hyperfide/migrations/0017-review.sql"
       ],
       "do_steps": [
-        "Discover attributable commits durably and create obligations for every one of the configured10–15 watchers per commit by default.",
+        "Discover attributable commits durably and create obligations for every one of the configured10\u201315 watchers per commit by default.",
         "Omit/duplicate reviews, rewrite history and replace a watcher; missing no-finding receipts stay visible, and specialist sharding requires an approved policy change.",
         "Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.",
         "Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes."
@@ -2941,6 +2941,48 @@
         "artifacts/hyperfide/tasks/17.1/evidence-index.json"
       ],
       "owner": "review",
+      "verification_scope": "Registered task-component variant only; all cases remain UNRUN now. This task receipt cannot replace any required full-case/provider/connector/campaign receipt."
+    },
+    {
+      "id": "11.5",
+      "title": "Materialise packet-scoped workspace slices for very large repositories",
+      "status": "pending",
+      "wave": 18,
+      "requires": [
+        "11.1",
+        "11.3",
+        "7.3",
+        "3.2"
+      ],
+      "reqs": [
+        "11.5"
+      ],
+      "touches": [
+        "services/hyperfide/src/preparation/slices.ts",
+        "tests/hyperfide/manifests/tasks/11.5.json",
+        "tests/hyperfide/cases/tasks/11_5.py",
+        "tests/hyperfide/registrations/11.5.json",
+        "services/hyperfide/components/11.5.json",
+        "services/hyperfide/migrations/0045-workspace-slices.sql",
+        "tests/hyperfide/cases/support/large_repo_fixture.py"
+      ],
+      "do_steps": [
+        "Derive a task's workspace slice from its packet: declared touches, the published graph generation's dependency closure (imports, build targets, test fixtures, shared contracts and registry files) and the build system's required roots; emit an immutable slice manifest (pinned commit, graph generation, included paths, excluded roots, digest) and materialise it with partial clone plus sparse checkout into the writable slot.",
+        "Keep qualification exact under a slice: build, test and verify commands run against the slice; receipts record slice identity; a slice whose closure derivation is incomplete falls back to the full tree with a recorded reason; out-of-slice reads and writes during execution are detected and either refused or widened explicitly, never ignored.",
+        "Inject a missing closure edge, a touch outside the slice, a build root the slice excluded, submodule/LFS paths inside the slice and a graph generation older than the pinned commit; verify refusal or explicit widening, byte identity of included paths against the full tree, and measured materialisation cost against the full-tree baseline on a fixture exceeding 20,000 files and ten languages.",
+        "Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.",
+        "Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes."
+      ],
+      "acceptance_ids": [
+        "V-038",
+        "V-057"
+      ],
+      "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-038 --manifest tests/hyperfide/manifests/tasks/11.5.json && python3 tests/hyperfide/qualify.py --case V-057 --manifest tests/hyperfide/manifests/tasks/11.5.json",
+      "artifacts": [
+        "artifacts/hyperfide/tasks/11.5/manifest.json",
+        "artifacts/hyperfide/tasks/11.5/evidence-index.json"
+      ],
+      "owner": "preparation",
       "verification_scope": "Registered task-component variant only; all cases remain UNRUN now. This task receipt cannot replace any required full-case/provider/connector/campaign receipt."
     },
     {
@@ -3431,7 +3473,7 @@
         "services/hyperfide/components/18.3.json"
       ],
       "do_steps": [
-        "Resolve finding→reviewed revision→commit/attempt→feature→current manager with explicit collaborators and durable routing acknowledgement.",
+        "Resolve finding\u2192reviewed revision\u2192commit/attempt\u2192feature\u2192current manager with explicit collaborators and durable routing acknowledgement.",
         "Reorder/duplicate events and transfer managers; no finding silently drops, routes only to a dead owner or starts duplicate repair authority.",
         "Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.",
         "Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes."
@@ -4440,7 +4482,7 @@
         "tests/hyperfide/registrations/27.3.json"
       ],
       "do_steps": [
-        "Resolve actual account/auth/region/profile/SLO and sustained-concurrency window, qualify each provider separately in small canaries, then ramp the approved combined allocation through 2 slots → 10 sandboxes/20 sessions → 25/50 → 50/100 → 100 sandboxes/200 remote frontier sessions. The 100-sandbox target is the combined fleet; separate full-size provider soaks require an explicit additional campaign decision.",
+        "Resolve actual account/auth/region/profile/SLO and sustained-concurrency window, qualify each provider separately in small canaries, then ramp the approved combined allocation through 2 slots \u2192 10 sandboxes/20 sessions \u2192 25/50 \u2192 50/100 \u2192 100 sandboxes/200 remote frontier sessions. The 100-sandbox target is the combined fleet; separate full-size provider soaks require an explicit additional campaign decision.",
         "Run approved48-hour then72-hour/1500-session campaigns with real native workloads, graph/build/review/integration and credential renewal; record actual concurrency, per-provider evidence, main-host exclusion and full resource inventory.",
         "Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes."
       ],

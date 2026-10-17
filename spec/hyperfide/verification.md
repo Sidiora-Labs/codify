@@ -146,6 +146,7 @@ All rows have status **UNRUN**. The `V-` identities are stable; refinement adds 
 | V-054 | Full stop and teardown after soak; restart cleanup controller with unreachable provider objects; apply artifact retention/expiry policies. | All resources are accounted for; deleted resources are confirmed absent, retained resources have explicit owners/expiry. Required evidence remains retrievable for its retention period. Incomplete cleanup is a visible failure/debt, never a clean bill. |
 | V-055 | Rehearse legacy migration and release rollback against representative existing installation/run fixtures, with new-brand commands and offline mode. | No silent data loss, duplicate authority or broken compatibility promise. Operators can restore the documented previous usable state, with explicit treatment of schema/protocol irreversibility. |
 | V-056 | Self-qualify the harness with missing/unknown/empty selectors, missing executables, absent required credentials, zero assertions, failed child commands and partial cleanup. Assemble programme closure from all requirement criteria, cases, revisions, findings, docs baselines, cleanup and approved exceptions; tamper with a result/hash and omit a required case. | Harness fails nonzero for every false-success trap and produces explicit failure/blocked evidence. Independent closure checker rejects tampered/incomplete packs. Complete pack links exact evidence for every criterion and reports unresolved qualification explicitly. Product completion cannot be inferred from spec-pack authoring checks. |
+| V-057 | Materialise packet-scoped slices from a repository exceeding 20,000 files and ten languages for several concurrent tasks; omit one dependency-closure edge, touch a path outside the slice, require a build root the slice excluded, include a submodule/LFS path inside the slice, and use a graph generation older than the pinned commit. | Each slice manifest is immutable and bound to the exact commit; every included path is byte-identical to the full tree; omitted inputs, excluded build roots and out-of-slice access are detected and recorded as a refusal or an explicit widening, never a silent pass; full-tree fallback carries a recorded reason; results carry slice identity so later full-tree qualification can detect omitted inputs; materialisation cost is reported against the full-tree baseline. |
 
 ## 5. Load and fixture matrix
 
@@ -195,7 +196,7 @@ Native KVX requirement/criterion mapping must point to these cases and their cur
 | Central graph and SQLite/legacy migration | V-018–V-025, V-048, V-055 |
 | Branding and supported local/offline compatibility | V-019, V-026–V-028, V-055 |
 | API semantics, whole-system coherence, review and issues | V-029–V-035 |
-| Railway/Blaxel preparation, runtime and secrets | V-036–V-041, V-049–V-051, V-054 |
+| Railway/Blaxel preparation, runtime and secrets | V-036–V-041, V-049–V-051, V-054, V-057 |
 | Frontier agents, native sessions and recovery | V-042–V-044, V-050, V-051 |
 | Span/Jev/D1 advisory decisions | V-045, V-046 |
 | Fleet scale, endurance, supervision-only main server | V-047–V-052 |

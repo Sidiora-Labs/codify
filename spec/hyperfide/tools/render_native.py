@@ -68,8 +68,8 @@ def render(root, mode):
                 raise ValueError('invalid verification case table row')
             rows.append(columns)
     cases = {row[0] for row in rows}
-    if len(rows) != 56 or len(cases) != 56 or set(clauses) != cases:
-        raise ValueError('expected exactly 56 unique mapped verification cases')
+    if len(rows) != 57 or len(cases) != 57 or set(clauses) != cases:
+        raise ValueError('expected exactly 57 unique mapped verification cases')
     existing_cases = {key[len('acceptance.'):]: value for key, value in native.items() if key.startswith('acceptance.')}
     if set(existing_cases) - cases or (mode == 'implementation' and set(existing_cases) != cases):
         raise ValueError('native acceptance identities differ; refusing runtime evidence deletion')
