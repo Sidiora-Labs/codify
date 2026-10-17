@@ -77,10 +77,20 @@ int hf_client_authority_guard_args(const char *operation,int argc,char **argv,FI
  for(int i=0;i+1<argc;i++)if(!strcmp(argv[i],"--root")){result=hf_client_authority_guard_at(operation,argv[i+1],output);if(result)return result;}
  return 0;
 }
+/* Local cache freshness is reported, never trusted: a local store cannot
+ * claim remote ownership or overwrite distributed projections. */
+static void hf_cache25(FILE *output,int mode){
+ struct stat info;int present=lstat(".codegraph/graph.db",&info)==0&&S_ISREG(info.st_mode);
+ if(mode==HF_DISTRIBUTED){fputs(",\"cache\":{\"store\":\"remote\",\"authoritative\":false,\"freshness\":\"READ_THROUGH_AUTHORITY\",\"overwrite_remote\":false}",output);return;}
+ if(!present){fputs(",\"cache\":{\"store\":\"local\",\"present\":false,\"authoritative\":false,\"freshness\":\"ABSENT\",\"overwrite_remote\":false}",output);return;}
+ time_t now=time(NULL);long long age=now>info.st_mtime?(long long)(now-info.st_mtime):0;
+ fprintf(output,",\"cache\":{\"store\":\"local\",\"present\":true,\"authoritative\":false,\"freshness\":\"%s\",\"modified_at\":%lld,\"age_seconds\":%lld,\"overwrite_remote\":false}",
+  mode==HF_OFFLINE?"STALE_UNSYNCHRONISED":"LOCAL_ONLY",(long long)info.st_mtime,age);
+}
 int hf_component_25_3(const char *action,const char *request_json,FILE *output){
  if(strcmp(action,"authority.mode")||strcmp(hf_ws25(request_json),"{}")){fputs("{\"ok\":false,\"error\":{\"code\":\"INVALID_REQUEST\"}}\n",output);return 1;}
  int mode=hf_client_authority_mode();if(mode<0){fputs("{\"ok\":false,\"error\":{\"code\":\"AUTHORITY_MODE_INVALID\"}}\n",output);return 1;}
- fprintf(output,"{\"ok\":true,\"mode\":\"%s\",\"remote_ownership\":false,\"local_fallback\":false,\"transport_status\":\"REQUIRES_AUTHENTICATED_TRANSPORT\"}\n",mode==HF_LOCAL?"local":(mode==HF_OFFLINE||mode==HF_OFFLINE_LOCAL)?"offline":"distributed");return 0;
+ fprintf(output,"{\"ok\":true,\"mode\":\"%s\",\"remote_ownership\":false,\"local_fallback\":false,\"transport_status\":\"REQUIRES_AUTHENTICATED_TRANSPORT\"",mode==HF_LOCAL?"local":(mode==HF_OFFLINE||mode==HF_OFFLINE_LOCAL)?"offline":"distributed");hf_cache25(output,mode);fputs("}\n",output);return 0;
 }
 
 /* Authenticated network dispatch. A handled response, including an unknown
@@ -251,7 +261,7 @@ int hf_client_dispatch(int argc,char **argv,FILE *out,FILE *err){
  int authority=!strcmp(argv[1],"authority");
  if(authority&&argc==3&&!strcmp(argv[2],"mode")){
  int mode=hf_client_authority_mode();if(mode<0)return hf_client_error25(err,"AUTHORITY_MODE_INVALID","Authority configuration is invalid");
- fprintf(out,"{\"ok\":true,\"mode\":\"%s\",\"local_fallback\":false}\n",mode==HF_LOCAL?"local":mode==HF_DISTRIBUTED?"distributed":"offline");return 0;
+ fprintf(out,"{\"ok\":true,\"mode\":\"%s\",\"remote_ownership\":false,\"local_fallback\":false",mode==HF_LOCAL?"local":mode==HF_DISTRIBUTED?"distributed":"offline");hf_cache25(out,mode);fputs("}\n",out);return 0;
  }
  int mode=hf_client_authority_mode();if(mode<0)return hf_client_error25(err,"AUTHORITY_MODE_INVALID","Authority configuration is invalid");
  if(!authority&&(mode==HF_LOCAL||mode==HF_OFFLINE_LOCAL)){int guard=hf_client_authority_guard_args("cli",argc,argv,err);return guard?guard:-1;}
