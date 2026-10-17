@@ -74,9 +74,7 @@ def check(ident,callback):
 def artifact_root():
     path=Path(os.environ.get('HYPERFIDE_CAMPAIGN_DIR','/tmp/hyperfide/task-2.4-auth-standalone'));path.mkdir(parents=True,exist_ok=True);return path
 def setup(f):
-    for version,name in [(2,'0002-spec'),(4,'0004-durability')]:
-        raw=(ROOT/('services/hyperfide/migrations/'+name+'.sql')).read_bytes()
-        f.sql("BEGIN;\n"+raw.decode()+"\nINSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES("+str(version)+",'"+name+"','"+sha(raw)+"');COMMIT;")
+    for name in ['0002-spec','0004-durability']:f.apply_migration(name)
     f.ids.update({key:str(uuid.uuid4()) for key in ['repository','accepted_spec','package','package2','task1','task2','task3','task4','task5']})
     i=f.ids
     executable=str(Path(sys.executable).resolve())
@@ -257,8 +255,9 @@ def probe(f):
         candidate=proof_input(f,'task8');p=candidate['policy'];shell=str(Path('/bin/bash').resolve())
         p['rubric_digest']=f.criteria;p['checks']=[{'id':'captured-command','argv':[shell,'-c','printf captured-evidence'],'executable_digest':sha(Path(shell).read_bytes()),'timeout_ms':600000,'required_artifacts':[],'input_keys':['source','dependency','toolchain','configuration','graph','contract']}]
         p['clauses'][0]['checks']=['captured-command']
-        expect(success(f,'spec.proof.register',candidate)['policy']['checks'][0]['required_artifacts']==[],'Explicit accepted empty artifact inventory was not preserved')
-    check('proof.accepted-task-command.explicit-empty-artifacts',accepted_empty_artifacts)
+        refused(f,'spec.proof.register',candidate,'PROOF_MAPPING_INVALID')
+        expect(f.sql("SELECT count(*)::int n FROM hyperfide.proof_registries WHERE task_id=$1",[f.ids['task8']])[0]['n']==0,'Command-only proof without behavioural artifacts was persisted')
+    check('proof.accepted-task-command.empty-artifacts-refused',accepted_empty_artifacts)
 
     def legacy_unbound():
         candidate=proof_input(f,'task6');candidate['policy']['checks'][0]['argv']=['/usr/bin/true']

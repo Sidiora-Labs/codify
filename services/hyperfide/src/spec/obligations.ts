@@ -173,7 +173,7 @@ async function acceptedProofAuthority(policy:ProofPolicy,definition:unknown,inte
   }
  }else if(policy.checks.length){
   const command=taskValue('verify_cmd'),artifacts=taskValue('artifacts');
-  if(typeof command!=='string'||!command.length||command.length>8192||!strings(artifacts,/^.+$/,true)||artifacts.some(item=>!safeArtifact(item))||
+  if(typeof command!=='string'||!command.length||command.length>8192||!strings(artifacts,/^.+$/)||artifacts.some(item=>!safeArtifact(item))||
    policy.checks.length!==1||policy.rubric_digest!==policy.criteria_digest)
    fail('PROOF_MAPPING_INVALID','Accepted executable definitions or exact task command and artifacts are required');
   let executable:string,executable_digest:string;

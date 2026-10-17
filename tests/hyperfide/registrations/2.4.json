@@ -68,7 +68,7 @@
     "proof.auth.existing-cross-run",
     "proof.auth.role-refused",
     "proof.accepted-task-command.exact-adapter",
-    "proof.accepted-task-command.explicit-empty-artifacts",
+    "proof.accepted-task-command.empty-artifacts-refused",
     "proof.legacy.unbound-registry-refused",
     "proof.history.unchanged-task-retained",
     "proof.history.changed-task-rejects-old-policy",
