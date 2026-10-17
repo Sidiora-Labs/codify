@@ -114,7 +114,8 @@ coverage (`complete`, `partial`, `skipped`, `failed`, `unchecked`), parser
 inventory, pending reconciliation and degraded state under `index_health`.
 Code answers classify contributing files as verified, stale or unchecked in
 `index_health.source_validation`. The answer check has caps of 16 files,
-4 MiB and 25 ms, so unchecked is a real limit rather than a freshness claim.
+1 MiB per file, 4 MiB total and 25 ms, so unchecked is a real limit rather
+than a freshness claim.
 
 File changes use subsecond metadata and content verification for explicitly
 dirty paths. Watcher loss creates durable reconciliation debt; the debt clears

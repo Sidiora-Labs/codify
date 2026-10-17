@@ -391,11 +391,10 @@ static int integrate_agentmd_call(void *v) {
     return cmd_agentmd(((IntegrateAgentmd *)v)->cg, true);
 }
 
-/* Generate the graph projection only when its ownership marker is present or
- * the path is empty. Capture cmd_agentmd's normal CLI report so JSON apply
- * remains one valid document. Returns apply_asset-style status. A busy
- * database is not a failure: the projection renders from the last completed
- * index and the next apply catches up. */
+/* Only absent or legacy/current-owned context may be regenerated; preserve
+ * user-owned content. Capture the CLI report to keep JSON apply valid.
+ * Auto-sync honors project policy; busy indexing permits the last completed
+ * graph. Return apply_asset-style changed/unchanged/refused/error status. */
 static int integrate_agent_context(Cg *cg) {
     char path[4700];
     config_context_path(cg->root, "agent-context.md", path, sizeof path);

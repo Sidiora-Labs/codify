@@ -14,8 +14,8 @@
 #include <ctype.h>
 #include <unistd.h>
 
-/* The first line of every generated map; a file that does not start with
- * it is somebody else's and is never overwritten without --force. */
+/* New maps use this ownership prefix; the legacy prefix below is also ours.
+ * Neither prefix present means replacement requires explicit --force. */
 #define CM_MARKER "<!-- hyperfide-owned: codemap v1"
 #define CM_LEGACY_MARKER "<!-- codify-owned: codemap v1"
 extern int hyperfide_owned_write(const char *,const char *,size_t,const char *,bool);
@@ -2267,8 +2267,8 @@ int codemap_render(Cg *cg, int budget, bool json, const char *self_rel,
 
 /* ---------------- the file ---------------- */
 
-/* The budget an existing map was generated with, from its marker; 0 when
- * the file is not ours. */
+/* Recognize either ownership prefix before trusting a first-line budget.
+ * Missing/nonpositive budgets use the default; unowned content returns 0. */
 static int marker_budget(const char *body) {
     size_t ml = strlen(CM_MARKER);
     if (!body || (strncmp(body, CM_MARKER, ml) != 0 &&

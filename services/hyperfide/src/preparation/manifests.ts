@@ -275,8 +275,10 @@ function names(fd: number): string[] {
 }
 /**
  * The configured root is trusted deployment input; caller paths never select an arbitrary host root.
- * Directory descriptors anchor every traversal. Scanning is bounded and detects known state/canaries;
- * it does not establish absence of arbitrary unknown secrets or perform later readiness probes.
+ * Linux directory descriptors anchor bounded traversal and revalidation against concurrent changes.
+ * Schema v2 may inventory policy-checked internal symlinks and hardlink groups; v1 rejects symlinks.
+ * The preparation owner must quiesce writers: this scan is not an atomic filesystem snapshot.
+ * Known sensitive state/canaries are rejected; this is no proof against unknown secrets or readiness probe.
  */
 async function inventory(candidate: string, context: InventoryContext, policy: ScanPolicy, allowSymlinks: boolean): Promise<{ files: InventoryEntry[]; directories: DirectoryEntry[]; symlinks: SymlinkEntry[]; hardlinks: HardlinkGroup[] }> {
   const root = context.env.HF_PREPARATION_ALLOWED_ROOT;
@@ -512,7 +514,8 @@ async function make(input: unknown, context: InventoryContext, verifying: boolea
   return manifest;
 }
 export async function createManifest(input: unknown, context: InventoryContext): Promise<PreparationManifest> { return make(input, context, false); }
-/** Byte/profile integrity only: expired historical artifacts may verify; reuse needs current policy admission. */
+/** Re-scan the trusted candidate and compare canonical schema v1/v2 content, including link topology.
+ * Expired historical profiles may verify; integrity grants no current reuse or execution authority. */
 export async function verifyManifest(input: unknown, context: InventoryContext): Promise<{ valid: true; digest: string; file_count: number }> {
   const manifest = await make(input, context, true); return { valid: true, digest: manifest.digest, file_count: manifest.files.length };
 }

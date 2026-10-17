@@ -43,7 +43,8 @@ function options(args: string[]): Record<string,string> {
 export type ProtocolResponse =
   | { id: string | number; ok: true; result: unknown }
   | { id: string | number | null; ok: false; error: { code: string; message: string } };
-// Shared internal dispatcher: later authenticated transports reuse these exact admission checks.
+// Shared stdio/HTTPS dispatch preserves the trusted invocation context; wire input cannot supply it.
+// Snapshot bounded JSON results before returning so component getters cannot run during wire serialization.
 export async function handleRequest(registry: ComponentRegistry, request: unknown, responseLimit = MAX_BYTES, invocation?:InvocationContext): Promise<ProtocolResponse> {
   let id: string | number | null = null;
   try {
