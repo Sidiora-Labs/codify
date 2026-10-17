@@ -11,7 +11,7 @@ import {createLegacyWriterAdmission} from './legacy.js';
 import {isArtifactStoreCapability} from '../artifacts/objects.js';
 
 type Json=Record<string,unknown>;
-interface Profile {id:string;source_id:string;repository_id:string;organisation_id:string;root:string;database:string;external?:{label:string;path:string;kind:string;sensitive?:boolean}[];archive_approved_digests?:string[]}
+export interface Profile {id:string;source_id:string;repository_id:string;organisation_id:string;root:string;database:string;external?:{label:string;path:string;kind:string;sensitive?:boolean}[];archive_approved_digests?:string[]}
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const digestPattern=/^sha256:[0-9a-f]{64}$/;
 const known=new Set(['meta','branches','files','symbols','refs','routes','memories','memory_superseded','git_commits','git_churn','leases','attempts','agents','runtime_events','events','fleet_runs','fleet_nodes','fleet_approvals','runtime_files','work_packets','work_files','work_evidence','imports','comments','projections','projection_findings','extraction_health','journal_applied']);
@@ -34,9 +34,9 @@ function input(value:unknown,required:string[],optional:string[]=[]):Json{
 }
 function id(value:unknown):string{if(typeof value!=='string'||!uuid.test(value))fail('MIGRATION_INPUT','Canonical UUID required');return value;}
 function hex(value:unknown):string{if(typeof value!=='string'||!digestPattern.test(value))fail('MIGRATION_INPUT','SHA256 digest required');return value;}
-async function fileHash(filename:string):Promise<string>{const h=createHash('sha256');for await(const chunk of createReadStream(filename))h.update(chunk);return 'sha256:'+h.digest('hex');}
+export async function fileHash(filename:string):Promise<string>{const h=createHash('sha256');for await(const chunk of createReadStream(filename))h.update(chunk);return 'sha256:'+h.digest('hex');}
 function quote(name:string):string{return '"'+name.replaceAll('"','""')+'"';}
-async function regular(root:string,relative:string):Promise<string>{
+export async function regular(root:string,relative:string):Promise<string>{
  if(!path.isAbsolute(root)||!relative||path.isAbsolute(relative)||relative.includes('\\')||relative.split('/').some(p=>p===''||p==='.'||p==='..'))fail('MIGRATION_PATH','Unsafe relative migration path');
  const rootInfo=await fs.lstat(root);if(!rootInfo.isDirectory()||rootInfo.isSymbolicLink())fail('MIGRATION_PATH','Trusted root must be a real directory');
  let current=root;
@@ -44,7 +44,7 @@ async function regular(root:string,relative:string):Promise<string>{
  if(!(await fs.lstat(current)).isFile())fail('MIGRATION_PATH','Source is not a regular file');
  return current;
 }
-async function profiles(env:Readonly<NodeJS.ProcessEnv>):Promise<Profile[]>{
+export async function profiles(env:Readonly<NodeJS.ProcessEnv>):Promise<Profile[]>{
  const filename=env.HF_MIGRATION_SOURCES_FILE;if(!filename)fail('MIGRATION_CONFIG','Trusted migration sources are required');
  const info=await fs.lstat(filename);if(!info.isFile()||info.isSymbolicLink()||info.size>1024*1024)fail('MIGRATION_CONFIG','Invalid migration sources');
  const raw:unknown=JSON.parse(await fs.readFile(filename,'utf8'));
@@ -63,12 +63,12 @@ async function profiles(env:Readonly<NodeJS.ProcessEnv>):Promise<Profile[]>{
 async function profile(env:Readonly<NodeJS.ProcessEnv>,name:unknown):Promise<Profile>{
  const p=(await profiles(env)).find(p=>p.id===name);if(!p)fail('MIGRATION_SCOPE','Unknown trusted source profile');return p;
 }
-async function archiveRoot(env:Readonly<NodeJS.ProcessEnv>):Promise<string>{
+export async function archiveRoot(env:Readonly<NodeJS.ProcessEnv>):Promise<string>{
  const root=env.HF_MIGRATION_ARCHIVE_ROOT;if(!root||!path.isAbsolute(root))fail('MIGRATION_CONFIG','Trusted archive root required');
  const st=await fs.lstat(root);if(!st.isDirectory()||st.isSymbolicLink()||(st.mode&0o077)!==0)fail('MIGRATION_CONFIG','Archive root must be a private real directory');
  return root;
 }
-function open(filename:string):DatabaseSync{
+export function open(filename:string):DatabaseSync{
  const db=new DatabaseSync(filename,{readOnly:true,allowExtension:false,timeout:3000,readBigInts:true});
  db.exec('PRAGMA query_only=ON; PRAGMA trusted_schema=OFF');return db;
 }
@@ -171,12 +171,11 @@ function cell(value:unknown):unknown {
  if(value instanceof Uint8Array)return {type:'blob',base64:Buffer.from(value).toString('base64')};
  return fail('MIGRATION_UNSUPPORTED','Unsupported SQLite value representation');
 }
-async function importBatch(p:Profile,value:Json,ctx:ComponentContext):Promise<unknown>{
- const importId=id(value.import_id),offset=value.offset,limit=value.limit,table=value.table;
- if(typeof offset!=='string'||!/^(0|[1-9][0-9]{0,14})$/.test(offset)||typeof limit!=='number'||!Number.isSafeInteger(limit)||limit<1||limit>500||typeof table!=='string')fail('MIGRATION_INPUT','Bounded table, decimal offset and batch limit required');
- const prior=await load(p,importId,ctx),db=open(String(prior.archive_path));let payloads:{key:unknown;data:unknown;mapped:string;digest:string;disposition:string}[]=[];
- let total=0n;
- try{
+export interface LogicalRow {key:unknown;data:unknown;mapped:string;digest:string;disposition:string}
+/** The one logical-row encoder. Import batches and cutover parity samples must agree
+ * byte-for-byte, so neither may re-derive keys, cells or payload digests independently. */
+export function logicalBatch(db:DatabaseSync,table:string,offset:string,limit:number,source:string,repository:string):{rows:LogicalRow[];total:bigint}{
+ const payloads:LogicalRow[]=[];let total=0n;
  const inv=inventory(db),tables=inv.tables as Json[],meta=tables.find(t=>t.name===table);
  if(!meta||meta.disposition==='ARCHIVE_ONLY')fail('MIGRATION_UNSUPPORTED','Only inventoried ordinary tables can import logical history');
  const cols=rows(db,'PRAGMA table_xinfo('+quote(table)+')').filter(c=>String(c.hidden)!=='1');
@@ -222,9 +221,17 @@ async function importBatch(p:Profile,value:Json,ctx:ComponentContext):Promise<un
  const encodedBytes=Buffer.byteLength(encoded);
  if(encodedBytes>8*1024*1024)fail('MIGRATION_ROW_SIZE_BOUND','Logical row exceeds bounded representation; original archive preserved');
  encodedBatch+=encodedBytes;if(encodedBatch>8*1024*1024)fail('MIGRATION_BATCH_SIZE_BOUND','Logical batch exceeds aggregate encoded byte budget; reduce batch limit');
- payloads.push({key,data,mapped:mappedId(p.source_id,p.repository_id,table,key),digest:hash(encoded),
+ payloads.push({key,data,mapped:mappedId(source,repository,table,key),digest:hash(encoded),
  disposition:live.has(table)?'REQUIRES_RECONCILIATION':String(meta.disposition)});
  }
+ return {rows:payloads,total};
+}
+async function importBatch(p:Profile,value:Json,ctx:ComponentContext):Promise<unknown>{
+ const importId=id(value.import_id),offset=value.offset,limit=value.limit,table=value.table;
+ if(typeof offset!=='string'||!/^(0|[1-9][0-9]{0,14})$/.test(offset)||typeof limit!=='number'||!Number.isSafeInteger(limit)||limit<1||limit>500||typeof table!=='string')fail('MIGRATION_INPUT','Bounded table, decimal offset and batch limit required');
+ const prior=await load(p,importId,ctx),db=open(String(prior.archive_path));let payloads:LogicalRow[]=[];
+ let total=0n;
+ try{({rows:payloads,total}=logicalBatch(db,table,offset,limit,p.source_id,p.repository_id));
  }finally{db.close();}
  const requestDigest=hash(canonical({importId,table,offset,limit,snapshot:prior.snapshot_digest}));
  try{return await identityTransaction(ctx,async client=>{

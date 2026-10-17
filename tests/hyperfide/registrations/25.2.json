@@ -1,0 +1,132 @@
+{
+  "schema_version": 1,
+  "variant": "task:25.2",
+  "task": "25.2",
+  "scope": "task-component",
+  "cases": [
+    "V-019",
+    "V-028",
+    "V-055"
+  ],
+  "assertion_ids": [
+    "cutover.legacy.missing-trusted-topology",
+    "cutover.legacy.source-epoch-binding",
+    "cutover.legacy.private-topology",
+    "cutover.legacy.null-predecessor-admission",
+    "cutover.legacy.namespace-binding",
+    "cutover.legacy.actual-admission-descriptor",
+    "cutover.legacy.idempotent-admission",
+    "cutover.legacy.native-admission-enforced",
+    "cutover.legacy.writable-mount-refused",
+    "cutover.legacy.active-sqlite-writer-refused",
+    "cutover.legacy.shared-writable-mapping-refused",
+    "cutover.legacy.directory-reconnect-handle-refused",
+    "cutover.legacy.changed-admission-refused",
+    "cutover.legacy.symlink-scope-refused",
+    "cutover.legacy.real-readonly-namespace-proof",
+    "cutover.legacy.null-predecessor-real-readonly-proof",
+    "cutover.legacy.outside-writable-hardlink-refused",
+    "cutover.legacy.preexisting-detached-writer-refused",
+    "cutover.legacy.stale-sqlite-reconnect-blocked",
+    "cutover.service.describe",
+    "cutover.service.schema-checksum-gate",
+    "cutover.service.prepare-requires-run-quiescence",
+    "cutover.service.prepare-requires-readonly-legacy-storage",
+    "cutover.service.prepare-quiesced",
+    "cutover.service.prepare-replay",
+    "cutover.service.prepare-replay-conflict",
+    "cutover.service.stale-generation-refused",
+    "cutover.service.validate-requires-run-quiescence",
+    "cutover.service.validate-requires-artifact-receipt",
+    "cutover.service.validate-refuses-pre-quiesce-import",
+    "cutover.service.validate-refuses-tampered-history",
+    "cutover.service.shadow-read-only",
+    "cutover.service.validate-parity-receipt",
+    "cutover.service.activate-refused-without-approved-fence",
+    "cutover.service.single-authority",
+    "cutover.service.rollback-before-writes",
+    "cutover.service.re-prepare-after-rollback",
+    "cutover.service.rollback-refused-after-writes",
+    "cutover.service.recovery-refuses-sqlite-archive-authority",
+    "cutover.service.recovery-forward-after-effects",
+    "cutover.service.sqlite-archive-never-authority",
+    "cutover.service.rollback-paths-recorded",
+    "cutover.service.cleanup.actual-absence"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/25_2.py"
+  ],
+  "timeout_seconds": 600,
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
+  "fixtures": [
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/migration/cutover.js",
+    "services/hyperfide/dist/migration/legacy.js",
+    "services/hyperfide/dist/migration/parity.js",
+    "services/hyperfide/dist/migration/sqlite.js"
+  ],
+  "resources": [
+    {
+      "id": "hf-task25.2-database",
+      "kind": "isolated-postgresql-tls-object-namespace-fixture",
+      "scope": "task25.2-disposable"
+    }
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/25_2.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "required_artifacts": [
+    "cutover/cleanup.json",
+    "cutover/observations.json",
+    "cutover/service-observations.json"
+  ],
+  "source_files": [
+    "services/hyperfide/components/25.2.json",
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/migration/cutover.js",
+    "services/hyperfide/dist/migration/legacy.js",
+    "services/hyperfide/dist/migration/parity.js",
+    "services/hyperfide/dist/migration/sqlite.js",
+    "services/hyperfide/migrations/0025-sqlite-history.sql",
+    "services/hyperfide/migrations/0252-migration-proof.sql",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/package.json",
+    "services/hyperfide/src/migration/cutover.ts",
+    "services/hyperfide/src/migration/legacy.ts",
+    "services/hyperfide/src/migration/parity.ts",
+    "services/hyperfide/src/migration/sqlite.ts",
+    "services/hyperfide/tsconfig.json",
+    "tests/hyperfide/cases/tasks/15_2.py",
+    "tests/hyperfide/cases/tasks/25_2.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/registrations/25.2.json",
+    "tests/hyperfide/registry.json",
+    "tests/hyperfide/support/identity_fixture.py"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations",
+    "src/hyperfide",
+    "tests/hyperfide/support"
+  ],
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "https.fixture.listen",
+    "object.fixture.listen",
+    "linux.namespace.private-mount"
+  ]
+}

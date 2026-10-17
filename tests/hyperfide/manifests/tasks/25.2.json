@@ -1,0 +1,296 @@
+{
+  "schema_version": 1,
+  "campaign_id": "hyperfide-task-25.2-cutover-rehearsal-v1",
+  "registered_variant": "task:25.2",
+  "scope": "task-component",
+  "case_ids": [
+    "V-019",
+    "V-028",
+    "V-055"
+  ],
+  "expected_assertion_ids": [
+    "cutover.legacy.missing-trusted-topology",
+    "cutover.legacy.source-epoch-binding",
+    "cutover.legacy.private-topology",
+    "cutover.legacy.null-predecessor-admission",
+    "cutover.legacy.namespace-binding",
+    "cutover.legacy.actual-admission-descriptor",
+    "cutover.legacy.idempotent-admission",
+    "cutover.legacy.native-admission-enforced",
+    "cutover.legacy.writable-mount-refused",
+    "cutover.legacy.active-sqlite-writer-refused",
+    "cutover.legacy.shared-writable-mapping-refused",
+    "cutover.legacy.directory-reconnect-handle-refused",
+    "cutover.legacy.changed-admission-refused",
+    "cutover.legacy.symlink-scope-refused",
+    "cutover.legacy.real-readonly-namespace-proof",
+    "cutover.legacy.null-predecessor-real-readonly-proof",
+    "cutover.legacy.outside-writable-hardlink-refused",
+    "cutover.legacy.preexisting-detached-writer-refused",
+    "cutover.legacy.stale-sqlite-reconnect-blocked",
+    "cutover.service.describe",
+    "cutover.service.schema-checksum-gate",
+    "cutover.service.prepare-requires-run-quiescence",
+    "cutover.service.prepare-requires-readonly-legacy-storage",
+    "cutover.service.prepare-quiesced",
+    "cutover.service.prepare-replay",
+    "cutover.service.prepare-replay-conflict",
+    "cutover.service.stale-generation-refused",
+    "cutover.service.validate-requires-run-quiescence",
+    "cutover.service.validate-requires-artifact-receipt",
+    "cutover.service.validate-refuses-pre-quiesce-import",
+    "cutover.service.validate-refuses-tampered-history",
+    "cutover.service.shadow-read-only",
+    "cutover.service.validate-parity-receipt",
+    "cutover.service.activate-refused-without-approved-fence",
+    "cutover.service.single-authority",
+    "cutover.service.rollback-before-writes",
+    "cutover.service.re-prepare-after-rollback",
+    "cutover.service.rollback-refused-after-writes",
+    "cutover.service.recovery-refuses-sqlite-archive-authority",
+    "cutover.service.recovery-forward-after-effects",
+    "cutover.service.sqlite-archive-never-authority",
+    "cutover.service.rollback-paths-recorded",
+    "cutover.service.cleanup.actual-absence"
+  ],
+  "approval": {
+    "approved": true,
+    "allowed_actions": [
+      "postgresql.fixture.create",
+      "postgresql.fixture.drop",
+      "https.fixture.listen",
+      "object.fixture.listen",
+      "linux.namespace.private-mount"
+    ]
+  },
+  "inputs": [
+    {
+      "path": "services/hyperfide/components/1.4.json",
+      "sha256": "bad91dd5fb9ed7e60aaad3dfd43510a848ee86a5f95c5bb682082f029c8f1f26",
+      "size": 274
+    },
+    {
+      "path": "services/hyperfide/components/14.1.json",
+      "sha256": "d90461e0c89dedac5c578a4fe57c7269b9958c38668562247dbb39e3c6cca6be",
+      "size": 583
+    },
+    {
+      "path": "services/hyperfide/components/15.2.json",
+      "sha256": "7ab470f29929ec7dc22b0e4e70255241590b0a25ed3362978867489f1168d842",
+      "size": 487
+    },
+    {
+      "path": "services/hyperfide/components/2.1.json",
+      "sha256": "8e3c3615b3e712b9d923e2bcfa5065dd0e192e4a822f4f3c11f3421e4ad345ad",
+      "size": 338
+    },
+    {
+      "path": "services/hyperfide/components/2.4.json",
+      "sha256": "c64dfc7057a799a1b5591a655821c99ff40810aa2f5b1fe347a5f8c3059986e9",
+      "size": 356
+    },
+    {
+      "path": "services/hyperfide/components/24.1.json",
+      "sha256": "d80fd4bc8186b9c46750c6350b91d3a9697b905d75c882b539cf6867f04a0ec8",
+      "size": 446
+    },
+    {
+      "path": "services/hyperfide/components/24.3.json",
+      "sha256": "e705fbcbcd17be8b4f84f550d994478ee73196f536f468c8db0eac04b7e5d0e2",
+      "size": 379
+    },
+    {
+      "path": "services/hyperfide/components/25.1.json",
+      "sha256": "3d99632f04328dc3bbf3af458b4c6f586a55533a03ce23c1cd1665c160e2ae7e",
+      "size": 445
+    },
+    {
+      "path": "services/hyperfide/components/25.2.json",
+      "sha256": "86227c8194c3c43bddf5708b11cee6edebac35c89e0ba17d039a2e16d6910008",
+      "size": 464
+    },
+    {
+      "path": "services/hyperfide/components/3.1.json",
+      "sha256": "75306dbcb1451bac4cd9f000c029515c046a1b9650bf4f81ca1f30f3ca98638c",
+      "size": 502
+    },
+    {
+      "path": "services/hyperfide/components/3.2.json",
+      "sha256": "f522355bfe192032f6aa8b53ea06fc4e2683edef6abf601ab32a56e3a0e438ca",
+      "size": 401
+    },
+    {
+      "path": "services/hyperfide/components/4.1.json",
+      "sha256": "e51ebab039cc34c08b50b73ea08955bd9bafb1a0fbb25de73fd328d981c79452",
+      "size": 375
+    },
+    {
+      "path": "services/hyperfide/components/4.2.json",
+      "sha256": "42cc05908e2eeb4692ec49a2c14dc64caf477448d431e96372fb0241bed7d061",
+      "size": 278
+    },
+    {
+      "path": "services/hyperfide/components/4.4.json",
+      "sha256": "1123d0b4cb595e434eb4cc483cf3fdbeff859998bacd67da21e91f0c6aa15771",
+      "size": 362
+    },
+    {
+      "path": "services/hyperfide/components/5.1.json",
+      "sha256": "c73623c22e058880f26667dddb3372e667be3727d2fe5b0312cfd0af47543203",
+      "size": 292
+    },
+    {
+      "path": "services/hyperfide/components/6.1.json",
+      "sha256": "cf10e88a3ed9542605b2e3a98deece43cf460d40b7fb4f1129ca257a0bf5cf3b",
+      "size": 487
+    },
+    {
+      "path": "services/hyperfide/components/6.2.json",
+      "sha256": "6e2caf80ff053d2e387010b1b6f6d5862015bac4ccb52f056465d81b9fc7981b",
+      "size": 330
+    },
+    {
+      "path": "services/hyperfide/components/6.4.json",
+      "sha256": "d8b6fc93cad9114618252eb6b9c435ea81b267d2d0046a801d68d9d3d326a622",
+      "size": 345
+    },
+    {
+      "path": "services/hyperfide/components/7.2.json",
+      "sha256": "9d7c611d354e1e1c6002767053b9711f87a9ed98953eaecbd7bcc89d38933dce",
+      "size": 399
+    },
+    {
+      "path": "services/hyperfide/components/7.3.json",
+      "sha256": "5f33be058561f16fdcc99f6a5b36f133025a4c99a49f125f206329807ad240d7",
+      "size": 366
+    },
+    {
+      "path": "services/hyperfide/components/schema.json",
+      "sha256": "8895f135cc1ce6aad30858d5e15d0810157e49a8fa266cbd2c1ae385f76f8961",
+      "size": 1439
+    },
+    {
+      "path": "services/hyperfide/dist/control.js",
+      "sha256": "1383288f00472de29607207d1d318e257c6e80c0fb2c05ca9fb2d974040e8032",
+      "size": 118
+    },
+    {
+      "path": "services/hyperfide/dist/migration/cutover.js",
+      "sha256": "d6e5c185b8d1d12c771fe256a3837c14d60bb78db1c4392e3843a6260d7c7860",
+      "size": 28628
+    },
+    {
+      "path": "services/hyperfide/dist/migration/legacy.js",
+      "sha256": "e5e5548c9ef69bd352dba52f41c3b59c441312545127998fe1a3f3daf728b7af",
+      "size": 20375
+    },
+    {
+      "path": "services/hyperfide/dist/migration/parity.js",
+      "sha256": "ba5e6ffeca37d6dc79410b9b9c21f159341c77ad22f3a29ee262dde764086a85",
+      "size": 9611
+    },
+    {
+      "path": "services/hyperfide/dist/migration/sqlite.js",
+      "sha256": "874448b34a68781035d670e1305cb087cca9d1e467a6f8687e81fe7934398c13",
+      "size": 32905
+    },
+    {
+      "path": "services/hyperfide/migrations/0025-sqlite-history.sql",
+      "sha256": "10d4ebe88ae40dccde2ec21a6541bb9a95d4e95dff2e3e0080cc6d63420c4366",
+      "size": 2488
+    },
+    {
+      "path": "services/hyperfide/migrations/0252-migration-proof.sql",
+      "sha256": "811be4d8937e6a458fbfa576692809dc287263669cad9b4ee4c99555aab92a30",
+      "size": 2186
+    },
+    {
+      "path": "services/hyperfide/package-lock.json",
+      "sha256": "101f5bc9fbb5864f227051eb2d0388449925df88c0fdd0e5755b40b808a4cfbb",
+      "size": 128778
+    },
+    {
+      "path": "services/hyperfide/package.json",
+      "sha256": "51c686f08fdfa47386af869cd6cdb63f1d2553f99366741239ded92dfe0d4398",
+      "size": 766
+    },
+    {
+      "path": "services/hyperfide/src/migration/cutover.ts",
+      "sha256": "55ef00e4d96a10a42df329fd5794f03564df4f98b28a594ae601f7e87f770c4f",
+      "size": 24292
+    },
+    {
+      "path": "services/hyperfide/src/migration/legacy.ts",
+      "sha256": "962ced70c7aa4eab750e3b8baf8d8b2a79978e510a06a69b19acd9685e019719",
+      "size": 18870
+    },
+    {
+      "path": "services/hyperfide/src/migration/parity.ts",
+      "sha256": "43d3a2c9bd71b47c6229bffd5e96726baeeda9cc15351062e2c008936774ed93",
+      "size": 9912
+    },
+    {
+      "path": "services/hyperfide/src/migration/sqlite.ts",
+      "sha256": "3a588dfcd87497b82e660b6148bf54447b17feec5106d37374236de721bf0256",
+      "size": 29507
+    },
+    {
+      "path": "services/hyperfide/tsconfig.json",
+      "sha256": "2b45e09325652f23d0bf4ec53439e4552cf4c2854d7288ce40186d4074f894bb",
+      "size": 487
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/15_2.py",
+      "sha256": "15764545b61284d7bc8eee82aea806b88aca503e652e846440eb8ebe24fbfa91",
+      "size": 54584
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/25_2.py",
+      "sha256": "46ae9e352e8884db371d8a52a71a55523a9dd1e9ed7f17981b62ef0d922de2ca",
+      "size": 38935
+    },
+    {
+      "path": "tests/hyperfide/check-evidence.py",
+      "sha256": "cc8de56fb25bea153490b4143a231f1ff6f4dac758baaea4bf90fb7d9ba236a0",
+      "size": 30633
+    },
+    {
+      "path": "tests/hyperfide/manifest.schema.json",
+      "sha256": "3407092d7e6e452bb288e996f840bd5bab22d6c0f494a49bf944cd73c18078b8",
+      "size": 3216
+    },
+    {
+      "path": "tests/hyperfide/qualify.py",
+      "sha256": "8aa17f5e2572c8557f15353f7267e98600547fb0f2693486c0e0f2fc1abce8c2",
+      "size": 37538
+    },
+    {
+      "path": "tests/hyperfide/registrations/25.2.json",
+      "sha256": "42e5844e66ec42eb850da34d4829b91c1b0be0e9b1116c793043ecffeb065fc4",
+      "size": 4701
+    },
+    {
+      "path": "tests/hyperfide/registry.json",
+      "sha256": "59c858064cf8f112221068f9b2c6b7c9a3d5480aaad0792baa0845e1e601b52e",
+      "size": 11102
+    },
+    {
+      "path": "tests/hyperfide/support/identity_fixture.py",
+      "sha256": "2b992fd5eab4d903909a4dd621b2ce3c7278fa932e163cbad8f33cf2b65efe0a",
+      "size": 29318
+    }
+  ],
+  "resources": [
+    {
+      "id": "hf-task25.2-database",
+      "kind": "isolated-postgresql-tls-object-namespace-fixture",
+      "scope": "task25.2-disposable"
+    }
+  ],
+  "seed": 252,
+  "policy": {
+    "activation_path": "REFUSED_NO_APPROVED_FENCE",
+    "full_case_receipt": false,
+    "verification_scope": "Registered task-component variant only; all cases remain UNRUN."
+  }
+}
