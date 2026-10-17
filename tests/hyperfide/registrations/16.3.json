@@ -15,6 +15,23 @@
     "assurance.16.3.auth.absent.qualification.accept",
     "assurance.16.3.auth.forged.qualification.accept",
     "assurance.16.3.primary.unbranded-denied",
+    "assurance.16.3.coverage.seeded-registry-current",
+    "assurance.16.3.do2.linked-clause-satisfied",
+    "assurance.16.3.do2.uncovered-clause-open",
+    "assurance.16.3.do2.accept-proof-incomplete",
+    "assurance.16.3.do2.executable-judgement-denied",
+    "assurance.16.3.do2.model-score-refused",
+    "assurance.16.3.do1.unapproved-reviewer-denied",
+    "assurance.16.3.do1.wrong-rubric-denied",
+    "assurance.16.3.do1.review-recorded",
+    "assurance.16.3.do1.clause-traceability",
+    "assurance.16.3.do3.stale-generation-refused",
+    "assurance.16.3.do3.stale-version-refused",
+    "assurance.16.3.do3.accept-retains-active-custody",
+    "assurance.16.3.do3.former-lease-not-consulted",
+    "assurance.16.3.do3.accept-replay-stale",
+    "assurance.16.3.do3.race-single-winner",
+    "assurance.16.3.do3.race-loser-expected-version",
     "assurance.16.3.https.signed-missing",
     "assurance.16.3.https.cross-scope",
     "assurance.16.3.https.wrong-role",
@@ -38,7 +55,10 @@
     "services/hyperfide/dist/assurance/validity.js",
     "services/hyperfide/dist/storage/transactions.js",
     "services/hyperfide/dist/transport/protocol.js",
-    "services/hyperfide/dist/storage/dispositions.js"
+    "services/hyperfide/dist/storage/dispositions.js",
+    "services/hyperfide/dist/artifacts/objects.js",
+    "services/hyperfide/dist/spec/obligations.js",
+    "services/hyperfide/dist/scheduler/claim.js"
   ],
   "resources": [
     {
@@ -60,6 +80,31 @@
       "id": "hf-task-16.3-signed-files",
       "kind": "local-directory",
       "scope": "task16.3-signed-disposable"
+    },
+    {
+      "id": "hf-task-16.3-behaviour-database",
+      "kind": "postgresql-database",
+      "scope": "task16.3-behaviour-disposable"
+    },
+    {
+      "id": "hf-task-16.3-behaviour-service",
+      "kind": "https-service",
+      "scope": "task16.3-behaviour-disposable"
+    },
+    {
+      "id": "hf-task-16.3-behaviour-role",
+      "kind": "postgresql-role",
+      "scope": "task16.3-behaviour-disposable"
+    },
+    {
+      "id": "hf-task-16.3-behaviour-files",
+      "kind": "local-directory",
+      "scope": "task16.3-behaviour-disposable"
+    },
+    {
+      "id": "hf-task-16.3-behaviour-object-store",
+      "kind": "http-service",
+      "scope": "task16.3-behaviour-disposable"
     }
   ],
   "cleanup_argv": [
@@ -70,7 +115,9 @@
   "cleanup_timeout_seconds": 60,
   "required_artifacts": [
     "assurance/observations-16.3.json",
-    "assurance/signed-absence-16.3.json"
+    "assurance/signed-absence-16.3.json",
+    "assurance/behaviour-absence-16.3.json",
+    "assurance/coverage-traceability-16.3.json"
   ],
   "source_files": [
     "services/hyperfide/src/assurance/submission.ts",
@@ -95,7 +142,10 @@
     "tests/hyperfide/qualify.py",
     "tests/hyperfide/support/identity_fixture.py",
     "services/hyperfide/src/assurance/preparation.ts",
-    "tests/hyperfide/cases/tasks/11_1.py"
+    "tests/hyperfide/cases/tasks/11_1.py",
+    "tests/hyperfide/cases/tasks/15_2.py",
+    "services/hyperfide/src/artifacts/objects.ts",
+    "services/hyperfide/src/spec/obligations.ts"
   ],
   "source_roots": [
     "services/hyperfide/src",
@@ -111,6 +161,8 @@
     "postgresql.role.create",
     "postgresql.role.drop",
     "filesystem.fixture.create",
-    "filesystem.fixture.remove"
+    "filesystem.fixture.remove",
+    "http.fixture.start",
+    "http.fixture.stop"
   ]
 }
