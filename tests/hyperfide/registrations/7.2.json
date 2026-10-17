@@ -26,7 +26,10 @@
     "graph.ingestion.symbol-projection",
     "graph.ingestion.reference-projection",
     "graph.ingestion.body-reconstruction",
-    "graph.ingestion.no-publication-side-effect"
+    "graph.ingestion.no-publication-side-effect",
+    "graph.ingestion.concurrent-exact-build-replay",
+    "graph.ingestion.reject-incomplete-manifest-artifact-reuse",
+    "graph.ingestion.reject-quarantined-build-replay"
   ],
   "argv": [
     "python3",

@@ -46,13 +46,20 @@ export function sourceId(build:string,bundle:string,family:string,legacy:unknown
 }
 // Mirror resolve()'s sourceId(build,bundle,'semantic_edges',legacy-id) identity.
 // Raw edges whose endpoints cannot be projected remain evidence, never proof of absence.
-export async function semanticProjectionDebt(tx:GraphTransaction,s:GraphScope,graphId:string):Promise<{count:string;rows:JsonObject[]}>{
+export async function semanticProjectionDebt(tx:Pick<GraphTransaction,'query'>,s:GraphScope,graphId:string):Promise<{count:string;rows:JsonObject[]}>{
  const result=await tx.query<{bundle_digest:string;fact_key:string;payload:JsonObject;unresolved_count:string}>("SELECT f.bundle_digest,f.fact_key,f.payload,count(*) OVER()::text AS unresolved_count FROM hyperfide.graph_fact_rows f WHERE f.organisation_id=$1 AND f.run_id=$2 AND f.graph_id=$3 AND f.family='semantic_edges' AND NOT EXISTS(SELECT 1 FROM hyperfide.graph_edges e WHERE e.organisation_id=f.organisation_id AND e.run_id=f.run_id AND e.graph_id=f.graph_id AND e.id=md5($3::text||':'||f.bundle_digest||':semantic_edges:'||COALESCE(f.payload->>'id',f.payload->>'symbol_id',f.fact_key))::uuid) ORDER BY f.bundle_digest,f.fact_key LIMIT 256",[s.organisation_id,s.run_id,graphId]);
  return {count:result.rows[0]?.unresolved_count??'0',rows:result.rows.map(({unresolved_count,...row})=>({...row,resolution_state:'UNPROJECTED_ENDPOINT'}))};
 }
 export async function getBuild(tx:GraphTransaction,s:GraphScope,id:string,lock=false):Promise<JsonObject> {
  const r=await tx.query('SELECT * FROM hyperfide.graph_builds WHERE organisation_id=$1 AND run_id=$2 AND id=$3'+(lock?' FOR UPDATE':''),[s.organisation_id,s.run_id,id]);
  if(!r.rows[0])fail('GRAPH_BUILD_UNAVAILABLE','Exact graph build unavailable');return r.rows[0] as JsonObject;
+}
+// Row locks serialize eligibility with actual artifact quarantine/GC. PostgreSQL
+// manifest custody is checked here; COMPLETE does not attest external store health.
+export async function assertGraphArtifacts(tx:GraphTransaction,s:GraphScope,id:string):Promise<void>{
+ const rows=await tx.query<{manifest_text:string;digest:string;size_bytes:string;status:string}>('SELECT b.manifest_text,a.digest,a.size_bytes::text,a.status FROM hyperfide.graph_bundle_inputs b JOIN hyperfide.artifacts a ON a.organisation_id=b.organisation_id AND a.run_id=b.run_id AND a.id=b.artifact_id WHERE b.organisation_id=$1 AND b.run_id=$2 AND b.graph_id=$3 ORDER BY a.id FOR SHARE OF a',[s.organisation_id,s.run_id,id]);
+ if(!rows.rows.length)fail('GRAPH_ARTIFACT_UNAVAILABLE','Exact graph manifest artifacts are unavailable');
+ for(const row of rows.rows)if(row.status!=='COMPLETE'||row.digest!==digest(row.manifest_text)||row.size_bytes!==String(Buffer.byteLength(row.manifest_text)))fail('GRAPH_ARTIFACT_UNAVAILABLE','Exact graph manifest artifact is unavailable or has conflicting custody metadata');
 }
 export async function graphCoverage(tx:GraphTransaction,s:GraphScope,id:string):Promise<JsonObject>{
  const rows=await tx.query<{family:string;count:string}>('SELECT family,count(*)::text AS count FROM hyperfide.graph_fact_rows WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3 GROUP BY family ORDER BY family',[s.organisation_id,s.run_id,id]);
@@ -72,14 +79,20 @@ async function createBuild(input:unknown,ctx:ComponentContext):Promise<unknown> 
    if(pin.rowCount!==1)fail('GRAPH_SOURCE_DENIED','Source commit is not registered in run repository set');
   }
   const prior=await tx.query('SELECT id,state FROM hyperfide.graph_builds WHERE organisation_id=$1 AND run_id=$2 AND input_digest=$3',[s.organisation_id,s.run_id,inputDigest]);
-  if(prior.rows[0])return {build_id:prior.rows[0].id,state:prior.rows[0].state,replayed:true,input_digest:inputDigest,source_manifest_digest:sourceDigest};
+  if(prior.rows[0]){await assertGraphArtifacts(tx,s,String(prior.rows[0].id));return {build_id:prior.rows[0].id,state:prior.rows[0].state,replayed:true,input_digest:inputDigest,source_manifest_digest:sourceDigest};}
   const id=randomUUID();
-  await tx.query('INSERT INTO hyperfide.graph_builds(organisation_id,run_id,id,input_digest,source_manifest_digest,parser_digest,schema_digest,config_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[s.organisation_id,s.run_id,id,inputDigest,sourceDigest,digest(canonical(bundles.map(b=>b.identity.parser_digest))),digest('hyperfide.graph.bundle.v1'),digest(canonical(bundles.map(b=>b.identity.config_digest)))]);
+  const created=await tx.query('INSERT INTO hyperfide.graph_builds(organisation_id,run_id,id,input_digest,source_manifest_digest,parser_digest,schema_digest,config_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(organisation_id,run_id,input_digest) DO NOTHING RETURNING id',[s.organisation_id,s.run_id,id,inputDigest,sourceDigest,digest(canonical(bundles.map(b=>b.identity.parser_digest))),digest('hyperfide.graph.bundle.v1'),digest(canonical(bundles.map(b=>b.identity.config_digest)))]);
+  if(!created.rowCount){const existing=(await tx.query('SELECT id,state FROM hyperfide.graph_builds WHERE organisation_id=$1 AND run_id=$2 AND input_digest=$3',[s.organisation_id,s.run_id,inputDigest])).rows[0];if(!existing)fail('GRAPH_BUILD_UNAVAILABLE','Concurrent build requires exact replay');await assertGraphArtifacts(tx,s,String(existing.id));return {build_id:existing.id,state:existing.state,replayed:true,input_digest:inputDigest,source_manifest_digest:sourceDigest};}
   for(const b of bundles){
-   const body=canonical(b),artifactId=sourceId(id,b.bundle_digest,'manifest',0);
-   // Exact manifest bytes are persisted in the same primary transaction.
-   // This is PostgreSQL-backed provenance, never object-store qualification.
-   await tx.query("INSERT INTO hyperfide.artifacts(organisation_id,run_id,id,digest,size_bytes,storage_backend,storage_key,status,retention_class) VALUES($1,$2,$3,$4,$5,'POSTGRES_GRAPH',$6,'COMPLETE','RUN')",[s.organisation_id,s.run_id,artifactId,digest(body),String(Buffer.byteLength(body)),id+'/'+b.bundle_digest]);
+   const body=canonical(b),bodyDigest=digest(body),size=String(Buffer.byteLength(body));
+   // Artifacts are content-addressed within the run, independent of graph build.
+   // Reuse complete identical metadata; never relabel an incomplete object.
+   const inserted=await tx.query("INSERT INTO hyperfide.artifacts(organisation_id,run_id,id,digest,size_bytes,storage_backend,storage_key,status,retention_class) VALUES($1,$2,$3,$4,$5,'POSTGRES_GRAPH',$6,'COMPLETE','RUN') ON CONFLICT(organisation_id,run_id,digest) DO NOTHING RETURNING id,size_bytes::text,status",[s.organisation_id,s.run_id,sourceId(id,b.bundle_digest,'manifest',0),bodyDigest,size,id+'/'+b.bundle_digest]);
+   const stored=inserted.rows[0]??(await tx.query('SELECT id,size_bytes::text,status FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND digest=$3 FOR SHARE',[s.organisation_id,s.run_id,bodyDigest])).rows[0];
+   if(!stored||stored.status!=='COMPLETE'||String(stored.size_bytes)!==size)fail('GRAPH_ARTIFACT_CONFLICT','Existing manifest artifact is unavailable or conflicts with exact bytes');
+   const artifactId=String(stored.id);
+   // Exact manifest bytes also persist here in the same primary transaction.
+   // PostgreSQL-backed provenance does not claim external object-store qualification.
    await tx.query('INSERT INTO hyperfide.graph_bundle_inputs(organisation_id,run_id,graph_id,bundle_digest,identity,manifest,manifest_text,artifact_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[s.organisation_id,s.run_id,id,b.bundle_digest,canonical(b.identity),body,body,artifactId]);
   }
   return {build_id:id,state:'STAGING',replayed:false,input_digest:inputDigest,source_manifest_digest:sourceDigest};

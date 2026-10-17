@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "4.3",
+  "task": "4.3",
+  "roles": [
+    "control"
+  ],
+  "module": "storage/replicas.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "storage.packet.barrier",
+    "storage.packet.read"
+  ],
+  "requires": [
+    "4.2",
+    "4.4",
+    "3.2",
+    "14.1"
+  ]
+}
