@@ -3,22 +3,92 @@
 Import SchedulerFixture for downstream tests; import never grants authority.
 """
 from __future__ import annotations
-import concurrent.futures,copy,importlib.util,json,os,socket,subprocess,sys
+import concurrent.futures,copy,importlib.util,json,os,socket,subprocess,sys,hashlib,re,shutil,signal,time
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[4]
 spec=importlib.util.spec_from_file_location("hf_packet_fixture",ROOT/"tests/hyperfide/cases/tasks/3_2.py")
 packet=importlib.util.module_from_spec(spec);spec.loader.exec_module(packet)
 PacketFixture=packet.PacketFixture;uid=packet.uid;identity=packet.identity;sha=packet.sha
 FAILED=[];ASSERTION_IDS=[]
+
+TEST_TASK=None
+def campaign_root():
+ return Path(os.environ.get("HYPERFIDE_CAMPAIGN_DIR","/tmp/hyperfide/scheduler-standalone-"+str(TEST_TASK)))
+def owned_receipt():
+ return campaign_root()/"scheduler"/"owned-resources.json"
+def write_json(path,value):
+ path.parent.mkdir(parents=True,exist_ok=True)
+ temporary=path.with_suffix(".tmp")
+ with temporary.open("w") as stream:
+  json.dump(value,stream,sort_keys=True);stream.flush();os.fsync(stream.fileno())
+ temporary.replace(path)
+def configure_cleanup(task):
+ global TEST_TASK
+ TEST_TASK=task
+ if "--cleanup" not in sys.argv:write_json(owned_receipt(),{"task":task,"fixtures":[]})
+def process_start(pid):
+ try:return Path("/proc/"+str(pid)+"/stat").read_text().rsplit(")",1)[1].split()[19]
+ except FileNotFoundError:return None
+def record_fixture(f):
+ if TEST_TASK is None:return
+ path=owned_receipt();data=json.loads(path.read_text())
+ entry={"database":f.database,"runtime_role":f.runtime_role,"private_path":str(f.path),"port":getattr(f,"port",None),"process_id":f.child.pid if f.child else None,"process_start":process_start(f.child.pid) if f.child else None,"kernel_boot_id":Path("/proc/sys/kernel/random/boot_id").read_text().strip()}
+ data["fixtures"]=[row for row in data["fixtures"] if row["database"]!=f.database]+[entry]
+ write_json(path,data)
+def cleanup_owned(task):
+ configure_cleanup(task)
+ resource="hf-task-"+task+"-runtime";observations=[]
+ try:
+  data=json.loads(owned_receipt().read_text())
+  expect(data["task"]==task and isinstance(data["fixtures"],list),"Exact owned fixture receipt required")
+  for row in data["fixtures"]:
+   db=row["database"];role=row["runtime_role"];path=Path(row["private_path"])
+   expect(re.fullmatch(r"hf_identity_[0-9a-f]{32}",db) and re.fullmatch(r"hf_ir_[0-9a-f]{32}",role),"Unexpected owned DB/role identity")
+   expect(path.parent==Path("/tmp") and path.name.startswith("hyperfide-identity-") and not path.is_symlink(),"Unexpected private fixture path")
+   pid=row["process_id"];start=row["process_start"]
+   if pid and process_start(pid)==start:
+    expect(Path("/proc/sys/kernel/random/boot_id").read_text().strip()==row["kernel_boot_id"],"Kernel boot changed")
+    command=Path("/proc/"+str(pid)+"/cmdline").read_bytes()
+    expect(str(path).encode() in command and b"/services/hyperfide/dist/" in command,"Owned process command identity mismatch")
+    os.kill(pid,signal.SIGTERM);deadline=time.monotonic()+8
+    while process_start(pid)==start and time.monotonic()<deadline:time.sleep(.05)
+    if process_start(pid)==start:
+     os.kill(pid,signal.SIGKILL);deadline=time.monotonic()+3
+     while process_start(pid)==start and time.monotonic()<deadline:time.sleep(.05)
+    expect(process_start(pid)!=start,"Owned listener process remains")
+   payload={"sql":'DROP DATABASE IF EXISTS "'+db+'" WITH (FORCE)',"values":[],"serial":False}
+   env=os.environ.copy()
+   result=subprocess.run(["node","--input-type=commonjs","-e",SchedulerFixture.sql.__globals__["SQL_JS"]],input=json.dumps(payload),text=True,cwd=ROOT,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=20)
+   expect(result.returncode==0,"Owned database cleanup failed")
+   payload["sql"]='DROP ROLE IF EXISTS "'+role+'"'
+   result=subprocess.run(["node","--input-type=commonjs","-e",SchedulerFixture.sql.__globals__["SQL_JS"]],input=json.dumps(payload),text=True,cwd=ROOT,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=20)
+   expect(result.returncode==0,"Owned role cleanup failed")
+   payload={"sql":"SELECT NOT EXISTS(SELECT 1 FROM pg_database WHERE datname=$1) AND NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname=$2) AS absent","values":[db,role],"serial":False}
+   result=subprocess.run(["node","--input-type=commonjs","-e",SchedulerFixture.sql.__globals__["SQL_JS"]],input=json.dumps(payload),text=True,cwd=ROOT,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=20)
+   expect(result.returncode==0 and json.loads(result.stdout)[0]["absent"],"Database/role absence not observed")
+   if path.exists():shutil.rmtree(path)
+   expect(not path.exists(),"Private path remains")
+   if row["port"]:
+    with socket.socket() as sock:expect(sock.connect_ex(("127.0.0.1",row["port"]))!=0,"Owned listener port remains")
+   observations.append({"database":db,"runtime_role":role,"observed_absent":True,"private_path_absent":True,"listener_absent":True})
+  write_json(campaign_root()/"scheduler"/"cleanup.json",{"task":task,"observations":observations,"complete":True})
+  print(json.dumps({"type":"cleanup","complete":True,"resources":[{"id":resource,"status":"deleted"}]}),flush=True)
+  return 0
+ except Exception as error:
+  print(json.dumps({"type":"cleanup","complete":False,"resources":[{"id":resource,"status":"unknown"}],"error":str(error)}),flush=True);return 1
+
 def expect(value,message):
  if not value:raise AssertionError(message)
 def check(name,callback):
  ASSERTION_IDS.append(name)
  try:callback();actual="observed"
  except Exception as error:FAILED.append(name);actual=type(error).__name__+": "+str(error)
- print(json.dumps({"type":"assertion","id":name,"expected":"observed","actual":actual}),flush=True)
+ record={"type":"assertion","id":name,"expected":"observed","actual":actual}
+ print(json.dumps(record),flush=True)
+ if TEST_TASK is not None:
+  path=campaign_root()/"scheduler"/"observations.json";rows=json.loads(path.read_text()) if path.exists() else [];rows.append(record);write_json(path,rows)
 class SchedulerFixture(PacketFixture):
- def __init__(self,extra_components=(),extra_setup=None,agent_limit=2,bootstrap=True,sandbox_cpu_limit=8000,sandbox_cpu_headroom=1000,source_object_id=None):
+ def __init__(self,extra_components=(),extra_setup=None,agent_limit=2,bootstrap=True,sandbox_cpu_limit=8000,sandbox_cpu_headroom=1000,source_object_id=None,extra_env=None):
   def setup(f):
    packet.apply_migration(f,"0005-scheduling")
    i=f.ids;f.accounts={};f.claims={}
@@ -33,6 +103,10 @@ class SchedulerFixture(PacketFixture):
    for dimension,limit in limits.items():
     ident=uid();f.accounts[dimension]=ident
     f.sql("INSERT INTO hyperfide.capacity_accounts(organisation_id,id,pool_id,dimension,capacity_class,configured_limit,provenance_digest,qualification_state) VALUES($1,$2,$3,$4,'EXECUTION',$5,$6,'QUALIFIED')",[i["organisation"],ident,i["pool"],dimension,str(limit),sha(b"trusted-fixture-budget")])
+   f.physical_accounts={}
+   for dimension,limit in {"SANDBOX":"100","CPU_MILLIS":"400000","MEMORY_BYTES":"858993459200","DISK_BYTES":"2147483648000"}.items():
+    ident=uid();f.physical_accounts[dimension]=ident
+    f.sql("INSERT INTO hyperfide.capacity_accounts(organisation_id,id,pool_id,dimension,capacity_class,configured_limit,provenance_digest,qualification_state) VALUES($1,$2,$3,$4,'PHYSICAL',$5,$6,'QUALIFIED')",[i["organisation"],ident,i["pool"],dimension,limit,sha(b"fixed-test-pool-physical-envelope")])
    f.definitions={}
    for name,feature,package_key,path in (("a","alpha","package","src/claim-a.ts"),("b","beta","wave_package","src/claim-b.ts"),("overlap","alpha","package","src/claim-a.ts"),("missing","alpha","package","src/missing.ts")):
     task_id=uid();slot_id=uid();i["task_"+name]=task_id;i["slot_"+name]=slot_id
@@ -44,10 +118,14 @@ class SchedulerFixture(PacketFixture):
      policy=copy.deepcopy(f.packet_proof);policy["criteria_digest"]=criteria
      f.sql("INSERT INTO hyperfide.proof_registries(organisation_id,run_id,task_id,spec_generation,spec_revision_id,criteria_digest,registry_digest,policy) VALUES($1,$2,$3,1,$4,$5,$6,$7)",[i["organisation"],i["run"],task_id,i["spec"],criteria,identity(policy),json.dumps(policy)])
    if extra_setup:extra_setup(f)
-  super().__init__(extra_components=("5.1","5.2","5.3","5.4")+tuple(extra_components),extra_setup=setup,bootstrap=bootstrap,seed_historical_runtime=False,**({"source_object_id":source_object_id} if source_object_id is not None else {}))
+  super().__init__(extra_components=("5.1","5.2","5.3","5.4")+tuple(extra_components),extra_setup=setup,bootstrap=bootstrap,seed_historical_runtime=False,extra_env=extra_env,**({"source_object_id":source_object_id} if source_object_id is not None else {}))
   # Explicit trusted fixed test envelope; not provider/kernel measurement evidence.
   qualified=self.primary("return claims.qualifySandboxBudget(tx,data.qualification);",{"qualification":{"organisation_id":self.ids["organisation"],"sandbox_id":self.ids["sandbox"],"sandbox_boot_generation":"1","qualification_id":uid(),"evidence_digest":sha(b"explicit-fixed-test-envelope"),"source":"OPERATOR_FIXED","hard_limits":{"cpu_millis":str(sandbox_cpu_limit),"memory_bytes":"17179869184","disk_bytes":"34359738368"},"headroom":{"cpu_millis":str(sandbox_cpu_headroom),"memory_bytes":"1073741824","disk_bytes":"0"}}})
   expect("result" in qualified,"Trusted fixture budget failed: "+json.dumps(qualified))
+ def start(self):
+  record_fixture(self)
+  try:super().start()
+  finally:record_fixture(self)
  def capacity(self,job="AGENT"):
   requirements=self.packet_definition["resource_requirements"]
   dimensions={"CPU_MILLIS":str(requirements["cpu_millis"]),"MEMORY_BYTES":requirements["memory_bytes"],"DISK_BYTES":requirements["disk_bytes"],job:"1"}
@@ -81,8 +159,9 @@ process.stdout.write(JSON.stringify({result}));}catch(e){process.stdout.write(JS
   result=subprocess.run(["node","--input-type=module","-e",script],input=json.dumps(payload),text=True,cwd=ROOT,env=self.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=20)
   expect(result.returncode==0,"Trusted product API probe failed: "+result.stderr[:1500]);return json.loads(result.stdout)
  def counts(self):
-  return self.sql("SELECT dimension,reserved::text,allocated::text FROM hyperfide.capacity_accounts WHERE organisation_id=$1 AND pool_id=$2 ORDER BY dimension",[self.ids["organisation"],self.ids["pool"]])
+  return self.sql("SELECT dimension,reserved::text,allocated::text FROM hyperfide.capacity_accounts WHERE organisation_id=$1 AND pool_id=$2 AND capacity_class='EXECUTION' ORDER BY dimension",[self.ids["organisation"],self.ids["pool"]])
 def main():
+ configure_cleanup("5.1")
  f=SchedulerFixture();i=f.ids
  try:
   check("claim.fixture.no-seeded-authority",lambda:expect(f.sql("SELECT count(*)::int n FROM hyperfide.attempts")[0]["n"]==0,"Fixture fabricated compute authority"))
@@ -118,6 +197,8 @@ def main():
    expect(f.request(altered,key="manager")[1].get("error",{}).get("code")=="IDEMPOTENCY_CONFLICT","Fresh inner request bypassed protocol identity")
   check("claim.protocol.identity",envelope_conflict)
   check("claim.no-false-qualification",lambda:expect(f.sql("SELECT count(*)::int n FROM hyperfide.tasks WHERE state IN ('QUALIFIED','INTEGRATED','DONE')")[0]["n"]==0,"Claim manufactured qualification"))
+  f.sql("UPDATE hyperfide.sandboxes SET desired_state='DESTROYED',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[i["organisation"],i["sandbox"]])
+  check("claim.destroy-intent.blocks-continuation",lambda:expect(f.primary("return leases.assertCurrentCompute(tx,data.token,{operation:'ADVANCE'});",{"token":f.claims["a"]["result"]["token"]}).get("error",{}).get("code")=="SANDBOX_NOT_ADMITTING","Destroy intent allowed continued execution"))
  finally:
   db=f.database;path=f.path;port=f.port;f.close()
   def cleanup():
@@ -158,5 +239,5 @@ def main():
   db=local.database;path=local.path;local.close();check('claim.sandbox-cleanup.observed',lambda:expect(not path.exists() and local.sql("SELECT count(*)::int n FROM pg_database WHERE datname=$1",[db],admin=True)[0]['n']==0,'Local budget fixture remains'))
  return 1 if FAILED else 0
 if __name__=="__main__":
- if "--cleanup" in sys.argv:raise SystemExit("Independent crash cleanup requires the persisted owned-resource receipt; not falsely reporting success.")
+ if "--cleanup" in sys.argv:raise SystemExit(cleanup_owned("5.1"))
  raise SystemExit(main())

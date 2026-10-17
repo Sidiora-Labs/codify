@@ -7,6 +7,7 @@ ROOT=Path(__file__).resolve().parents[4]
 s=importlib.util.spec_from_file_location("hf_scheduler_fixture",ROOT/"tests/hyperfide/cases/tasks/5_1.py");m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
 expect=m.expect;check=m.check;uid=m.uid
 def main():
+ m.configure_cleanup("5.4")
  f=m.SchedulerFixture();i=f.ids
  try:
   scope={"organisation_id":i["organisation"],"run_id":i["run"],"pool_id":i["pool"],"authority_epoch":i["epoch"],"leader_generation":"1","package_generation":"2","package_id":i["package"]}
@@ -16,6 +17,10 @@ def main():
   check("resources.eligible.manager-private",lambda:expect(all(t["task_id"]!=i["task_b"] for t in discovery["eligible"]) and all(t["task_id"]!=i["task_b"] for t in discovery["excluded"]),"Manager observed another owner's task shortlist"))
   check("resources.eligible.no-authority",lambda:expect(discovery["authority"]=="CANDIDATE_DISCOVERY" and f.sql("SELECT count(*)::int n FROM hyperfide.attempts")[0]["n"]==0,"Discovery granted compute"))
   demand={"organisation_id":i["organisation"],"run_id":i["run"],"pool_id":i["pool"],"profile_id":i["profile"],"job_class":"PREPARATION","warm_spare":True}
+  creation=f.ok("scheduler.resources.demand",dict(demand,warm_spare=False),key="manager",component="5.4")
+  physical={row["capacity_account_id"]:row["quantity"] for row in creation["reservation_dimensions"]}
+  check("resources.prewarm.full-provisioned-profile",lambda:expect(physical[f.physical_accounts["CPU_MILLIS"]]=="4000" and physical[f.physical_accounts["MEMORY_BYTES"]]=="8589934592" and physical[f.physical_accounts["DISK_BYTES"]]=="21474836480" and len(physical)==4,"Creation undercharged fixed sandbox profile with smaller task demand"))
+  check("resources.prewarm.execution-separate",lambda:expect(creation["preparation_task_id"] in (i["task_a"],i["task_overlap"]) and {r["capacity_account_id"]:r["quantity"] for r in creation["execution_dimensions"]}[f.accounts["CPU_MILLIS"]]=="1000" and len(creation["execution_dimensions"])==4,"Execution work was blended into physical CREATE quota"))
   check("resources.prewarm.manager-spares-denied",lambda:f.reject("scheduler.resources.demand",demand,"SPARE_DELEGATION_REQUIRED",key="manager",component="5.4"))
   queue=dict(scope,request_id=uid(),task_id=i["task_a"],job_kind="TEST",priority=0,wait_reason="BUILD",deadline_ms=300000,dimensions=f.capacity("TEST"))
   check("resources.task-required",lambda:f.reject("scheduler.resources.queue",{k:v for k,v in queue.items() if k!="task_id"},"TASK_REQUIRED",key="manager",component="5.4"))
@@ -44,4 +49,4 @@ def main():
  finally:
   db=f.database;path=f.path;f.close();check("resources.cleanup.observed",lambda:expect(not path.exists() and f.sql("SELECT count(*)::int n FROM pg_database WHERE datname=$1",[db],admin=True)[0]["n"]==0,"Fixture resource remains"))
  return 1 if m.FAILED else 0
-if __name__=="__main__":raise SystemExit(main())
+if __name__=="__main__":raise SystemExit(m.cleanup_owned("5.4") if "--cleanup" in sys.argv else main())

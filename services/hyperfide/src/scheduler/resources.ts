@@ -10,7 +10,7 @@ import {assertInvocation} from '../transport/protocol.js';
 import type {InvocationContext} from '../transport/protocol.js';
 import {actorFor,boundedInteger,canonical,claimTask,decimal,digest,dimensions,dispatchRecipients,fail,fields,
   gatewayFor,invocationFor,object,operationReplay,parseClaim,recordOutcome,requestDigest,reserveCapacity,
-  requireSchedulerAuthority,uuid,jobPolicy,allocateReservations,assertJobReservation,bindJobReservation,readJobAllocation,renewJobAllocation,releaseJobAllocation,validateResourceVector,assertNoExecutionHold,requireTaskBarriers,requireProofRegistry,packetResources,packetPolicyResources,approvedDimensions} from './claim.js';
+  requireSchedulerAuthority,uuid,jobPolicy,allocateReservations,assertJobReservation,bindJobReservation,readJobAllocation,renewJobAllocation,releaseJobAllocation,validateResourceVector,assertNoExecutionHold,requireTaskBarriers,requireProofRegistry,packetResources,packetPolicyResources,approvedDimensions,approvedPhysicalDimensions} from './claim.js';
 import type {CapacityDimension,CapacityRequest,SchedulerActor,SchedulerScope,PacketResourceRequirements} from './claim.js';
 
 
@@ -97,7 +97,7 @@ export async function eligibleDemand(tx:PrimaryTransaction,input:SchedulerScope&
  pool_id:string;profile_id:string;job_class:'PREPARATION'|'INDEX';warm_spare:boolean;
 },invocation:InvocationContext):Promise<{
  eligible_count:number;reservation_dimensions:CapacityDimension[];spec_version:string;profile_version:string;observed_at:string;
- truncated:boolean;candidate_scan_limit:number;
+ truncated:boolean;candidate_scan_limit:number;preparation_task_id:string|null;execution_dimensions:CapacityDimension[];
 }>{
  assertPrimaryTransaction(tx);assertInvocation(invocation);
  if(invocation.principal.organisation_id!==input.organisation_id||invocation.principal.run_id!==input.run_id)
@@ -131,6 +131,7 @@ export async function eligibleDemand(tx:PrimaryTransaction,input:SchedulerScope&
  "AND NOT EXISTS(SELECT 1 FROM hyperfide.submission_custodies c WHERE c.organisation_id=t.organisation_id AND c.run_id=t.run_id AND c.task_id=t.id AND c.authority='ACTIVE') ORDER BY t.wave,t.task_key,t.id LIMIT 501",
  [input.organisation_id,input.run_id,packages,input.profile_id]);
  let count=0,maximum:PacketResourceRequirements|undefined,version='';
+ let preparationTask:string|null=null,selected:PacketResourceRequirements|undefined,profileResources:unknown;
  for(const task of tasks.rows.slice(0,500)){
   try{
    await assertNoExecutionHold(tx,input,{package_id:task.feature_package_id,...(task.current_attempt_id?{attempt_id:task.current_attempt_id}:{}),operation:'ADMISSION'});
@@ -139,6 +140,7 @@ export async function eligibleDemand(tx:PrimaryTransaction,input:SchedulerScope&
    const requirements=packetResources(accepted.resource_requirements);
    if(version&&version!==accepted.profile_version)fail('PROFILE_VERSION_CONFLICT','Approved profile identity resolves to incompatible immutable versions');
    version=accepted.profile_version;count++;
+   if(preparationTask===null){preparationTask=task.id;selected=requirements;profileResources=object(accepted.declared_profile).resources;}
    if(!maximum)maximum={...requirements};
    else{
     maximum.cpu_millis=Math.max(maximum.cpu_millis,requirements.cpu_millis);
@@ -147,7 +149,8 @@ export async function eligibleDemand(tx:PrimaryTransaction,input:SchedulerScope&
    }
   }catch(error){if(!(error instanceof FoundationError))throw error;}
  }
- return {eligible_count:count,reservation_dimensions:maximum?await approvedDimensions(tx,input,input.pool_id,maximum,input.job_class,input.warm_spare,true):[],
+ return {eligible_count:count,reservation_dimensions:selected?await approvedPhysicalDimensions(tx,input,input.pool_id,profileResources,input.warm_spare):[],
+ execution_dimensions:selected?await approvedDimensions(tx,input,input.pool_id,selected,input.job_class):[],preparation_task_id:preparationTask,
  spec_version:run.rows[0]!.spec_generation,profile_version:version,observed_at:run.rows[0]!.observed_at,
  truncated:tasks.rows.length>500,candidate_scan_limit:500};
 }
@@ -241,8 +244,8 @@ export class ResourceScheduler {
       if(reservation.state!=='RELEASE_PENDING')fail('RELEASE_NOT_PENDING','Revoke execution and request cleanup before releasing capacity');
       let proof:QuiescenceReceipt|null=null,source='';
       for(const [name,reader] of this.readers){
-        const account=await tx.query<{capacity_class:string}>('SELECT capacity_class FROM hyperfide.capacity_accounts WHERE organisation_id=$1 AND id=$2',[input.organisation_id,reservation.capacity_account_id]);
-        if(account.rows[0]?.capacity_class==='PHYSICAL'&&name!=='provider.absence')continue;
+        const account=await tx.query<{capacity_class:string;dimension:string}>('SELECT capacity_class,dimension FROM hyperfide.capacity_accounts WHERE organisation_id=$1 AND id=$2',[input.organisation_id,reservation.capacity_account_id]);
+        if((account.rows[0]?.capacity_class==='PHYSICAL'||account.rows[0]?.dimension==='WARM_SPARE')&&name!=='provider.absence')continue;
         proof=await reader(tx,{organisation_id:input.organisation_id,run_id:input.run_id,reservation_id:reservation.id});
         if(proof){source=name;break;}
       }
@@ -307,7 +310,7 @@ export function createComponent(_startup:ComponentContext):Component{
     'scheduler.resources.eligible':async(value,context)=>{
       const input=fields(value,['organisation_id','run_id','pool_id','authority_epoch','leader_generation'],['package_id','package_generation','profile_id','limit']);
       const scope=scopeOf(input),actor=actorFor(context,scope,input);
-      return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:context.signal,guard:tx=>invocationFor(context).guard(tx)},async tx=>{
+      return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:context.signal},async tx=>{
         await requireQueueActor(tx,scope,actor,uuid(input.authority_epoch,'authority_epoch'),undefined,input.package_id===undefined?undefined:uuid(input.package_id,'package_id'));
         return eligibleTasks(tx,{...scope,pool_id:uuid(input.pool_id,'pool_id'),...(input.profile_id===undefined?{}:{profile_id:uuid(input.profile_id,'profile_id')}),...(input.limit===undefined?{}:{limit:boundedInteger(input.limit,'limit',1,500)})},invocationFor(context));
       });
@@ -315,7 +318,7 @@ export function createComponent(_startup:ComponentContext):Component{
     'scheduler.resources.demand':async(value,context)=>{
       const input=fields(value,['organisation_id','run_id','pool_id','profile_id','job_class','warm_spare']);
       if(!['PREPARATION','INDEX'].includes(String(input.job_class))||typeof input.warm_spare!=='boolean')fail('INVALID_REQUEST','Preparation demand requires an explicit job class and spare policy');
-      return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:context.signal,guard:tx=>invocationFor(context).guard(tx)},tx=>eligibleDemand(tx,{...scopeOf(input),pool_id:uuid(input.pool_id,'pool_id'),profile_id:uuid(input.profile_id,'profile_id'),job_class:input.job_class as 'PREPARATION'|'INDEX',warm_spare:input.warm_spare as boolean},invocationFor(context)));
+      return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:context.signal},tx=>eligibleDemand(tx,{...scopeOf(input),pool_id:uuid(input.pool_id,'pool_id'),profile_id:uuid(input.profile_id,'profile_id'),job_class:input.job_class as 'PREPARATION'|'INDEX',warm_spare:input.warm_spare as boolean},invocationFor(context)));
     },
 
     'scheduler.resources.queue':async(value,context)=>{
@@ -331,8 +334,7 @@ export function createComponent(_startup:ComponentContext):Component{
       const package_id=input.package_id===undefined?undefined:uuid(input.package_id,'package_id');
       const attempt=input.attempt_id===undefined?null:uuid(input.attempt_id,'attempt_id');
       if(!task)fail('TASK_REQUIRED','Public job admission must bind an accepted task resource policy');
-      return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal,
-        guard:tx=>invocationFor(context).guard(tx)},async tx=>{
+      return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal},async tx=>{
         await lockRun(tx,scope);await requireQueueActor(tx,scope,actor,uuid(input.authority_epoch,'authority_epoch'),task,package_id);
         const priorInput=await operationReplay(tx,scope,actor.session_id,'scheduler.resource.queue',request,input);
         if(priorInput!==undefined)return priorInput;
@@ -374,8 +376,7 @@ export function createComponent(_startup:ComponentContext):Component{
       const input=fields(value,['organisation_id','run_id','pool_id','waiter_id','authority_epoch','leader_generation'],
         ['package_generation','package_id','claim']);
       const scope=scopeOf(input),actor=actorFor(context,scope,input),pool=uuid(input.pool_id,'pool_id'),waiter=uuid(input.waiter_id,'waiter_id');
-      return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal,
-        guard:tx=>invocationFor(context).guard(tx)},async tx=>{
+      return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal},async tx=>{
         await lockRun(tx,scope);
         await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[scope.organisation_id+':'+pool+':resource-admission']);
         const selected=await tx.query<{id:string;run_id:string;request_id:string;job_kind:string;task_id:string|null;attempt_id:string|null;deadline_at:string;owner_session_id:string;state:string;admitted_at:string|null}>(
@@ -430,8 +431,7 @@ export function createComponent(_startup:ComponentContext):Component{
     'scheduler.resources.inspect':async(value,context)=>{
       const input=fields(value,['organisation_id','run_id','pool_id','authority_epoch','leader_generation'],['package_generation','package_id']);
       const scope=scopeOf(input),actor=actorFor(context,scope,input),pool=uuid(input.pool_id,'pool_id');
-      return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:1,signal:context.signal,
-        guard:tx=>invocationFor(context).guard(tx)},async tx=>{
+      return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:1,signal:context.signal},async tx=>{
         await requireQueueActor(tx,scope,actor,uuid(input.authority_epoch,'authority_epoch'),undefined,
           input.package_id===undefined?undefined:uuid(input.package_id,'package_id'));
         const rows=await tx.query('SELECT capacity_class,dimension,resource_key,configured_limit,reserved,allocated,qualification_state,state_version '+
@@ -447,8 +447,7 @@ export function createComponent(_startup:ComponentContext):Component{
       const scope=scopeOf(input),actor=actorFor(context,scope,input);
       if(!Array.isArray(input.reservation_ids))fail('INVALID_REQUEST','reservation_ids must be an array');
       const ids=input.reservation_ids.map(id=>uuid(id,'reservation_id'));
-      return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal,
-        guard:tx=>invocationFor(context).guard(tx)},async tx=>{
+      return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal},async tx=>{
         await requireQueueActor(tx,scope,actor,uuid(input.authority_epoch,'authority_epoch'),undefined,
           input.package_id===undefined?undefined:uuid(input.package_id,'package_id'));
         return scheduler.release(tx,{...scope,reservation_ids:ids});

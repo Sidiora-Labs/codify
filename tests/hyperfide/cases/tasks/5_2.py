@@ -7,6 +7,7 @@ ROOT=Path(__file__).resolve().parents[4]
 s=importlib.util.spec_from_file_location("hf_scheduler_fixture",ROOT/"tests/hyperfide/cases/tasks/5_1.py");m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
 SchedulerFixture=m.SchedulerFixture;expect=m.expect;check=m.check;uid=m.uid
 def main():
+ m.configure_cleanup("5.2")
  f=SchedulerFixture();i=f.ids
  try:
   r=f.claim("a",lease_ms=1000);t=r["token"]
@@ -33,6 +34,13 @@ def main():
   check("lease.pause.allows-renewal",lambda:expect("result" in f.primary("return leases.renewCompute(tx,data.token,300000);",lower),"Paused compute lost bounded renewal"))
   check("lease.control.unknown-fields",lambda:expect(f.primary("await claims.assertNoExecutionHold(tx,data.scope,{task_id:data.token.task_id,operation:'ADVANCE'});return true;",lower).get("error",{}).get("code")=="INVALID_REQUEST","Unknown scope field was silently ignored"))
   check("lease.resume.requires-cas",lambda:expect(f.primary("return claims.applyExecutionControl(tx,data.scope,{scope_kind:'PACKAGE',scope_id:data.package_id,mode:'ACTIVE',operation_id:crypto.randomUUID(),reason:'Unverified weakening'});",{"package_id":i["wave_package"]}).get("error",{}).get("code")=="RESUME_REVALIDATION_REQUIRED","Hold weakened without exact resume generation"))
+  resume=f.primary("return claims.applyExecutionControl(tx,data.scope,{scope_kind:'PACKAGE',scope_id:data.package_id,mode:'ACTIVE',operation_id:crypto.randomUUID(),reason:'Exact verified test resume',resume:true,expected_generation:data.generation});",{"package_id":i["wave_package"],"generation":pause["result"]["generation"]})
+  check("lease.resume.exact-generation",lambda:expect(resume.get("result",{}).get("mode")=="ACTIVE","Exact resume failed"))
+  drain=f.primary("const deadline=(await tx.query(`SELECT (clock_timestamp()+interval '60 seconds')::text AS deadline`)).rows[0].deadline;return claims.applyExecutionControl(tx,data.scope,{scope_kind:'PACKAGE',scope_id:data.package_id,mode:'DRAIN',deadline_at:new Date(deadline).toISOString(),fallback_mode:'STOP',operation_id:crypto.randomUUID(),reason:'Real pre-drain admission test'});",{"package_id":i["wave_package"]})
+  check("lease.drain.persisted-admission",lambda:expect("result" in f.primary("return leases.assertCurrentCompute(tx,data.token,{operation:'ADVANCE'});",lower),"Pre-drain claimed attempt was blocked"))
+  check("lease.drain.requires-selector",lambda:expect(f.primary("return claims.assertNoExecutionHold(tx,data.scope,{package_id:data.package_id,operation:'ADVANCE'});",{"package_id":i["wave_package"]}).get("error",{}).get("code")=="EXECUTION_CONTINUATION_UNPROVEN","Drain accepted an unproven continuation"))
+  check("lease.drain.blocks-admission",lambda:expect(f.primary("return leases.assertCurrentCompute(tx,data.token,{operation:'ADMISSION'});",lower).get("error",{}).get("code")=="EXECUTION_HELD","Drain admitted new work"))
+  f.primary("return claims.applyExecutionControl(tx,data.scope,{scope_kind:'PACKAGE',scope_id:data.package_id,mode:'ACTIVE',operation_id:crypto.randomUUID(),reason:'Resume after bounded drain regression',resume:true,expected_generation:data.generation});",{"package_id":i["wave_package"],"generation":drain["result"]["generation"]})
   check("lease.cancel.foreign-manager",lambda:f.reject("scheduler.compute.cancel",request,"PACKAGE_OWNER_MISMATCH",key="manager",component="5.2"))
   cancelled=f.ok("scheduler.compute.cancel",request,key="manager2",component="5.2")
   check("lease.cancel.logical-only",lambda:expect(cancelled["termination_confirmed"] is False and cancelled["resource_disposition"]=="RELEASE_PENDING","Cancellation fabricated physical termination"))
@@ -43,5 +51,22 @@ def main():
   check("lease.expiry.no-custody-created",lambda:expect(f.sql("SELECT count(*)::int n FROM hyperfide.submission_custodies")[0]["n"]==0,"Compute expiry manufactured submission custody"))
  finally:
   db=f.database;path=f.path;f.close();check("lease.cleanup.observed",lambda:expect(not path.exists() and f.sql("SELECT count(*)::int n FROM pg_database WHERE datname=$1",[db],admin=True)[0]["n"]==0,"Fixture resource remains"))
+ recovery=SchedulerFixture()
+ try:
+  current=recovery.claim('a');token=current['token'];before=recovery.counts()
+  data={"organisation_id":recovery.ids["organisation"],"run_id":recovery.ids["run"],"expected_run_epoch":recovery.ids["epoch"],"target_epoch":uid(),"recovery_operation_id":uid()}
+  wrong=dict(data,expected_run_epoch=uid())
+  check("lease.recovery.exact-source-epoch",lambda:expect(recovery.primary("return leases.revokeRunForRecovery(tx,data.input);",{"input":wrong}).get("error",{}).get("code")=="STALE_AUTHORITY_EPOCH","Foreign source epoch revoked compute"))
+  def recovery_rollback():
+   outcome=recovery.primary("await leases.lockComputeFenceTargets(tx,[data.token]);await leases.revokeRunForRecovery(tx,data.input);throw Error('bounded rollback injection');",{"input":data,"token":token})
+   expect("error" in outcome and "result" not in outcome and recovery.sql("SELECT count(*)::int n FROM hyperfide.attempts WHERE compute_authority='CURRENT'")[0]["n"]==1 and recovery.counts()==before,"Rollback lost authority/counters: "+json.dumps(outcome))
+  check("lease.recovery.transaction-rollback",recovery_rollback)
+  revoked=recovery.primary("return leases.revokeRunForRecovery(tx,data.input);",{"input":data})["result"]
+  check("lease.recovery.revokes-current",lambda:expect(revoked["revoked_attempts"]=="1" and revoked["revoked_allocations"]=="1" and recovery.sql("SELECT count(*)::int n FROM hyperfide.compute_leases WHERE state='ACTIVE'")[0]["n"]==0,"Offline revocation left active compute"))
+  check("lease.recovery.retains-physical-debt",lambda:expect(recovery.counts()==before and any(x.startswith("sandbox-charge:") for x in revoked["retained_debt_references"]) and recovery.sql("SELECT state FROM hyperfide.sandbox_execution_charges")[0]["state"]=="RELEASE_PENDING","Offline recovery freed unknown physical capacity"))
+  check("lease.recovery.does-not-rebind-run",lambda:expect(recovery.sql("SELECT authority_epoch FROM hyperfide.runs")[0]["authority_epoch"]==data["expected_run_epoch"],"Lower revoker bypassed14 epoch CAS"))
+  check("lease.recovery.idempotent-revocation",lambda:expect(recovery.primary("return leases.revokeRunForRecovery(tx,data.input);",{"input":data})["result"]["revoked_attempts"]=="0","Repeated source revocation fabricated work"))
+ finally:
+  db=recovery.database;path=recovery.path;recovery.close();check("lease.recovery.cleanup.observed",lambda:expect(not path.exists() and recovery.sql("SELECT count(*)::int n FROM pg_database WHERE datname=$1",[db],admin=True)[0]["n"]==0,"Recovery disposable fixture remains"))
  return 1 if m.FAILED else 0
-if __name__=="__main__":raise SystemExit(main())
+if __name__=="__main__":raise SystemExit(m.cleanup_owned("5.2") if "--cleanup" in sys.argv else main())

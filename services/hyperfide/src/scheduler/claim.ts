@@ -5,7 +5,7 @@ import type {PrimaryTransaction,TransactionGateway} from '../storage/transaction
 import {assertPrimaryTransaction} from '../storage/transactions.js';
 import {requireAuthority} from '../hierarchy/packages.js';
 import {enqueue,lockRun} from '../events/outbox.js';
-import {loadExecutionPacket,loadPreparationIntent} from '../hierarchy/packets.js';
+import {loadExecutionPacket,loadPreparationIntent,validateExecutionInputs} from '../hierarchy/packets.js';
 import {assertInvocation} from '../transport/protocol.js';
 import type {InvocationContext} from '../transport/protocol.js';
 
@@ -53,23 +53,60 @@ export async function applyExecutionControl(tx:PrimaryTransaction,scope:Schedule
   [scope.organisation_id,scope.run_id,input.operation_id,id,generation,hash,input.mode,input.reason,input.deadline_at??null,input.fallback_mode??null]);
  return {control_id:id,generation,mode:input.mode,replayed:false};
 }
-export async function assertNoExecutionHold(tx:PrimaryTransaction,scope:SchedulerScope,target:{
- package_id?:string;attempt_id?:string;sandbox_id?:string;operation:'ADMISSION'|'RENEWAL'|'CHECKPOINT'|'ADVANCE'|'CLEANUP'
-}):Promise<void>{
+
+export interface ExecutionTarget {
+ package_id?:string;attempt_id?:string;sandbox_id?:string;resource_allocation_id?:string;
+ qualification_job_id?:string;publication_operation_id?:string;
+ operation:'ADMISSION'|'RENEWAL'|'CHECKPOINT'|'ADVANCE'|'CLEANUP';
+}
+async function admissionTimes(tx:PrimaryTransaction,scope:SchedulerScope,target:ExecutionTarget):Promise<string[]>{
+ const sources=[
+  ['attempt_id','attempts',""],
+  ['resource_allocation_id','resource_job_allocations'," AND state='ACTIVE'"],
+  ['qualification_job_id','qualification_jobs'," AND state='RUNNING'"],
+  ['publication_operation_id','publication_operations',""]
+ ] as const;
+ const result:string[]=[];
+ for(const [key,table,predicate] of sources){
+  const id=target[key];if(id===undefined)continue;
+  const row=await tx.query<{admitted_at:string}>('SELECT created_at::text AS admitted_at FROM hyperfide.'+table+' WHERE organisation_id=$1 AND run_id=$2 AND id=$3'+predicate+' FOR SHARE',[scope.organisation_id,scope.run_id,id]);
+  if(!row.rows[0])fail('EXECUTION_CONTINUATION_UNPROVEN','Continuation requires its actual persisted admission in the authenticated run');
+  result.push(row.rows[0].admitted_at);
+ }
+ return result;
+}
+export async function assertNoExecutionHold(tx:PrimaryTransaction,scope:SchedulerScope,target:ExecutionTarget):Promise<void>{
  assertPrimaryTransaction(tx);
- fields(target,['operation'],['package_id','attempt_id','sandbox_id']);
+ fields(target,['operation'],['package_id','attempt_id','sandbox_id','resource_allocation_id','qualification_job_id','publication_operation_id']);
  if(!['ADMISSION','RENEWAL','CHECKPOINT','ADVANCE','CLEANUP'].includes(target.operation))fail('INVALID_REQUEST','Unknown execution validation class');
- for(const key of ['package_id','attempt_id','sandbox_id'] as const)if(target[key]!==undefined)uuid(target[key],key);
+ for(const key of ['package_id','attempt_id','sandbox_id','resource_allocation_id','qualification_job_id','publication_operation_id'] as const)if(target[key]!==undefined)uuid(target[key],key);
  if(target.operation==='CLEANUP')return;
- const rows=await tx.query<{scope_kind:string;mode:ExecutionMode}>(
-  "SELECT scope_kind,CASE WHEN mode='DRAIN' AND deadline_at<=clock_timestamp() THEN fallback_mode ELSE mode END AS mode FROM hyperfide.execution_controls WHERE organisation_id=$1 AND run_id=$2 AND "+
-  "((scope_kind='RUN' AND scope_id=$2) OR (scope_kind='PACKAGE' AND package_id=$3) OR "+
-  "(scope_kind='ATTEMPT' AND attempt_id=$4) OR (scope_kind='SANDBOX' AND sandbox_id=$5)) FOR SHARE",
+ await lockRun(tx,scope);
+ const currentRun=await tx.query<{state:string}>('SELECT state FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR SHARE',[scope.organisation_id,scope.run_id]);
+ const rows=await tx.query<{scope_kind:string;declared_mode:ExecutionMode;mode:ExecutionMode;effective_at:string|null}>(
+  "SELECT c.scope_kind,c.mode AS declared_mode,CASE WHEN c.mode='DRAIN' AND c.deadline_at<=clock_timestamp() THEN c.fallback_mode ELSE c.mode END AS mode,h.created_at::text AS effective_at FROM hyperfide.execution_controls c LEFT JOIN hyperfide.execution_control_history h ON h.organisation_id=c.organisation_id AND h.run_id=c.run_id AND h.control_id=c.id AND h.generation=c.generation WHERE c.organisation_id=$1 AND c.run_id=$2 AND "+
+  "((c.scope_kind='RUN' AND c.scope_id=$2) OR (c.scope_kind='PACKAGE' AND c.package_id=$3) OR (c.scope_kind='ATTEMPT' AND c.attempt_id=$4) OR (c.scope_kind='SANDBOX' AND c.sandbox_id=$5)) FOR SHARE OF c",
   [scope.organisation_id,scope.run_id,target.package_id??null,target.attempt_id??null,target.sandbox_id??null]);
+ if(currentRun.rows[0]?.state==='DRAINING'&&!rows.rows.some(row=>row.scope_kind==='RUN'&&row.declared_mode==='DRAIN'))fail('EXECUTION_CONTINUATION_UNPROVEN','Draining run requires its persisted run drain policy');
+ let admissions:string[]|undefined;
  for(const hold of rows.rows){
   if(hold.mode==='STOP'||hold.mode==='PAUSE'&&!['RENEWAL','CHECKPOINT'].includes(target.operation)||hold.mode==='DRAIN'&&target.operation==='ADMISSION')
    fail('EXECUTION_HELD',hold.scope_kind+' execution control '+hold.mode+' forbids '+target.operation);
+  if(hold.mode==='DRAIN'){
+   admissions??=await admissionTimes(tx,scope,target);
+   if(!admissions.length||!hold.effective_at)fail('EXECUTION_CONTINUATION_UNPROVEN','Drain continuation requires actual pre-drain admission and immutable control history');
+   for(const admitted of admissions){
+    const ordering=await tx.query<{allowed:boolean}>('SELECT $1::timestamptz<=$2::timestamptz AS allowed',[admitted,hold.effective_at]);
+    if(!ordering.rows[0]?.allowed)fail('EXECUTION_CONTINUATION_UNPROVEN','Work admitted after the drain cannot continue');
+   }
+  }
  }
+}
+export async function assertExecutionContinuation(tx:PrimaryTransaction,scope:SchedulerScope,target:ExecutionTarget):Promise<void>{
+ assertPrimaryTransaction(tx);
+ if(!['ADVANCE','RENEWAL','CHECKPOINT'].includes(target.operation))fail('INVALID_REQUEST','Continuation cannot grant new admission or cleanup authority');
+ if(!(await admissionTimes(tx,scope,target)).length)fail('EXECUTION_CONTINUATION_UNPROVEN','A persisted admission selector is required');
+ await assertNoExecutionHold(tx,scope,target);
 }
 
 
@@ -112,10 +149,10 @@ export async function approvedDimensions(tx:PrimaryTransaction,scope:SchedulerSc
    fail('RESOURCE_POLICY_DENIED','Accepted task does not allow this resource class');
   if(job_class!=='EXCLUSIVE_SERVICE')required[job_class]='1';
   else if(!requirements.exclusive_services?.length)fail('RESOURCE_POLICY_DENIED','Task declares no exclusive services');
-  if(job_class==='PREPARATION'||job_class==='INDEX')required.SANDBOX='1';
+  if(physical_preparation)required.SANDBOX='1';
  }
  if(warm_spare)required.WARM_SPARE='1';
- const classes=Object.keys(required).map(dimension=>(physical_preparation||job_class==='PREPARATION')&&['SANDBOX','CPU_MILLIS','MEMORY_BYTES','DISK_BYTES'].includes(dimension)?'PHYSICAL':'EXECUTION');
+ const classes=Object.keys(required).map(dimension=>physical_preparation&&['SANDBOX','CPU_MILLIS','MEMORY_BYTES','DISK_BYTES'].includes(dimension)?'PHYSICAL':'EXECUTION');
  const accounts=await tx.query<{id:string;dimension:string;capacity_class:string;qualification_state:string}>(
   'SELECT id,dimension,capacity_class,qualification_state FROM hyperfide.capacity_accounts WHERE organisation_id=$1 AND pool_id=$2 AND resource_key=$3 AND (dimension,capacity_class) IN (SELECT unnest($4::text[]),unnest($5::text[])) ORDER BY id FOR SHARE',
   [scope.organisation_id,pool_id,'',Object.keys(required),classes]);
@@ -128,6 +165,20 @@ export async function approvedDimensions(tx:PrimaryTransaction,scope:SchedulerSc
    [scope.organisation_id,pool_id,requirements.exclusive_services]);
   if(named.rows.length!==requirements.exclusive_services.length||named.rows.some(row=>row.qualification_state!=='QUALIFIED'))fail('CAPACITY_POLICY_UNQUALIFIED','Named exclusive services require qualified accounts');
   result.push(...named.rows.map(row=>({capacity_account_id:row.id,quantity:'1'})));
+ }
+ return result.sort((a,b)=>a.capacity_account_id.localeCompare(b.capacity_account_id));
+}
+
+export async function approvedPhysicalDimensions(tx:PrimaryTransaction,scope:SchedulerScope,pool_id:string,resources:unknown,warm_spare=false):Promise<CapacityDimension[]>{
+ assertPrimaryTransaction(tx);const input=object(resources);
+ const required:Record<string,string>={SANDBOX:'1',CPU_MILLIS:String(boundedInteger(input.cpu_millis,'profile cpu_millis',1,Number.MAX_SAFE_INTEGER)),MEMORY_BYTES:decimal(input.memory_bytes,'profile memory_bytes'),DISK_BYTES:decimal(input.disk_bytes,'profile disk_bytes',true)};
+ const accounts=await tx.query<{id:string;dimension:string;qualification_state:string}>("SELECT id,dimension,qualification_state FROM hyperfide.capacity_accounts WHERE organisation_id=$1 AND pool_id=$2 AND capacity_class='PHYSICAL' AND resource_key='' AND dimension=ANY($3::text[]) ORDER BY id",[scope.organisation_id,pool_id,Object.keys(required)]);
+ if(accounts.rows.length!==4||accounts.rows.some(row=>row.qualification_state!=='QUALIFIED'))fail('CAPACITY_POLICY_UNQUALIFIED','Complete provisioned profile resources need qualified physical accounts');
+ const result=accounts.rows.map(row=>({capacity_account_id:row.id,quantity:required[row.dimension]!}));
+ if(warm_spare){
+  const spare=await tx.query<{id:string}>("SELECT id FROM hyperfide.capacity_accounts WHERE organisation_id=$1 AND pool_id=$2 AND capacity_class='EXECUTION' AND dimension='WARM_SPARE' AND resource_key='' AND qualification_state='QUALIFIED'",[scope.organisation_id,pool_id]);
+  if(!spare.rows[0])fail('CAPACITY_POLICY_UNQUALIFIED','Warm spare requires an explicit qualified pool budget');
+  result.push({capacity_account_id:spare.rows[0].id,quantity:'1'});
  }
  return result.sort((a,b)=>a.capacity_account_id.localeCompare(b.capacity_account_id));
 }
@@ -192,12 +243,17 @@ export function canonical(value:unknown):string{
 export function requestDigest(value:unknown):string{
   return 'sha256:'+createHash('sha256').update(canonical(value)).digest('hex');
 }
-export function gatewayFor(context:ComponentContext):Pick<TransactionGateway,'withPrimaryTransaction'>{
+export function gatewayFor(context:ComponentContext,continuation?:(tx:PrimaryTransaction)=>Promise<unknown>):Pick<TransactionGateway,'withPrimaryTransaction'>{
   const resources=(context as ComponentContext & {resources?:{gateway?:TransactionGateway}}).resources;
   if(!resources?.gateway)fail('DEPENDENCY_UNAVAILABLE','The registered primary transaction gateway is required');
   const gateway=resources.gateway,invocation=invocationFor(context);
   return {withPrimaryTransaction:async <T>(options:Parameters<TransactionGateway['withPrimaryTransaction']>[0],operation:(tx:PrimaryTransaction)=>Promise<T>|T):Promise<T>=>{
-   return gateway.withPrimaryTransaction({...options,guard:async tx=>{await invocation.guard(tx);await options.guard?.(tx);}},async tx=>{
+   return gateway.withPrimaryTransaction({...options,guard:async tx=>{
+    if(['scheduler.compute.cancel','scheduler.compute.expire'].includes(invocation.payload.action))await invocation.identityGuard(tx);
+    else if(continuation)await invocation.continuationGuard(tx,async candidate=>{assertPrimaryTransaction(candidate);await continuation(candidate);});
+    else await invocation.guard(tx);
+    await options.guard?.(tx);
+   }},async tx=>{
     const scope={organisation_id:invocation.principal.organisation_id,run_id:invocation.principal.run_id};
     const key=invocation.operation.idempotency_key,name='envelope.'+invocation.payload.action;
     const payload={payload_digest:invocation.operation.payload_digest};
@@ -416,7 +472,7 @@ export async function requirePacketAdmission(tx:PrimaryTransaction,input:ClaimRe
  id:string;feature_package_id:string;spec_revision_id:string;spec_generation:string;criteria_digest:string;
 }):Promise<PacketResourceRequirements>{
  const proof=await requireProofRegistry(tx,input,task);
- const loaded=await loadExecutionPacket(tx,{organisation_id:input.organisation_id,run_id:input.run_id,digest:input.input_packet_digest});
+ const loaded=await validateExecutionInputs(tx,{organisation_id:input.organisation_id,run_id:input.run_id,digest:input.input_packet_digest});
  const packet=object(loaded.packet),mandatory=object(packet.mandatory),identity=object(mandatory.identity),runtime=object(mandatory.runtime),observation=object(packet.observation),intent=object(mandatory.intent);
  const pins={organisation_id:input.organisation_id,run_id:input.run_id,authority_epoch:input.authority_epoch,task_id:input.task_id,
  attempt_id:input.attempt_id,attempt_generation:input.attempt_generation,spec_revision_id:input.spec_revision_id,spec_generation:input.spec_generation,
@@ -740,8 +796,9 @@ export async function qualifySandboxBudget(tx:PrimaryTransaction,input:SandboxBu
 }
 export async function lockSandboxBudget(tx:PrimaryTransaction,input:SandboxExecutor):Promise<void>{
  assertPrimaryTransaction(tx);await lockRun(tx,input);
- const sandbox=await tx.query<{pool_id:string;boot_generation:string}>('SELECT pool_id,boot_generation FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2 FOR SHARE',[input.organisation_id,input.sandbox_id]);
+ const sandbox=await tx.query<{pool_id:string;boot_generation:string;desired_state:string;observed_state:string}>('SELECT pool_id,boot_generation,desired_state,observed_state FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2 FOR SHARE',[input.organisation_id,input.sandbox_id]);
  if(sandbox.rows[0]?.boot_generation!==input.sandbox_boot_generation)fail('STALE_SANDBOX_BOOT','Execution budget belongs to another sandbox boot');
+ if(sandbox.rows[0].desired_state!=='RUNNING'||sandbox.rows[0].observed_state!=='RUNNING')fail('SANDBOX_NOT_ADMITTING','Desired and observed sandbox state must both permit execution');
  await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[input.organisation_id+':'+sandbox.rows[0].pool_id+':resource-admission']);
  const budget=await tx.query('SELECT qualification_id FROM hyperfide.sandbox_execution_budgets WHERE organisation_id=$1 AND sandbox_id=$2 AND sandbox_boot_generation=$3 FOR UPDATE',[input.organisation_id,input.sandbox_id,input.sandbox_boot_generation]);
  if(!budget.rows[0])fail('SANDBOX_BUDGET_UNQUALIFIED','No trusted usable execution budget is qualified for this exact sandbox boot');
@@ -777,7 +834,7 @@ export async function markSandboxReleasePending(tx:PrimaryTransaction,input:Sche
 }
 export async function assertSandboxReservation(tx:PrimaryTransaction,input:SchedulerScope&{reservation_id:string}):Promise<unknown>{
  assertPrimaryTransaction(tx);
- const row=await tx.query("SELECT c.*,b.qualification_id,b.evidence_digest,(b.hard_cpu_millis-b.headroom_cpu_millis)::text AS usable_cpu_millis,(b.hard_memory_bytes-b.headroom_memory_bytes)::text AS usable_memory_bytes,(b.hard_disk_bytes-b.headroom_disk_bytes)::text AS usable_disk_bytes FROM hyperfide.reservations r JOIN hyperfide.sandbox_execution_charges c ON c.organisation_id=r.organisation_id AND c.run_id=r.run_id AND c.request_id=r.request_id JOIN hyperfide.sandbox_execution_budgets b ON b.organisation_id=c.organisation_id AND b.sandbox_id=c.sandbox_id AND b.sandbox_boot_generation=c.sandbox_boot_generation JOIN hyperfide.sandboxes s ON s.organisation_id=c.organisation_id AND s.id=c.sandbox_id AND s.boot_generation=c.sandbox_boot_generation WHERE r.organisation_id=$1 AND r.run_id=$2 AND r.id=$3 AND r.state='ALLOCATED' AND c.state='HELD' FOR SHARE OF c,b,s",
+ const row=await tx.query("SELECT c.*,b.qualification_id,b.evidence_digest,(b.hard_cpu_millis-b.headroom_cpu_millis)::text AS usable_cpu_millis,(b.hard_memory_bytes-b.headroom_memory_bytes)::text AS usable_memory_bytes,(b.hard_disk_bytes-b.headroom_disk_bytes)::text AS usable_disk_bytes FROM hyperfide.reservations r JOIN hyperfide.sandbox_execution_charges c ON c.organisation_id=r.organisation_id AND c.run_id=r.run_id AND c.request_id=r.request_id JOIN hyperfide.sandbox_execution_budgets b ON b.organisation_id=c.organisation_id AND b.sandbox_id=c.sandbox_id AND b.sandbox_boot_generation=c.sandbox_boot_generation JOIN hyperfide.sandboxes s ON s.organisation_id=c.organisation_id AND s.id=c.sandbox_id AND s.boot_generation=c.sandbox_boot_generation WHERE r.organisation_id=$1 AND r.run_id=$2 AND r.id=$3 AND r.state='ALLOCATED' AND c.state='HELD' AND s.desired_state='RUNNING' AND s.observed_state='RUNNING' FOR SHARE OF c,b,s",
  [input.organisation_id,input.run_id,input.reservation_id]);
  if(!row.rows[0])fail('SANDBOX_CHARGE_UNAVAILABLE','Current native execution requires the exact held per-boot sandbox resource charge');
  const r=row.rows[0];
@@ -810,10 +867,10 @@ export async function inspectSandboxCharge(tx:PrimaryTransaction,input:Scheduler
  const r=result.rows[0];return r?{charge_id:r.id,generation:r.generation,request_id:r.request_id,organisation_id:r.organisation_id,run_id:r.run_id,sandbox_id:r.sandbox_id,sandbox_boot_generation:r.sandbox_boot_generation,slot_id:r.slot_id,attempt_id:r.attempt_id,job_kind:r.job_kind,state:r.state,resources:{cpu_millis:r.cpu_millis,memory_bytes:r.memory_bytes,disk_bytes:r.disk_bytes},execution_authority:false}:null;
 }
 export function createComponent(context:ComponentContext):Component{
-  return {apiVersion:1,capabilities:{'scheduler.allocations.v1':Object.freeze({assertJobReservation,allocateReservations,bindJobReservation,readJobAllocation,renewJobAllocation,releaseJobAllocation,validateResourceVector}),'scheduler.controls.v1':Object.freeze({applyExecutionControl,assertNoExecutionHold}),'scheduler.claims.v1':Object.freeze({claimTask,reserveCapacity,requireSchedulerAuthority,readCurrentComputeToken}),'scheduler.sandbox-budget.v1':Object.freeze({qualifySandboxBudget,lockSandboxBudget,reserveSandboxResources,markSandboxReleasePending,assertSandboxReservation,inspectSandboxCharge})},actions:{
+  return {apiVersion:1,capabilities:{'scheduler.allocations.v1':Object.freeze({assertJobReservation,allocateReservations,bindJobReservation,readJobAllocation,renewJobAllocation,releaseJobAllocation,validateResourceVector}),'scheduler.controls.v1':Object.freeze({applyExecutionControl,assertNoExecutionHold,assertExecutionContinuation}),'scheduler.claims.v1':Object.freeze({claimTask,reserveCapacity,requireSchedulerAuthority,readCurrentComputeToken}),'scheduler.sandbox-budget.v1':Object.freeze({qualifySandboxBudget,lockSandboxBudget,reserveSandboxResources,markSandboxReleasePending,assertSandboxReservation,inspectSandboxCharge})},actions:{
     'scheduler.claim':async (value,context)=>{
       const input=parseClaim(value),actor=actorFor(context,input,object(value));
-      return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal,guard:tx=>invocationFor(context).guard(tx)},
+      return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal},
         tx=>claimTask(tx,input,actor,dispatchRecipients(context)));
     }
   }};
