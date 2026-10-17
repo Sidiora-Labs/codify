@@ -133,6 +133,8 @@ class Fixture:
         target=name if Path(name).name==name and name not in {".",".."} else "slot-fixture"
         expect(not (self.workspaces/target).exists(),"failed preparation published final workspace")
 def main():
+    sys.path.insert(0,str(ROOT/"tests/hyperfide/support"))
+    check("staging.qualification-unclaimed-generation",lambda:preparation_generation_probe(ROOT/"build/hyperfide-native",ROOT))
     with tempfile.TemporaryDirectory(prefix="hf-bootstrap-") as directory:
         base=Path(directory)
         def case(identity,callback):
@@ -296,8 +298,6 @@ def main():
         def symlink(f):
             alternate=f.base/"alternate";alternate.mkdir();f.workspaces.rmdir();f.workspaces.symlink_to(alternate,target_is_directory=True);f.refused()
         case("workspace.symlink-root",symlink)
-    sys.path.insert(0,str(ROOT/"tests/hyperfide/support"))
-    check("staging.qualification-unclaimed-generation",lambda:preparation_generation_probe(ROOT/"build/hyperfide-native",ROOT))
     print(json.dumps({"type":"cleanup","resources":[],"complete":True}),flush=True)
     return int(bool(FAILED))
 if __name__=="__main__":sys.exit(main())
