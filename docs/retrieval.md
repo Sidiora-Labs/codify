@@ -1,13 +1,20 @@
-# Retrieval: search, symbol, show, context, files
+# Retrieval: search, symbol, show, context, files, grep
 
-How `cg search`, `cg symbol`, `cg show`, `cg context` and `cg files` decide
-what to answer with, and in what order. The legacy query path lives in
-`src/graph.c`, with file filters in `src/files.c`. Version 1.6 also uses
-`src/sem_search.c` for structured search, `src/sem_flow.c` for typed graph
-traversal, and `src/sem_inspect.c` for hierarchy and unused-symbol queries.
-Syntax adapters in `src/ast_*.c`, a labelled `src/lang.c` fallback, and
-semantic passes in `src/sem_*.c` supply their evidence. The [indexing guide]
-(indexing.md) states coverage, inference boundaries and answer-health limits.
+How `hyperfide search`, `hyperfide symbol`, `hyperfide show`,
+`hyperfide context`, `hyperfide files` and `hyperfide grep` decide what to
+answer with, and in what order. `hyperfide` is the canonical command; `cg`
+is a deprecated compatibility alias installed from the same executable, with
+identical arguments, JSON and exit codes, kept for the compatibility window
+of the approved release. The free-text ranking and the outlines live in
+`src/graph.c`, with file filters and `hyperfide files` in `src/files.c` and
+line search in `src/grep.c`. The query path also uses `src/sem_search.c` for
+identifier lookup and the `--kind`/`--name` filters; `src/sem_flow.c`
+(`hyperfide flow`) and `src/sem_inspect.c` (`hyperfide inspect hierarchy`,
+`hyperfide inspect unused`) answer typed traversal and hierarchy questions
+beside these commands. Syntax adapters in `src/ast_*.c`, a labelled
+`src/lang.c` fallback, and semantic passes in `src/sem_*.c` supply their
+evidence. The [indexing guide](indexing.md) states coverage, inference
+boundaries and the source checks an answer reports.
 
 ## Declarations
 
@@ -35,7 +42,8 @@ header.
   declaration. A declaration has no body.
 - **Legacy resolution** first resolves a call through the usual tiers (same file,
   import, same directory, unique). If the winner is a declaration, the call
-  goes to its definition instead, chosen in this order:
+  goes to its definition instead (`cand_definition` in `src/resolve.c`),
+  chosen in this order:
   1. the one in the file with the header's stem (`store.h` → `store.c`)
   2. else the single non-static definition, or the first one when they all
      sit in one file as `#ifdef` alternatives
@@ -44,33 +52,45 @@ header.
   If none of these applies, the call stays on the prototype. Callers,
   reference counts and impact therefore land on the function that runs.
 - **Answers** list the definition first, in `defs_named`, `find_symbols`
-  and every caller of theirs. When the definition has no doc of its own,
-  `symbol_doc` uses the prototype's doc. `cg anchors --uncovered` counts a
-  definition documented at its prototype as covered.
+  and every caller of theirs. Search and context fold a prototype into its
+  definition only when their signatures and qualified owners agree
+  (`prototype_matches`); otherwise the prototype stays visible. When the
+  definition has no doc of its own, `symbol_doc` uses the prototype's doc.
+  `hyperfide anchors --uncovered` counts a definition documented at its
+  prototype as covered.
 - **Soft edges**: prose in a prototype's doc still creates soft edges, but
   they come from no symbol. A prototype calls nothing.
-- **JSON**: `"decl": true` marks a declaration row in `symbol --json` and
-  in every `json_sym` row.
+- **JSON**: `"decl": true` marks a declaration row in `symbol --json` (under
+  `definitions`) and in every `json_sym` row.
 
 ## Phrase queries
 
-`rank_query` ranks the hits for both `search` and `context`.
+`search` and `context` share one entry, `structured_query`. A one-word query
+first goes to the identifier lookup in `src/sem_search.c`: an exact name
+(case-insensitive), then a whole identifier segment (`memory` finds
+`memory_export`). Only when both find nothing does a bounded typo fallback
+run: names within one edit of a 3 to 64 character query, at most 16 of
+them, counted in the JSON `weak_matches` key. Those rows lead, and
+`rank_query` ranks everything else, including every multi-word query and
+the file hits.
 
 1. **The query becomes words.** Stopwords are dropped ("how does the",
    "of", "to"), and identifiers are split by `name_words`: snake_case,
    camelCase, PascalCase, digit runs, and `HTTPServer` → `http server`.
-   At most 8 words are kept.
+   Words shorter than two characters are dropped, and at most 8 words are
+   kept.
 2. **Names.** `symbol_fts` has a `words` column holding each name's split
    words. `"export memory"` therefore matches `memory_export` and
    `exportMemory` through the index, with no `LIKE` scan. The lookup runs
-   an all-words pass first, then one pass per word. An exact name match
-   always leads.
+   an all-words pass first, then one pass per word; words shorter than
+   three characters are below the trigram index's reach and are skipped
+   here. An exact name match always leads.
 3. **Docs.** `comment_fts` (doc comments) is matched with the same words.
 4. **Bodies.** `body_fts` returns the files whose text holds the words: an
    AND pass, then an OR pass. Each file is read once. The line holding the
    most query words becomes that file's hit, and each line's words are
    credited to the innermost definition that contains it.
-5. **Prototypes fold** into their definitions, which pick up the
+5. **Prototypes fold** into their matching definitions, which pick up the
    prototype's name, doc and body credit.
 6. **Score.** For each query word, a symbol earns the best of:
    - 300 if its name carries the word
@@ -79,28 +99,39 @@ header.
 
    It then adds:
    - 40 per distinct word it carries
-   - 150 when it carries every word and its name carries at least one (a
-     doc that merely mentions every word must not outrank a name that is
-     one of them)
+   - 150 when the query has at least two words, it carries every one, and
+     its name carries at least one (a doc that merely mentions every word
+     must not outrank a name that is one of them)
    - 100 when its name carries every word
-   - a small bonus for callables, classes and structs
+   - 3000 for an exact name match
+   - a small bonus for functions, methods, classes and structs
    - up to 40 for being referenced
 
-   Paths under tests, fixtures, mocks, `generated`, `dist`, `*_pb2.py`,
-   `*.pb.*`, `*.min.*` and `*.generated.*` lose 250.
+   A path with a segment named `test`, `tests`, `__tests__`, `fixtures`,
+   `vendor`, `node_modules`, `examples`, `generated`, `__generated__` or
+   `dist`, or a basename containing `_test.`, `.test.`, `.spec.`, `.min.`,
+   `.generated.`, `_pb2.` or `.pb.`, loses 250 (`rank_path_penalized`). A
+   prototype that did not fold loses 20.
 
-File hits sort source first, then by how many query words the line holds,
-then by full-text rank. Text output shows the matching line beside the
-path:
+File hits sort source first (the same path rule), then by how many query
+words the line holds, then by full-text rank. Text output shows the
+matching line beside the path (observed on a five-file scratch repository):
 
 ```
 — full-text matches —
-  src/store.c:14  int memory_export(Store *s, FILE *out) {
-  src/main.c:8  int n = memory_export(s, stdout);
-  tests/test_store.c:6  /* export memory round trip: ... */
+  py/sync_gate.py:2  def export_memory(path):
+  src/main.c:5  int n = memory_export(s, stdout);
+  src/store.c:5  int memory_export(Store *s, FILE *out) {
+  src/store.h:7  int memory_export(Store *s,
+  tests/test_store.c:1  /* export memory round trip: checks memory_export output */
 ```
 
-In JSON, each file hit gains a `text` key. Every existing key is unchanged.
+In `search --json`, each file hit is
+`{"path","line","text","excerpt"}`: `text` is the matching line and
+`excerpt` marks the matched words with `>>` and `<<`. The answer object is
+`{"query","symbols":[…],"weak_matches","files":[…],"index_health"}`.
+`hyperfide search` returns at most `-n` symbols (default 20; `limit` over
+MCP).
 
 ## Path queries
 
@@ -126,7 +157,8 @@ Imports and dependents are measured before the symbol list, so a long file
 cannot crowd them out. A purpose line that would leave no room for the
 answer's skeleton is dropped and counted as omitted.
 
-JSON shapes:
+JSON shapes (every `--json` answer also ends with an `index_health` object,
+described in the [indexing guide](indexing.md)):
 
 ```
 {"query","path","kind":"file","lines","purpose","symbols":[…],
@@ -139,8 +171,9 @@ JSON shapes:
 
 ## Filters: --path, --lang, --no-tests
 
-`cg search`, `cg context`, `cg survey` and `cg files` take the same three
-filters, parsed once (`query_filter_parse` in `src/files.c`):
+`hyperfide search`, `hyperfide context`, `hyperfide survey`,
+`hyperfide files` and `hyperfide grep` take the same three filters, parsed
+once (`query_filter_parse` in `src/files.c`):
 
 - `--path GLOB`, repeatable, any one matching. A plain path is that file or
   anything under that directory (`--path src/net`). In a glob, `*` and `**`
@@ -155,20 +188,31 @@ filters, parsed once (`query_filter_parse` in `src/files.c`):
 The filter is applied inside the SQL, not after it. `prep_scoped` splices
 `query_filter_sql` beside the branch predicate, so the symbol, doc and body
 passes of the ranking, the directory outline and survey's file list all
-narrow before `LIMIT` and before ranking. A narrowed query never reads
-more rows than the wide one. Callers and callees, which are read through
-the reference join, are filtered on the way out. Over MCP, `search_code`
-and `get_context` take `path` (a string or a list), `lang` and `no_tests`.
+narrow before `LIMIT` and before ranking. Callers and callees, which are
+read through the reference join, are filtered on the way out
+(`qf_keep`).
+
+`hyperfide search` and `hyperfide context` also take two symbol filters:
+`--kind K` keeps symbols of that kind (`function`, `method`, `class`, ...),
+and `--name N` keeps symbols whose name is `N` or contains it,
+case-insensitively. They narrow the symbol rows only; file hits are not
+filtered by them. `hyperfide grep` has its own `--kind` and `--symbol`
+(see below).
+
+Over MCP, `search_code` and `get_context` take `path` (a string or a list),
+`lang`, `no_tests`, `kind`, `name` and `limit`; `get_context` also takes
+`budget`.
 
 ## Finding files: cg files
 
-`cg files` answers from the `files` table, without walking the disk:
+`hyperfide files` (the canonical spelling of `cg files`) answers from the
+`files` table, without walking the disk:
 
 ```
-cg files 'src/**/*.c'       # a glob over paths
-cg files sync gate          # the words of the path
-cg files src                # a directory: subdirectories, then its files
-cg files --dirs             # the map: directories with counts
+hyperfide files 'src/**/*.c'       # a glob over paths
+hyperfide files sync gate          # the words of the path
+hyperfide files src                # a directory: subdirectories, then its files
+hyperfide files --dirs             # the map: directories with counts
 ```
 
 - **A glob** (any of `*?[`) matches paths the way `--path` does.
@@ -179,17 +223,19 @@ cg files --dirs             # the map: directories with counts
   A path that carries every word in its basename leads, and ties sort by
   path.
 - **A bare directory** lists its subdirectories with file and line counts,
-  then its own files.
+  then its own files. With no pattern, the top level is listed.
 
-Each row prints the path, language, lines and symbol count. At most `-n N`
-rows are printed (40 by default), and a tail line names how many were
-left out.
+Each row prints the path, language, lines and symbol count (definitions;
+prototypes are not counted). At most `-n N` rows are printed (40 by
+default), and a tail line names how many were left out, for example
+`(+1 more entry omitted; -n 4 shows more)`. A glob or word query that
+matches nothing prints `files: nothing matches '…'` and exits 1.
 
 `--dirs [prefix]` aggregates instead. It lists every directory down to
 `--depth N` (default 2) below the prefix, with its file count, line count
 and dominant language (by lines), largest first and nested under its
-parent, so a tree of a million files reads as a map. The filters apply to
-both forms (`cg files --dirs --lang go`).
+parent, so a large tree reads as a map. The filters apply to both forms
+(`hyperfide files --dirs --lang go`).
 
 JSON shapes:
 
@@ -212,27 +258,38 @@ with the row.
 ## The budget
 
 `--budget N` tokens is about 4N bytes, and the whole response counts,
-including the closing `tokens_used`/`budget`/`omitted` keys.
+including the closing `tokens_used`/`budget`/`omitted` keys. The
+`hyperfide context` default is 4000 tokens and 8 symbols (`-n`, at most
+64).
 
 - **Free-text answers** expand every hit, not only the top three: a doc,
   or else opening lines. Each hit's opening lines grow with its share of
   the room left, up to 60. A sixth of the budget is held back for entry
   points and files.
-- **Documented hits** keep doc plus signature. `cg show --full` is the deep
-  view.
+- **Documented hits** keep doc plus signature. `hyperfide show --full` is
+  the deep view.
 - **Callers and callees** are attached only to the top three hits.
 - **What does not fit** is counted. Each section carries an `omitted`
   marker, and `--json` ends with the total.
 - **The minimum budget** is 64 tokens. Below that, the answer's skeleton
-  alone would not fit, so the budget is raised and the output reports
-  64.
+  alone would not fit, so the budget is raised to 64 (`CTX_MIN_BUDGET`).
+- **With `--json` and an explicit `--budget`** (and over MCP when
+  `get_context` is given a `budget`), part of the request is reserved for
+  the `index_health` object: a third of it, at most 32 tokens, never
+  leaving the answer less than 64 (`answer_health_query_budget` in
+  `src/answer_health.c`). An answer that still overflows the request is
+  cut to a compact form that keeps `omitted`, `budget`, `tokens_used` and
+  a shortened `index_health` (plus `query`, `path` and `kind` when they
+  fit). In that form `budget` is the requested number, so a request below
+  64 can report `tokens_used` above `budget`.
 
 ## Line search: cg grep
 
-`cg grep <pattern>` answers "where does this string occur" — the question
-an agent otherwise asks `grep` or `rg` — with each hit placed in the graph.
-The code is `src/grep.c`; over MCP it is the `grep_code` tool, which takes
-the same parameters (`pattern`, `regex`, `case_sensitive`, `path`, `lang`,
+`hyperfide grep <pattern>` (the canonical spelling of `cg grep`) answers
+"where does this string occur" — the question an agent otherwise asks
+`grep` or `rg` — with each hit placed in the graph. The code is
+`src/grep.c`; over MCP it is the `grep_code` tool, which takes the same
+parameters (`pattern`, `regex`, `case_sensitive`, `path`, `lang`,
 `symbol`, `kind`, `no_tests`, `context`, `limit`, `budget`, `files`,
 `count`) and answers with the `--json` object.
 
@@ -248,13 +305,15 @@ meta `fts_mode` records which form was built. grep takes the literal a
 match must contain: the whole pattern for a literal, or the longest
 metacharacter-free run for a regex. A character followed by `*`, `?` or `{`
 is optional and leaves the run, and any `|` means no run is required. It
-then asks for every trigram of that literal, each on its own, because
-`detail=none` refuses phrase queries. The files that hold all of them,
-within the branch scope (`--branch`, `--all-branches`), are the
+then asks for the trigrams of that literal, each on its own, because
+`detail=none` refuses phrase queries; a literal with more than 24 trigrams
+is asked for an even spread of about 24 of them. The files that hold all
+of them, within the branch scope (`--branch`, `--all-branches`), are the
 candidates. A pattern with no three-character literal skips this step:
-every indexed file of the scope is scanned, and the summary says so. The
-index only narrows the search. A candidate that does not match costs a
-read, never a wrong hit.
+every indexed file of the scope is scanned, and the summary says
+`no three-character literal in the pattern for the trigram index: every
+indexed file was scanned`. The index only narrows the search. A candidate
+that does not match costs a read, never a wrong hit.
 
 **The completeness guard.** A candidate list is only as good as the table
 behind it. A graph whose `body_tri` was created after its files were
@@ -265,25 +324,27 @@ the index, grep compares `body_tri`'s row count with the count of indexed
 files that carry a body (at most 2 MB; files the indexer skipped have no
 `files` row and do not count). When the table is short, grep counts the
 scope file by file and, if any file in scope lacks its row, scans every
-file in scope instead. The summary says
+file in scope instead. The summary then reads, as the code prints it,
 `full scan — body_tri incomplete (N of M files); the next cg sync repairs it`
-and `--json` carries `"full_scan":"body_tri incomplete"` with
-`"body_tri":{"rows":N,"files":M}`. The guard clears itself: every whole-tree
-index pass (`cg sync`, `cg index`, and the freshness pass a read command
-runs) makes the same comparison, re-reads the open branch's files that have
-no row, inserts them (at most 50,000 a pass), and reports
-`N trigram rows repaired`. `cg index --full` rebuilds every row regardless.
+(the repair is run by `hyperfide sync`), and `--json` carries
+`"full_scan":"body_tri incomplete"` with `"body_tri":{"rows":N,"files":M}`.
+The guard clears itself: every whole-tree index pass (`hyperfide sync`,
+`hyperfide index`, and the freshness pass a read command runs) makes the
+same comparison, re-reads the open branch's files that have no row,
+inserts them (at most 50,000 a pass), and reports
+`N trigram rows repaired` (`1 trigram row repaired` for one).
+`hyperfide index --full` rebuilds every row regardless.
 
 **Scanning.** Candidates are read from disk, in that branch's worktree, by
 parallel workers. Their count is the machine's index worker budget,
 bounded by the number of candidates. A literal is found with `memmem`
 (over a lowercased copy under `-i`) and a regex with `regexec`, one hit per
 line. Hits are what the file holds now, so an edit made since the last sync
-is found in any file the index already names. `cg grep` also runs the same
-freshness pass as the other read commands before it starts. A file the
-indexer would not read (binary, or larger than 8 MB) or whose body it does
-not index (larger than 2 MB) is not searched. Each one is counted as
-`skipped`.
+is found in any file the index already names. `hyperfide grep` also runs
+the same freshness pass as the other read commands before it starts. A
+file the indexer would not read (binary, or larger than 8 MB) or whose body
+it does not index (larger than 2 MB) is not searched. Each one is counted
+as `skipped`.
 
 **Placement and ranking.** For each file with hits, one query loads its
 symbol spans (definitions only, not prototypes). Each hit is placed in the
@@ -293,28 +354,30 @@ only hits inside spans of that kind. `--path GLOB` (repeatable), `--lang`
 (a language name or an extension) and `--no-tests` filter the files through
 the same `QueryFilter` that search, context, survey and files use
 (`query_filter_parse`, applied inside the candidate query by
-`query_filter_sql`), so a glob selects the same files on every command. Files are ranked by hit count, then
-source before tests, then shallower paths first.
+`query_filter_sql`), so a glob selects the same files on every command.
+Files are ranked by hit count, then source before tests, then shallower
+paths first, then by path.
 
 **Output.** Hits are grouped by file. The enclosing symbol is named once
 for each run of hits inside it, and each hit is written as
-`path:line: text`. `-C N` adds context lines (`path-N- text`). The answer
-stops at `-n` hits (default 50) or at the `--budget` (default 4000 tokens),
-whichever comes first, and ends with the tail:
+`path:line: text`, with the line's leading whitespace trimmed. `-C N` adds
+context lines (`path-N- text`). The answer stops at `-n` hits (default 50)
+or at the `--budget` (default 4000 tokens), whichever comes first, and ends
+with the tail (observed on a five-file scratch repository with `-n 2`):
 
 ```
-… 3 more hits in 2 files — narrow with --path or raise -n
-5 hits in 2 files · 2 candidates of 14 indexed files · 2 scanned · 0 skipped · 1 ms
+… 3 more hits in 3 files — narrow with --path or raise -n
+5 hits in 4 files · 4 candidates of 5 indexed files · 4 scanned · 0 skipped · 0 ms
 ```
 
 `--files` lists only the matching files with their counts, and `--count`
-prints only the total. The `--json` object is:
+prints only the total (`5 hits in 4 files`). The `--json` object is:
 
 ```
 {"query","regex","case_sensitive","candidates","scanned","skipped",
  "indexed","full_scan","body_tri"?,"total","files_with_hits",
  "hits":[{"path","line","text","symbol","kind","branch"?,"before"?,"after"?}],
- "omitted","omitted_files","ms"}
+ "omitted","omitted_files","ms","index_health"}
 ```
 
 `full_scan` is false when the index narrowed, true when the pattern has
@@ -322,16 +385,17 @@ no trigram (or the index could not answer), and `"body_tri incomplete"`
 when the completeness guard fired. `symbol` and `kind` are null for file
 scope. `branch` is present when more
 than one branch is in scope. `before` and `after` are present with
-`context`. With `--files`, `hits` is replaced by `files:[{"path","count"}]`.
+`context`. With `--files`, `hits` is replaced by `files:[{"path","count"}]`;
+with `--count`, `hits` is an empty list.
 
 ## Cost
 
-A first `cg context` on Codify's own tree (about 250 files and 20k refs)
-used to spend most of its time on full scans of `refs` for "who resolved
-to this symbol". Callers, reference counts, entry-point climbs and
-dependents all ask that question. `idx_ref_target` makes each one an index
-lookup. The index is created after the schema upgrade, because an older
-`refs` table without `target_id` would refuse it. The body pass no longer
-sends single letters or prefix-matched two-letter words to `body_fts`.
-`"c" *` on a path query was the slowest single query. A path query now
-goes straight to the outline.
+A first `hyperfide context` used to spend most of its time on full scans of
+`refs` for "who resolved to this symbol". Callers, reference counts,
+entry-point climbs and dependents all ask that question. `idx_ref_target`
+makes each one an index lookup. The index is created after the schema
+upgrade, because an older `refs` table without `target_id` would refuse it.
+The body pass no longer sends single letters or prefix-matched two-letter
+words to `body_fts`. `"c" *` on a path query was the slowest single query.
+A path query now goes straight to the outline. No timing for these paths is
+qualified in this revision.

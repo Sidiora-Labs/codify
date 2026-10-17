@@ -2,9 +2,13 @@
 
 Half of a codebase is invisible to a parser. Symbols, calls, and routes are
 the structure graph; *purpose, contract, danger, and coupling* live only in
-prose. Codify indexes that prose — comments become first-class graph nodes,
+prose. Hyperfide indexes that prose — comments become first-class graph nodes,
 bound to the symbol they describe — and this document is the convention for
 writing prose worth indexing.
+
+Commands below use `hyperfide`, the canonical command; `cg` is a deprecated
+compatibility alias from the same executable with identical arguments, JSON
+and exit codes, kept for the compatibility window of the approved release.
 
 ## The derivability test
 
@@ -14,7 +18,7 @@ One rule decides whether a comment is an anchor:
 > not an anchor.**
 
 `i++ // increment i` fails the test. So does `// constructor` above a
-constructor, and any comment that restates the signature. Codify applies a
+constructor, and any comment that restates the signature. Hyperfide applies a
 mechanical version of the same test at retrieval time: a doc whose every
 word already appears in the symbol's name or signature is dropped rather
 than served. Write the thing the code *cannot* say, or write nothing.
@@ -50,26 +54,30 @@ route this code moves with.
 ```
 
 A file-level header stating the file's purpose is the fifth surface — one
-sentence at the top of the file is what `cg survey` prints as the file's
+sentence at the top of the file is what `hyperfide survey` prints as the file's
 purpose line.
 
 ## What the machinery does with them
 
 - **Capture** — every anchor is indexed and bound to its symbol; multi-line
-  notes are searchable via `cg search` and `cg context`.
-- **Doc-first retrieval** — `cg context` serves doc + signature instead of
-  body lines where an anchor exists, so one budget covers several times
-  more symbols. `cg symbol` keeps the body and leads with the doc.
-- **The survey tier** — `cg survey [path|query]` reads ~100 files for the
-  price of one body: purpose lines, docs with signatures, never bodies.
+  notes are searchable via `hyperfide search` and `hyperfide context`.
+- **Doc-first retrieval** — `hyperfide context` serves doc + signature
+  instead of body lines where an anchor exists, so one budget covers
+  several times more symbols. `hyperfide symbol` keeps the body and leads
+  with the doc.
+- **The survey tier** — `hyperfide survey [path|query]` reads about 100
+  files per call (default budget 16000 tokens): purpose lines, docs with
+  signatures, never bodies.
 - **Soft edges** — names inside anchors (symbols, paths, routes) become
   references of kind `soft`: the cross-language and dynamic couplings a
-  parser cannot derive. They appear labeled `(soft)` in `cg impact` and
+  parser cannot derive. They appear labeled `(soft)` in `hyperfide impact` and
   never masquerade as parsed calls; `--no-soft` excludes them.
 - **Drift honesty** — every anchor records a baseline of the code it
   describes. When the code moves on and the doc does not, the anchor is
-  *stale*: `cg check` warns, `cg guard` names it after your edits, and
-  retrieval marks the doc `[stale]` rather than serving it as truth.
+  *stale*: `hyperfide check` warns, `hyperfide guard` names it after your
+  edits (advisory, never a failure), and retrieval marks the doc
+  `[stale — code changed after this was written]` (`"doc_stale": true` in
+  JSON) rather than serving it as truth.
   Updating (or deleting) the comment clears it. Warn, don't block.
 
 ## Backfilling a repository
@@ -77,21 +85,24 @@ purpose line.
 Do not anchor everything — anchor where coordination happens.
 
 ```
-cg anchors               # health: coverage, stale docs, top of the work list
-cg anchors --uncovered   # the backfill work list, ranked
-cg anchors --stale       # docs whose code moved on
+hyperfide anchors               # health: coverage, stale docs, top of the work list
+hyperfide anchors --uncovered   # the backfill work list, ranked
+hyperfide anchors --stale       # docs whose code moved on
 ```
 
 The ranking is a **coordination score**: fan-out × extent × distinct
-referencing files. Deliberately *not* raw inbound reference count — that
+referencing files (soft references do not count toward fan-out).
+`--json` reports `symbols`, `anchored`, `stale`, `uncovered` and
+`uncovered_total`, and the MCP `anchors` tool returns the same report.
+Deliberately *not* raw inbound reference count — that
 metric ranks the `sb_puts`/`xmalloc` tail highest, and self-evident
 utilities are exactly the symbols that need no anchor. Orchestration
 points — long functions that call many things and are referenced from many
 files — rise to the top; a score of zero is a leaf that explains itself.
 
-Work from the top of `cg anchors --uncovered`, write only comments that
+Work from the top of `hyperfide anchors --uncovered`, write only comments that
 pass the derivability test, and let the drift lint keep the backfill honest
-afterwards: a stale anchor is worse than none, and `cg check` will say so.
+afterwards: a stale anchor is worse than none, and `hyperfide check` will say so.
 
 Nothing here is required for adoption. A repository that has never heard of
 this convention still gets capture, retrieval, survey, and soft edges from
