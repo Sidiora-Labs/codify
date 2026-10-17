@@ -1,0 +1,122 @@
+{
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "https.loopback.listen"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/5_1.py"
+  ],
+  "assertion_ids": [
+    "claim.fixture.no-seeded-authority",
+    "claim.strict.fields",
+    "claim.role.denied",
+    "claim.manager.scope",
+    "claim.epoch.stale",
+    "claim.spec.stale",
+    "claim.vector.refused",
+    "claim.failure.atomic",
+    "claim.signed.ownership",
+    "claim.vector.exact",
+    "claim.outbox.atomic",
+    "claim.exact.replay",
+    "claim.replay.conflict",
+    "claim.write-scope.conflict",
+    "claim.dependency.not-qualified",
+    "claim.wave.earlier-unqualified",
+    "claim.run.not-admitting",
+    "claim.proof-registry.missing",
+    "claim.single-owner.second-claim-refused",
+    "claim.component.registered",
+    "claim.concurrent.idempotency",
+    "claim.restart.replay",
+    "claim.protocol.identity",
+    "claim.no-false-qualification",
+    "claim.destroy-intent.blocks-continuation",
+    "claim.cleanup.observed",
+    "claim.concurrent.multi-manager-quota",
+    "claim.quota-rollback.full-vector",
+    "claim.quota-cleanup.observed",
+    "claim.concurrent.sandbox-budget",
+    "claim.sandbox.pool-budget-independent",
+    "claim.sandbox.exact-charge",
+    "claim.sandbox-cleanup.observed",
+    "claim.capacity.creating-uncertain-counted",
+    "claim.capacity.under-boundary-admitted",
+    "claim.capacity.boundary-refused-dimension",
+    "claim.capacity.rate-sandbox-separate",
+    "claim.capacity-cleanup.observed",
+    "claim.custody.sweeper-reclaims-ordinary-expiry",
+    "claim.custody.submitted.survives-expiry",
+    "claim.custody.submitted.reclaim-refused",
+    "claim.custody.qualifying.survives-expiry",
+    "claim.custody.qualifying.reclaim-refused",
+    "claim.custody.qualified.survives-expiry",
+    "claim.custody.qualified.reclaim-refused",
+    "claim.custody.integrating.survives-expiry",
+    "claim.custody.integrating.reclaim-refused",
+    "claim.custody.uncertain-resources-counted",
+    "claim.custody.no-fresh-packet",
+    "claim.custody-cleanup.observed"
+  ],
+  "cases": [
+    "V-002",
+    "V-007"
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/5_1.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "fixtures": [
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/scheduler/claim.js",
+    "services/hyperfide/dist/scheduler/leases.js",
+    "services/hyperfide/dist/scheduler/resources.js",
+    "services/hyperfide/dist/storage/runtime.js",
+    "services/hyperfide/dist/spec/import.js"
+  ],
+  "required_artifacts": [
+    "scheduler/observations.json",
+    "scheduler/cleanup.json"
+  ],
+  "required_env": [
+    "DATABASE_URL"
+  ],
+  "resources": [
+    {
+      "id": "hf-task-5.1-runtime",
+      "kind": "postgresql-database-role-listener",
+      "scope": "task5.1-disposable"
+    }
+  ],
+  "schema_version": 1,
+  "scope": "task-component",
+  "source_files": [
+    "services/hyperfide/src/scheduler/claim.ts",
+    "services/hyperfide/migrations/0005-scheduling.sql",
+    "services/hyperfide/components/5.1.json",
+    "tests/hyperfide/cases/tasks/5_1.py",
+    "tests/hyperfide/cases/tasks/3_2.py",
+    "tests/hyperfide/cases/tasks/3_1.py",
+    "tests/hyperfide/support/identity_fixture.py",
+    "tests/hyperfide/registrations/5.1.json",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py",
+    "services/hyperfide/package.json",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/tsconfig.json"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "task": "5.1",
+  "timeout_seconds": 600,
+  "variant": "task:5.1"
+}
