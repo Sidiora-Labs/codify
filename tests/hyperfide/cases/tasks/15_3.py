@@ -34,14 +34,18 @@ def accepted_intent():
     section('proof',rubric_digest=rubric),section('proof.review.3.2.1',reviewers=[self.hf153_reviewer],rubric_digest=rubric)]}}
    query=query.replace("'fixture','{}',1)","'fixture',$5,1)");values=list(values)+[json.dumps(document)]
   elif query.startswith('INSERT INTO hyperfide.tasks(') and values and len(values)>7:
-   definition=json.loads(values[7])
+   columns=query.split('(',1)[1].split(')',1)[0].split(',')
+   definition_index=columns.index('definition')
+   definition=json.loads(values[definition_index])
    if 'section' not in definition:definition['section']={'name':'task.3.2','line':1,'fields':{'reqs':field('reqs',['3.2.1'])}}
-   values=list(values);values[7]=json.dumps(definition)
+   values=list(values);values[definition_index]=json.dumps(definition)
   elif query.startswith('INSERT INTO hyperfide.proof_registries(') and hasattr(self,'hf153_reviewer'):
-   policy=json.loads(values[6])
+   columns=query.split('(',1)[1].split(')',1)[0].split(',')
+   policy_index=columns.index('policy');digest_index=columns.index('registry_digest')
+   policy=json.loads(values[policy_index])
    for clause in policy.get('clauses',[]):
     if clause.get('mode')=='REVIEW':clause['reviewers']=[self.hf153_reviewer]
-   values=list(values);values[5]=scheduler.identity(policy);values[6]=json.dumps(policy)
+   values=list(values);values[digest_index]=scheduler.identity(policy);values[policy_index]=json.dumps(policy)
   return original(self,query,values,*args,**kwargs)
  base.sql=sql;base._hf153_intent=True
 def sha(data):return 'sha256:'+hashlib.sha256(data).hexdigest()
