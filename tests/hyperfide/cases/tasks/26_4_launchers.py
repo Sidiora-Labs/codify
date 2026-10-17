@@ -14,6 +14,10 @@ def check(name,fn):
  print(json.dumps({'type':'assertion','id':name,'expected':'observed','actual':actual}),flush=True)
 def last_json(text):
  lines=[x for x in text.splitlines() if x.startswith('{')];return json.loads(lines[-1]) if lines else {}
+def identifies_mode(text,mode):
+ # Authority responses also carry task 25's ownership and cache metadata.
+ result=json.loads(text)
+ return result.get('ok') is True and result.get('mode')==mode and result.get('local_fallback') is False
 def digest(path):return hashlib.sha256(path.read_bytes()).hexdigest()
 def tree(path):return {str(p.relative_to(path)):digest(p) for p in sorted(path.rglob('*')) if p.is_file()}
 class Release:
@@ -104,14 +108,14 @@ def offline(base,env):
   return subprocess.run((['unshare','-n'] if isolated else [])+[str(ROOT/binary),*args],cwd=repo,env=e,text=True,capture_output=True,timeout=60)
  check('offline.network-disabled-without-postgres-or-model-credentials',lambda:expect(isolated and not any(k in clean for k in ('DATABASE_URL','PGHOST','ANTHROPIC_API_KEY','OPENAI_API_KEY')) and native('authority','mode').returncode==0))
  init=native('init');mode=native('authority','mode')
- check('offline.local-mode-identified',lambda:expect(init.returncode==0 and json.loads(mode.stdout)=={'ok':True,'mode':'local','local_fallback':False}))
+ check('offline.local-mode-identified',lambda:expect(init.returncode==0 and identifies_mode(mode.stdout,'local')))
  remembered=native('remember','offline decision kept local');recalled=native('recall','--json');context=native('context','core','--json')
  check('offline.local-core-workflow-works',lambda:expect(remembered.returncode==0 and recalled.returncode==0 and json.loads(recalled.stdout)['memories'][0]['body']=='offline decision kept local' and context.returncode==0 and any(s['name']=='core' for s in json.loads(context.stdout)['symbols'])))
  check('offline.cg-alias-local-parity',lambda:expect(native('recall','--json',binary='cg').stdout==recalled.stdout and native('authority','mode',binary='cg').stdout==mode.stdout))
  local_store=tree(repo/'.codegraph')
  marker=repo/'.hyperfide/authority.json';marker.parent.mkdir();marker.write_text(json.dumps({'schema_version':1,'mode':'distributed','authority_epoch':uid()}));marker.chmod(0o600)
  offline_mode=native('authority','mode',extra={'HYPERFIDE_MODE':'offline'})
- check('offline.distributed-client-identifies-offline',lambda:expect(json.loads(offline_mode.stdout)=={'ok':True,'mode':'offline','local_fallback':False}))
+ check('offline.distributed-client-identifies-offline',lambda:expect(offline_mode.returncode==0 and identifies_mode(offline_mode.stdout,'offline')))
  refused=native('remember','divergent offline write',extra={'HYPERFIDE_MODE':'offline'})
  check('offline.distributed-ownership-fails-clearly',lambda:expect(refused.returncode==78 and last_json(refused.stderr)=={'ok':False,'error':{'code':'OFFLINE_AUTHORITY_UNAVAILABLE','message':'Remote authority is unavailable while offline'},'local_fallback':False}))
  reconnected=native('authority','mode')
