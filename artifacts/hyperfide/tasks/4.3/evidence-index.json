@@ -1,9 +1,9 @@
 {
   "task": "4.3",
-  "commit": "eb63d7d1b7e11ca90d1ab2f30236d3f44c83622b",
+  "commit": "6a1c183094309a3ea3bf70726e3cd69329fe7cf7",
+  "requalified_on": "6a1c183094309a3ea3bf70726e3cd69329fe7cf7",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-010 --manifest tests/hyperfide/manifests/tasks/4.3.json && python3 tests/hyperfide/qualify.py --case V-023 --manifest tests/hyperfide/manifests/tasks/4.3.json",
-  "exit_code": 1,
-  "stdout_tail": "{\"status\": \"FAIL\", \"receipt_id\": \"b2fa25e0-cf5f-46ef-bbba-4eba82d768fe\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/4.3/campaigns/09f4e9fd7d88e42cfc6c35afc52438ad30b808bfa92c4c551b94b926ed6d2402\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": [\"executed assertion inventory differs from exact registration\", \"one or more behavioural assertions failed\", \"probe failed, was unavailable, or timed out\", \"required artifact missing or unsafe: replica43/observations.json\"]}\n\nreal\t0m16.954s\nuser\t0m6.:00s\nsys\t0m4.361s\n",
-  "ran_at": "2026-10-17T09:31:05.188936+00:00",
-  "note": "FAIL: upstream 3_2.py PacketFixture definition lacks section.fields required by spec/obligations.ts clauseCoverage (2.4 commit 272c6854); 3_2.py's own probe fails identically. V-023 not reached (&&)."
+  "exit_code": 0,
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"e40edd1a-f50f-403b-bec2-3bb9ac14d1f1\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/4.3/campaigns/1723f307519a08c62dffc0ef7ce0c4ad4386a6a4dbe44d45dac425a430e9cf19\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"71964e53-c7d1-46bc-a3eb-10a4537d37f8\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/4.3/campaigns/1723f307519a08c62dffc0ef7ce0c4ad4386a6a4dbe44d45dac425a430e9cf19\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T09:55:25.011677+00:00"
 }
