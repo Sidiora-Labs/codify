@@ -73,7 +73,7 @@ static int readiness_unprivileged(const HfJson *job,int result,MeasuredSource *m
  hf_json_get(observed,"source_state_digest",actual,sizeof actual)&&!strcmp(actual,expected_state)&&hf_json_get(observed,"workspace_digest",actual,sizeof actual)&&!strcmp(actual,expected_workspace)&&hf_json_bool(observed,hf_json_field(observed,0,"authority_granted"),&authority)&&!authority;
  if(ok){
   int sources=hf_json_field(observed,0,"source_bindings"),ready_key=hf_json_field(job,ready,"source_repository_key");char wanted_key[256],key[256],commit[65],tree[65],wanted_commit[65],wanted_tree[65];int matches=0;
-  ok=sources>=0&&observed->tokens[sources].type=='a'&&hf_json_string(job,ready_key,wanted_key,sizeof wanted_key)&&string_at(job,binding,"source_object_id",wanted_commit,sizeof wanted_commit)&&string_at(job,binding,"source_tree_id",wanted_tree,sizeof wanted_tree);
+  ok=sources>=0&&observed->tokens[sources].type=='['&&hf_json_string(job,ready_key,wanted_key,sizeof wanted_key)&&string_at(job,binding,"source_object_id",wanted_commit,sizeof wanted_commit)&&string_at(job,binding,"source_tree_id",wanted_tree,sizeof wanted_tree);
   if(ok)for(int t=sources+1;t<observed->tokens[sources].next;t=observed->tokens[t].next){
    if(string_at(observed,t,"id",key,sizeof key)&&!strcmp(key,wanted_key)){++matches;if(!string_at(observed,t,"commit",commit,sizeof commit)||!string_at(observed,t,"tree",tree,sizeof tree)||strcmp(commit,wanted_commit)||strcmp(tree,wanted_tree)){ok=0;break;}snprintf(measured->commit,sizeof measured->commit,"%s",commit);snprintf(measured->tree,sizeof measured->tree,"%s",tree);}
   }
@@ -129,7 +129,7 @@ static int readiness(const HfJson *job,int result,const char *config_path,Measur
 typedef struct {char *key,*value;} EnvEntry;
 static int compare_env(const void *a,const void *b){return strcmp(((const EnvEntry*)a)->key,((const EnvEntry*)b)->key);}
 static int environment(const HfJson *j,int plan,EnvEntry entries[64],int *count,char digest[65]){
- int object=hf_json_field(j,plan,"environment");*count=0;if(object<0||j->tokens[object].type!='o'||j->tokens[object].count>128)return 0;
+ int object=hf_json_field(j,plan,"environment");*count=0;if(object<0||j->tokens[object].type!='{'||j->tokens[object].count>128)return 0;
  for(int t=object+1;t<j->tokens[object].next;){if(*count==64)return 0;int value=t+1;entries[*count].key=calloc(128,1);entries[*count].value=calloc(4096,1);if(!entries[*count].key||!entries[*count].value||!hf_json_string(j,t,entries[*count].key,128)||!hf_json_string(j,value,entries[*count].value,4096))return 0;
   const char *key=entries[*count].key;for(const char *p=key;*p;++p)if(!((*p>='A'&&*p<='Z')||(*p>='0'&&*p<='9')||*p=='_'))return 0;
   if(!*key||!strncmp(key,"LD_",3)||!strncmp(key,"DYLD_",5)||!strncmp(key,"HF_",3)||!strcmp(key,"HOME")||!strcmp(key,"TMPDIR")||!strcmp(key,"PATH"))return 0;
@@ -167,12 +167,12 @@ int hf_runner_job_execute(const char *request,FILE *out){
  if(!no_processes((uid_t)uid,owned,&owned_count)||owned_count||!readiness(job,result,config,&measured,(uid_t)uid,(gid_t)gid,request_started+(timeout<remaining?timeout:remaining)*1000000LL,operation)){hf_http_response_free(&response);free(job);return hf_native_error(out,"ACTUAL_WORKSPACE_NOT_READY_OR_SLOT_BUSY");}
  int root=open(workspace,O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW),cwd=-1;struct stat st;if(root>=0&&!fstat(root,&st)&&st.st_uid==(uid_t)uid&&!(st.st_mode&077))cwd=!strcmp(relative_cwd,".")?dup(root):open_beneath(root,relative_cwd,1);
  int array=hf_json_field(job,plan,"argv");char **argv=NULL;int argc=0,binary=-1;char executable[65],environment_digest[65];EnvEntry env[64]={0};int env_count=0;
- ok=cwd>=0&&array>=0&&job->tokens[array].type=='a'&&job->tokens[array].count>0&&job->tokens[array].count<=256;
+ ok=cwd>=0&&array>=0&&job->tokens[array].type=='['&&job->tokens[array].count>0&&job->tokens[array].count<=256;
  if(ok){argv=calloc((size_t)job->tokens[array].count+1,sizeof *argv);ok=argv!=NULL;}
  for(int t=array+1;ok&&t<job->tokens[array].next;t=job->tokens[t].next){argv[argc]=calloc(4096,1);ok=argv[argc]&&hf_json_string(job,t,argv[argc],4096);++argc;}
  if(ok&&argv[0][0]=='/')binary=open(argv[0],O_RDONLY|O_CLOEXEC|O_NOFOLLOW);
  ok=ok&&binary>=0&&!fstat(binary,&st)&&S_ISREG(st.st_mode)&&st.st_uid==0&&!(st.st_mode&022)&&fd_hash(binary,executable)&&!strcmp(expected_executable+7,executable)&&environment(job,plan,env,&env_count,environment_digest)&&!strcmp(expected_environment+7,environment_digest);
- int artifacts=hf_json_field(job,plan,"artifact_paths");if(ok)ok=artifacts>=0&&job->tokens[artifacts].type=='a'&&job->tokens[artifacts].count<=64;
+ int artifacts=hf_json_field(job,plan,"artifact_paths");if(ok)ok=artifacts>=0&&job->tokens[artifacts].type=='['&&job->tokens[artifacts].count<=64;
  for(int t=artifacts+1;ok&&t<job->tokens[artifacts].next;t=job->tokens[t].next){char file[4096];ok=hf_json_string(job,t,file,sizeof file)&&relative(file);if(ok){int existing=open_beneath(cwd,file,0);if(existing>=0){close(existing);ok=0;}}}
  sqlite3 *db=ok?job_database(state_dir):NULL;sqlite3_stmt *q=NULL;char receipt_path[4200];snprintf(receipt_path,sizeof receipt_path,"%s/job-%s.receipt.json",ok?state_dir:"",operation);
  if(ok&&db){int rc=sqlite3_prepare_v2(db,"INSERT INTO jobs(id,digest,state,uid) VALUES(?,?,'INTENT',?)",-1,&q,NULL);if(rc==SQLITE_OK){sqlite3_bind_text(q,1,operation,-1,SQLITE_STATIC);sqlite3_bind_text(q,2,plan_digest,-1,SQLITE_STATIC);sqlite3_bind_int64(q,3,uid);rc=sqlite3_step(q);}sqlite3_finalize(q);ok=rc==SQLITE_DONE;}else ok=0;

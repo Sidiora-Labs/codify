@@ -6,6 +6,7 @@ ROOT=pathlib.Path(__file__).resolve().parents[4]
 PROBE=r'''
 #define _GNU_SOURCE
 #include "src/hyperfide/launch.c"
+#include "src/hyperfide/job.c"
 static int checks=0;
 static void check(int ok,const char *id){++checks;printf("{\"type\":\"assertion\",\"id\":\"%s\",\"expected\":true,\"actual\":%s}\n",id,ok?"true":"false");fflush(stdout);if(!ok)exit(1);}
 static pid_t worker(uid_t uid){
@@ -63,16 +64,25 @@ int main(void){
  check(frame_reserve(db,"frame-a","launch-a","sha256:b")==-1,"runner.frame.changed-bytes-conflict");
  check(sqlite3_exec(db,"PRAGMA query_only=ON",NULL,NULL,NULL)==SQLITE_OK,"runner.frame.write-fault");
  check(frame_reserve(db,"frame-b","launch-a","sha256:a")==-2,"runner.frame.ledger-fault-refused");
- sqlite3_close(db);return checks==35?0:3;
+ sqlite3_close(db);
+ HfJson *json=malloc(sizeof *json);EnvEntry actual_env[64]={0};int actual_count=0;char actual_digest[65];
+ check(json&&hf_json_parse(json,"{\"environment\":{\"LANG\":\"C.UTF-8\"},\"argv\":[\"/usr/bin/printf\",\"\"],\"artifact_paths\":[]}"),"runner.job.actual-parser");
+ check(json->tokens[hf_json_field(json,0,"argv")].type=='['&&json->tokens[hf_json_field(json,0,"artifact_paths")].type=='[',"runner.job.actual-array-tokens");
+ check(environment(json,0,actual_env,&actual_count,actual_digest)&&actual_count==1&&!strcmp(actual_env[0].key,"LANG")&&!strcmp(actual_env[0].value,"C.UTF-8"),"runner.job.actual-environment-object");
+ for(int k=0;k<64;++k){free(actual_env[k].key);free(actual_env[k].value);actual_env[k].key=actual_env[k].value=NULL;}
+ check(hf_json_parse(json,"{\"environment\":{\"HF_FORGED_AUTH\":\"x\"}}")&&!environment(json,0,actual_env,&actual_count,actual_digest),"runner.job.auth-env-refused");
+ for(int k=0;k<64;++k){free(actual_env[k].key);free(actual_env[k].value);}
+ free(json);return checks==39?0:3;
 }
 '''
 def main():
     with tempfile.TemporaryDirectory(prefix="hyperfide-native-watchdog-") as temp:
         work=pathlib.Path(temp);probe=work/"probe.c";binary=work/"probe"
         probe.write_text(PROBE)
-        files=["supervisor.c","transport.c","process_tree.c","control.c","job.c"]
+        files=["supervisor.c","supervisor_daemon.c","transport.c","process_tree.c","control.c"]
         command=["cc","-std=gnu11","-O1","-Wall","-Wextra","-Werror","-I",str(ROOT),"-I",str(ROOT/"src/hyperfide"),str(probe),*[str(ROOT/"src/hyperfide"/p) for p in files],"-lsqlite3","-lcurl","-lcrypto","-o",str(binary)]
-        subprocess.run(command,check=True,cwd=ROOT,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        compiled=subprocess.run(command,cwd=ROOT,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        if compiled.returncode:raise RuntimeError(compiled.stderr.decode(errors="replace"))
         result=subprocess.run([str(binary)],cwd=ROOT,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=15)
         print(result.stdout,end="")
         if result.stderr: print(result.stderr,end="",file=__import__("sys").stderr)

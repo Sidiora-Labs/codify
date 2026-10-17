@@ -5,7 +5,7 @@ The replay test commits exact persisted pending bytes through genuine14 then
 restarts the native child: it proves lost-reply replay semantics without mocking14.
 """
 from __future__ import annotations
-import base64,fcntl,hashlib,importlib.util,json,os,signal,subprocess,tempfile,time,uuid
+import base64,fcntl,hashlib,importlib.util,json,os,signal,subprocess,tempfile,time,uuid,sys
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[3]
 RESULTS=[]
@@ -47,6 +47,77 @@ class Child:
             self.child.send_signal(signal.SIGKILL if kill else signal.SIGTERM)
         out,err=self.child.communicate(timeout=12)
         return self.child.returncode,out.decode(errors="replace"),err.decode(errors="replace")
+
+def entrypoint_probe(f,folder):
+    """Additional real native CLI tests; never substitute the private C driver."""
+    import select
+    filename=os.environ.get("HF_SUPERVISOR_DAEMON_NATIVE_BINARY")
+    expected=os.environ.get("HF_SUPERVISOR_DAEMON_NATIVE_SHA256")
+    expect(bool(filename) and bool(expected),"exact native CLI binary and SHA256 required")
+    binary=Path(filename).resolve()
+    expect(binary.is_file() and hashlib.sha256(binary.read_bytes()).hexdigest()==expected,"actual native CLI binary pin differs")
+    root=folder/"entry-state";root.mkdir(mode=0o700)
+    registration=folder/"entry-registration.json";private(registration,{"preparation_digest":f.preparation,"inventory":[]})
+    transport=folder/"entry-transport.json"
+    private(transport,{"origin":f.origin,"ca_file":str(f.ca),"key_path":str(f.keys["runner"]["path"]),"credential_id":f.ids["runner"],"timeout_ms":1000})
+    config=folder/"entry-runner.json"
+    private(config,{"transport_config":str(transport),"state_dir":str(root),"organisation_id":f.ids["organisation"],"run_id":f.ids["run"],"sandbox_id":f.ids["sandbox"],"boot_id":f.ids["boot"],"boot_generation":"1","runner_registration_path":str(registration),"heartbeat_interval_ms":1000})
+    request=json.dumps({"config_path":str(config)},separators=(",",":")).encode()
+    argv=[str(binary),"--component","12.1","--action","supervisor.serve"]
+    # The actual RUNNER CLI has no database/admin fixture environment.
+    env={name:os.environ[name] for name in ("PATH","LANG","LC_ALL","TZ") if name in os.environ}
+    child=subprocess.Popen(argv,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env)
+    child.stdin.write(request);child.stdin.close();child.stdin=None
+    def version():
+        rows=f.sql("SELECT state_version::text FROM hyperfide.identity_runner_status WHERE credential_id=$1",[f.ids["runner"]])
+        return int(rows[0]["state_version"]) if rows else 0
+    try:
+        expect(select.select([child.stdout],[],[],5)[0],"actual CLI did not stream before exiting")
+        event=json.loads(child.stdout.readline())
+        check("daemon.entry-streams-before-exit",lambda:expect(child.poll() is None and event["event"]=="RUNNER_HEARTBEATING" and event["dispatch_ready"] is False,"serve used finite/memstream dispatch"))
+        before=version();wait_for(lambda:version()>before)
+        check("daemon.entry-real-signed-heartbeat",lambda:expect(child.poll() is None,"actual CLI did not keep heartbeating"))
+        before=version();writer=os.open("/proc/"+str(child.pid)+"/fd/1",os.O_WRONLY|os.O_NONBLOCK)
+        try:
+            while True:
+                try:os.write(writer,b"x"*4096)
+                except BlockingIOError:break
+            wait_for(lambda:version()>before)
+            check("daemon.entry-full-controller-pipe-survival",lambda:expect(child.poll() is None,"actual CLI stalled under observer backpressure"))
+        finally:os.close(writer)
+        before=version();child.stdout.close();child.stdout=None
+        wait_for(lambda:version()>before)
+        check("daemon.entry-controller-disconnect-survival",lambda:expect(child.poll() is None,"actual CLI died with controller disconnect"))
+        child.send_signal(signal.SIGTERM);child.communicate(timeout=12)
+        check("daemon.entry-bounded-sigterm",lambda:expect(child.returncode==0,"actual CLI did not stop cleanly"))
+    finally:
+        if child.poll() is None:child.kill();child.wait(timeout=3)
+    f.sql("UPDATE hyperfide.identity_runner_status SET state_version=state_version+1 WHERE credential_id=$1",[f.ids["runner"]])
+    reader,writer=os.pipe();os.set_blocking(writer,False)
+    while True:
+        try:os.write(writer,b"x"*4096)
+        except BlockingIOError:break
+    os.set_blocking(writer,True)
+    encoded=base64.urlsafe_b64encode(request).decode().rstrip("=")
+    blocked=subprocess.Popen(argv+["--request-base64",encoded],stdin=subprocess.DEVNULL,stdout=writer,stderr=writer,env=env)
+    os.close(writer)
+    try:
+        check("daemon.entry-rejection-full-pipe-exits",lambda:expect(blocked.wait(timeout=5)!=0 and json.loads((root/"daemon-state.json").read_text())["pending"]["kind"]=="heartbeat","actual entry blocked final rejection or lost pending"))
+    finally:
+        if blocked.poll() is None:blocked.kill();blocked.wait(timeout=3)
+        os.close(reader)
+def entry_main():
+    fixture_module=load_fixture();f=None
+    try:
+        with tempfile.TemporaryDirectory(prefix="hf-runner-entry-") as temp:
+            folder=Path(temp);folder.chmod(0o700)
+            f=fixture_module.IdentityFixture();f.bootstrap_runner()
+            entrypoint_probe(f,folder)
+    finally:
+        if f:f.close()
+    print(json.dumps({"type":"cleanup","resources":[],"complete":True}),flush=True)
+    return int(any(value!="observed" for _,value in RESULTS))
+
 def main():
     fixture_module=load_fixture()
     with tempfile.TemporaryDirectory(prefix="hf-runner-daemon-") as temp:
@@ -169,6 +240,7 @@ def main():
             check("daemon.nonregular-registration-refused-bounded",lambda:expect(fifo.child.returncode!=0,"FIFO registration blocked or was accepted"))
             check("daemon.no-dispatch-authority",lambda:expect('"dispatch_ready":false' in stopped[1] and '"execution_authority":false' in stopped[1] and '"dispatch_ready":true' not in stopped[1],"14 heartbeat invented dispatch authority"))
             check("daemon.root-private-journal",lambda:expect(statepath.stat().st_mode&0o777==0o600 and root.stat().st_mode&0o777==0o700,"state permissions are not private"))
+            if os.environ.get("HF_SUPERVISOR_DAEMON_NATIVE_BINARY") or os.environ.get("HF_SUPERVISOR_DAEMON_NATIVE_SHA256"):entrypoint_probe(f,folder)
         finally:
             for child in children:
                 if child.child.poll() is None:
@@ -176,4 +248,4 @@ def main():
             if with_actual:with_actual.close()
     print(json.dumps({"type":"cleanup","resources":[],"complete":True}),flush=True)
     return int(any(value!="observed" for _,value in RESULTS))
-if __name__=="__main__":raise SystemExit(main())
+if __name__=="__main__":raise SystemExit(entry_main() if "--entry-only" in sys.argv else main())
