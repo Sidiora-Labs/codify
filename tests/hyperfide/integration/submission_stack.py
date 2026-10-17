@@ -94,13 +94,14 @@ class SubmissionStack:
             source+='[task.'+name+']\nwave = 1\nreqs = ["16.1"]\nacceptance_ids = ["V-013"]\nrequires = []\ntouches = ["src/'+name+'.ts"]\n'
         parsed=json.loads(subprocess.check_output(["node","--input-type=module","-e","import{parseKvx}from'./services/hyperfide/dist/spec/import.js';let s='';for await(const c of process.stdin)s+=c;process.stdout.write(JSON.stringify(parseKvx(s)));"],input=source.encode(),cwd=ROOT,timeout=30))
         spec=uid();i["submission_spec"]=spec
+        self.spec_generation=self.scheduler.next_spec_generation(f)
         intent={"schema_version":1,"revision_digest":sha(b"submission-envelope-"+spec.encode()),"source_digest":sha(source.encode()),
             "repositories":[{"repository_id":i["repository"],"source_object_id":self.baseline,"integration_ref":"refs/heads/main"}],"allowed_actions":f.actions,
             "closure_policy":{"required_evidence":["unit"],"required_review_roles":[],"publication":"AFTER_QUALIFICATION"},"provenance":None,"parsed":parsed,"runtime_wave_offset":0}
         f.sql("INSERT INTO hyperfide.spec_revisions(organisation_id,project_id,id,source_digest,source_content,document,schema_version,revision_digest) VALUES($1,$2,$3,$4,$5,$6,1,$7)",
             [i["organisation"],i["project"],spec,sha(source.encode()),source,json.dumps(intent),intent["revision_digest"]])
-        f.sql("INSERT INTO hyperfide.run_spec_revisions(organisation_id,run_id,spec_generation,spec_revision_id) VALUES($1,$2,2,$3)",[i["organisation"],i["run"],spec])
-        f.sql("UPDATE hyperfide.runs SET spec_generation=2,spec_revision_id=$3,state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[i["organisation"],i["run"],spec])
+        f.sql("INSERT INTO hyperfide.run_spec_revisions(organisation_id,run_id,spec_generation,spec_revision_id) VALUES($1,$2,$4,$3)",[i["organisation"],i["run"],spec,self.spec_generation])
+        f.sql("UPDATE hyperfide.runs SET spec_generation=$4,spec_revision_id=$3,state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[i["organisation"],i["run"],spec,self.spec_generation])
         sections={section["name"]:section for section in parsed["sections"]}
         f.submission_criteria={}
         for name in self.tasks:
@@ -108,15 +109,15 @@ class SubmissionStack:
             definition=copy.deepcopy(f.packet_definition);definition.update(feature_key="alpha",touches=["src/"+name+".ts"],section=sections["task."+name])
             f.definitions[name]=definition
             criteria=sha(("accepted-submission-criteria-"+name).encode());f.submission_criteria[name]=criteria
-            f.sql("INSERT INTO hyperfide.tasks(organisation_id,run_id,id,task_key,feature_package_id,spec_revision_id,spec_generation,criteria_digest,definition,wave) VALUES($1,$2,$3,$4,$5,$6,2,$7,$8,1)",
-                [i["organisation"],i["run"],task,"alpha.submit-"+name,i["package"],spec,criteria,json.dumps(definition)])
+            f.sql("INSERT INTO hyperfide.tasks(organisation_id,run_id,id,task_key,feature_package_id,spec_revision_id,spec_generation,criteria_digest,definition,wave) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,1)",
+                [i["organisation"],i["run"],task,"alpha.submit-"+name,i["package"],spec,self.spec_generation,criteria,json.dumps(definition)])
             f.sql("INSERT INTO hyperfide.worker_slots(organisation_id,id,sandbox_id,slot_key,boot_generation,capacity_kind,state) VALUES($1,$2,$3,$4,1,'AGENT','READY')",
                 [i["organisation"],slot,i["sandbox"],"submit-"+name])
-            policy={"schema_version":1,"criteria_digest":criteria,"spec_revision_id":spec,"spec_generation":"2","repository_id":i["repository"],"source_object_id":self.baseline,
+            policy={"schema_version":1,"criteria_digest":criteria,"spec_revision_id":spec,"spec_generation":self.spec_generation,"repository_id":i["repository"],"source_object_id":self.baseline,
                 "rubric_digest":rubric,"checks":[check],"clauses":[{"id":"16.1","mode":"EXECUTABLE","acceptance_ids":["V-013"],"checks":["unit"]}],
                 "inputs":{key:sha(("accepted-"+key).encode()) for key in ("source","dependency","toolchain","configuration","graph","contract")},"contract_digests":[]}
-            f.sql("INSERT INTO hyperfide.proof_registries(organisation_id,run_id,task_id,spec_generation,spec_revision_id,criteria_digest,registry_digest,policy) VALUES($1,$2,$3,2,$4,$5,$6,$7)",
-                [i["organisation"],i["run"],task,spec,criteria,self.scheduler.identity(policy),json.dumps(policy)])
+            f.sql("INSERT INTO hyperfide.proof_registries(organisation_id,run_id,task_id,spec_generation,spec_revision_id,criteria_digest,registry_digest,policy) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
+                [i["organisation"],i["run"],task,self.spec_generation,spec,criteria,self.scheduler.identity(policy),json.dumps(policy)])
     # Signed HTTPS helpers.
     def put(self,data):
         i=self.fixture.ids
@@ -125,7 +126,7 @@ class SubmissionStack:
         return self.fixture.ok("artifact.object.put",value,component="15.2",key="operator")["artifact"]["artifact_id"]
     def claim(self,name,lease_ms=300000,upload=True):
         f=self.fixture;i=f.ids;org,run=i["organisation"],i["run"]
-        request=f.prepare_claim(name,lease_ms);request.update(run_spec_generation="2",spec_generation="2",spec_revision_id=i["submission_spec"])
+        request=f.prepare_claim(name,lease_ms);request.update(run_spec_generation=self.spec_generation,spec_generation=self.spec_generation,spec_revision_id=i["submission_spec"])
         token=f.claim(name,request=request)["token"]
         workspace,session=uid(),uid()
         f.sql("INSERT INTO hyperfide.workspaces(organisation_id,run_id,id,repository_id,attempt_id,attempt_generation,sandbox_id,slot_id,sandbox_boot_generation,base_commit,branch_ref,workspace_path) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
