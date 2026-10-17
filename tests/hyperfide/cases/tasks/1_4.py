@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import hashlib
-import io
 import json
 import os
 from pathlib import Path
@@ -15,7 +14,6 @@ import time
 import subprocess
 import sys
 import tempfile
-import tarfile
 
 ROOT = Path(__file__).resolve().parents[4]
 IDS = [
@@ -55,7 +53,8 @@ FAILED = []
 
 def run(argv, *, cwd=ROOT, text="", timeout=40):
     result = subprocess.run([str(x) for x in argv], cwd=cwd, input=text, text=True,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout,
+                            env=dict(os.environ, HYPERFIDE_REQUIRE_SYNC_REPLICA="0"))
     return result
 
 
@@ -197,6 +196,7 @@ def native_fixture(base):
     (directory / "scripts").mkdir()
     for relative in ["Makefile", "scripts/hyperfide-native-components.py",
                      "src/hyperfide/components.h", "src/hyperfide/component_main.c",
+                     "src/sha256.c", "src/cg.h", "src/semantic.h",
                      "src/hyperfide/components/schema.kvx"]:
         destination = directory / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -275,7 +275,10 @@ def main():
         def authorize():
             policy = base / "real-policy.json"
             policy.write_text(json.dumps(BASE_POLICY))
+            components=base/"policy-components";components.mkdir()
+            shutil.copyfile(ROOT/"services/hyperfide/components/1.4.json",components/"1.4.json")
             result=run(["node",ROOT/"services/hyperfide/dist/control.js","--policy",policy,
+                        "--components",components,"--module-root",ROOT/"services/hyperfide/dist",
                         "--spec-revision","fixture-revision"],text=json.dumps({"id":"auth","component":"1.4",
                         "action":"programme.authorize","input":{"action":"fixture.echo","spec_revision":"fixture-revision","policy_revision":1}})+"\n")
             expect(result.returncode==0 and response(result)["ok"] is True,f"real policy component failed: {result}")
@@ -492,8 +495,10 @@ export function createComponent(ctx){{log('factory');return {{apiVersion:1,actio
             for task_id,status in [("4.1","in_progress"),("8.1","done")]:
                 block=re.search(r"(?ms)^\[task\."+re.escape(task_id)+r"\]\n(.*?)(?=^\[|\Z)",after)
                 expect(block is not None and f'status = "{status}"' in block.group(1),"render erased exact task progress")
-            acceptance=after.split("[acceptance.V-001]")[1]
-            expect('qualification = "PASS"' not in acceptance and acceptance.count('qualification = "UNRUN"')==56,"component progress promoted full cases")
+            expected_cases=set(re.findall(r'^\|\s*(V-\d{3})\s*\|', (pack/"verification.md").read_text(), re.M))
+            acceptance=dict(re.findall(r'(?ms)^\[acceptance\.(V-\d{3})\]\n(.*?)(?=^\[|\Z)', after))
+            expect(set(acceptance)==expected_cases and all('qualification = "UNRUN"' in block and
+                   'qualification = "PASS"' not in block for block in acceptance.values()),"component progress promoted full cases")
         check("foundation.authoring.preserve-state",preserve)
         def check_no_write():
             path=pack/"spec.kvx"
@@ -561,22 +566,23 @@ export function createComponent(ctx){{log('factory');return {{apiVersion:1,actio
         check("foundation.authoring.preamble-duplicate",lambda:extra_structural_refusal("preamble"))
         check("foundation.authoring.verification-scope",lambda:extra_structural_refusal("scope"))
         def draft_control():
-            revision="c1047fe2bcdef0a44053d49f36e8e732c0206fea"
-            result=subprocess.run(["git","archive",revision,"spec/hyperfide","spec/workflow.kvx"],
-                                  cwd=ROOT,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
-            expect(result.returncode==0,f"immutable historical draft fixture unavailable: {result.stderr!r}")
-            repository=base/"draft-control";repository.mkdir()
-            with tarfile.open(fileobj=io.BytesIO(result.stdout),mode="r:") as archive:
-                archive.extractall(repository,filter="data")
-            draft=repository/"spec/hyperfide"
-            for child in ROOT.iterdir():
-                if child.name not in {"spec",".git","artifacts","node_modules"}:
-                    (repository/child.name).symlink_to(child,target_is_directory=child.is_dir())
+            draft=authoring_fixture(base/"draft-control")
+            path=draft/"spec.kvx"
+            text=path.read_text()
+            text=re.sub(r'(?m)^status = "[^\"]+"', 'status = "draft"', text, count=1)
+            text=text.replace('implementation_authorized = true', 'implementation_authorized = false', 1)
+            text=re.sub(r'(?m)^state = "[^\"]+"', 'state = "not_started"', text, count=1)
+            text=re.sub(r'(?m)^approval_record = .*\n', '', text, count=1)
+            text=re.sub(r'(?ms)(^\[task\.[^\]]+\]\n.*?)^status = "[^\"]+"', r'\1status = "pending"', text)
+            text=re.sub(r'(?m)^qualification = "[^\"]+"', 'qualification = "UNRUN"', text)
+            path.write_text(text)
+            workflow=draft.parent/"workflow.kvx"
+            workflow.write_text(re.sub(r'(?m)^active_feature\s*= .*', 'active_feature = "codify-v16"', workflow.read_text()))
             report=base/"draft-control-report.json"
             validation=run([sys.executable,ROOT/"spec/hyperfide/tools/validate_pack.py","--mode","draft",
                             "--root",draft,"--output",report],timeout=80)
             expect(validation.returncode==0 and json.loads(report.read_text())["status"]=="PASS",
-                   f"valid historical draft rejected: {validation.stdout} {validation.stderr}")
+                   f"valid draft rejected: {validation.stdout} {validation.stderr}")
             rendered=run([sys.executable,ROOT/"spec/hyperfide/tools/render_native.py","--mode","draft",
                           "--root",draft],timeout=80)
             expect(rendered.returncode==0,f"valid draft rendering rejected: {rendered.stderr}")
