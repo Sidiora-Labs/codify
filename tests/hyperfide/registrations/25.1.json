@@ -9,9 +9,15 @@
     "V-025"
   ],
   "assertion_ids": [
+    "migration.legacy.describe-provisioner-entrypoint",
+    "migration.legacy.capability-exported",
+    "migration.legacy.describe-input-refused",
+    "migration.legacy.unsigned-refused",
     "migration.describe",
     "migration.auth.unsigned-refused",
     "migration.auth.cross-organisation-refused",
+    "migration.legacy.control-role-not-loaded",
+    "migration.schema.absent-refused",
     "migration.snapshot.wal",
     "migration.snapshot.integrity",
     "migration.snapshot.digest",
@@ -25,6 +31,8 @@
     "migration.inventory.trigger",
     "migration.external.unavailable",
     "migration.external.session-excluded",
+    "migration.external.journal-config-observed",
+    "migration.kvx.done-unrun-unqualified",
     "migration.import.memories",
     "migration.import.attempts",
     "migration.import.custom_shape",
@@ -42,6 +50,7 @@
     "migration.import.exact-blob",
     "migration.import.unqualified",
     "migration.import.reconciliation",
+    "migration.import.lease-requires-reconciliation",
     "migration.import.no-authority-tables",
     "migration.replay.restart",
     "migration.replay.conflict",
@@ -97,7 +106,9 @@
   ],
   "fixtures": [
     "services/hyperfide/dist/control.js",
-    "services/hyperfide/dist/migration/sqlite.js"
+    "services/hyperfide/dist/migration/sqlite.js",
+    "services/hyperfide/dist/provisioner.js",
+    "services/hyperfide/dist/migration/legacy.js"
   ],
   "resources": [
     {
@@ -119,9 +130,15 @@
   ],
   "source_files": [
     "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/migration/legacy.js",
     "services/hyperfide/dist/migration/sqlite.js",
+    "services/hyperfide/dist/provisioner.js",
+    "services/hyperfide/dist/spec/import.js",
     "services/hyperfide/package-lock.json",
     "services/hyperfide/package.json",
+    "services/hyperfide/src/migration/legacy.ts",
+    "services/hyperfide/src/migration/sqlite.ts",
+    "services/hyperfide/src/spec/import.ts",
     "services/hyperfide/tsconfig.json",
     "src/db.c",
     "src/index_health.c",
