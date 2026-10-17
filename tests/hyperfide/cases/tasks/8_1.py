@@ -390,11 +390,16 @@ class Service:
                                       "provider.operation.validate", "provider.outcome.validate", "provider.inventory.validate"]}
         policy_path = directory / "policy.json"
         policy_path.write_text(json.dumps(policy))
+        components=directory/"components";components.mkdir()
+        for name in ["1.4.json","8.1.json"]:
+            (components/name).write_bytes((ROOT/"services/hyperfide/components"/name).read_bytes())
         self.stderr = (directory / "service.stderr").open("w+")
         self.process = subprocess.Popen(
             ["node", "services/hyperfide/dist/provisioner.js", "--policy", str(policy_path),
-             "--spec-revision", "fixture-revision"], cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-             stderr=self.stderr, text=True, start_new_session=True)
+             "--spec-revision", "fixture-revision", "--components",str(components),
+             "--module-root",str(ROOT/"services/hyperfide/dist")], cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+             stderr=self.stderr, text=True, start_new_session=True,
+             env=dict(os.environ, HYPERFIDE_REQUIRE_SYNC_REPLICA="0"))
         self.sequence = 0
 
     def request(self, action, payload):
