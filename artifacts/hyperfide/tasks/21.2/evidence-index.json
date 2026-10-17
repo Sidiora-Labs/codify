@@ -1,9 +1,9 @@
 {
   "task": "21.2",
-  "commit": "e3b05e843c5570bd13a075660f6be2b3bad8fe84",
+  "commit": "12aa390190b3d3e360e079254378a381103fc236",
+  "requalified_on": "12aa390190b3d3e360e079254378a381103fc236",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-045 --manifest tests/hyperfide/manifests/tasks/21.2.json && python3 tests/hyperfide/qualify.py --case V-044 --manifest tests/hyperfide/manifests/tasks/21.2.json",
-  "exit_code": 0,
-  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"df25dead-a6a3-477a-8fee-1309b67244d1\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/21.2/campaigns/dd68dbb937e5e16d540c90aa40eb8c3582b18d1a8c38c60fc6d0cd9e72122023\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"36ba0b73-aa55-4559-a8a2-bd3edf14a308\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/21.2/campaigns/dd68dbb937e5e16d540c90aa40eb8c3582b18d1a8c38c60fc6d0cd9e72122023\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
-  "ran_at": "2026-10-17T09:18:38Z",
-  "note": "Run as root against the PostgreSQL fixture; the repo root and .git directory owner was temporarily set to root for the run (and restored to hf) because check-evidence.py reads HEAD with neutral git config, which rejects the hf-owned checkout as dubious ownership."
+  "exit_code": 1,
+  "stdout_tail": "{\"status\": \"FAIL\", \"receipt_id\": \"70e73948-7758-4151-8700-688eeea14d23\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/21.2/campaigns/98ce69ce400448223cd17b534c9637dd1a2d9e73375ec45183965bc05f527034\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": [\"executed assertion inventory differs from exact registration\", \"one or more behavioural assertions failed\", \"probe failed, was unavailable, or timed out\"]}\n",
+  "ran_at": "2026-10-17T14:23:16.303336+00:00"
 }

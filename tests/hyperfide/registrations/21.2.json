@@ -32,7 +32,8 @@
     "native21.new-checkpoint-stale",
     "native21.repeat-new-checkpoint-identified",
     "native21.foreign-reservation-refused",
-    "native21.compute-authority-unchanged"
+    "native21.compute-authority-unchanged",
+    "native21.setup"
   ],
   "argv": [
     "python3",
