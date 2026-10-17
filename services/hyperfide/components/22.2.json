@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "22.2",
+  "task": "22.2",
+  "roles": [
+    "control"
+  ],
+  "module": "evaluation/scorecard.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "evaluation.calibrate",
+    "evaluation.scorecard"
+  ],
+  "requires": [
+    "22.1"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "22.4",
+  "task": "22.4",
+  "roles": [
+    "control"
+  ],
+  "module": "evaluation/promotion.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "evaluation.promotion.assess",
+    "evaluation.drift.check",
+    "evaluation.selfhost.optional"
+  ],
+  "requires": [
+    "22.1",
+    "22.2",
+    "22.3"
+  ]
+}

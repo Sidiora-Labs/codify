@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "id": "22.1",
+  "task": "22.1",
+  "roles": [
+    "control"
+  ],
+  "module": "evaluation/datasets.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "evaluation.dataset.build",
+    "evaluation.dataset.inspect",
+    "evaluation.dataset.packet"
+  ],
+  "requires": []
+}
