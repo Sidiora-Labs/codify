@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Actual signed finding API plus controlled loopback HTTP; never contacts GitHub."""
 from __future__ import annotations
-import base64,concurrent.futures,copy,hashlib,hmac,http.server,importlib.util,json,sys,threading
+import base64,concurrent.futures,copy,hashlib,hmac,http.server,importlib.util,json,subprocess,sys,threading
 from pathlib import Path
 spec=importlib.util.spec_from_file_location('finding_test_fixture',Path(__file__).with_name('18_1.py'));common=importlib.util.module_from_spec(spec);spec.loader.exec_module(common)
 from types import SimpleNamespace
@@ -31,7 +31,7 @@ class GitHubFixture:
 def main():
     if '--cleanup' in sys.argv:return common.cleanup('18.2')
     github=GitHubFixture();secret='fixture-webhook-secret-with-32-bytes';env={'HF_GITHUB_REQUESTS_APPROVED':'true','HF_GITHUB_API_URL':'http://127.0.0.1:'+str(github.server.server_port)+'/','HF_GITHUB_ALLOW_LOOPBACK':'true','HF_GITHUB_TOKEN':'synthetic-local-token','HF_GITHUB_MARKER_SECRET':'synthetic-marker-secret-with-32-bytes','HF_GITHUB_WEBHOOK_SECRET':secret}
-    f=common.fixture('18.2',extra=('18.2',),env=env)
+    f=common.fixture('18.2',extra=('18.2',),env=env,after_seed=accepted_proof_intent)
     def call(action,payload):return common.call(f,action,payload,component='finding-github')
     def reject(action,payload,code=None):return common.reject(f,action,payload,code,component='finding-github')
     try:
@@ -93,6 +93,23 @@ def main():
         try:f.close()
         finally:github.close()
     return int(any(actual!='observed' for _,actual in common.RESULTS))
+def accepted_proof_intent(f):
+    # Synthetic upstream input: bind the seeded proof registry to an explicitly accepted generation-2 intent so the 2.4 proof authority admits it.
+    i=f.ids;x=f.x;row=f.sql('SELECT policy FROM hyperfide.proof_registries WHERE organisation_id=$1 AND run_id=$2 AND task_id=$3',[i['organisation'],i['run'],x['task']])[0];policy=row['policy'] if isinstance(row['policy'],dict) else json.loads(row['policy'])
+    checks=[check['id'] for check in policy['checks']]
+    source='[task.18.1]\ntitle = "Synthetic finding origin"\nreqs = ["18.1"]\nacceptance_ids = ["V-032"]\n[req.18]\ntitle = "Finding lifecycle"\nac_1 = "Synthetic accepted finding criterion"\n[acceptance.V-032]\nreqs = ["18.1"]\nchecks = '+json.dumps(checks)+'\n[proof]\nrubric_digest = '+json.dumps(policy['rubric_digest'])+'\n'+''.join('[proof.check.'+check['id']+']\n'+''.join(key+' = '+json.dumps(check[key])+'\n' for key in ('argv','executable_digest','timeout_ms','required_artifacts','input_keys')) for check in policy['checks'])
+    parsed=json.loads(subprocess.check_output(['node','--input-type=module','-e',"import{parseKvx}from'./services/hyperfide/dist/spec/import.js';let s='';for await(const c of process.stdin)s+=c;process.stdout.write(JSON.stringify(parseKvx(s)));"],input=source.encode(),cwd=common.ROOT))
+    revision=uid();digest=common.sha(source.encode())
+    document={'schema_version':1,'revision_digest':common.sha(b'finding-github-accepted-envelope'),'source_digest':digest,'repositories':[{'repository_id':x['repository'],'source_object_id':common.OID,'integration_ref':'refs/heads/main'}],'allowed_actions':[],'closure_policy':{'required_evidence':checks,'required_review_roles':[],'publication':'AFTER_QUALIFICATION'},'provenance':None,'parsed':parsed,'runtime_wave_offset':0}
+    f.sql('INSERT INTO hyperfide.spec_revisions(organisation_id,project_id,id,source_digest,source_content,document,schema_version,revision_digest) VALUES($1,$2,$3,$4,$5,$6,1,$7)',[i['organisation'],i['project'],revision,digest,source,json.dumps(document),document['revision_digest']])
+    f.sql('INSERT INTO hyperfide.run_spec_revisions(organisation_id,run_id,spec_generation,spec_revision_id) VALUES($1,$2,2,$3)',[i['organisation'],i['run'],revision])
+    section=next(item for item in parsed['sections'] if item['name']=='task.18.1')
+    definition={'schema_version':1,'section':section,'feature_key':'fixture','declared_wave':1,'runtime_wave_offset':0,'declared_status':None,'history_only':True}
+    f.sql("UPDATE hyperfide.runs SET spec_revision_id=$3,spec_generation=2,state='PENDING_VALIDATION',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[i['organisation'],i['run'],revision])
+    f.sql('UPDATE hyperfide.tasks SET spec_generation=2,spec_revision_id=$4,definition=$5,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[i['organisation'],i['run'],x['task'],revision,json.dumps(definition)])
+    f.sql("UPDATE hyperfide.runs SET state='RUNNING',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[i['organisation'],i['run']])
+    policy=dict(policy,spec_revision_id=revision,spec_generation='2')
+    common.insert(f,'proof_registries',common.scoped(f,task_id=x['task'],spec_generation='2',spec_revision_id=revision,criteria_digest=policy['criteria_digest'],registry_digest=common.sha(json.dumps(policy,sort_keys=True,separators=(',',':')).encode()),policy=policy))
 def ordered_refusal(reject,op,github):
     before=(github.posts,github.gets);reject('finding.github.dispatch',{'operation_id':op['operation_id']},'OPERATION_ORDER_BLOCKED');expect((github.posts,github.gets)==before)
 def ack_replay(call,op,github):

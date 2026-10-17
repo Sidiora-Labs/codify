@@ -1,0 +1,9 @@
+{
+  "task": "18.2",
+  "commit": "b3a37a9974d124563859376210cc7fe9570428d9",
+  "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-032 --manifest tests/hyperfide/manifests/tasks/18.2.json",
+  "exit_code": 0,
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"79ae309b-6522-4011-9c62-513c5174e863\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/18.2/campaigns/b89a31edc8162f18608af128397212dfd5b6bfa59b8df329935d33fd247ef0aa\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T09:20:09+00:00",
+  "notes": "Run as repository owner uid hf (repo owned by hf; checker's isolated git refuses root-run dubious ownership) with node 24.22.0 against the local PostgreSQL fixture; loopback GitHub fake only, live_github=false."
+}
