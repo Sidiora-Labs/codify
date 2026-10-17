@@ -162,6 +162,19 @@ def apply_advisory_fixture_migration(f,name,service=None):
 
 
 
+def advisory_spec_fragments():
+ table={}
+ for fragment in (ROOT/"services/hyperfide/components").glob("*.json"):
+  if fragment.name!="schema.json":table[json.loads(fragment.read_text())["id"]]=fragment
+ pending=["21.1"];seen=set();names=[]
+ while pending:
+  ident=pending.pop()
+  if ident in seen or ident=="20.4":continue
+  seen.add(ident);fragment=table[ident]
+  names.append(fragment.stem);pending.extend(json.loads(fragment.read_text())["requires"])
+ return tuple(names)
+
+
 def seed_advisory_amendment_source(f,service):
  """Trusted accepted fixture compiled by the actual source importer; no validation result is supplied."""
  import hashlib,uuid
@@ -172,9 +185,11 @@ def seed_advisory_amendment_source(f,service):
  f.sql("INSERT INTO hyperfide.repositories(organisation_id,project_id,id,name,url,object_format) VALUES($1,$2,$3,'advisory-fixture','https://example.invalid/advisory.git','sha1')",[f.ids["organisation"],f.ids["project"],f.ids["repository"]])
  f.sql("INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id,object_type) VALUES($1,$2,$3,'commit')",[f.ids["organisation"],f.ids["repository"],"a"*40])
  f.source=source;f.closure={"required_evidence":["actual-check"],"required_review_roles":["VERIFIER"],"publication":"AFTER_QUALIFICATION"}
+ # Accepted intent has a bounded action contract, independent of the service's component inventory.
+ f.accepted_actions=json.loads((service/"components/21.1.json").read_text())["actions"]
  f.env["HF_SPEC_ALLOWED_ROOT"]=str(f.path)
  (f.path/"approved.kvx").write_text(source)
- envelope={"run_id":f.ids["run"],"source":{"relative_path":"approved.kvx","sha256":hashlib.sha256(source.encode()).hexdigest(),"size_bytes":str(len(source.encode()))},"repositories":[{"repository_id":f.ids["repository"],"source_object_id":"a"*40,"integration_ref":"refs/heads/main"}],"allowed_actions":f.actions,"closure_policy":f.closure,"provenance":None}
+ envelope={"run_id":f.ids["run"],"source":{"relative_path":"approved.kvx","sha256":hashlib.sha256(source.encode()).hexdigest(),"size_bytes":str(len(source.encode()))},"repositories":[{"repository_id":f.ids["repository"],"source_object_id":"a"*40,"integration_ref":"refs/heads/main"}],"allowed_actions":f.accepted_actions,"closure_policy":f.closure,"provenance":None}
  scope={"organisation_id":f.ids["organisation"],"project_id":f.ids["project"],"run_id":f.ids["run"],"authority_epoch":f.ids["epoch"],"root":str(f.path),"allowed_actions":f.actions}
  script="import fs from 'node:fs';import{prepareAcceptedIntent}from "+json.dumps((service/"dist/spec/import.js").as_uri())+";const q=JSON.parse(fs.readFileSync(0,'utf8')),p=await prepareAcceptedIntent(q.scope,q.envelope);process.stdout.write(JSON.stringify({document:p.document,tasks:p.tasks,revision_digest:p.revision_digest}));"
  r=subprocess.run(["node","--input-type=module","-e",script],input=json.dumps({"scope":scope,"envelope":envelope}),cwd=ROOT,env=f.env,text=True,capture_output=True,timeout=20)
@@ -209,11 +224,6 @@ def signed_authority_probe(include_findings=False,include_amendment=False,includ
    fixture_root=Path(folder);service=fixture_root/"services/hyperfide";service.mkdir(parents=True)
    shutil.copytree(ROOT/"services/hyperfide/dist",service/"dist")
    shutil.copytree(ROOT/"services/hyperfide/migrations",service/"migrations")
-   if include_amendment:
-    # Separate bounded component fixture: actual required schemas only, never a full-release receipt.
-    required={"0001-authority.sql","0002-spec.sql","0004-durability.sql","0014-enrollment.sql","0021-decisions.sql","0202-spec-dependencies.sql"}
-    for migration in (service/"migrations").glob("*.sql"):
-     if migration.name not in required:migration.unlink()
    shutil.copytree(ROOT/"services/hyperfide/components",service/"components")
    shutil.copyfile(ROOT/"services/hyperfide/package.json",service/"package.json")
    (service/"node_modules").symlink_to(ROOT/"services/hyperfide/node_modules",target_is_directory=True)
@@ -241,7 +251,7 @@ def signed_authority_probe(include_findings=False,include_amendment=False,includ
     f.sql("INSERT INTO hyperfide.run_spec_revisions(organisation_id,run_id,spec_generation,spec_revision_id) VALUES($1,$2,2,$3)",[f.ids["organisation"],f.ids["run"],revision])
     f.sql("UPDATE hyperfide.runs SET spec_revision_id=$3,spec_generation=2,state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[f.ids["organisation"],f.ids["run"],revision])
    finding_extra=("18.1","21.3","5.4")+(("3.1",) if "3.1" in json.loads((service/"components/18.1.json").read_text())["requires"] else ()) if include_findings else ()
-   fixture=identity.IdentityFixture(extra_components=("20.4","21.4","21.1")+finding_extra,extra_setup=setup)
+   fixture=identity.IdentityFixture(extra_components=("20.4",)+advisory_spec_fragments()+finding_extra,extra_setup=setup)
    try:
     f=fixture;scope={"organisation_id":f.ids["organisation"],"run_id":f.ids["run"]}
     def call(action,data,component="21.4",**kwargs):return f.invoke(action,{"scope":scope,**data},component=component,**kwargs)[1]
@@ -250,12 +260,12 @@ def signed_authority_probe(include_findings=False,include_amendment=False,includ
      packet=packet_result["result"]
      def amendment(source):
       (f.path/"replacement.kvx").write_text(source)
-      return {"run_id":f.ids["run"],"base_spec_revision_id":f.ids["accepted_spec"],"base_spec_generation":"2","state_version":"2","purpose":"REPLAN","reason":"Explicit fixture replacement; never accepted","replacement":{"run_id":f.ids["run"],"source":{"relative_path":"replacement.kvx","sha256":hashlib.sha256(source.encode()).hexdigest(),"size_bytes":str(len(source.encode()))},"repositories":[{"repository_id":f.ids["repository"],"source_object_id":"a"*40,"integration_ref":"refs/heads/main"}],"allowed_actions":f.actions,"closure_policy":f.closure,"provenance":None}}
+      return {"run_id":f.ids["run"],"base_spec_revision_id":f.ids["accepted_spec"],"base_spec_generation":"2","state_version":"2","purpose":"REPLAN","reason":"Explicit fixture replacement; never accepted","replacement":{"run_id":f.ids["run"],"source":{"relative_path":"replacement.kvx","sha256":hashlib.sha256(source.encode()).hexdigest(),"size_bytes":str(len(source.encode()))},"repositories":[{"repository_id":f.ids["repository"],"source_object_id":"a"*40,"integration_ref":"refs/heads/main"}],"allowed_actions":f.accepted_actions,"closure_policy":f.closure,"provenance":None}}
      def analyse(source):
       return call("decision.spec.amendment.check",{"packet_id":packet["id"],"amendment":amendment(source)},"21.1")
      def positive():
       r=analyse(f.source.replace("[task.1]","[task.1]\ntitle = \"Replanned implementation\""))
-      identity.expect(r.get("ok") is True,"Actual ordinary validation failed: "+str(r.get("error",{}).get("code")))
+      identity.expect(r.get("ok") is True,"Actual ordinary validation failed: "+str(r.get("error",{})))
       result=r["result"];v=result["validation"]
       identity.expect(v["status"]=="STRUCTURALLY_VALID" and v["accepted"] is False and v["dispatch_authority"] is False and result["applied"] is False and set(v["impact"]["affected_task_ids"])=={f.ids["task1"],f.ids["task2"]},"Actual transitive impact/nonacceptance lost")
      identity.check("signed21.actual-amendment-validator-positive",positive)
@@ -380,9 +390,10 @@ def durable_job_probe():
     ensure_semantic_fence_schema(self)
     apply_advisory_fixture_migration(self,"0021-decisions")
     added=[]
-    for ident in ["21.4","21.1"]:
+    for ident in advisory_spec_fragments():
      fragment=ROOT/("services/hyperfide/components/"+ident+".json")
      shutil.copyfile(fragment,self.components/(ident+".json"));added+=json.loads(fragment.read_text())["actions"]
+    added=list(dict.fromkeys(action for action in added if action not in self.actions))
     policy=json.loads(self.policy.read_text());policy["allowed_actions"]+=added;self.policy.write_text(json.dumps(policy))
     config=json.loads(self.identity_config.read_text())
     for principal in config["principals"]:
