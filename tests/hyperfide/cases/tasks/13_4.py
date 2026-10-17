@@ -148,7 +148,10 @@ def main():
     try:
         check('admission.main-startup-sizing-only',startup_budget)
         check('admission.native-signal-classifier',classifier_table)
-        f=AdmissionFixture();f.bind()
+        f=AdmissionFixture()
+        # The shared session fixture includes resume contenders; this probe needs one worker seat.
+        f.inner.sql("DELETE FROM hyperfide.agent_sessions WHERE id IN ($1,$2)",[f.inner.ids["successor"],f.inner.ids["rival"]])
+        f.bind()
         f.inner.bootstrap_runner();f.inner.delegate_principal("native_worker",f.scope["session_id"]);f.foreign_runner()
         i=f.inner.ids;org,run,artifact=i["organisation"],i["run"],i["artifact"]
         reserve={"scope":f.scope,"reservation_id":uid(),"quota_key":"fixture-quota"}
