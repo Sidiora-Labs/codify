@@ -1,0 +1,9 @@
+{
+  "task": "8.3",
+  "commit": "3a828263465a179b7595f5a60e08ed55289aa5b3",
+  "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-037 --manifest tests/hyperfide/manifests/tasks/8.3.json && python3 tests/hyperfide/qualify.py --case V-054 --manifest tests/hyperfide/manifests/tasks/8.3.json",
+  "exit_code": 0,
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"a6a80bf6-b666-4a7c-a706-54f394d70d91\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/8.3/campaigns/f2db9d8f81ad5b053c8c3da264bac007be53d9868477627195c2ea66e1f97488\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"93141c8e-c468-4296-a82b-93f999baea0a\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/8.3/campaigns/f2db9d8f81ad5b053c8c3da264bac007be53d9868477627195c2ea66e1f97488\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T09:36:50Z",
+  "note": "Run as root with /work/hyperfide and /work/hyperfide/.git temporarily owned by root (non-recursive, restored to hf afterwards) because the independent checker's isolated git refuses a repository owned by another uid (dubious ownership); the toolchain under /root is not executable by hf."
+}
