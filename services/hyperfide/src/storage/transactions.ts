@@ -99,6 +99,14 @@ export class TransactionGateway {
     if(!Number.isSafeInteger(retries)||retries<0||retries>5)
       throw new StorageError('DATABASE_CONFIG_INVALID','maxRetries must be an integer from 0 to 5');
     for(let attempt=1;;attempt++){
+      if(attempt>1){
+        // SSI peers can outlive several immediate retries. Yield without a lease
+        // so they can commit, and jitter retries to avoid repeating the collision.
+        const delay=Math.min(1000,100*2**(attempt-2))*(1+Math.random());
+        let timer:ReturnType<typeof setTimeout>|undefined;
+        try{await bounded(new Promise<void>(resolve=>{timer=setTimeout(resolve,delay);}),deadline,options.signal);}
+        finally{if(timer)clearTimeout(timer);}
+      }
       let lease:DatabaseLease|undefined,handle:PrimaryTransaction|undefined;
       let phase:'acquire'|'begin'|'body'|'commit'|'committed'='acquire';
       let healthy=true;

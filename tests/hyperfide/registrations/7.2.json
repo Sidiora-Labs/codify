@@ -8,6 +8,7 @@
     "V-022"
   ],
   "assertion_ids": [
+    "graph.ingestion.retry-yields-primary-capacity",
     "graph.ingestion.real-copy-describe",
     "graph.ingestion.persist-build",
     "graph.ingestion.replay-build",
