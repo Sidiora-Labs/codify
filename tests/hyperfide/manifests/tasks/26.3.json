@@ -1,0 +1,163 @@
+{
+  "approval": {
+    "allowed_actions": [],
+    "approved": true
+  },
+  "campaign_id": "hyperfide-task-26.3-names-migration-v1",
+  "case_ids": [
+    "V-026",
+    "V-055"
+  ],
+  "expected_assertion_ids": [
+    "names.native.authority-alias-conflict-redacted",
+    "names.native.credential-alias-conflict-redacted",
+    "names.native.transport-alias-conflict-redacted",
+    "names.native.mcp-policy-alias-conflict-redacted",
+    "names.native.equal-credential-alias-compatible",
+    "names.native.legacy-config-fallback",
+    "names.plan.real-pins",
+    "names.plan.retained-native-paths",
+    "names.plan.no-mutation",
+    "names.plan.reject-traversal",
+    "names.plan.reject-absolute",
+    "names.plan.reject-backslash",
+    "names.plan.reject-extra-fields",
+    "names.manifest.reject-digest",
+    "names.manifest.reject-auth-path",
+    "names.manifest.reject-duplicate",
+    "names.aliases.conflict-secret-redacted",
+    "names.aliases.equal-secret-redacted",
+    "names.apply.real-copy",
+    "names.native.completed-manifest-selection",
+    "names.native.portable-manifest-without-private-journal",
+    "names.native.canonical-context-default",
+    "names.apply.legacy-preserved",
+    "names.apply.context-preserved",
+    "names.apply.private-backup",
+    "names.apply.durable-descriptor",
+    "names.apply.idempotent-replay",
+    "names.apply.native-state-untouched",
+    "names.rollback.reject-user-loss",
+    "names.rollback.real-copies",
+    "names.rollback.preserve-backup-source",
+    "names.rollback.reject-old-id",
+    "names.recovery.partial-journal-fixture",
+    "names.filesystem.reject-symlink",
+    "names.native.both-configs-fail-closed",
+    "names.plan.reject-both-configs",
+    "names.apply.reject-drift",
+    "names.apply.kernel-lock-exclusion",
+    "names.apply.kernel-lock-release",
+    "names.rollback.refuses-missing-backup",
+    "names.rollback.last-canonical-copy-preserved",
+    "names.rollback.refuses-missing-legacy",
+    "names.rollback.missing-legacy-keeps-canonical",
+    "names.rollback.retains-actual-quarantine"
+  ],
+  "inputs": [
+    {
+      "path": "services/hyperfide/src/migration/names.ts",
+      "sha256": "57e282031ca9f15b87e37cdcf638fb76bd687ba046c113c9100ca79c39844534",
+      "size": 22542
+    },
+    {
+      "path": "services/hyperfide/components/26.3.json",
+      "sha256": "509945433d51b5e0ee3e41eeae08629903a8eea8f67921a723cfcde2480e8bca",
+      "size": 333
+    },
+    {
+      "path": "services/hyperfide/dist/migration/names.js",
+      "sha256": "e10b63ffb021e827a59f8ed59aff2f41b7aa397b3a64f273a91870a601a496b3",
+      "size": 26099
+    },
+    {
+      "path": "services/hyperfide/src/components/registry.ts",
+      "sha256": "070480a8b924f1e7b3c0400a6a8adf1b8b49253623189efe09fede9c987e97d8",
+      "size": 12721
+    },
+    {
+      "path": "services/hyperfide/src/components/service.ts",
+      "sha256": "9bc9b235ca40944692bae091e2028715330d52930fcf2051ddf9e0c05a2736a1",
+      "size": 10773
+    },
+    {
+      "path": "services/hyperfide/src/policy/programme.ts",
+      "sha256": "64addcffe3ccc4b106982123688e07abf19b7656ffbceaebcd7e2d581343692e",
+      "size": 5089
+    },
+    {
+      "path": "services/hyperfide/dist/control.js",
+      "sha256": "1383288f00472de29607207d1d318e257c6e80c0fb2c05ca9fb2d974040e8032",
+      "size": 118
+    },
+    {
+      "path": "services/hyperfide/dist/components/registry.js",
+      "sha256": "26ca887afe59391f275c422cf06b9ba56eb8de4dfcf9bcb1a8b2ff852f95a9d1",
+      "size": 12283
+    },
+    {
+      "path": "services/hyperfide/dist/components/service.js",
+      "sha256": "d48dba209b9803a09a9b09326803142e28bf416bf2dbf14d99aba69d57b35677",
+      "size": 11025
+    },
+    {
+      "path": "services/hyperfide/dist/policy/programme.js",
+      "sha256": "2f9b0745664f79b55492989112528b423decdf553fb303778425c4f9685fa6a5",
+      "size": 4611
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/26_3.py",
+      "sha256": "d2a00c7d8edb4b7165c5d25a036df39bb19c38fad0e772c11b2e0e175e0306fa",
+      "size": 11708
+    },
+    {
+      "path": "src/config.c",
+      "sha256": "5a921f51eab4b9fa48ddddb210bc88274d06f4df6a3761ff19347f258e99d2e9",
+      "size": 44651
+    },
+    {
+      "path": "src/cg.h",
+      "sha256": "6c58363f66c65e4e7f91960845596626a41abbbf966ea75e0f70523c1635cb3d",
+      "size": 93626
+    },
+    {
+      "path": "src/main.c",
+      "sha256": "0608c434dcf49b89d1a5ffe3a074b0663495d01af860a515ef150b505e4da943",
+      "size": 35178
+    },
+    {
+      "path": "hyperfide",
+      "sha256": "528dc352fa30b2a1b0acfb7922d7d69af045b6cd3a69042465c8a2613ddf2800",
+      "size": 69086576
+    },
+    {
+      "path": "cg",
+      "sha256": "528dc352fa30b2a1b0acfb7922d7d69af045b6cd3a69042465c8a2613ddf2800",
+      "size": 69086576
+    },
+    {
+      "path": "/usr/bin/flock",
+      "sha256": "85a6c65e142a5eb6b4a7009e648875e62392880519265b7aa5b08fd18f2c5eaf",
+      "size": 27200
+    }
+  ],
+  "policy": {
+    "cloud_provisioning": false,
+    "component_only": true,
+    "execution": "remote-only",
+    "frontier_calls": false,
+    "full_case_status": "INCOMPLETE",
+    "private_records_used": false,
+    "production_deployment_qualified": false,
+    "qualification_limitations": [
+      "Registered task-component variant only; V-026 and V-055 full cases remain UNRUN and this receipt cannot replace any full-case/provider/connector/campaign receipt.",
+      "Interrupted migration is a simulated partial-journal fixture, not an actual process crash.",
+      "Pins of services/hyperfide/dist and the native binaries are locally built artifacts and must be refreshed after any rebuild."
+    ]
+  },
+  "registered_variant": "task:26.3",
+  "resources": [],
+  "schema_version": 1,
+  "scope": "task-component",
+  "seed": 1
+}
