@@ -160,4 +160,21 @@ assert not d.execute("SELECT 1 FROM semantic_route_compositions c "
                      "WHERE r.route_id IS NULL").fetchone()
 assert not d.execute("SELECT 1 FROM semantic_route_dirty").fetchone()
 PY
+
+# dict.get(key, default) and *_path object keys are not route registrations.
+precision="$TMP/route-precision"
+mkdir -p "$precision"
+cp -R "$(dirname "$fixture")/../routes"/. "$precision"/
+cd "$precision"
+git init -q -b main
+"$CG" init >/dev/null
+out="$("$CG" routes)"
+for row in 'GET     /items' 'POST    /orders' 'DELETE  /users/{id}' 'PUT     /' \
+           'GET     /health' 'PATCH   /orders/{id}' '/hapi/items' '/vue/account' \
+           '/react/home'; do
+    grep -qF -- "$row" <<<"$out" || fail "true-positive route missing: $row"$'\n'"$out"
+done
+if grep -E 'false_positives\.(py|mjs)' <<<"$out"; then
+    fail "false-positive route extracted"
+fi
 echo "semantic route graph: OK"
