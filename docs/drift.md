@@ -3,12 +3,15 @@
 A fleet drifts in four ways: a task changes code it never declared, two
 tasks that run at once step on each other, a merge changes a symbol another
 live branch depends on, or a feature lands with acceptance criteria no
-qualified task covers. Codify looks for each before the change merges,
-records every finding as an event, and shows it in `cg brief`, `cg fleet
+qualified task covers. Hyperfide looks for each before the change merges,
+records every finding as an event, and shows it in `hyperfide brief`, `hyperfide fleet
 tree`, and the editor's agent chat.
 
 Drift **warns by default**. It blocks only where `spec/workflow.kvx` asks
 for it, through a role's `approve` list.
+
+`hyperfide` is the command; `cg` is the deprecated compatibility alias from
+the same executable, with identical arguments, JSON and exit codes.
 
 Implemented in `src/drift.c`; covered by `tests/integration/33_drift.sh`
 and the fleet end-to-end suite `tests/integration/35_fleet_e2e.sh`.
@@ -20,21 +23,21 @@ A task declares what it will change: `touches` (paths or globs) and
 declaration and reports two things: paths changed outside the touches, and
 public symbols whose lines changed but are not among the declared symbols.
 
-It runs on its own at `cg spec done` and at `cg fleet merge-up`, and on
+It runs on its own at `hyperfide spec done` and at `hyperfide fleet merge-up`, and on
 demand:
 
 ```
-$ cg drift check 3.2 --base feature/alpha
+$ hyperfide drift check 3.2 --base feature/alpha
 drift: 3 path(s) changed outside the task's touches: src/a.ts src/b.ts src/b1.ts
 drift: 4 public symbol(s) changed but not declared: alpha (src/a.ts) beta (src/b.ts) b1 (src/b1.ts) delta (src/d.ts)
 drift: declare them in the task (touches/symbols) or keep the change inside its scope
 ```
 
-`--base` defaults to `CG_BASE` when the fleet set it, else `HEAD`. At `cg
-spec done` a finding is advice and never a reason to refuse: the task still
+`--base` defaults to `CG_BASE` (alias `HYPERFIDE_BASE`) when the fleet set
+it, else `HEAD`. At `hyperfide spec done` a finding is advice and never a reason to refuse: the task still
 qualifies on its `verify_cmd` and graph checks. At `merge-up` it is advice
 too, unless a role lists `drift` in `approve` — then the merge waits for
-`cg fleet approve` (see [hierarchy.md](hierarchy.md#approvals)). Each check
+`hyperfide fleet approve` (see [hierarchy.md](hierarchy.md#approvals)). Each check
 is recorded as a `drift.spec` event.
 
 ## Collision prediction
@@ -46,7 +49,7 @@ collisions run one after the other instead of side by side, and the
 serialization is recorded once as a `drift.collision` event.
 
 ```
-$ cg drift collisions -f gamma
+$ hyperfide drift collisions -f gamma
 2.1      2.2      both touch src/*.ts / src/d.ts
 ```
 
@@ -54,11 +57,11 @@ A pair is listed once, with the first reason found; the other reasons read
 `both change alpha` and `alpha and delta call one another`.
 
 With nothing predicted it says `no predicted collisions among the open
-tasks of alpha`. `cg drift` alone is the same report for the active feature.
+tasks of alpha`. `hyperfide drift` alone is the same report for the active feature.
 
 ## Interface drift across branches
 
-After every merge into a feature branch, Codify diffs the signatures of the
+After every merge into a feature branch, Hyperfide diffs the signatures of the
 symbols that merge changed and looks up references to them on every other
 live branch through the unified graph (see [branches.md](branches.md)). A
 removed symbol or a changed signature that another branch still references
@@ -91,13 +94,13 @@ code it changed, beside the `symbol`, `near`, and textual findings (see
 
 ## Requirement coverage before land
 
-`cg fleet land` first checks that every acceptance criterion of the feature
+`hyperfide fleet land` first checks that every acceptance criterion of the feature
 is traced to a qualified task. An uncovered criterion is printed; the land
 continues unless a role lists `coverage` in `approve`, in which case it
 waits for approval. The same report on demand:
 
 ```
-$ cg drift coverage -f alpha
+$ hyperfide drift coverage -f alpha
 coverage: every acceptance criterion of alpha has a qualified task
 ```
 
@@ -108,18 +111,39 @@ it when there is one, and the start of its text.
 ## Where findings show up
 
 ```
-$ cg drift summary -f alpha
+$ hyperfide drift summary -f alpha
 drift for alpha:
   spec: 6 (latest #101)
   interface: 1 (latest #83)
 ```
 
-The same counts appear in `cg brief` (`drift on alpha: 7 finding(s) — cg
-drift summary`) and under the feature manager in `cg fleet tree`. The `#`
-numbers are event sequence numbers: `cg events --since 100 -n 1` shows the
+The same counts appear in `hyperfide brief` (`drift on alpha: 7 finding(s) — cg
+drift summary`) and under the feature manager in `hyperfide fleet tree`. The `#`
+numbers are event sequence numbers: `hyperfide events --since 100 -n 1` shows the
 latest spec finding. In the editor, an interface-drift finding appears as a
 notice in the agent chat, and a chat attached to a fleet agent shows that
 agent's drift events inline.
+
+## The Hyperfide control plane
+
+Every drift check here is the binary's, run against the local checkout, its
+git history and its SQLite graph (`src/drift.c`, called from `src/spec.c`,
+`src/fleet.c` and `src/orchestrate.c`). In distributed authority mode (a
+`.hyperfide/authority.json` descriptor, or `HYPERFIDE_AUTHORITY_DESCRIPTOR`;
+`hyperfide authority mode` prints the mode), `hyperfide drift` refuses with
+`DISTRIBUTED_COMMAND_UNSUPPORTED`, exit 78 (`src/hyperfide/client.c`), as
+do `hyperfide fleet merge-up` and `hyperfide fleet land`, which run the
+drift and coverage gates.
+
+The control service carries the distributed counterparts: producer-consumer
+contracts and behavioural impact analysis
+(`services/hyperfide/src/review/contracts.ts`), criterion-level
+qualification coverage (`services/hyperfide/src/assurance/coverage.ts`),
+assurance invalidation when an input changes
+(`services/hyperfide/src/assurance/validity.ts`), and task, wave and
+programme closure (`services/hyperfide/src/integration/closure.ts`). Tasks
+16.3, 16.4, 17.2 and 19.3 are `pending` in `spec/hyperfide/spec.kvx`, so
+that path is not qualified in this revision.
 
 ## Limitations
 
@@ -132,8 +156,8 @@ agent's drift events inline.
 - Interface drift sees references the indexer extracted on other live
   branches. Dynamic dispatch, reflection, and references in languages the
   graph does not index are missed.
-- The counts in `cg drift summary` and the fleet tree are every finding
+- The counts in `hyperfide drift summary` and the fleet tree are every finding
   recorded, including ones that were later fixed.
-- The feature manager's briefing (`cg fleet brief`) does not yet list drift
+- The feature manager's briefing (`hyperfide fleet brief`) does not yet list drift
   findings; a manager learns of interface drift through the steering
-  message, and of spec drift from `cg drift summary`.
+  message, and of spec drift from `hyperfide drift summary`.
