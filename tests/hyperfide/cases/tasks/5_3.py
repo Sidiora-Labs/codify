@@ -126,7 +126,9 @@ def main():
   f.ok("scheduler.dispatch.ensure",other_request,key="manager2",component="5.3")
   check("dispatch.reconcile.package-spoof-denied",lambda:f.reject("scheduler.dispatch.reconcile",dict(reconcile,request_id=other_request["request_id"]),"PACKAGE_SCOPE_DENIED",key="manager",component="5.3"))
   check("dispatch.reconcile.target-owner-required",lambda:f.reject("scheduler.dispatch.reconcile",dict(reconcile,request_id=other_request["request_id"],package_id=i["wave_package"]),"PACKAGE_OWNER_MISMATCH",key="manager",component="5.3"))
-  check("dispatch.unbound-reader.refusal",lambda:f.reject("scheduler.dispatch.reconcile",reconcile,"DEPENDENCY_UNAVAILABLE",key="manager",component="5.3"))
+  unbound=f.primary("const {DispatchReconciler}=await import('./services/hyperfide/dist/scheduler/dispatch.js');return new DispatchReconciler().reconcile(tx,data.scope,data.request_id);",{"request_id":request["request_id"]})
+  check("dispatch.unbound-reader.refusal",lambda:refused(unbound,"DEPENDENCY_UNAVAILABLE"))
+  check("dispatch.native-reader.missing-is-unknown",lambda:expect(f.ok("scheduler.dispatch.reconcile",reconcile,key="manager",component="5.3")["state"]=="UNKNOWN","Missing native receipt must remain uncertain"))
   check("dispatch.unknown.keeps-owner",lambda:expect(f.sql("SELECT compute_authority,execution_state FROM hyperfide.attempts WHERE id=$1",[token["attempt_id"]])[0]=={"compute_authority":"CURRENT","execution_state":"RESERVED"},"Missing external receipt changed execution authority"))
   check("dispatch.no-native-proof.no-release",lambda:expect(f.sql("SELECT count(*)::int n FROM hyperfide.reservations WHERE state='RELEASED'")[0]["n"]==0,"Unconfirmed dispatch freed resources"))
   def race():
@@ -142,7 +144,34 @@ def main():
   check("dispatch.consumer.receipt-before-ack",lambda:expect(f.sql("SELECT count(*)::int n FROM hyperfide.event_deliveries d JOIN hyperfide.outbox_events e ON e.organisation_id=d.organisation_id AND e.run_id=d.run_id AND e.id=d.event_id JOIN hyperfide.command_inbox i ON i.organisation_id=d.organisation_id AND i.run_id=d.run_id AND i.principal_scope=d.consumer_id::text AND i.idempotency_key=d.event_id::text AND i.operation='event.receive' AND i.state='COMPLETED' WHERE d.state='ACKNOWLEDGED' AND e.event_type='scheduler.dispatch.requested'")[0]["n"]==2,"ACK lacks actual committed effect receipt"))
   check("dispatch.consumer.native-route-distinct",lambda:expect(f.sql("SELECT count(*)::int n FROM hyperfide.event_deliveries d JOIN hyperfide.outbox_events e ON e.organisation_id=d.organisation_id AND e.run_id=d.run_id AND e.id=d.event_id WHERE d.consumer_id=$1 AND e.event_type='runner.spawn.requested' AND d.state='PENDING'",[i["native_consumer"]])[0]["n"]==2,"Native commands share claim-consumer route or were falsely acknowledged"))
   check("dispatch.consumer.restart-no-repeat",lambda:expect(f.ok("scheduler.dispatch.consume",{"limit":2},key="controller",component="5.3")["processed"]==0,"ACKed claims were reexecuted"))
-
+  native_id=f.sql("SELECT native_sandbox_id FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2",[i["organisation"],i["sandbox"]])[0]["native_sandbox_id"]
+  f.ok("identity.binding.observe",{"provisioning_intent_id":i["intent"],"sandbox_id":i["sandbox"],"boot_generation":"1","boot_id":i["boot"],"native_sandbox_id":native_id,"observation_digest":m.sha(b"component-fixture-provider"),"expected_version":"1"},key="provisioner",component="14.1")
+  expect(f.issue(actions=f.actions)[1].get("ok") is True,"Runner grant issue failed")
+  enrolled=f.request(f.enrollment(),key="runner",endpoint="/v1/enroll",credential=f.grant)[1]
+  expect(enrolled.get("ok") is True,"Runner enrollment failed: "+json.dumps(enrolled))
+  i["runner"]=enrolled["result"]["credential_id"]
+  scope={"organisation_id":i["organisation"],"run_id":i["run"]}
+  f.ok("instructions.consumer.register",dict(scope,consumer_id=uid()),key="runner",component="6.3")
+  start=dict(scope,id=result["operation_id"],attempt_id=token["attempt_id"],attempt_generation=token["attempt_generation"],authority_epoch=token["authority_epoch"],sandbox_boot_generation=token["sandbox_boot_generation"],kind="START",body={"launch_id":uid(),"slot_id":token["slot_id"],"agent_session_id":uid(),"connector_plan_digest":m.sha(b"component-fixture-plan")})
+  f.ok("instructions.issue",start,key="operator",component="6.3")
+  packet=f.ok("instructions.runner.poll",dict(scope,limit=1,lease_ms=1000),key="runner",component="6.3")["commands"][0]["packet"]
+  report={k:packet[k] for k in ("organisation_id","run_id","command_id","operation_id","attempt_id","attempt_generation","authority_epoch","sandbox_id","boot_id","sandbox_boot_generation","sequence","payload_digest")}
+  report.update(ledger_receipt_id=uid(),ledger_version="1",state="ACCEPTED",observed_process=None)
+  f.ok("instructions.ack",report,key="runner",component="6.3")
+  check("dispatch.native-reader.accepted-is-unknown",lambda:expect(f.ok("scheduler.dispatch.reconcile",reconcile,key="manager",component="5.3")["state"]=="UNKNOWN","Accepted intent claimed execution"))
+  # Component-fixture process observation exercises signed receipt integration;
+  # live native execution is qualified separately by the native runner cases.
+  report.update(ledger_version="2",state="EXECUTING",observed_process={"os_boot_id":uid(),"pid":123,"start_time":"1","pgid":123})
+  f.ok("instructions.ack",report,key="runner",component="6.3")
+  f.stop();f.start()
+  def integrated_running():
+   observed=f.ok("scheduler.dispatch.reconcile",reconcile,key="manager",component="5.3")
+   expect(observed["state"]=="RUNNING" and observed["authoritative"] is True,"Registered receipt reader did not reconcile the admitted native observation")
+   expect(attempt(f,token["attempt_id"])["execution_state"]=="RUNNING","Native observation did not advance execution")
+  check("dispatch.native-reader.signed-executing-after-restart",integrated_running)
+  report.update(ledger_version="3",state="TERMINAL",observed_process=None)
+  f.ok("instructions.ack",report,key="runner",component="6.3")
+  check("dispatch.native-reader.terminal-without-kind-is-unknown",lambda:expect(f.ok("scheduler.dispatch.reconcile",reconcile,key="manager",component="5.3")["state"]=="UNKNOWN","Terminal acknowledgement invented an outcome kind"))
  finally:
   db=f.database;path=f.path;f.close();check("dispatch.cleanup.observed",lambda:expect(not path.exists() and f.sql("SELECT count(*)::int n FROM pg_database WHERE datname=$1",[db],admin=True)[0]["n"]==0,"Fixture resource remains"))
  q=fixture()
