@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "24.3",
+  "task": "24.3",
+  "roles": [
+    "control"
+  ],
+  "module": "recovery/stop.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "recovery.stop.describe",
+    "recovery.stop.request",
+    "recovery.stop.reconcile",
+    "recovery.stop.finalize"
+  ],
+  "requires": [
+    "4.2",
+    "24.1",
+    "14.1",
+    "5.1"
+  ]
+}
