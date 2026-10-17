@@ -1,126 +1,126 @@
 {
-  "actions": [
-    "postgresql.fixture.create",
-    "postgresql.fixture.drop",
-    "https.loopback.listen"
-  ],
-  "argv": [
-    "python3",
-    "tests/hyperfide/cases/tasks/5_3.py"
-  ],
-  "assertion_ids": [
-    "dispatch.role.denied",
-    "dispatch.intent.not-execution",
-    "dispatch.exact-physical-identity",
-    "dispatch.outbox-bound",
-    "dispatch.restart.same-command",
-    "dispatch.new-key.no-replacement",
-    "dispatch.replay.token-conflict",
-    "dispatch.no-forged-receipt",
-    "dispatch.reconcile.package-spoof-denied",
-    "dispatch.reconcile.target-owner-required",
-    "dispatch.unbound-reader.refusal",
-    "dispatch.unknown.keeps-owner",
-    "dispatch.no-native-proof.no-release",
-    "dispatch.concurrent.one-command",
-    "dispatch.consumer.role-required",
-    "dispatch.consumer.actual-inbox-effect",
-    "dispatch.consumer.stable-existing-intent",
-    "dispatch.consumer.receipt-before-ack",
-    "dispatch.consumer.native-route-distinct",
-    "dispatch.consumer.restart-no-repeat",
-    "dispatch.cleanup.observed",
-    "dispatch.consumer.pause-denied",
-    "dispatch.consumer.pause-rollback",
-    "dispatch.consumer.concurrent-single-intent",
-    "dispatch.consumer.actual-fresh-intent",
-    "dispatch.consumer.cleanup.observed",
-    "dispatch.component.registered-entrypoint",
-    "dispatch.lost-response.crash-after-commit",
-    "dispatch.lost-response.client-timeout-retry",
-    "dispatch.superseded.intent-unreconciled",
-    "dispatch.replacement.claim-is-not-dispatch",
-    "dispatch.replacement.requires-reconciliation",
-    "dispatch.replacement.consumer-waits",
-    "dispatch.reconcile.uncertain-unknown",
-    "dispatch.reconcile.null-observation-unknown",
-    "dispatch.replacement.after-reconciliation",
-    "dispatch.replacement.ensure-replays",
-    "dispatch.reconcile.superseded-executing-no-authority",
-    "dispatch.superseded.renew-refused",
-    "dispatch.reconcile.current-executing-authoritative",
-    "dispatch.duplicate-execution.single-authority",
-    "dispatch.reconcile.receipt-mismatch",
-    "dispatch.reconcile.receipt-unadmitted",
-    "dispatch.reconcile.terminal-kind-required",
-    "dispatch.reconcile.single-reader",
-    "dispatch.reconcile.terminal-states",
-    "dispatch.reconcile.terminal-replay",
-    "dispatch.reconcile.terminal-no-release",
-    "dispatch.reconcile.cleanup.observed",
-    "dispatch.native-reader.missing-is-unknown",
-    "dispatch.native-reader.accepted-is-unknown",
-    "dispatch.native-reader.signed-executing-after-restart",
-    "dispatch.native-reader.terminal-without-kind-is-unknown"
-  ],
-  "cases": [
-    "V-004",
-    "V-037"
-  ],
-  "cleanup_argv": [
-    "python3",
-    "tests/hyperfide/cases/tasks/5_3.py",
-    "--cleanup"
-  ],
-  "cleanup_timeout_seconds": 60,
-  "fixtures": [
-    "services/hyperfide/dist/control.js",
-    "services/hyperfide/dist/scheduler/dispatch.js",
-    "services/hyperfide/dist/scheduler/claim.js",
-    "services/hyperfide/dist/scheduler/leases.js",
-    "services/hyperfide/dist/scheduler/resources.js",
-    "services/hyperfide/dist/storage/runtime.js"
-  ],
-  "required_artifacts": [
-    "scheduler/observations.json",
-    "scheduler/cleanup.json"
-  ],
-  "required_env": [
-    "DATABASE_URL"
-  ],
-  "resources": [
-    {
-      "id": "hf-task-5.3-runtime",
-      "kind": "postgresql-database-role-listener",
-      "scope": "task5.3-disposable"
-    }
-  ],
-  "schema_version": 1,
-  "scope": "task-component",
-  "source_files": [
-    "services/hyperfide/src/scheduler/dispatch.ts",
-    "services/hyperfide/components/5.3.json",
-    "tests/hyperfide/cases/tasks/5_3.py",
-    "tests/hyperfide/registrations/5.3.json",
-    "tests/hyperfide/cases/tasks/5_1.py",
-    "tests/hyperfide/cases/tasks/3_2.py",
-    "tests/hyperfide/cases/tasks/3_1.py",
-    "tests/hyperfide/support/identity_fixture.py",
-    "services/hyperfide/migrations/0005-scheduling.sql",
-    "tests/hyperfide/qualify.py",
-    "tests/hyperfide/check-evidence.py",
-    "tests/hyperfide/manifest.schema.json",
-    "services/hyperfide/package.json",
-    "services/hyperfide/package-lock.json",
-    "services/hyperfide/tsconfig.json"
-  ],
-  "source_roots": [
-    "services/hyperfide/src",
-    "services/hyperfide/dist",
-    "services/hyperfide/components",
-    "services/hyperfide/migrations"
-  ],
-  "task": "5.3",
-  "timeout_seconds": 600,
-  "variant": "task:5.3"
+ "actions": [
+  "postgresql.fixture.create",
+  "postgresql.fixture.drop",
+  "https.loopback.listen"
+ ],
+ "argv": [
+  "python3",
+  "tests/hyperfide/cases/tasks/5_3.py"
+ ],
+ "assertion_ids": [
+  "dispatch.role.denied",
+  "dispatch.intent.not-execution",
+  "dispatch.exact-physical-identity",
+  "dispatch.outbox-bound",
+  "dispatch.restart.same-command",
+  "dispatch.new-key.no-replacement",
+  "dispatch.replay.token-conflict",
+  "dispatch.no-forged-receipt",
+  "dispatch.reconcile.package-spoof-denied",
+  "dispatch.reconcile.target-owner-required",
+  "dispatch.unbound-reader.refusal",
+  "dispatch.native-reader.missing-is-unknown",
+  "dispatch.unknown.keeps-owner",
+  "dispatch.no-native-proof.no-release",
+  "dispatch.concurrent.one-command",
+  "dispatch.consumer.role-required",
+  "dispatch.consumer.actual-inbox-effect",
+  "dispatch.consumer.stable-existing-intent",
+  "dispatch.consumer.receipt-before-ack",
+  "dispatch.consumer.native-route-distinct",
+  "dispatch.consumer.restart-no-repeat",
+  "dispatch.native-reader.accepted-is-unknown",
+  "dispatch.native-reader.signed-executing-after-restart",
+  "dispatch.native-reader.terminal-without-kind-is-unknown",
+  "dispatch.cleanup.observed",
+  "dispatch.consumer.pause-denied",
+  "dispatch.consumer.pause-rollback",
+  "dispatch.consumer.concurrent-single-intent",
+  "dispatch.consumer.actual-fresh-intent",
+  "dispatch.consumer.cleanup.observed",
+  "dispatch.component.registered-entrypoint",
+  "dispatch.lost-response.crash-after-commit",
+  "dispatch.lost-response.client-timeout-retry",
+  "dispatch.superseded.intent-unreconciled",
+  "dispatch.replacement.claim-is-not-dispatch",
+  "dispatch.replacement.requires-reconciliation",
+  "dispatch.replacement.consumer-waits",
+  "dispatch.reconcile.uncertain-unknown",
+  "dispatch.reconcile.null-observation-unknown",
+  "dispatch.replacement.after-reconciliation",
+  "dispatch.replacement.ensure-replays",
+  "dispatch.reconcile.superseded-executing-no-authority",
+  "dispatch.superseded.renew-refused",
+  "dispatch.reconcile.current-executing-authoritative",
+  "dispatch.duplicate-execution.single-authority",
+  "dispatch.reconcile.receipt-mismatch",
+  "dispatch.reconcile.receipt-unadmitted",
+  "dispatch.reconcile.terminal-kind-required",
+  "dispatch.reconcile.single-reader",
+  "dispatch.reconcile.terminal-states",
+  "dispatch.reconcile.terminal-replay",
+  "dispatch.reconcile.terminal-no-release",
+  "dispatch.reconcile.cleanup.observed"
+ ],
+ "cases": [
+  "V-004",
+  "V-037"
+ ],
+ "cleanup_argv": [
+  "python3",
+  "tests/hyperfide/cases/tasks/5_3.py",
+  "--cleanup"
+ ],
+ "cleanup_timeout_seconds": 60,
+ "fixtures": [
+  "services/hyperfide/dist/control.js",
+  "services/hyperfide/dist/scheduler/dispatch.js",
+  "services/hyperfide/dist/scheduler/claim.js",
+  "services/hyperfide/dist/scheduler/leases.js",
+  "services/hyperfide/dist/scheduler/resources.js",
+  "services/hyperfide/dist/storage/runtime.js"
+ ],
+ "required_artifacts": [
+  "scheduler/observations.json",
+  "scheduler/cleanup.json"
+ ],
+ "required_env": [
+  "DATABASE_URL"
+ ],
+ "resources": [
+  {
+   "id": "hf-task-5.3-runtime",
+   "kind": "postgresql-database-role-listener",
+   "scope": "task5.3-disposable"
+  }
+ ],
+ "schema_version": 1,
+ "scope": "task-component",
+ "source_files": [
+  "services/hyperfide/src/scheduler/dispatch.ts",
+  "services/hyperfide/components/5.3.json",
+  "tests/hyperfide/cases/tasks/5_3.py",
+  "tests/hyperfide/registrations/5.3.json",
+  "tests/hyperfide/cases/tasks/5_1.py",
+  "tests/hyperfide/cases/tasks/3_2.py",
+  "tests/hyperfide/cases/tasks/3_1.py",
+  "tests/hyperfide/support/identity_fixture.py",
+  "services/hyperfide/migrations/0005-scheduling.sql",
+  "tests/hyperfide/qualify.py",
+  "tests/hyperfide/check-evidence.py",
+  "tests/hyperfide/manifest.schema.json",
+  "services/hyperfide/package.json",
+  "services/hyperfide/package-lock.json",
+  "services/hyperfide/tsconfig.json"
+ ],
+ "source_roots": [
+  "services/hyperfide/src",
+  "services/hyperfide/dist",
+  "services/hyperfide/components",
+  "services/hyperfide/migrations"
+ ],
+ "task": "5.3",
+ "timeout_seconds": 600,
+ "variant": "task:5.3"
 }

@@ -1,197 +1,197 @@
 {
-  "approval": {
-    "allowed_actions": [
-      "postgresql.fixture.create",
-      "postgresql.fixture.drop",
-      "https.loopback.listen"
-    ],
-    "approved": true
+ "approval": {
+  "allowed_actions": [
+   "postgresql.fixture.create",
+   "postgresql.fixture.drop",
+   "https.loopback.listen"
+  ],
+  "approved": true
+ },
+ "campaign_id": "hyperfide-task-5.3-component-v1-requal-12aa390190b3-requal-6a91b0130b1d",
+ "case_ids": [
+  "V-004",
+  "V-037"
+ ],
+ "expected_assertion_ids": [
+  "dispatch.role.denied",
+  "dispatch.intent.not-execution",
+  "dispatch.exact-physical-identity",
+  "dispatch.outbox-bound",
+  "dispatch.restart.same-command",
+  "dispatch.new-key.no-replacement",
+  "dispatch.replay.token-conflict",
+  "dispatch.no-forged-receipt",
+  "dispatch.reconcile.package-spoof-denied",
+  "dispatch.reconcile.target-owner-required",
+  "dispatch.unbound-reader.refusal",
+  "dispatch.native-reader.missing-is-unknown",
+  "dispatch.unknown.keeps-owner",
+  "dispatch.no-native-proof.no-release",
+  "dispatch.concurrent.one-command",
+  "dispatch.consumer.role-required",
+  "dispatch.consumer.actual-inbox-effect",
+  "dispatch.consumer.stable-existing-intent",
+  "dispatch.consumer.receipt-before-ack",
+  "dispatch.consumer.native-route-distinct",
+  "dispatch.consumer.restart-no-repeat",
+  "dispatch.native-reader.accepted-is-unknown",
+  "dispatch.native-reader.signed-executing-after-restart",
+  "dispatch.native-reader.terminal-without-kind-is-unknown",
+  "dispatch.cleanup.observed",
+  "dispatch.consumer.pause-denied",
+  "dispatch.consumer.pause-rollback",
+  "dispatch.consumer.concurrent-single-intent",
+  "dispatch.consumer.actual-fresh-intent",
+  "dispatch.consumer.cleanup.observed",
+  "dispatch.component.registered-entrypoint",
+  "dispatch.lost-response.crash-after-commit",
+  "dispatch.lost-response.client-timeout-retry",
+  "dispatch.superseded.intent-unreconciled",
+  "dispatch.replacement.claim-is-not-dispatch",
+  "dispatch.replacement.requires-reconciliation",
+  "dispatch.replacement.consumer-waits",
+  "dispatch.reconcile.uncertain-unknown",
+  "dispatch.reconcile.null-observation-unknown",
+  "dispatch.replacement.after-reconciliation",
+  "dispatch.replacement.ensure-replays",
+  "dispatch.reconcile.superseded-executing-no-authority",
+  "dispatch.superseded.renew-refused",
+  "dispatch.reconcile.current-executing-authoritative",
+  "dispatch.duplicate-execution.single-authority",
+  "dispatch.reconcile.receipt-mismatch",
+  "dispatch.reconcile.receipt-unadmitted",
+  "dispatch.reconcile.terminal-kind-required",
+  "dispatch.reconcile.single-reader",
+  "dispatch.reconcile.terminal-states",
+  "dispatch.reconcile.terminal-replay",
+  "dispatch.reconcile.terminal-no-release",
+  "dispatch.reconcile.cleanup.observed"
+ ],
+ "inputs": [
+  {
+   "path": "services/hyperfide/src/scheduler/dispatch.ts",
+   "sha256": "2b2212d71cd7c637e805738cc3729b4473626dc5bab2a540635ab3cf268777c6",
+   "size": 18152
   },
-  "campaign_id": "hyperfide-task-5.3-component-v1-requal-12aa390190b3-requal-6a91b0130b1d",
-  "case_ids": [
-    "V-004",
-    "V-037"
-  ],
-  "expected_assertion_ids": [
-    "dispatch.role.denied",
-    "dispatch.intent.not-execution",
-    "dispatch.exact-physical-identity",
-    "dispatch.outbox-bound",
-    "dispatch.restart.same-command",
-    "dispatch.new-key.no-replacement",
-    "dispatch.replay.token-conflict",
-    "dispatch.no-forged-receipt",
-    "dispatch.reconcile.package-spoof-denied",
-    "dispatch.reconcile.target-owner-required",
-    "dispatch.unbound-reader.refusal",
-    "dispatch.unknown.keeps-owner",
-    "dispatch.no-native-proof.no-release",
-    "dispatch.concurrent.one-command",
-    "dispatch.consumer.role-required",
-    "dispatch.consumer.actual-inbox-effect",
-    "dispatch.consumer.stable-existing-intent",
-    "dispatch.consumer.receipt-before-ack",
-    "dispatch.consumer.native-route-distinct",
-    "dispatch.consumer.restart-no-repeat",
-    "dispatch.cleanup.observed",
-    "dispatch.consumer.pause-denied",
-    "dispatch.consumer.pause-rollback",
-    "dispatch.consumer.concurrent-single-intent",
-    "dispatch.consumer.actual-fresh-intent",
-    "dispatch.consumer.cleanup.observed",
-    "dispatch.component.registered-entrypoint",
-    "dispatch.lost-response.crash-after-commit",
-    "dispatch.lost-response.client-timeout-retry",
-    "dispatch.superseded.intent-unreconciled",
-    "dispatch.replacement.claim-is-not-dispatch",
-    "dispatch.replacement.requires-reconciliation",
-    "dispatch.replacement.consumer-waits",
-    "dispatch.reconcile.uncertain-unknown",
-    "dispatch.reconcile.null-observation-unknown",
-    "dispatch.replacement.after-reconciliation",
-    "dispatch.replacement.ensure-replays",
-    "dispatch.reconcile.superseded-executing-no-authority",
-    "dispatch.superseded.renew-refused",
-    "dispatch.reconcile.current-executing-authoritative",
-    "dispatch.duplicate-execution.single-authority",
-    "dispatch.reconcile.receipt-mismatch",
-    "dispatch.reconcile.receipt-unadmitted",
-    "dispatch.reconcile.terminal-kind-required",
-    "dispatch.reconcile.single-reader",
-    "dispatch.reconcile.terminal-states",
-    "dispatch.reconcile.terminal-replay",
-    "dispatch.reconcile.terminal-no-release",
-    "dispatch.reconcile.cleanup.observed",
-    "dispatch.native-reader.missing-is-unknown",
-    "dispatch.native-reader.accepted-is-unknown",
-    "dispatch.native-reader.signed-executing-after-restart",
-    "dispatch.native-reader.terminal-without-kind-is-unknown"
-  ],
-  "inputs": [
-    {
-      "path": "services/hyperfide/src/scheduler/dispatch.ts",
-      "sha256": "2b2212d71cd7c637e805738cc3729b4473626dc5bab2a540635ab3cf268777c6",
-      "size": 18152
-    },
-    {
-      "path": "services/hyperfide/components/5.3.json",
-      "sha256": "ecb373c4314c48274c49fca2ece036d38c82a950eabd3a61b0e58bd1a6d69601",
-      "size": 408
-    },
-    {
-      "path": "tests/hyperfide/cases/tasks/5_3.py",
-      "sha256": "a6ea00370125543faaee40b3779767a94e52f069d571e8383da88b96b510e342",
-      "size": 32574
-    },
-    {
-      "path": "tests/hyperfide/registrations/5.3.json",
-      "sha256": "71b1cc471ba495c95b1ef0ebc871690fed3356e8d5d960709e523cafd0ea3b17",
-      "size": 4327
-    },
-    {
-      "path": "tests/hyperfide/cases/tasks/5_1.py",
-      "sha256": "cc0f4d0fd03f16fb6c1df0df4d2433c43e813a2c67b373962337efe75514771e",
-      "size": 43289
-    },
-    {
-      "path": "tests/hyperfide/cases/tasks/3_2.py",
-      "sha256": "f718d35df3c5c6fd7149cd27e756027fbf638577e3862db291c51fb30d2ff6d4",
-      "size": 35541
-    },
-    {
-      "path": "tests/hyperfide/cases/tasks/3_1.py",
-      "sha256": "16359a464606e238a5bcfe16fce54d096ed48ae5182c18499d2b0613c21b3d08",
-      "size": 35448
-    },
-    {
-      "path": "tests/hyperfide/support/identity_fixture.py",
-      "sha256": "2b992fd5eab4d903909a4dd621b2ce3c7278fa932e163cbad8f33cf2b65efe0a",
-      "size": 29318
-    },
-    {
-      "path": "services/hyperfide/migrations/0005-scheduling.sql",
-      "sha256": "6cad3cae3af9117c8215520ee3b78ebaedfb69a79b9281f3566f56c9e01f9e78",
-      "size": 26704
-    },
-    {
-      "path": "tests/hyperfide/qualify.py",
-      "sha256": "8aa17f5e2572c8557f15353f7267e98600547fb0f2693486c0e0f2fc1abce8c2",
-      "size": 37538
-    },
-    {
-      "path": "tests/hyperfide/check-evidence.py",
-      "sha256": "cc8de56fb25bea153490b4143a231f1ff6f4dac758baaea4bf90fb7d9ba236a0",
-      "size": 30633
-    },
-    {
-      "path": "tests/hyperfide/manifest.schema.json",
-      "sha256": "3407092d7e6e452bb288e996f840bd5bab22d6c0f494a49bf944cd73c18078b8",
-      "size": 3216
-    },
-    {
-      "path": "services/hyperfide/package.json",
-      "sha256": "51c686f08fdfa47386af869cd6cdb63f1d2553f99366741239ded92dfe0d4398",
-      "size": 766
-    },
-    {
-      "path": "services/hyperfide/package-lock.json",
-      "sha256": "101f5bc9fbb5864f227051eb2d0388449925df88c0fdd0e5755b40b808a4cfbb",
-      "size": 128778
-    },
-    {
-      "path": "services/hyperfide/tsconfig.json",
-      "sha256": "2b45e09325652f23d0bf4ec53439e4552cf4c2854d7288ce40186d4074f894bb",
-      "size": 487
-    },
-    {
-      "path": "services/hyperfide/dist/control.js",
-      "sha256": "1383288f00472de29607207d1d318e257c6e80c0fb2c05ca9fb2d974040e8032",
-      "size": 118
-    },
-    {
-      "path": "services/hyperfide/dist/scheduler/dispatch.js",
-      "sha256": "2669d52e397d6b7a7ab0e8500a84ffc218f94ed5f7d46e616692bfa58758fe5d",
-      "size": 18862
-    },
-    {
-      "path": "services/hyperfide/dist/scheduler/claim.js",
-      "sha256": "7f81b4e7d9c8b97419c464844ed910764776c5f70edbfb054906ef50ffd91fb4",
-      "size": 88849
-    },
-    {
-      "path": "services/hyperfide/dist/scheduler/leases.js",
-      "sha256": "c60e2436c46125b615391c1503df3a5abd7e9bb34b7795d741493bd0e09f956e",
-      "size": 30171
-    },
-    {
-      "path": "services/hyperfide/dist/scheduler/resources.js",
-      "sha256": "ec62e4f9221a32b9900759b8e2ca8220138e8319332dfd69b4579a5ac541b3da",
-      "size": 55412
-    },
-    {
-      "path": "services/hyperfide/dist/storage/runtime.js",
-      "sha256": "79edb921337c7546f593720dd063655e6843a0ca09c270973077da79b1bb26cd",
-      "size": 18037
-    }
-  ],
-  "policy": {
-    "cloud_provisioning": false,
-    "component_only": true,
-    "execution": "remote-only",
-    "fixture_cleanup": "observed PostgreSQL database/role/private path/listener absence; no retained external resources",
-    "frontier_calls": false,
-    "full_case_status": "INCOMPLETE",
-    "native_receipt_scope": "test-owned trusted receipt reader over central command_inbox rows; production runner receipt reader is dependency-limited (12.x)"
+  {
+   "path": "services/hyperfide/components/5.3.json",
+   "sha256": "ecb373c4314c48274c49fca2ece036d38c82a950eabd3a61b0e58bd1a6d69601",
+   "size": 408
   },
-  "registered_variant": "task:5.3",
-  "resources": [
-    {
-      "id": "hf-task-5.3-runtime",
-      "kind": "postgresql-database-role-listener",
-      "scope": "task5.3-disposable"
-    }
-  ],
-  "schema_version": 1,
-  "scope": "task-component",
-  "seed": 1
+  {
+   "path": "tests/hyperfide/cases/tasks/5_3.py",
+   "sha256": "a6ea00370125543faaee40b3779767a94e52f069d571e8383da88b96b510e342",
+   "size": 32574
+  },
+  {
+   "path": "tests/hyperfide/registrations/5.3.json",
+   "sha256": "71b1cc471ba495c95b1ef0ebc871690fed3356e8d5d960709e523cafd0ea3b17",
+   "size": 4327
+  },
+  {
+   "path": "tests/hyperfide/cases/tasks/5_1.py",
+   "sha256": "cc0f4d0fd03f16fb6c1df0df4d2433c43e813a2c67b373962337efe75514771e",
+   "size": 43289
+  },
+  {
+   "path": "tests/hyperfide/cases/tasks/3_2.py",
+   "sha256": "f718d35df3c5c6fd7149cd27e756027fbf638577e3862db291c51fb30d2ff6d4",
+   "size": 35541
+  },
+  {
+   "path": "tests/hyperfide/cases/tasks/3_1.py",
+   "sha256": "16359a464606e238a5bcfe16fce54d096ed48ae5182c18499d2b0613c21b3d08",
+   "size": 35448
+  },
+  {
+   "path": "tests/hyperfide/support/identity_fixture.py",
+   "sha256": "2b992fd5eab4d903909a4dd621b2ce3c7278fa932e163cbad8f33cf2b65efe0a",
+   "size": 29318
+  },
+  {
+   "path": "services/hyperfide/migrations/0005-scheduling.sql",
+   "sha256": "6cad3cae3af9117c8215520ee3b78ebaedfb69a79b9281f3566f56c9e01f9e78",
+   "size": 26704
+  },
+  {
+   "path": "tests/hyperfide/qualify.py",
+   "sha256": "8aa17f5e2572c8557f15353f7267e98600547fb0f2693486c0e0f2fc1abce8c2",
+   "size": 37538
+  },
+  {
+   "path": "tests/hyperfide/check-evidence.py",
+   "sha256": "cc8de56fb25bea153490b4143a231f1ff6f4dac758baaea4bf90fb7d9ba236a0",
+   "size": 30633
+  },
+  {
+   "path": "tests/hyperfide/manifest.schema.json",
+   "sha256": "3407092d7e6e452bb288e996f840bd5bab22d6c0f494a49bf944cd73c18078b8",
+   "size": 3216
+  },
+  {
+   "path": "services/hyperfide/package.json",
+   "sha256": "51c686f08fdfa47386af869cd6cdb63f1d2553f99366741239ded92dfe0d4398",
+   "size": 766
+  },
+  {
+   "path": "services/hyperfide/package-lock.json",
+   "sha256": "101f5bc9fbb5864f227051eb2d0388449925df88c0fdd0e5755b40b808a4cfbb",
+   "size": 128778
+  },
+  {
+   "path": "services/hyperfide/tsconfig.json",
+   "sha256": "2b45e09325652f23d0bf4ec53439e4552cf4c2854d7288ce40186d4074f894bb",
+   "size": 487
+  },
+  {
+   "path": "services/hyperfide/dist/control.js",
+   "sha256": "1383288f00472de29607207d1d318e257c6e80c0fb2c05ca9fb2d974040e8032",
+   "size": 118
+  },
+  {
+   "path": "services/hyperfide/dist/scheduler/dispatch.js",
+   "sha256": "2669d52e397d6b7a7ab0e8500a84ffc218f94ed5f7d46e616692bfa58758fe5d",
+   "size": 18862
+  },
+  {
+   "path": "services/hyperfide/dist/scheduler/claim.js",
+   "sha256": "7f81b4e7d9c8b97419c464844ed910764776c5f70edbfb054906ef50ffd91fb4",
+   "size": 88849
+  },
+  {
+   "path": "services/hyperfide/dist/scheduler/leases.js",
+   "sha256": "c60e2436c46125b615391c1503df3a5abd7e9bb34b7795d741493bd0e09f956e",
+   "size": 30171
+  },
+  {
+   "path": "services/hyperfide/dist/scheduler/resources.js",
+   "sha256": "ec62e4f9221a32b9900759b8e2ca8220138e8319332dfd69b4579a5ac541b3da",
+   "size": 55412
+  },
+  {
+   "path": "services/hyperfide/dist/storage/runtime.js",
+   "sha256": "79edb921337c7546f593720dd063655e6843a0ca09c270973077da79b1bb26cd",
+   "size": 18037
+  }
+ ],
+ "policy": {
+  "cloud_provisioning": false,
+  "component_only": true,
+  "execution": "remote-only",
+  "fixture_cleanup": "observed PostgreSQL database/role/private path/listener absence; no retained external resources",
+  "frontier_calls": false,
+  "full_case_status": "INCOMPLETE",
+  "native_receipt_scope": "test-owned trusted receipt reader over central command_inbox rows; production runner receipt reader is dependency-limited (12.x)"
+ },
+ "registered_variant": "task:5.3",
+ "resources": [
+  {
+   "id": "hf-task-5.3-runtime",
+   "kind": "postgresql-database-role-listener",
+   "scope": "task5.3-disposable"
+  }
+ ],
+ "schema_version": 1,
+ "scope": "task-component",
+ "seed": 1
 }
