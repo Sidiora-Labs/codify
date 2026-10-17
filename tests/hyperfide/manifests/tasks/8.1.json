@@ -3,7 +3,7 @@
     "allowed_actions": [],
     "approved": true
   },
-  "campaign_id": "hyperfide-task-8.1-provider-contract-v1-requal-ff4632c9bc89",
+  "campaign_id": "hyperfide-task-8.1-provider-contract-v2-requal-ff4632c9bc89",
   "case_ids": [
     "V-036",
     "V-041"
@@ -377,8 +377,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/8_1.py",
-      "sha256": "3ebb89aa8078b82b731e4b229fae7802c5416aed78035044e681a6ecbef93356",
-      "size": 27470
+      "sha256": "14eca8f99d75b4bca96a606bc65e3bfb24fd0df404aa7a738404e98bad74117d",
+      "size": 27845
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
