@@ -9,6 +9,7 @@
   ],
   "assertion_ids": [
     "critique.service-linked",
+    "critique.spec-revisions-required",
     "critique.source-linked",
     "critique.mandatory-contract",
     "critique.missing-clause",
@@ -21,16 +22,48 @@
     "critique.validation-dispatch-forgery",
     "critique.validation-full-impact-digest",
     "critique.validation-bounded-impact",
-    "critique.source-immutable"
+    "critique.source-immutable",
+    "signed21.actual-amendment-validator-positive",
+    "signed21.actual-amendment-invalid-graph",
+    "signed21.actual-amendment-command-weakening",
+    "signed21.actual-amendment-packet-base-fence",
+    "signed21.actual-amendment-source-digest",
+    "signed21.actual-amendment-never-accepts",
+    "signed21.actual-packet",
+    "signed21.strict-null-json-record",
+    "signed21.real-primary-inspect",
+    "signed21.wire-advice-refused",
+    "signed21.cross-scope-refused",
+    "signed21.wrong-key-refused",
+    "signed21.missing-producer-abstains",
+    "signed21.secret-not-persisted",
+    "signed21.restart-history",
+    "signed21.accepted-intent-preserved",
+    "jobs21.common-revision-packet",
+    "jobs21.actual-durable-admission",
+    "jobs21.exact-common-hash",
+    "jobs21.actual-provider-typed-questions",
+    "jobs21.no-calibration-abstains",
+    "jobs21.capture-real-server-result",
+    "jobs21.actual-abstention-flags",
+    "jobs21.actual-abstention-proposal",
+    "jobs21.raw-provenance-preserved",
+    "jobs21.wire-trust-refused",
+    "jobs21.stale-real-job-capture",
+    "jobs21.accepted-source-preserved"
   ],
   "argv": [
     "python3",
     "tests/hyperfide/cases/tasks/21_1.py"
   ],
   "timeout_seconds": 240,
-  "required_env": [],
+  "required_env": [
+    "DATABASE_URL"
+  ],
   "fixtures": [
-    "services/hyperfide/dist/decisions/audit.js"
+    "services/hyperfide/dist/decisions/audit.js",
+    "tests/hyperfide/support/identity_fixture.py",
+    "tests/hyperfide/cases/tasks/20_4.py"
   ],
   "resources": [],
   "required_artifacts": [],
