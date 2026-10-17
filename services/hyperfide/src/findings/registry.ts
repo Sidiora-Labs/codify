@@ -181,9 +181,13 @@ async function confirmDuplicate(value:FindingTransaction,input:unknown):Promise<
   await tx.query('UPDATE hyperfide.findings SET state=\'OPEN\',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[scope.organisation_id,scope.run_id,targetId]);
   await emit(tx,scope,targetId,(BigInt(target.registry_version)+1n).toString(),'finding.reopened',{finding_id:targetId,source_finding_id:sourceId});
  }
+ // Consolidation never transfers accountability: a differing source owner stays explicit on the canonical record for leader resolution.
+ const accountabilityReview=String(source.owner_package_id)!==String(target.owner_package_id);
+ const affected=[...new Set([...(Array.isArray(source.collaborator_package_ids)?source.collaborator_package_ids.map(String):[]),...(accountabilityReview?[String(source.owner_package_id)]:[])])].filter(id=>id!==String(target.owner_package_id)).sort();
+ if(affected.length)await tx.query('UPDATE hyperfide.finding_registry_records SET state_version=state_version+1,collaborator_package_ids=(SELECT COALESCE(jsonb_agg(DISTINCT v ORDER BY v),\'[]\'::jsonb) FROM jsonb_array_elements(collaborator_package_ids||$4::jsonb) AS e(v)) WHERE organisation_id=$1 AND run_id=$2 AND finding_id=$3',[scope.organisation_id,scope.run_id,targetId,JSON.stringify(affected)]);
  await tx.query('INSERT INTO hyperfide.finding_duplicate_links(organisation_id,run_id,source_finding_id,target_finding_id,actor_id,reason,evidence_ids,actor_role,credential_id) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)',[scope.organisation_id,scope.run_id,sourceId,targetId,value.principal.actor_id,reason,JSON.stringify(evidenceIds),value.principal.role,value.principal.credential_id]);
  await tx.query('UPDATE hyperfide.finding_registry_records SET phase=\'DUPLICATE\',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND finding_id=$3',[scope.organisation_id,scope.run_id,sourceId]);
- await emit(tx,scope,sourceId,(BigInt(version)+1n).toString(),'finding.duplicate-confirmed',{source_finding_id:sourceId,target_finding_id:targetId});
+ await emit(tx,scope,sourceId,(BigInt(version)+1n).toString(),'finding.duplicate-confirmed',{source_finding_id:sourceId,target_finding_id:targetId,accountable_package_id:target.owner_package_id,affected_package_ids:affected,accountability_review_required:accountabilityReview});
  return {source_finding_id:sourceId,target_finding_id:targetId,replayed:false};
 }
 export function createComponent(_context:ComponentContext):Component{return {apiVersion:1,actions:{
