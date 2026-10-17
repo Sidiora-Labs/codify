@@ -271,8 +271,113 @@ export async function checkpointByKey(client:RailwayClient,key:string,signal?:Ab
   if(matches.length!==1) throw new Error('Railway checkpoint key is missing or ambiguous');
   return {id:text(matches[0]!.id),key:text(matches[0]!.key)};
 }
+export interface RestoredSentinelObservation {
+  native_sandbox_id:string;boot_id:string;environment_id:string;region:string;preparation_digest:string;
+  sentinel_file_digest:string|null;sentinel_process_alive:boolean;
+}
+/** Disk-only restore proof: sentinel bytes must survive, the sentinel process must not, and the boot must be fresh. */
+export function verifySentinelRestore(base:PreparedRailwayBase,sentinel:{path:string;sha256:string;process_marker:string},
+  child:RestoredSentinelObservation):ReturnType<typeof freshRestoreObservation>&{sentinel_file:'IDENTICAL';sentinel_process:'ABSENT'} {
+  const fresh=freshRestoreObservation(base,child);
+  if(child.sentinel_process_alive!==false) throw new Error('Railway restore claims process memory survival');
+  if(child.sentinel_file_digest===null||digest(child.sentinel_file_digest)!==digest(sentinel.sha256))
+    throw new Error('Railway disk restore content mismatch');
+  return {...fresh,sentinel_file:'IDENTICAL',sentinel_process:'ABSENT'};
+}
+/** Component-fixture only: a simulated sandbox view under the trusted configured preparation root.
+ * It is never live provider evidence; live hooks must come from authenticated runner enrollment. */
+class SimulatedSandboxView {
+  constructor(private readonly client:RailwayClient){
+    if(client.config.mode!=='component-fixture')throw new Error('Railway live preparation requires trusted pool binding');
+  }
+  private root(id:string):string {
+    if(!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(text(id,128)))throw new Error('Railway sandbox id');
+    return path.join(this.client.config.preparation_root,'sandboxes',id);
+  }
+  private read(name:string,max:number):Buffer {
+    const fd=fs.openSync(name,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);
+    try{const stat=fs.fstatSync(fd);if(!stat.isFile()||stat.size>max)throw new Error('Railway simulated sandbox file');
+      return fs.readFileSync(fd);}finally{fs.closeSync(fd);}
+  }
+  runner(id:string):{boot_id:string;preparation_digest:string;environment_id:string;region:string;writers_stopped:boolean;credentials_revoked:boolean} {
+    const v=object(JSON.parse(this.read(path.join(this.root(id),'runner.json'),65536).toString('utf8')),
+      ['boot_id','preparation_digest','environment_id','region','writers_stopped','credentials_revoked']);
+    text(v.boot_id,128);digest(v.preparation_digest);text(v.environment_id);text(v.region);
+    return v as ReturnType<SimulatedSandboxView['runner']>;
+  }
+  processAlive(id:string,marker:string):boolean {
+    const rows=JSON.parse(this.read(path.join(this.root(id),'processes.json'),65536).toString('utf8'));
+    if(!Array.isArray(rows)||rows.length>1024)throw new Error('Railway simulated process table');
+    return rows.some(row=>{
+      const v=object(row,['pid','marker']);integer(v.pid,1,4194304);
+      if(text(v.marker,256)!==marker)return false;
+      try{return fs.readFileSync('/proc/'+String(v.pid)+'/cmdline').toString('utf8').split('\0').includes(marker);}
+      catch{return false;}
+    });
+  }
+  fileDigest(id:string,relative:string):string|null {
+    const v=text(relative,1024);
+    if(path.posix.isAbsolute(v)||v.split('/').some(p=>!p||p==='.'||p==='..'))throw new Error('Railway sentinel path');
+    try{return 'sha256:'+createHash('sha256').update(this.read(path.join(this.root(id),'disk',v),16*1024*1024)).digest('hex');}
+    catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return null;throw error;}
+  }
+  hooks(id:string,expected:ProviderScope):PreparationCaptureHooks {
+    const quiesced=()=>{const r=this.runner(id);
+      if(r.writers_stopped!==true||r.credentials_revoked!==true||r.environment_id!==expected.environment_id||r.region!==expected.region)
+        throw new Error('Railway preparation runner is not quiescent');
+      return r;};
+    return {
+      withPreparationLock:(key,action)=>serialized(key,action),
+      quiesceAndVerify:async()=>{const r=quiesced();return {boot_id:r.boot_id,preparation_digest:r.preparation_digest,
+        assertHeld:async()=>{if(quiesced().boot_id!==r.boot_id)throw new Error('Railway preparation fence lost');},release:async()=>{}};},
+      persistCheckpoint:async base=>{const folder=path.join(this.client.config.preparation_root,'checkpoints');
+        fs.mkdirSync(folder,{recursive:true,mode:0o700});
+        fs.writeFileSync(path.join(folder,base.checkpoint.key+'.json'),canonicalJSON(base),{flag:'wx',mode:0o600});}
+    };
+  }
+}
+const locks=new Map<string,Promise<unknown>>();
+async function serialized<T>(key:string,action:()=>Promise<T>):Promise<T> {
+  const prior=locks.get(key)??Promise.resolve();
+  const next=prior.catch(()=>{}).then(action);locks.set(key,next);
+  try{return await next;}finally{if(locks.get(key)===next)locks.delete(key);}
+}
+function preparationInput(value:unknown,keys:string[]):JsonObject {
+  const v=object(value,keys);
+  return {...v,manifest:object(v.manifest),scope:scope(v.scope),candidate_path:text(v.candidate_path,4096)};
+}
+/** Exported for the Railway adapter (9.4) to bind with coordinator lock, authenticated runner quiescence and durable persistence. */
+export const RAILWAY_PREPARATION_CAPABILITY=Object.freeze({capturePreparedBase,buildRailwayTemplate,checkpointByKey,
+  validatePreparedBase,freshRestoreObservation,verifySentinelRestore});
 export function createComponent(_context:ComponentContext):Component {
-  return {apiVersion:1,actions:{
+  return {apiVersion:1,capabilities:Object.freeze({'railway.preparation.v1':RAILWAY_PREPARATION_CAPABILITY}),actions:{
+    'railway.preparation.capture':async(input,context)=>{
+      const v=preparationInput(input,['sandbox_id','scope','manifest','candidate_path','scan_policy']);
+      const client=configuredClient(context),view=new SimulatedSandboxView(client),id=text(v.sandbox_id,128);
+      const base=await capturePreparedBase(client,{sandbox_id:id,scope:v.scope as ProviderScope,
+        manifest:v.manifest as unknown as PreparationManifest,candidate_path:v.candidate_path as string,scan_policy:v.scan_policy},
+        context,view.hooks(id,v.scope as ProviderScope));
+      return {base,...client.provenance(),simulated:true,authority:'NONE'};
+    },
+    'railway.preparation.template.build':async(input,context)=>{
+      const v=preparationInput(input,['candidate_path','manifest','scan_policy','scope','commands','build_env']);
+      const client=configuredClient(context);new SimulatedSandboxView(client);
+      await buildRailwayTemplate(client,v as unknown as Parameters<typeof buildRailwayTemplate>[1],context);
+      return {built:true,recipe_digest:(v.manifest as unknown as PreparationManifest).profile.recipe.digest,
+        steps:(v.commands as string[]).length,...client.provenance(),simulated:true,authority:'NONE'};
+    },
+    'railway.preparation.sentinel.verify':(input,context)=>{
+      const v=object(input,['base','scope','preparation_digest','child_sandbox_id','sentinel']);
+      const base=validatePreparedBase(v.base,scope(v.scope),digest(v.preparation_digest));
+      const s=object(v.sentinel,['path','sha256','process_marker']);
+      const sentinel={path:text(s.path,1024),sha256:digest(s.sha256),process_marker:text(s.process_marker,256)};
+      const client=configuredClient(context),view=new SimulatedSandboxView(client),child=text(v.child_sandbox_id,128);
+      const runner=view.runner(child);
+      return {...verifySentinelRestore(base,sentinel,{native_sandbox_id:child,boot_id:runner.boot_id,
+        environment_id:runner.environment_id,region:runner.region,preparation_digest:runner.preparation_digest,
+        sentinel_file_digest:view.fileDigest(child,sentinel.path),
+        sentinel_process_alive:view.processAlive(child,sentinel.process_marker)}),...client.provenance(),simulated:true};
+    },
     'railway.preparation.describe':input=>{object(input,[]);return {sdk:RAILWAY_PIN,clone:'DISK_ONLY',
       enrollment:'FRESH_REQUIRED',checkpoint_mutation_identity:'ID',checkpoint_restore_identity:'KEY',authority:'NONE'};},
     'railway.preparation.reference.verify':input=>{
