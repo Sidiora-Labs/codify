@@ -23,8 +23,8 @@ export interface ExternalFencingServiceOptions {
  readonly providers:ProviderIsolationCapability;readonly legacy:LegacyWriterBackend;readonly ownedHost?:ProviderIsolationBackend;
 }
 function fail(code:string,message:string):never{throw new FoundationError(code,message)}
-function fields(value:unknown,required:readonly string[],optional:readonly string[]=[]):asserts value is Record<string,unknown>{
- if(!object(value)||required.some(k=>!Object.hasOwn(value,k))||Object.keys(value).some(k=>!required.includes(k)&&!optional.includes(k)))fail('EXTERNAL_FENCE_CONFIG_INVALID','Unexpected or missing trusted fencing configuration field');
+function fields(value:unknown,required:readonly string[],optional:readonly string[]=[],code='EXTERNAL_FENCE_CONFIG_INVALID'):asserts value is Record<string,unknown>{
+ if(!object(value)||required.some(k=>!Object.hasOwn(value,k))||Object.keys(value).some(k=>!required.includes(k)&&!optional.includes(k)))fail(code,code==='EXTERNAL_FENCE_CONFIG_INVALID'?'Unexpected or missing trusted fencing configuration field':'Fencing description takes empty input');
 }
 async function configuration(filename:string|undefined):Promise<FencingConfiguration>{
  if(!filename||!path.isAbsolute(filename)||path.resolve(filename)!==filename||await fs.realpath(filename)!==filename)fail('EXTERNAL_FENCE_CONFIG_REQUIRED','Canonical private server fencing configuration required');
@@ -79,5 +79,5 @@ export async function createComponent(context:ComponentContext):Promise<Componen
   providers:context.dependencies.require('8.4','provider.isolation.v1',provider),
   legacy:context.dependencies.require('legacy-writer-isolation','migration.legacy-writers.v1',legacy)
  });
- return {apiVersion:1,capabilities:{'recovery.external-fencing.v1':service},actions:{'recovery.fencing.describe':input=>{fields(input,[]);return service.describe()}},close:()=>service.close()};
+ return {apiVersion:1,capabilities:{'recovery.external-fencing.v1':service},actions:{'recovery.fencing.describe':input=>{fields(input,[],[],'EXTERNAL_FENCE_INPUT_INVALID');return service.describe()}},close:()=>service.close()};
 }
