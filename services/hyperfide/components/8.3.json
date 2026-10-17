@@ -17,7 +17,10 @@
     "provider.intents.reconcile",
     "provider.orphans.list",
     "provider.inventory.observe-known",
-    "provider.remote.execute-bound"
+    "provider.remote.execute-bound",
+    "provider.worker.start",
+    "provider.worker.status",
+    "provider.worker.stop"
   ],
   "requires": [
     "8.2"
