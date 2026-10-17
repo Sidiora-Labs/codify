@@ -1,3 +1,6 @@
+import {assertInvocation} from '../transport/protocol.js';
+import type {InvocationContext} from '../transport/protocol.js';
+import {readSemanticDisposition} from '../storage/dispositions.js';
 import {randomUUID,createHash} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import type {Component,ComponentContext} from '../components/registry.js';
@@ -6,7 +9,54 @@ import type {PrimaryTransaction,QuerySession} from '../storage/transactions.js';
 import {object} from '../policy/programme.js';
 import {validateProfile} from '../preparation/manifests.js';
 
-import {gateway,trustedActor,requireAuthority,record,uuid,decimal,digest,text,strings,canonical,hash,refuse,operation,ready} from './packages.js';
+import {gateway,trustedActor,requireAuthority,record,uuid,decimal,digest,text,strings,canonical,hash,refuse,operation,ready,hierarchyReadGuard} from './packages.js';
+
+
+export interface ContinuationArtifactBinding {
+ artifact_id:string;artifact_digest:string;artifact_size_bytes:string;storage_kind:'object'|'manifest';content_digest:string;content_size_bytes:string;
+}
+export interface ContinuationBinding {
+ schema_version:1;checkpoint_id:string;artifact:ContinuationArtifactBinding;
+ source:{attempt_id:string;attempt_generation:string;task_id:string;workspace_id:string;repository_id:string;source_object_id:string;input_packet_digest:string;preparation_digest:string;dependency_digest:string;source_metadata_digest:string;agent_session_id:string|null;support_level:'NATIVE_RESUME'|'SOURCE_ONLY'|'UNSUPPORTED'};
+ context_artifacts:{dependency:ContinuationArtifactBinding;summary:ContinuationArtifactBinding;findings:ContinuationArtifactBinding};
+ instruction_cursor:string;authority:'NONE';context_restored:false;
+}
+export type ContinuationReader=(tx:PrimaryTransaction,scope:{organisation_id:string;run_id:string;checkpoint_id:string},invocation:InvocationContext)=>Promise<ContinuationBinding>;
+function continuationBinding(value:unknown,checkpointId:string):ContinuationBinding {
+ const v=record(value,['schema_version','checkpoint_id','artifact','source','context_artifacts','instruction_cursor','authority','context_restored']);
+ if(v.schema_version!==1||v.checkpoint_id!==checkpointId||v.authority!=='NONE'||v.context_restored!==false)return refuse('CONTINUATION_INPUT_INVALID','Checkpoint input must be the exact historical non-authoritative binding');
+ function artifact(value:unknown):ContinuationArtifactBinding{
+  const a=record(value,['artifact_id','artifact_digest','artifact_size_bytes','storage_kind','content_digest','content_size_bytes']);
+  uuid(a.artifact_id);digest(a.artifact_digest);digest(a.content_digest);decimal(a.artifact_size_bytes,true);decimal(a.content_size_bytes,true);
+  if(a.storage_kind!=='object'&&a.storage_kind!=='manifest')return refuse('CONTINUATION_INPUT_INVALID','Unknown stored continuation artifact format');
+  return a as unknown as ContinuationArtifactBinding;
+ }
+ const capsule=artifact(v.artifact);
+ if(capsule.storage_kind!=='manifest'||BigInt(capsule.content_size_bytes)<40n||BigInt(capsule.content_size_bytes)>134217728n)return refuse('CONTINUATION_INPUT_INVALID','Registered capsule size/format is unsupported');
+ const source=record(v.source,['attempt_id','attempt_generation','task_id','workspace_id','repository_id','source_object_id','input_packet_digest','preparation_digest','dependency_digest','source_metadata_digest','agent_session_id','support_level']);
+ for(const key of ['attempt_id','task_id','workspace_id','repository_id'])uuid(source[key]);
+ if(source.agent_session_id!==null)uuid(source.agent_session_id);
+ if(source.support_level==='NATIVE_RESUME'&&source.agent_session_id===null)return refuse('CONTINUATION_INPUT_INVALID','Native resume support requires an actual registered source session');
+ decimal(source.attempt_generation);for(const key of ['input_packet_digest','preparation_digest','dependency_digest','source_metadata_digest'])digest(source[key]);
+ if(typeof source.source_object_id!=='string'||!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(source.source_object_id))return refuse('CONTINUATION_INPUT_INVALID','Full actual checkpoint source commit required');
+ if(source.support_level!=='NATIVE_RESUME'&&source.support_level!=='SOURCE_ONLY')return refuse('CONTINUATION_UNSUPPORTED','Unsupported checkpoint cannot become a continuation input');
+ const contexts=record(v.context_artifacts,['dependency','summary','findings']);for(const item of Object.values(contexts))artifact(item);
+ if(typeof v.instruction_cursor!=='string'||!/^(0|[1-9][0-9]{0,18})$/.test(v.instruction_cursor))return refuse('CONTINUATION_INPUT_INVALID','Canonical persisted instruction cursor required');
+ return freeze(v as unknown as ContinuationBinding);
+}
+
+interface ContinuationProvider {reader:ContinuationReader|null;sealed:boolean}
+const continuationProviders=new Map<string,ContinuationProvider>();
+async function currentContinuation(tx:PrimaryTransaction,scope:{organisation_id:string;run_id:string;checkpoint_id:string},invocation:InvocationContext|undefined){
+ if(!invocation)return refuse('AUTHENTICATED_ACTOR_REQUIRED','Continuation reads require the actual authenticated invocation');
+ assertInvocation(invocation);
+ if(invocation.principal.organisation_id!==scope.organisation_id||invocation.principal.run_id!==scope.run_id)return refuse('ACTOR_SCOPE_MISMATCH','Continuation scope differs from the authenticated actor');
+ await invocation.guard(tx);
+ const provider=continuationProviders.get(scope.run_id);
+ if(provider)provider.sealed=true;
+ if(!provider?.reader)return refuse('CONTINUATION_READER_REQUIRED','The actual checkpoint service must install its trusted historical reader before startup completes');
+ return continuationBinding(await provider.reader(tx,scope,invocation),scope.checkpoint_id);
+}
 
 const MIGRATION_CHECKSUM='sha256:'+createHash('sha256').update(readFileSync(new URL('../../migrations/0032-execution-packets.sql',import.meta.url))).digest('hex');
 async function packetSchema(tx:QuerySession):Promise<void>{
@@ -58,12 +108,15 @@ async function preparationManifest(tx:QuerySession,organisationId:string,profile
 }
 /** Accepted physical preparation demand, independent of a not-yet-created executor. */
 export async function loadPreparationIntent(tx:PrimaryTransaction,input:{organisation_id:string;run_id:string;task_id:string;profile_id?:string}){
- assertPrimaryTransaction(tx);await ready(tx);
+ assertPrimaryTransaction(tx);await readSemanticDisposition(tx,input);await ready(tx);
  const org=uuid(input.organisation_id),run=uuid(input.run_id),taskId=uuid(input.task_id);
  const tasks=await tx.query('SELECT id,spec_revision_id,spec_generation::text,criteria_digest,definition FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR SHARE',[org,run,taskId]);
  const task=tasks.rows[0];if(!task)return refuse('TASK_UNAVAILABLE','Preparation intent requires an accepted same-run task');
  const accepted=await tx.query('SELECT 1 FROM hyperfide.run_spec_revisions WHERE organisation_id=$1 AND run_id=$2 AND spec_generation=$3 AND spec_revision_id=$4',[org,run,task.spec_generation,task.spec_revision_id]);
  if(!accepted.rowCount)return refuse('SPEC_REVISION_UNACCEPTED','Task is not pinned to accepted immutable run history');
+ const policyRows=await tx.query('SELECT policy_digest FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR SHARE',[org,run]);
+ if(!policyRows.rows[0])return refuse('RUN_UNAVAILABLE','Accepted preparation intent requires a current run');
+ const policyDigest=digest(policyRows.rows[0].policy_digest);
  const profileId=uuid(definitionField(task.definition,'environment_profile_id'));
  if(input.profile_id!==undefined&&uuid(input.profile_id)!==profileId)return refuse('ENVIRONMENT_PROFILE_MISMATCH','Requested profile differs from accepted task intent');
  const proofModule=await import(new URL('../spec/obligations.js',import.meta.url).href);
@@ -75,7 +128,17 @@ export async function loadPreparationIntent(tx:PrimaryTransaction,input:{organis
  if(Number(requirements.cpu_millis)>prepared.declared_profile.resources.cpu_millis||BigInt(String(requirements.memory_bytes))>BigInt(prepared.declared_profile.resources.memory_bytes)||BigInt(String(requirements.disk_bytes))>BigInt(prepared.declared_profile.resources.disk_bytes))return refuse('RESOURCE_POLICY_INVALID','Declared agent resources exceed the accepted environment profile');
  return freeze({task_id:taskId,spec_revision_id:task.spec_revision_id,spec_generation:task.spec_generation,criteria_digest:task.criteria_digest,
   profile_id:profileId,profile_version:prepared.declared_profile.profile_version,...prepared,resource_requirements:requirements,
-  registry_digest:digest(proof.registry_digest),proof_policy:proof.policy,execution_authority:false as const});
+  registry_digest:digest(proof.registry_digest),proof_policy:proof.policy,execution_profile:acceptedExecutionProfile(task.definition,prepared.declared_profile),policy_digest:policyDigest,execution_authority:false as const});
+}
+
+export interface PacketAuthority {
+ loadExecutionPacket:typeof loadExecutionPacket;readExecutionPacket:typeof readExecutionPacket;
+ loadPreparationIntent:typeof loadPreparationIntent;validateExecutionInputs:typeof validateExecutionInputs;
+ derivePreparedEnvironmentRoles:typeof derivePreparedEnvironmentRoles;deriveQualificationInputs:typeof deriveQualificationInputs;
+ installContinuationReader:(reader:ContinuationReader)=>void;
+}
+export function isPacketAuthority(value:unknown):value is PacketAuthority {
+ return object(value)&&['loadExecutionPacket','readExecutionPacket','loadPreparationIntent','validateExecutionInputs','derivePreparedEnvironmentRoles','deriveQualificationInputs','installContinuationReader'].every(key=>typeof value[key]==='function');
 }
 
 export interface ExecutionPacketRecord {packet_id:string;digest:string;mandatory_digest:string;packet:Record<string,unknown>}
@@ -84,7 +147,7 @@ function freeze<T>(value:T):T {
 }
 /** Return immutable historical inputs. Current admission/custody authority is a separate gate. */
 export async function loadExecutionPacket(tx:PrimaryTransaction,input:{organisation_id:string;run_id:string;digest:string}):Promise<ExecutionPacketRecord>{
- assertPrimaryTransaction(tx);await ready(tx);return readExecutionPacket(tx,input);
+ assertPrimaryTransaction(tx);await readSemanticDisposition(tx,input);await ready(tx);return readExecutionPacket(tx,input);
 }
 /** Exact immutable observation only; caller owns authenticated causal snapshot admission. */
 export async function readExecutionPacket(tx:QuerySession,input:{organisation_id:string;run_id:string;digest:string}):Promise<ExecutionPacketRecord>{
@@ -106,7 +169,7 @@ export async function readExecutionPacket(tx:QuerySession,input:{organisation_id
 }
 
 /** Current input eligibility for NEW admission only; never replace historical packet reads. */
-export async function validateExecutionInputs(tx:PrimaryTransaction,input:{organisation_id:string;run_id:string;digest:string}){
+export async function validateExecutionInputs(tx:PrimaryTransaction,input:{organisation_id:string;run_id:string;digest:string},invocation?:InvocationContext){
  const loaded=await loadExecutionPacket(tx,input),m=loaded.packet.mandatory;
  if(!object(m)||!object(m.identity)||!object(m.runtime)||!object(m.inputs)||!Array.isArray(m.inputs.repositories)||!object(m.inputs.graph))return refuse('PACKET_INPUTS_MISSING','Admission requires complete immutable runtime/source inputs');
  const currentTask=await tx.query("SELECT t.spec_revision_id,t.spec_generation::text,t.criteria_digest,r.authority_epoch FROM hyperfide.tasks t JOIN hyperfide.runs r ON r.organisation_id=t.organisation_id AND r.id=t.run_id WHERE t.organisation_id=$1 AND t.run_id=$2 AND t.id=$3 FOR SHARE OF t,r",[uuid(input.organisation_id),uuid(input.run_id),uuid(m.identity.task_id)]);
@@ -126,6 +189,12 @@ export async function validateExecutionInputs(tx:PrimaryTransaction,input:{organ
    return refuse('EXECUTION_INPUTS_STALE','Current required graph provenance differs from the exact immutable packet inputs');
   checked.push('CURRENT_REQUIRED_GRAPH_ARTIFACTS');
  }else checked.push('GRAPH_EXPLICITLY_NOT_REQUIRED');
+ if(object(m.intent)&&m.intent.continuation!==undefined&&m.intent.continuation!==null){
+  if(!object(m.intent.continuation))return refuse('CONTINUATION_INPUT_INVALID','Stored continuation binding is invalid');
+  const continuation=await currentContinuation(tx,{organisation_id:uuid(input.organisation_id),run_id:uuid(input.run_id),checkpoint_id:uuid(m.intent.continuation.checkpoint_id)},invocation);
+  if(canonical(continuation)!==canonical(m.intent.continuation))return refuse('EXECUTION_INPUTS_STALE','Historical checkpoint binding differs from immutable packet inputs');
+  checked.push('CURRENT_CONTINUATION_ARTIFACTS');
+ }
  return freeze({...loaded,checked_inputs:checked,execution_authority:false as const});
 }
 
@@ -144,6 +213,16 @@ export function derivePreparedEnvironmentRoles(manifest:unknown,context:unknown)
   toolchain_digest:hash({os:profile.os,image:profile.image,toolchains:profile.toolchains,package_managers:profile.package_managers,native_agents:profile.native_agents,connectors:profile.connectors,supervisor:profile.supervisor,hyperfide:profile.hyperfide,system_packages:profile.system_packages}),
   configuration_digest:hash({preparation_digest:preparationDigest,build_config:profile.build_config,generated_inputs:profile.generated_inputs,recipe:profile.recipe,execution_profile:execution,resource_requirements:resources,policy_digest:policyDigest}),
   authority:'NONE' as const});
+}
+
+function acceptedExecutionProfile(definition:unknown,profile:ReturnType<typeof validateProfile>){
+ const execution=definitionField(definition,'execution_profile');
+ if(!object(execution))return refuse('EXECUTION_PROFILE_REQUIRED','Accepted task intent must name its connector/model/auth profile references');
+ record(execution,['connector','model_profile_ref','credential_profile_ref','timeout_seconds']);
+ if(!['codex','claude-code'].includes(String(execution.connector)))return refuse('EXECUTION_PROFILE_INVALID','Only the approved frontier connector families are supported');
+ text(execution.model_profile_ref);text(execution.credential_profile_ref);
+ if(!Number.isSafeInteger(execution.timeout_seconds)||Number(execution.timeout_seconds)<1||Number(execution.timeout_seconds)>profile.policy.max_process_lifetime_seconds)return refuse('EXECUTION_PROFILE_INVALID','Execution lifetime exceeds the declared environment policy');
+ return execution;
 }
 
 /** Hash actual non-result inputs; source-result commit/tree provenance stays distinct. */
@@ -169,11 +248,18 @@ export function deriveQualificationInputs(packet:unknown):{
 }
 
 export function createComponent(context:ComponentContext):Component {
- const g=gateway(context);
- return {apiVersion:1,capabilities:{'hierarchy.packets.v1':Object.freeze({loadExecutionPacket,readExecutionPacket,loadPreparationIntent,validateExecutionInputs,derivePreparedEnvironmentRoles,deriveQualificationInputs})},actions:{
- 'hierarchy.packet.describe':async input=>{record(input,[]);return {schema_version:1,packet_phase:'PROSPECTIVE_ADMISSION',execution_authority:false,hash:'SHA256_CANONICAL_JSON',max_packet_bytes:262144,post_admission_required:['CURRENT_COMPUTE_GRANT','VERIFIED_MATERIALISATION','QUALIFIED_CONNECTOR_LAUNCH']};},
+ const g=gateway(context),run=uuid(context.policy.programme_id);
+ if(continuationProviders.has(run))return refuse('CONTINUATION_REGISTRY_EXISTS','The run already has a packet-service registry in this process');
+ const provider:ContinuationProvider={reader:null,sealed:false};continuationProviders.set(run,provider);
+ const installContinuationReader=(reader:ContinuationReader)=>{
+  if(provider.sealed||provider.reader!==null||typeof reader!=='function')return refuse('CONTINUATION_REGISTRATION_CLOSED','Exactly one trusted checkpoint reader may register during component startup');
+  provider.reader=reader;
+ };
+ return {apiVersion:1,capabilities:{'hierarchy.packets.v1':Object.freeze({loadExecutionPacket,readExecutionPacket,loadPreparationIntent,validateExecutionInputs,derivePreparedEnvironmentRoles,deriveQualificationInputs,installContinuationReader})},actions:{
+ 'hierarchy.packet.describe':async input=>{provider.sealed=true;record(input,[]);return {schema_version:1,packet_phase:'PROSPECTIVE_ADMISSION',execution_authority:false,hash:'SHA256_CANONICAL_JSON',max_packet_bytes:262144,post_admission_required:['CURRENT_COMPUTE_GRANT','VERIFIED_MATERIALISATION','QUALIFIED_CONNECTOR_LAUNCH']};},
  'hierarchy.packet.create':async (input,invocation)=>{
-  const v=record(input,['idempotency_key','leader_generation','package_generation','task_id','attempt_id','attempt_generation','sandbox_id','slot_id','sandbox_boot_generation','max_bytes','optional_context']);
+  provider.sealed=true;
+  const v=record(input,['idempotency_key','leader_generation','package_generation','task_id','attempt_id','attempt_generation','sandbox_id','slot_id','sandbox_boot_generation','max_bytes','optional_context','continuation_checkpoint_id'],['idempotency_key','leader_generation','package_generation','task_id','attempt_id','attempt_generation','sandbox_id','slot_id','sandbox_boot_generation','max_bytes','optional_context']);
   const a=trustedActor(invocation),taskId=uuid(v.task_id),attemptId=uuid(v.attempt_id),generation=decimal(v.attempt_generation);
   const sandboxId=uuid(v.sandbox_id),slotId=uuid(v.slot_id),boot=decimal(v.sandbox_boot_generation);
   if(!Number.isInteger(v.max_bytes)||Number(v.max_bytes)<4096||Number(v.max_bytes)>262144||!Array.isArray(v.optional_context)||v.optional_context.length>64)return refuse('INVALID_REQUEST','Packet/context limits are out of bounds');
@@ -206,16 +292,17 @@ export function createComponent(context:ComponentContext):Component {
    const profileRow={content_digest:prepared.preparation_digest},profile=prepared.declared_profile;
    const requirements=resourceRequirements(definitionField(task.definition,'resource_requirements'));
    if(Number(requirements.cpu_millis)>profile.resources.cpu_millis||BigInt(String(requirements.memory_bytes))>BigInt(profile.resources.memory_bytes)||BigInt(String(requirements.disk_bytes))>BigInt(profile.resources.disk_bytes))return refuse('RESOURCE_POLICY_INVALID','Per-agent declared requirements exceed the declared environment; usable capacity still requires independent admission');
-   const execution=definitionField(task.definition,'execution_profile');
-   if(!object(execution))return refuse('EXECUTION_PROFILE_REQUIRED','Accepted task intent must name its connector/model/auth profile references');
-   record(execution,['connector','model_profile_ref','credential_profile_ref','timeout_seconds']);
-   if(!['codex','claude-code'].includes(String(execution.connector)))return refuse('EXECUTION_PROFILE_INVALID','Only the approved frontier connector families are supported');
-   text(execution.model_profile_ref);text(execution.credential_profile_ref);
-   if(!Number.isSafeInteger(execution.timeout_seconds)||Number(execution.timeout_seconds)<1||Number(execution.timeout_seconds)>profile.policy.max_process_lifetime_seconds)return refuse('EXECUTION_PROFILE_INVALID','Execution lifetime exceeds the declared environment policy');
+   const execution=acceptedExecutionProfile(task.definition,profile);
    const scopeValue=definitionField(task.definition,'touches'),scope=strings(scopeValue,4096);
    if(!scope.length)return refuse('TASK_SCOPE_REQUIRED','Task has no explicit owned scope');
    const repos=await tx.query('SELECT repository_id,source_object_id,integration_ref FROM hyperfide.run_repositories WHERE organisation_id=$1 AND run_id=$2 ORDER BY repository_id',[a.organisation_id,a.run_id]);
    if(!repos.rowCount)return refuse('SOURCE_INPUTS_REQUIRED','No exact repository source input is pinned');
+   let continuation:ContinuationBinding|null=null;
+   if(v.continuation_checkpoint_id!==undefined){
+    continuation=await currentContinuation(tx,{organisation_id:a.organisation_id,run_id:a.run_id,checkpoint_id:uuid(v.continuation_checkpoint_id)},a.invocation);
+    if(continuation.source.task_id!==taskId||continuation.source.attempt_id===attemptId||BigInt(continuation.source.attempt_generation)>=BigInt(generation)||!repos.rows.some(r=>r.repository_id===continuation!.source.repository_id))
+     return refuse('CONTINUATION_SOURCE_MISMATCH','Checkpoint must belong to an older same-task attempt and accepted repository; its branch commit remains a separate immutable input');
+   }
    const deps=await tx.query('SELECT d.predecessor_run_id,d.predecessor_task_id,d.milestone,t.state,t.current_custody_id,c.repository_id,c.source_object_id,c.custody_generation::text,c.authority,c.qualification_outcome FROM hyperfide.task_dependencies d JOIN hyperfide.tasks t ON t.organisation_id=d.organisation_id AND t.run_id=d.predecessor_run_id AND t.id=d.predecessor_task_id LEFT JOIN hyperfide.submission_custodies c ON c.organisation_id=t.organisation_id AND c.run_id=t.run_id AND c.id=t.current_custody_id WHERE d.organisation_id=$1 AND d.run_id=$2 AND d.task_id=$3 ORDER BY d.predecessor_run_id,d.predecessor_task_id',[a.organisation_id,a.run_id,taskId]);
    if(deps.rows.some(d=>!d.repository_id||!d.source_object_id||d.qualification_outcome!=='PASS'||d.milestone==='RELEASED'||(d.milestone==='INTEGRATED'?d.state!=='INTEGRATED':!['QUALIFIED','INTEGRATING','INTEGRATED'].includes(d.state))))
     return refuse('DEPENDENCY_INPUT_UNAVAILABLE','Dependency requires exact qualified/integrated source evidence or a release-barrier input');
@@ -252,7 +339,7 @@ export function createComponent(context:ComponentContext):Component {
    const mandatory={identity:{organisation_id:a.organisation_id,run_id:a.run_id,authority_epoch:a.authority_epoch,leader_generation:auth.leader_generation,
     package_id:task.feature_package_id,package_generation:auth.package_generation,task_id:taskId,task_key:task.task_key,attempt_id:attemptId,attempt_generation:generation,
     parent_session_id:manager,accountable_manager_session_id:manager,spec_revision_id:task.spec_revision_id,spec_generation:task.spec_generation,criteria_digest:task.criteria_digest},
-    intent:{definition:task.definition,owned_scope:scope,proof_obligations:proof.obligations,proof_policy:proof.policy,registry_digest:proof.registry_digest},
+    intent:{definition:task.definition,owned_scope:scope,proof_obligations:proof.obligations,proof_policy:proof.policy,registry_digest:proof.registry_digest,continuation},
     inputs:{repositories:repos.rows,dependencies:deps.rows,contracts,graph:graphInputs},
     runtime:{sandbox_id:sandboxId,slot_id:slotId,sandbox_boot_generation:boot,environment_profile_id:slot.profile_id,preparation_digest:profileRow.content_digest,
      declared_profile:profile,execution_profile:execution,connector_qualification:'REQUIRED_BEFORE_LAUNCH',materialisation:'REQUIRED_AFTER_ADMISSION'},
@@ -267,21 +354,27 @@ export function createComponent(context:ComponentContext):Component {
    const packet=payload(),packetDigest=hash(packet),id=randomUUID();
    await tx.query('INSERT INTO hyperfide.hierarchy_execution_packets(organisation_id,run_id,id,digest,mandatory_digest,task_id,attempt_id,attempt_generation,spec_revision_id,spec_generation,package_id,package_generation,authority_epoch,leader_generation,policy_digest,registry_digest,packet) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)',
     [a.organisation_id,a.run_id,id,packetDigest,mandatoryDigest,taskId,attemptId,generation,task.spec_revision_id,task.spec_generation,task.feature_package_id,auth.package_generation,a.authority_epoch,auth.leader_generation,run.policy_digest,proof.registry_digest,JSON.stringify(packet)]);
+   if(continuation){
+    for(const [role,binding] of [['CAPSULE',continuation.artifact],['DEPENDENCY',continuation.context_artifacts.dependency],['SUMMARY',continuation.context_artifacts.summary],['FINDINGS',continuation.context_artifacts.findings]] as const)
+     await tx.query('INSERT INTO hyperfide.hierarchy_execution_packet_artifacts(organisation_id,run_id,packet_id,artifact_role,artifact_id) VALUES($1,$2,$3,$4,$5)',[a.organisation_id,a.run_id,id,role,binding.artifact_id]);
+   }
    return {packet_id:id,digest:packetDigest,mandatory_digest:mandatoryDigest,packet};
   });
  },
  'hierarchy.packet.validate':async (input,invocation)=>{
+  provider.sealed=true;
   const v=record(input,['leader_generation','package_generation','digest']),a=trustedActor(invocation),identity=digest(v.digest);
-  return g.withPrimaryTransaction({timeoutMs:10000,guard:a.guard,signal:a.signal},async tx=>{
+  return g.withPrimaryTransaction({timeoutMs:10000,guard:hierarchyReadGuard(a),signal:a.signal},async tx=>{
    const loaded=await loadExecutionPacket(tx,{organisation_id:a.organisation_id,run_id:a.run_id,digest:identity});
    const m=loaded.packet.mandatory;if(!object(m)||!object(m.identity))return refuse('PACKET_CORRUPT','Immutable task identity is missing');
    await requireAuthority(tx,{...a,leader_generation:decimal(v.leader_generation),package_id:uuid(m.identity.package_id),package_generation:decimal(v.package_generation),roles:['LEADER','FEATURE_MANAGER']});
-   return validateExecutionInputs(tx,{organisation_id:a.organisation_id,run_id:a.run_id,digest:identity});
+   return validateExecutionInputs(tx,{organisation_id:a.organisation_id,run_id:a.run_id,digest:identity},a.invocation);
   });
  },
  'hierarchy.packet.inspect':async (input,invocation)=>{
+  provider.sealed=true;
   const v=record(input,['leader_generation','package_generation','digest']),a=trustedActor(invocation),identity=digest(v.digest);
-  return g.withPrimaryTransaction({timeoutMs:10000,guard:a.guard,signal:a.signal},async tx=>{
+  return g.withPrimaryTransaction({timeoutMs:10000,guard:hierarchyReadGuard(a),signal:a.signal},async tx=>{
    await ready(tx);await packetSchema(tx);
    const packets=await tx.query('SELECT * FROM hyperfide.hierarchy_execution_packets WHERE organisation_id=$1 AND run_id=$2 AND digest=$3',[a.organisation_id,a.run_id,identity]);
    const p=packets.rows[0];if(!p)return refuse('PACKET_UNAVAILABLE','No immutable packet matches the authenticated scope/digest');

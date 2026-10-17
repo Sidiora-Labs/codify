@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Real signed supervisor registration and adoption contract; no native readiness claim."""
 from __future__ import annotations
-import importlib.util,json,sys
+import importlib.util,json,sys,subprocess
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[4]
 s=importlib.util.spec_from_file_location("hf_packet_adoption_fixture",ROOT/"tests/hyperfide/cases/tasks/3_2.py");m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
@@ -62,6 +62,26 @@ def main():
     try:f.sql("BEGIN ISOLATION LEVEL REPEATABLE READ;INSERT INTO hyperfide."+table+" DEFAULT VALUES;ROLLBACK;");raise RuntimeError("RR authority write accepted")
     except AssertionError as error:expect('"code":"25001"' in str(error),"Wrong isolation refusal")
   check("adoption.repeatable-read-write-refused",snapshot_write)
+  recovery={}
+  def recovery_bootstrap():
+   f.stop();recovery["epoch"]=m.uid();recovery["credential"]=m.uid();recovery["session"]=m.uid()
+   f.sql("UPDATE hyperfide.runs SET authority_epoch=$1,state_version=state_version+1 WHERE organisation_id=$2 AND id=$3",[recovery["epoch"],i["organisation"],i["run"]])
+   name="recovery_operator";key=f.path/(name+".pem")
+   subprocess.run(["openssl","genpkey","-algorithm","Ed25519","-out",str(key)],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);key.chmod(0o600)
+   public=subprocess.check_output(["openssl","pkey","-in",str(key),"-pubout","-outform","DER"],stderr=subprocess.DEVNULL)
+   f.keys[name]={"path":key,"public_key_b64":m.module.b64(public[-32:])};f.ids[name]=recovery["credential"]
+   config=json.loads(f.identity_config.read_text());record=dict(config["principals"][0],credential_id=recovery["credential"],actor_id=i["operator"],role="OPERATOR",deployment_epoch=recovery["epoch"],public_key_b64=f.keys[name]["public_key_b64"])
+   config["principals"]=[record];f.identity_config.write_text(json.dumps(config));f.start()
+   result=f.ok("hierarchy.supervisor.register",dict(register,idempotency_key="recover-primary",expected_leader_generation="2",session_id=recovery["session"],role="LEADER"),key=name,component="3.4")
+   expect(result["native_ready"] is False and result["session_id"]==recovery["session"],"Recovery invented readiness or could not register a fresh logical primary")
+  check("supervisor.restore.fresh-primary-registration",recovery_bootstrap)
+  def recovery_select():
+   result=f.ok("hierarchy.supervisor.select",{"idempotency_key":"recovery-select","expected_generation":"2","session_id":recovery["session"],"reason":"Explicit trusted platform-epoch recovery fixture"},key="recovery_operator",component="3.4")
+   expect(result["leader_generation"]=="3" and result["authority_epoch"]==recovery["epoch"],"Recovery selection did not explicitly advance the logical generation and platform epoch")
+  check("supervisor.restore.explicit-selection",recovery_select)
+  check("supervisor.restore.immutable-epoch-link",lambda:expect(f.sql("SELECT predecessor_authority_epoch,authority_epoch,selected_by_credential_id FROM hyperfide.hierarchy_leadership_selections WHERE leader_generation=3")[0]=={"predecessor_authority_epoch":i["epoch"],"authority_epoch":recovery["epoch"],"selected_by_credential_id":recovery["credential"]},"Recovery lost the actual predecessor epoch/admitting credential"))
+  check("supervisor.restore.old-credential-fenced",lambda:expect(f.invoke("hierarchy.describe",{},key="leader",component="3.1")[1].get("error",{}).get("code")=="AUTH_REVOKED","Restored platform accepted the old credential"))
+
  finally:
   database=f.database;path=f.path;f.close()
   check("adoption.cleanup.observed",lambda:expect(not path.exists() and f.sql("SELECT count(*)::int n FROM pg_database WHERE datname=$1",[database],admin=True)[0]["n"]==0,"Fixture remains"))
