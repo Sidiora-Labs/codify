@@ -12,6 +12,8 @@ import {FoundationError} from '../policy/programme.js';
 import {operationPayloadDigest,validateProviderOperation,validateProviderOutcome,validateInventory} from './contract.js';
 import type {ProviderMethod,ProviderOperation,ProviderOutcome,ResourceRef} from './contract.js';
 import {providerDatabase,readSelectedEnvironmentProfile,resolveSandboxBinding,providerDeployment,providerInvocation,bindProviderInvocation,assertInvocationRun,obj,str,uuid,dec,dg,utc,fail,readDeployment,currentPool,transaction,assertPoolCapacity,digestDocument,providerAdapter,hasProviderAdapter,providerOwnershipProbe} from './pools.js';
+import {createProvisionerWorker} from './worker.js';
+import type {ProvisionerWorker} from './worker.js';
 import type {ProviderDatabase,DeploymentConfig,ProviderPersistenceHooks,ProviderRunnerBindingVerifier,ProviderRunnerBinding,ProviderProcessRecord,ProviderDestructionRequest,ProviderDestructionProof,ProviderDestructionPreflight,ProviderOutputArchive,ProviderArtifactReference} from './pools.js';
 
 export interface Intent {
@@ -235,7 +237,7 @@ export function persistenceHooks(pool:ProviderDatabase,organisation:string,id:st
             await c.query("UPDATE hyperfide.provisioning_intents SET state='TERMINAL',updated_at=clock_timestamp(),state_version=state_version+1 WHERE organisation_id=$1 AND sandbox_id=$2 AND kind='CREATE' AND boot_generation=$3 AND state<>'REJECTED'",[organisation,row.sandbox_id,row.boot_generation]);
             // Admission owns final reservation release; observed absence merely
             // permits its conservative RELEASE_PENDING transition.
-            await c.query("UPDATE hyperfide.reservations r SET state='RELEASE_PENDING',state_version=state_version+1 FROM hyperfide.provisioning_intent_reservations l JOIN hyperfide.provisioning_intents i ON i.organisation_id=l.organisation_id AND i.run_id=l.run_id AND i.id=l.intent_id WHERE r.organisation_id=l.organisation_id AND r.run_id=l.run_id AND r.id=l.reservation_id AND i.organisation_id=$1 AND i.sandbox_id=$2 AND i.boot_generation=$3 AND r.state<>'RELEASED'",[organisation,row.sandbox_id,row.boot_generation]);
+            await c.query("UPDATE hyperfide.reservations r SET state='RELEASE_PENDING',state_version=r.state_version+1 FROM hyperfide.provisioning_intent_reservations l JOIN hyperfide.provisioning_intents i ON i.organisation_id=l.organisation_id AND i.run_id=l.run_id AND i.id=l.intent_id WHERE r.organisation_id=l.organisation_id AND r.run_id=l.run_id AND r.id=l.reservation_id AND i.organisation_id=$1 AND i.sandbox_id=$2 AND i.boot_generation=$3 AND r.state<>'RELEASED'",[organisation,row.sandbox_id,row.boot_generation]);
           }else{
             if(result.provider_state==='FAILED')state='QUARANTINED';
             else if(result.provider_state==='RUNNING'&&row.kind==='CREATE')state='ACKNOWLEDGED';
@@ -613,6 +615,11 @@ export function createComponent(context:ComponentContext):Component {
     if(context.signal.aborted)fail('PROVIDER_CLOSED','Provider coordinator is shutting down');
     const config=await readDeployment(context.env);return fn(input,config,bindProviderInvocation(database,config,invocationOf(requestContext)));
   };
+  // Only the provisioner process holds adapters and runs the durable-intent worker.
+  const worker=context.role==='provisioner'?createProvisionerWorker(database,context.env,context.signal,{execute:executeIntent,reconcile:reconcileIntent}):null;
+  const workerAction=(fn:(worker:ProvisionerWorker,invocation:InvocationContext)=>Promise<unknown>)=>async(input:unknown,requestContext:ComponentContext)=>{
+    provisioner();obj(input,[]);if(context.signal.aborted)fail('PROVIDER_CLOSED','Provider coordinator is shutting down');return fn(worker!,invocationOf(requestContext));
+  };
   return{apiVersion:1,capabilities:{'provider.intents.v1':{
  registerDestructionPreflight:(reader:ProviderDestructionPreflight)=>{if(typeof reader!=='function'||database.runtime.destructionPreflight)fail('PROVIDER_REGISTRATION_CONFLICT','Destruction custody reader must be installed once');database.runtime.destructionPreflight=reader;return()=>{if(database.runtime.destructionPreflight===reader)delete database.runtime.destructionPreflight;};},
  preparationParameters:async(tx:PrimaryTransaction,input:unknown,invocation:InvocationContext)=>preparationParameters(tx,await readDeployment(context.env),input,invocation),
@@ -634,7 +641,10 @@ export function createComponent(context:ComponentContext):Component {
     'provider.remote.execute-bound':()=>fail('TRUSTED_CAPABILITY_ONLY','Remote commands are admitted only by the trusted runner executor'),
     'provider.inventory.observe-known':guarded(async(input,c,database)=>{provisioner();if(providerInvocation(database).principal.role!=='PROVISIONER')fail('AUTH_SCOPE_DENIED','Inventory requires the provisioner principal');return observeKnownSandbox(database,c,input,context.signal);}),
     'provider.orphans.list':guarded(async(input,c,database)=>{const i=obj(input,['pool_id']);await currentPool(database,c,uuid(i.pool_id));return(await database.query('SELECT native_sandbox_id,state,ownership_evidence_digest,first_observed_at,last_observed_at FROM hyperfide.provider_orphans WHERE organisation_id=$1 AND pool_id=$2',[c.organisation_id,i.pool_id])).rows;}),
-  }};
+    'provider.worker.start':workerAction((w,invocation)=>{if(invocation.principal.role!=='PROVISIONER')fail('AUTH_SCOPE_DENIED','Provider effects require the provisioner principal');return w.start(invocation);}),
+    'provider.worker.status':workerAction((w,invocation)=>{if(!['OPERATOR','COORDINATOR','PROVISIONER'].includes(invocation.principal.role))fail('AUTH_SCOPE_DENIED','Provisioner readiness requires coordinator authority');return w.status(invocation);}),
+    'provider.worker.stop':workerAction(async(w,invocation)=>{if(!['OPERATOR','PROVISIONER'].includes(invocation.principal.role))fail('AUTH_SCOPE_DENIED','Stopping provider effects requires operator or provisioner authority');await w.stop();return w.status(invocation);}),
+  },close:async()=>{await worker?.stop();}};
 }
 
 /** Control composition installs a durable PG reader; provider effects stay in the provisioner. */
