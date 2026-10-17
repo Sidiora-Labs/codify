@@ -3,7 +3,7 @@
   "commit": "a80cd7edbb1c3021b76c18c53fdc95d634a77a09",
   "requalified_on": "a80cd7edbb1c3021b76c18c53fdc95d634a77a09",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-011 --manifest tests/hyperfide/manifests/tasks/7.2.json && python3 tests/hyperfide/qualify.py --case V-022 --manifest tests/hyperfide/manifests/tasks/7.2.json",
-  "exit_code": 1,
-  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"df206164-9bb3-4a00-a44f-f8b8b0abc571\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/7.2/campaigns/74034386fdb329140237a30231ad0c9d61ca2a96d6d2ee887c42312cc3fe5727\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"FAIL\", \"receipt_id\": \"d25dd177-d6bf-46d1-979e-5543ce5b7104\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/7.2/campaigns/74034386fdb329140237a30231ad0c9d61ca2a96d6d2ee887c42312cc3fe5727\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": [\"one or more behavioural assertions failed\", \"probe failed, was unavailable, or timed out\"]}\n",
-  "ran_at": "2026-10-17T19:21:43.790410+00:00"
+  "exit_code": 0,
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"30a83ae8-76fe-493a-8f3e-5a12203ebb95\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/7.2/campaigns/74034386fdb329140237a30231ad0c9d61ca2a96d6d2ee887c42312cc3fe5727\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"e398d612-b808-45ec-9318-2274121b38f4\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/7.2/campaigns/74034386fdb329140237a30231ad0c9d61ca2a96d6d2ee887c42312cc3fe5727\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T19:32:50.487Z"
 }
