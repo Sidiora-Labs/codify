@@ -1,35 +1,15 @@
 #!/usr/bin/env python3
 """Real signed manager routing acknowledgements against current PostgreSQL ownership."""
 from __future__ import annotations
-import importlib.util,json,subprocess,sys
+import importlib.util,sys
 from pathlib import Path
 spec=importlib.util.spec_from_file_location('finding_test_fixture',Path(__file__).with_name('18_1.py'));c=importlib.util.module_from_spec(spec);spec.loader.exec_module(c)
 check=c.check;expect=c.expect;uid=c.uid
 def managers(f):
     for name in ('manager','successor','peer'):f.add_principal(name,'FEATURE_MANAGER',actor_id=f.x[name])
-def accepted_proof_intent(f):
-    """Bind the seeded origin task to an accepted generation-2 revision so 2.4 proof authority can load it.
-
-    The shared 18.1 seed stores an empty task definition and '{}' as the accepted document, which the
-    current clause-coverage authority (spec/obligations.ts) rightly refuses. The accepted document is
-    immutable, so this fixture records a new accepted revision instead of rewriting history."""
-    seeded=f.sql('SELECT policy FROM hyperfide.proof_registries WHERE organisation_id=$1 AND run_id=$2 AND task_id=$3',[f.ids['organisation'],f.ids['run'],f.x['task']])[0]['policy']
-    source='[req.18]\nac_1 = "Fixture finding resolution clause"\n[acceptance.V-032]\nreqs = ["18.1"]\nchecks = '+json.dumps([k['id'] for k in seeded['checks']])+'\n[task.18.fixture]\nreqs = ["18.1"]\n[proof]\nrubric_digest = '+json.dumps(seeded['rubric_digest'])+'\n'
-    for item in seeded['checks']:source+='[proof.check.'+item['id']+']\n'+''.join(key+' = '+json.dumps(item[key])+'\n' for key in ('argv','executable_digest','timeout_ms','required_artifacts','input_keys'))
-    parsed=json.loads(subprocess.check_output(['node','--input-type=module','-e',"import{parseKvx}from'./services/hyperfide/dist/spec/import.js';let s='';for await(const c of process.stdin)s+=c;process.stdout.write(JSON.stringify(parseKvx(s)));"],input=source.encode(),cwd=c.ROOT))
-    revision=uid();document={'schema_version':1,'source_digest':c.sha(source.encode()),'parsed':parsed,'runtime_wave_offset':0}
-    f.sql('INSERT INTO hyperfide.spec_revisions(organisation_id,id,project_id,source_digest,source_content,document,schema_version) VALUES($1,$2,$3,$4,$5,$6,1)',[f.ids['organisation'],revision,f.ids['project'],c.sha(source.encode()),source,json.dumps(document)])
-    f.sql('INSERT INTO hyperfide.run_spec_revisions(organisation_id,run_id,spec_generation,spec_revision_id) VALUES($1,$2,2,$3)',[f.ids['organisation'],f.ids['run'],revision])
-    f.sql("UPDATE hyperfide.runs SET spec_revision_id=$3,spec_generation=2,state='PENDING_VALIDATION',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[f.ids['organisation'],f.ids['run'],revision])
-    section=next(item for item in parsed['sections'] if item['name']=='task.18.fixture')
-    definition={'schema_version':1,'section':section,'feature_key':'fixture-package','declared_wave':1,'runtime_wave_offset':0,'declared_status':None,'history_only':True}
-    f.sql('UPDATE hyperfide.tasks SET spec_revision_id=$3,spec_generation=2,definition=$4,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$5',[f.ids['organisation'],f.ids['run'],revision,json.dumps(definition),f.x['task']])
-    f.sql("UPDATE hyperfide.runs SET state='RUNNING',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[f.ids['organisation'],f.ids['run']])
-    policy=dict(seeded,spec_revision_id=revision,spec_generation='2')
-    c.insert(f,'proof_registries',c.scoped(f,task_id=f.x['task'],spec_generation='2',spec_revision_id=revision,criteria_digest=policy['criteria_digest'],registry_digest=c.sha(json.dumps(policy,sort_keys=True,separators=(',',':')).encode()),policy=policy))
 def main():
     if '--cleanup' in sys.argv:return c.cleanup('18.3')
-    f=c.fixture('18.3',extra=('18.3',),after_seed=accepted_proof_intent);managers(f)
+    f=c.fixture('18.3',extra=('18.3',));managers(f)
     def call(action,payload,key='operator'):return c.call(f,action,payload,component='finding-routing',key=key)
     def reject(action,payload,code=None,key='operator'):return c.reject(f,action,payload,code,component='finding-routing',key=key)
     def version(fid):return str(c.call(f,'finding.inspect',{'finding_id':fid})['finding']['registry_version'])
