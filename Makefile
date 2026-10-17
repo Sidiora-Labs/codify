@@ -86,9 +86,12 @@ clean:
 .PHONY: all unit integration test install uninstall clean release
 
 # nonpublishing release construction; destinations are operator configuration
-# (see scripts/release.sh)
+# (see scripts/release.sh). The bundle lands in RELEASE_DIR, default
+# build/release (ignored, so the clean-checkout check still holds):
+#   make release RELEASE_DIR=/path/to/out
+RELEASE_DIR ?= $(BUILD)/release
 release:
-	scripts/release.sh
+	scripts/release.sh --output $(RELEASE_DIR)
 
 # Hyperfide approved split runtime: explicit dependency setup and service builds.
 # Build-time Python validates native fragments; native execution remains a C binary.
