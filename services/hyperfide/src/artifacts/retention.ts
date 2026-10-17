@@ -16,7 +16,7 @@ type Policy={digest:string;minimum_age_ms:Record<string,number|null>};
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const DIGEST=/^sha256:[0-9a-f]{64}$/;
 const classes=['EPHEMERAL','RUN','RELEASE','LEGAL_HOLD'];
-const ACTIONS=['artifact.retention.inspect','artifact.retention.hold','artifact.retention.release','artifact.retention.policy','artifact.retention.collect','artifact.retention.reconcile'];
+const ACTIONS=['artifact.retention.inspect','artifact.retention.hold','artifact.retention.release','artifact.retention.policy','artifact.retention.collect','artifact.retention.reconcile','artifact.retention.debt'];
 function fail(code:string,message:string):never{throw new FoundationError(code,message);}
 function record(value:unknown):Row{if(!value||typeof value!=='object'||Array.isArray(value))fail('RETENTION_INPUT_INVALID','Expected an object');return value as Row;}
 function fields(value:unknown,required:string[]):Row{const row=record(value);if(Object.keys(row).length!==required.length||required.some(key=>!Object.hasOwn(row,key)))fail('RETENTION_INPUT_INVALID','Retention fields differ');return row;}
@@ -176,10 +176,19 @@ export class ArtifactRetention{
  return this.execute(scope,operation,policy);
  }
  private async reconcile(input:unknown):Promise<unknown>{const value=fields(input,['organisation_id','run_id','gc_operation_id','policy_digest']),scope=this.scope(value),policy=await this.policy(value.policy_digest);const operation=await this.transaction(async tx=>{const row=(await tx.query('SELECT * FROM hyperfide.artifact_gc_operations WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3',[scope.organisation_id,scope.run_id,uuid(value.gc_operation_id)])).rows[0];if(!row)fail('RETENTION_NOT_FOUND','GC intent is unavailable');return row;});return this.execute(scope,operation,policy);}
+ /** Unresolved destruction stays listed after restart; an empty bounded page is the only clean bill. */
+ private async debt(input:unknown):Promise<unknown>{
+ const value=fields(input,['organisation_id','run_id','policy_digest']),scope=this.scope(value),policy=await this.policy(value.policy_digest);
+ return this.transaction(async tx=>{
+ const rows=(await tx.query("SELECT g.operation_id,g.artifact_id,g.state,g.last_error_code,g.storage_backend,g.digest,g.created_at,g.updated_at,a.status AS artifact_status FROM hyperfide.artifact_gc_operations g JOIN hyperfide.artifacts a ON a.organisation_id=g.organisation_id AND a.run_id=g.run_id AND a.id=g.artifact_id WHERE g.organisation_id=$1 AND g.run_id=$2 AND g.state IN ('INTENT','REQUESTED','UNKNOWN','FAILED') ORDER BY g.created_at,g.operation_id LIMIT 1001",[scope.organisation_id,scope.run_id])).rows;
+ const truncated=rows.length>1000,debt=rows.slice(0,1000);
+ return {debt,debt_count:debt.length,truncated,clean:debt.length===0&&!truncated,policy_digest:policy.digest,grants_authority:false};
+ },'READ');
+ }
  async invoke(action:string,input:unknown):Promise<unknown>{
  const actor=this.actor();
- if(action!=='artifact.retention.inspect'&&!['OPERATOR','PROVISIONER'].includes(actor.principal.role))fail('AUTH_ROLE_DENIED','Retention mutations require an authorised control actor');
- try{switch(action){case 'artifact.retention.inspect':return await this.inspect(input);case 'artifact.retention.hold':return await this.hold(input);case 'artifact.retention.release':return await this.release(input);case 'artifact.retention.policy':return await this.changePolicy(input);case 'artifact.retention.collect':return await this.collect(input);case 'artifact.retention.reconcile':return await this.reconcile(input);default:fail('RETENTION_INPUT_INVALID','Unknown retention operation');}}
+ if(!['artifact.retention.inspect','artifact.retention.debt'].includes(action)&&!['OPERATOR','PROVISIONER'].includes(actor.principal.role))fail('AUTH_ROLE_DENIED','Retention mutations require an authorised control actor');
+ try{switch(action){case 'artifact.retention.inspect':return await this.inspect(input);case 'artifact.retention.hold':return await this.hold(input);case 'artifact.retention.release':return await this.release(input);case 'artifact.retention.policy':return await this.changePolicy(input);case 'artifact.retention.collect':return await this.collect(input);case 'artifact.retention.reconcile':return await this.reconcile(input);case 'artifact.retention.debt':return await this.debt(input);default:fail('RETENTION_INPUT_INVALID','Unknown retention operation');}}
  catch(error){if(error instanceof FoundationError)throw error;fail('RETENTION_DATABASE_UNAVAILABLE','Retention operation failed; reconcile durable intent before retry');}
  }
 }
