@@ -20,16 +20,6 @@
     "native.codex.public-no-private-runtime",
     "native.codex.real-clean-home-version-auth-probe",
     "native.codex.probe-does-not-qualify-vendor",
-    "native.claude.large-installed-binary",
-    "native.unknown-profile-refused",
-    "native.private-runtime.rejects-forged-context",
-    "native.private-runtime.requires-current-credential",
-    "native.private-runtime.current-reference-positive",
-    "native.private-runtime-does-not-return-secret-bytes",
-    "native.abort.refuses-incomplete-probe",
-    "native.abort.waits-for-actual-child-close",
-    "native.exec-time-binary-drift-refused",
-    "native.shim-wrapper-cannot-stand-in-for-payload",
     "native.qualification.unresolved-mode-refused",
     "native.qualification.secret-bearing-config-refused",
     "native.qualification.modes-recorded-separately",
@@ -44,7 +34,17 @@
     "native.qualification.records-append-only",
     "native.refresh.concurrent-commit-single-winner",
     "native.refresh.stale-write-cannot-overwrite-lineage",
-    "native.qualification.migration-readiness-required"
+    "native.qualification.migration-readiness-required",
+    "native.claude.large-installed-binary",
+    "native.unknown-profile-refused",
+    "native.private-runtime.rejects-forged-context",
+    "native.private-runtime.requires-current-credential",
+    "native.private-runtime.current-reference-positive",
+    "native.private-runtime-does-not-return-secret-bytes",
+    "native.abort.refuses-incomplete-probe",
+    "native.abort.waits-for-actual-child-close",
+    "native.exec-time-binary-drift-refused",
+    "native.shim-wrapper-cannot-stand-in-for-payload"
   ],
   "approval": {
     "approved": true,
@@ -1325,7 +1325,7 @@
     },
     {
       "path": "tests/hyperfide/registrations/14.3.json",
-      "sha256": "761f8e26b639f26c52f346398caa092176256f0364d4ea3b96d7409558ead746",
+      "sha256": "3ee20fbd0c0c237f6c5cbc42eeaee4b41ebb9548849dac94193eff2f0153f297",
       "size": 18033
     },
     {
