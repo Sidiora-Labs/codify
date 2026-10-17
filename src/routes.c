@@ -33,11 +33,11 @@ static RoutePat RP[] = {
       "<Route[ \t]+path=[{]?[ \t]*['\"]([^'\"]+)['\"][ \t]*[}]?",
       0, 1, 0, "PAGE", {0} },
     { "react-router", "js", NULL,
-      "path:[ \t]*['\"]([^'\"]+)['\"][ \t]*,[ \t]*(element|Component|loader|action):",
-      0, 1, 0, "PAGE", {0} },
+      "(^|[^A-Za-z0-9_$])path:[ \t]*['\"]([^'\"]+)['\"][ \t]*,[ \t]*(element|Component|loader|action):",
+      0, 2, 0, "PAGE", {0} },
     { "vue-router", "js", NULL,
-      "path:[ \t]*['\"]([^'\"]+)['\"][ \t]*,[ \t]*component:",
-      0, 1, 0, "PAGE", {0} },
+      "(^|[^A-Za-z0-9_$])path:[ \t]*['\"]([^'\"]+)['\"][ \t]*,[ \t]*component:",
+      0, 2, 0, "PAGE", {0} },
     { "react-navigation", "js", NULL,
       "<Link[ \t]+to=['\"](/[^'\"]*)['\"]",
       0, 1, 0, "NAV", {0} },
@@ -54,8 +54,8 @@ static RoutePat RP[] = {
       "fastify\\.(get|post|put|delete|patch)[ \t]*\\([ \t]*['\"`]([^'\"`]+)",
       1, 2, 0, NULL, {0} },
     { "hapi", "js", NULL,
-      "path:[ \t]*['\"`](/[^'\"`]*)['\"`]",
-      0, 1, 0, "*", {0} },
+      "(^|[^A-Za-z0-9_$])path:[ \t]*['\"`](/[^'\"`]*)['\"`]",
+      0, 2, 0, "*", {0} },
     { "nestjs", "js", NULL,
       "@(Get|Post|Put|Delete|Patch|Head|Options)\\([ \t]*['\"`]?([^'\"`)]*)",
       1, 2, 0, NULL, {0} },
@@ -63,11 +63,13 @@ static RoutePat RP[] = {
       "@[A-Za-z_][A-Za-z0-9_]*\\.route\\([ \t]*['\"]([^'\"]+)",
       0, 1, 0, "*", {0} },
     { "fastapi", "python", NULL,
-      "@[A-Za-z_][A-Za-z0-9_]*\\.(get|post|put|delete|patch)\\([ \t]*['\"]([^'\"]+)",
+      "@[A-Za-z_][A-Za-z0-9_]*\\.(get|post|put|delete|patch)\\([ \t]*['\"](/[^'\"]*)",
       1, 2, 0, NULL, {0} },
+    /* Undecorated calls share their shape with dict.get(key, default), so
+     * the receiver must be named as an app/router and the path rooted. */
     { "fastapi", "python", NULL,
-      "[A-Za-z_][A-Za-z0-9_]*\\.(get|post|put|delete|patch)\\([ \t]*['\"]([^'\"]+)['\"][ \t]*,[ \t]*([A-Za-z_][A-Za-z0-9_]*)",
-      1, 2, 3, NULL, {0} },
+      "(^|[^A-Za-z0-9_])(app|router|api|[A-Za-z_][A-Za-z0-9_]*_(app|router|api))\\.(get|post|put|delete|patch)\\([ \t]*['\"](/[^'\"]*)['\"][ \t]*,[ \t]*([A-Za-z_][A-Za-z0-9_]*)",
+      4, 5, 6, NULL, {0} },
     { "django", "python", "urls",
       "(path|re_path|url)\\([ \t]*r?['\"]([^'\"]*)['\"][ \t]*,[ \t]*([A-Za-z_][A-Za-z0-9_.]*)?",
       0, 2, 3, "*", {0} },
@@ -360,6 +362,8 @@ void routes_scan_line(const char *lang, const char *path, int lineno,
             memcpy(pattern, source + m[r->g_pattern].rm_so, n);
             pattern[n] = 0;
         }
+        /* A URL path never carries raw whitespace; '/bin/sh -c ...' is argv. */
+        if(strcmp(method,"MOUNT")!=0 && strpbrk(pattern," \t"))continue;
         if(pattern[0] && pattern[0]!='/' && strcmp(method,"MOUNT")!=0) {
             size_t pn=strlen(pattern);
             if(pn+1<sizeof pattern) {
