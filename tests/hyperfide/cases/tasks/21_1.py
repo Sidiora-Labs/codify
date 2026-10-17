@@ -63,8 +63,23 @@ def linkage_probe():
 
 def function_probe(env):
  """The 21.4 driver's 21.1 branch, minus its own service linkage (which predates spec-revisions)."""
+ contract_checks="""
+ await check('critique.validation-active-impact',()=>{
+  for(const size of [0,1,129]){
+   const impact={...analysis.impact,revalidation:Array.from({length:size},(_,i)=>({task_id:id(i),state:'RUNNING'})),unaffected_active_task_ids:Array.from({length:size},(_,i)=>id(i))};
+   const result=S.amendmentSummary({...analysis,impact});
+   for(const key of ['revalidation','unaffected_active_task_ids'])expect(A.canonical(result.impact[key])===A.canonical(impact[key].slice(0,128))&&result.impact.counts[key]===size,'active impact projection differs');
+   expect(result.impact.truncated===(size>128)&&result.impact_digest===A.digest(impact)&&result.analysis_digest===A.digest({...analysis,impact})&&result.accepted===false&&result.dispatch_authority===false,'active impact digest or authority differs');
+  }
+ });
+ await check('critique.validation-unknown-fields',()=>{
+  reject(()=>S.amendmentSummary({...analysis,unknown:true}),'DECISION_VALIDATION_INVALID');
+  reject(()=>S.amendmentSummary({...analysis,impact:{...analysis.impact,unknown:[]}}),'DECISION_VALIDATION_INVALID');
+ });
+ """
+ script_source=module.NODE.replace(" await check('critique.source-immutable'",contract_checks+" await check('critique.source-immutable'",1)
  with tempfile.TemporaryDirectory(prefix="hf-task21-1-fn-") as folder:
-  script=Path(folder)/"probe.mjs";script.write_text(module.NODE)
+  script=Path(folder)/"probe.mjs";script.write_text(script_source)
   result=subprocess.run(["node",str(script),"21.1"],cwd=ROOT,env={**env,"HF_FIXTURE_ROOT":str(ROOT)},text=True,capture_output=True,timeout=120)
  print(result.stdout,end="",flush=True)
  if result.returncode and result.stderr:print(result.stderr[-2000:],file=sys.stderr)

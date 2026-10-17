@@ -22,6 +22,8 @@
     "critique.validation-dispatch-forgery",
     "critique.validation-full-impact-digest",
     "critique.validation-bounded-impact",
+    "critique.validation-active-impact",
+    "critique.validation-unknown-fields",
     "critique.source-immutable",
     "signed21.actual-amendment-validator-positive",
     "signed21.actual-amendment-invalid-graph",
