@@ -6,6 +6,7 @@ import {createResourceContainer} from './storage/runtime.js';
 import {bootstrapAcceptedIntentWithGateway} from './spec/bootstrap.js';
 import type {SpecScope} from './spec/import.js';
 import {issueOfflineOperator,assertBootstrapExternalAuthority} from './bootstrap_identity.js';
+import {recoverBootstrapOperator} from './bootstrap_recovery.js';
 import {exact,fail,strictJSON,uuid} from './transport/protocol.js';
 
 async function privateInput(filename:string):Promise<Buffer>{
@@ -25,13 +26,29 @@ async function privateInput(filename:string):Promise<Buffer>{
   }finally{await file.close();}
  }finally{await directory.close();}
 }
+async function recoverCommand(input:unknown,policy:{deployment_id:string;max_ttl_ms:number;journal_dir:string},env:Readonly<NodeJS.ProcessEnv>,signal?:AbortSignal):Promise<unknown>{
+ exact(input,['schema_version','scope','recovery']);
+ if(input.schema_version!==1)fail('INVALID_REQUEST','Unsupported bootstrap recovery input version');
+ exact(input.scope,['organisation_id','run_id','authority_epoch']);
+ exact(input.recovery,['recovery_id','previous_credential_id','reason','credential_id','actor_id','public_key_b64','allowed_actions','expires_at']);
+ const controller=new AbortController(),stop=()=>controller.abort();
+ if(signal?.aborted)controller.abort();else signal?.addEventListener('abort',stop,{once:true});
+ const resources=createResourceContainer({role:'control',env,signal:controller.signal});
+ try{
+  const credential=await recoverBootstrapOperator(resources,{...input.scope,...input.recovery},policy,controller.signal);
+  return {schema_version:1,recovery:credential,private_key_created:false,services_activated:false};
+ }finally{controller.abort();signal?.removeEventListener('abort',stop);await resources.close();}
+}
 export async function bootstrapCommand(args:readonly string[],env:Readonly<NodeJS.ProcessEnv>=Object.freeze({...process.env}),signal?:AbortSignal):Promise<unknown>{
- if(args.length!==2||args[0]!=='--input')fail('INVALID_REQUEST','Usage: hyperfide bootstrap --input /absolute/private.json');
- if(env.HYPERFIDE_MODE==='offline')fail('PRIMARY_REQUIRED','Offline observation mode cannot issue authority');
+ const recover=args.length===3&&args[0]==='--recover';
+ if(recover)args=args.slice(1);
+ if(args.length!==2||args[0]!=='--input')fail('INVALID_REQUEST','Usage: hyperfide bootstrap [--recover] --input /absolute/private.json');
+ if(env.HYPERFIDE_MODE==='offline'||env.HYPERFIDE_MODE==='local')fail('PRIMARY_REQUIRED','Offline observation or local mode cannot issue authority');
  const deployment=env.HYPERFIDE_DEPLOYMENT_ID,ttl=env.HYPERFIDE_BOOTSTRAP_MAX_TTL_MS,root=env.HYPERFIDE_BOOTSTRAP_SOURCE_ROOT,journalDir=env.HYPERFIDE_AUTHORITY_JOURNAL_DIR;
  if(!uuid(deployment)||!ttl||!/^[1-9][0-9]*$/.test(ttl)||!Number.isSafeInteger(Number(ttl))||Number(ttl)>2147483647||
     !root||!path.isAbsolute(root)||!journalDir||!path.isAbsolute(journalDir))fail('BOOTSTRAP_POLICY_REQUIRED','Trusted deployment, source root and bounded expiry policy are required');
  const input=strictJSON(await privateInput(args[1]!),2097152);
+ if(recover)return recoverCommand(input,{deployment_id:deployment,max_ttl_ms:Number(ttl),journal_dir:journalDir},env,signal);
  exact(input,['schema_version','scope','metadata','accepted_intent','credential']);
  if(input.schema_version!==1)fail('INVALID_REQUEST','Unsupported bootstrap input version');
  exact(input.scope,['organisation_id','project_id','run_id','authority_epoch','allowed_actions']);

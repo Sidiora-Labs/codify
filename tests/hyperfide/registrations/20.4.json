@@ -51,7 +51,9 @@
     "decision.jobs.semantic-lock-order",
     "decision.jobs.business-version-preserved",
     "decision.jobs.insert-freshness",
-    "decision.jobs.isolation-guard"
+    "decision.jobs.isolation-guard",
+    "decision.jobs.core-loop-provider-timeout",
+    "decision.jobs.core-loop-provider-removed"
   ],
   "argv": [
     "python3",

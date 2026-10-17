@@ -25,7 +25,8 @@
     "evaluation.scorecard.reject-cross-profile-calibration",
     "evaluation.scorecard.reject-holdout-fitting",
     "evaluation.scorecard.reject-forged-receipt",
-    "evaluation.scorecard.unknown-cost-not-zero"
+    "evaluation.scorecard.unknown-cost-not-zero",
+    "evaluation.scorecard.error-rate-visible"
   ],
   "argv": [
     "python3",

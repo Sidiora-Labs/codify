@@ -6,6 +6,14 @@ import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError,object} from '../policy/programme.js';
 import {identityTransaction,invocationOf} from '../identity/enrollment.js';
 const actions=['release.inspect','release.compatibility','release.plan'] as const;
+/** A real release pins every production dependency file, so the manifest bound
+ * follows the 100000-entry inventory bound rather than a small-document bound. */
+const MANIFEST_LIMIT=32*1024*1024;
+/** Service units shipped in deploy/hyperfide. Unqualified units are carried for
+ * their owning task but must not be installable until that task delivers them. */
+const SERVICE_UNITS:Readonly<Record<string,{status:'INSTALLABLE'}|{status:'UNQUALIFIED';owner_task:string}>>={
+ 'control.service':{status:'INSTALLABLE'},'provisioner.service':{status:'INSTALLABLE'},'dispatch.service':{status:'INSTALLABLE'},
+ 'issue-watcher.service':{status:'UNQUALIFIED',owner_task:'26.4'},'supervisory-host.service':{status:'UNQUALIFIED',owner_task:'26.4'}};
 function fail(message:string):never{throw new FoundationError('RELEASE_INVALID',message);}
 function exact(v:unknown,keys:string[]):Record<string,unknown>{if(!object(v)||Object.keys(v).some(k=>!keys.includes(k))||keys.some(k=>!(k in v)))fail('Unexpected release fields');return v;}
 function version(v:unknown):number{if(!Number.isSafeInteger(v)||Number(v)<1)fail('Positive protocol version required');return Number(v);}
@@ -84,7 +92,7 @@ async function authenticateManifest(env:Readonly<NodeJS.ProcessEnv>,root:string,
 export async function inspectPrebuiltRelease(env:Readonly<NodeJS.ProcessEnv>,relativeManifest:unknown):Promise<unknown>{
  const root=env.HYPERFIDE_RELEASE_ROOT;if(!root||!path.isAbsolute(root))fail('Trusted prebuilt release root required');
  const rootInfo=await fs.lstat(root);if(!rootInfo.isDirectory()||rootInfo.isSymbolicLink()||await fs.realpath(root)!==root)fail('Release root must be a real directory');
- const filename=await file(root,relativeManifest);const info=await fs.stat(filename);if(info.size>1024*1024)fail('Oversized release manifest');
+ const filename=await file(root,relativeManifest);const info=await fs.stat(filename);if(info.size>MANIFEST_LIMIT)fail('Oversized release manifest');
  const manifestBytes=await fs.readFile(filename),manifestDigest='sha256:'+createHash('sha256').update(manifestBytes).digest('hex');
  const authentication=await authenticateManifest(env,root,manifestBytes);
  const manifest=exact(JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(manifestBytes)),['schema_version','release_version','source_commit','source_date_epoch','protocol_version','schema_min','schema_max','runtime','files']);
@@ -103,6 +111,18 @@ export async function inspectPrebuiltRelease(env:Readonly<NodeJS.ProcessEnv>,rel
  const entries=manifest.files as Record<string,unknown>[];
  if(entries.find(f=>f.path==='bin/hyperfide')!.digest!==entries.find(f=>f.path==='bin/cg')!.digest)fail('Compatibility CLI differs from the canonical executable');
  if(!entries.some(f=>String(f.path).startsWith('lib/hyperfide/'))||!entries.some(f=>String(f.path).startsWith('services/node_modules/')))fail('Prebuilt runtime libraries and production dependencies are required');
+ const serviceUnits:{unit:string;status:string;owner_task?:string}[]=[];
+ for(const f of entries){
+ const unit=/^deploy\/hyperfide\/([^/]+\.service)$/.exec(String(f.path))?.[1];if(!unit)continue;
+ const known=Object.hasOwn(SERVICE_UNITS,unit)?SERVICE_UNITS[unit]:undefined;if(!known)fail('Release ships an unclassified service unit');
+ if(known.status==='UNQUALIFIED'){
+ const text=await fs.readFile(await file(root,f.path),'utf8');
+ if(/^\s*\[Install\]/m.test(text)||!/^ConditionPathExists=\/opt\/hyperfide\/current\/share\/hyperfide\/qualified\//m.test(text))fail('Unqualified service unit is installable');
+ }
+ serviceUnits.push({unit,...known});
+ }
+ for(const unit of ['control.service','provisioner.service','dispatch.service'])if(!serviceUnits.some(u=>u.unit===unit))fail('Release lacks a required service definition');
+ serviceUnits.sort((a,b)=>a.unit<b.unit?-1:a.unit>b.unit?1:0);
  async function audit(directory:string):Promise<void>{
  for(const item of await fs.readdir(directory,{withFileTypes:true})){
  const p=path.join(directory,item.name),relative=path.relative(root!,p).split(path.sep).join('/');
@@ -115,7 +135,7 @@ export async function inspectPrebuiltRelease(env:Readonly<NodeJS.ProcessEnv>,rel
  if(await checksum(filename)!==manifestDigest)fail('Release manifest changed during inspection');
  const finalAuthentication=await authenticateManifest(env,root,manifestBytes);
  if(JSON.stringify(finalAuthentication)!==JSON.stringify(authentication))fail('Release trust anchor changed during inspection');
- return {verified:true,manifest_digest:manifestDigest,release_version:manifest.release_version,source_commit:manifest.source_commit,files:names.size,build_on_supervision_host:false,signature_status:authentication.mode==='ED25519'?'VERIFIED':'UNVERIFIED',authentication,deployment_authorized:false};
+ return {verified:true,manifest_digest:manifestDigest,release_version:manifest.release_version,source_commit:manifest.source_commit,files:names.size,service_units:serviceUnits,build_on_supervision_host:false,signature_status:authentication.mode==='ED25519'?'VERIFIED':'UNVERIFIED',authentication,deployment_authorized:false};
  }
 export function createComponent(_startup:ComponentContext):Component{return {apiVersion:1,actions:Object.fromEntries(actions.map(action=>[action,async(raw:unknown,ctx:ComponentContext)=>{
  const i=invocationOf(ctx);

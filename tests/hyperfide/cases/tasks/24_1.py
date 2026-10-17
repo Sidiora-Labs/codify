@@ -118,7 +118,7 @@ def observation_dir():
  path=Path(os.environ.get("HYPERFIDE_CAMPAIGN_DIR","/tmp/hyperfide/task-"+TASK+"-raw"))/"recovery"
  path.mkdir(parents=True,exist_ok=True)
  return path
-def cleanup():
+def cleanup(emit=True):
  global DB,RESOURCE
  complete=True
  try:
@@ -133,7 +133,8 @@ def cleanup():
   observation_dir().joinpath("database-absence.json").write_text(json.dumps(record)+chr(10))
  except Exception:complete=False
  resources=[] if RESOURCE is None else [{"id":RESOURCE,"status":"deleted" if complete else "unknown","observed_absent":complete,"evidence_artifact":"recovery/database-absence.json"}]
- print(json.dumps({"type":"cleanup","complete":complete,"resources":resources}),flush=True)
+ # qualify.py also runs cleanup_argv; only one cleanup event may be observed per campaign.
+ if emit:print(json.dumps({"type":"cleanup","complete":complete,"resources":resources}),flush=True)
  return complete
 
 ACCEPTED_REBIND_PROBE=r'''
@@ -142,10 +143,10 @@ import {FileExternalAuthorityJournal} from './services/hyperfide/dist/storage/au
 import {lookupAuthorityActivation} from './services/hyperfide/dist/storage/durability.js';
 import {FileExternalFenceJournal} from './services/hyperfide/dist/recovery/fencing.js';
 import {createAcceptedRunRecoveryVerifier} from './services/hyperfide/dist/recovery/control.js';
-import fs from 'node:fs/promises';import {randomUUID} from 'node:crypto';
+import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {randomUUID} from 'node:crypto';
 const signal=new AbortController().signal,r=createResourceContainer({role:'control',env:process.env,signal});
 const D='sha256:'+'a'.repeat(64),org=process.env.HF_RECOVERY_ORG,run=process.env.HF_RECOVERY_RUN,deployment=process.env.HYPERFIDE_DEPLOYMENT_ID;
-const dir=await fs.mkdtemp('/tmp/hyperfide/rebind-negative-');await fs.chmod(dir,0o700);let revocations=0;
+const dir=await fs.mkdtemp(path.join(os.tmpdir(),'hyperfide-rebind-negative-'));await fs.chmod(dir,0o700);let revocations=0;
 try{
  const current=(await r.observe({preferReplica:false},async tx=>(await tx.query("SELECT a.operation_id::text,a.epoch::text,e.proof_digest FROM hyperfide.authority_activations a JOIN hyperfide.authority_epochs e ON e.deployment_id=a.deployment_id AND e.epoch=a.epoch WHERE a.deployment_id=$1 AND e.state='ACTIVE'",[deployment])).rows[0])).value;
  const journal=new FileExternalAuthorityJournal(process.env.HYPERFIDE_AUTHORITY_JOURNAL_DIR,input=>lookupAuthorityActivation(r,input));
@@ -162,7 +163,10 @@ try{
 '''
 
 def tests(f):
- check("recovery.control.real-registered-process",lambda:expect(f.ok("recovery.control.describe",{})["supervision_failure_domains"]==1))
+ describe=f.ok("recovery.control.describe",{})
+ check("recovery.control.real-registered-process",lambda:expect(describe["supervision_failure_domains"]==1))
+ check("recovery.control.failover-requires-qualified-standby",lambda:expect(describe["uninterrupted_failover"]=="UNQUALIFIED" and describe["standby_qualification"]=="ABSENT" and describe["uninterrupted_failover_requires"]=="SEPARATELY_QUALIFIED_STANDBY"))
+ check("recovery.control.supervisor-capability-absent-reported",lambda:expect(describe["supervisor_capability"]=="ABSENT" and describe["offline_policy"]=="BOUNDED_LOCAL"))
  probe_env=f.identity.env.copy();probe_env["HF_RECOVERY_ORG"]=ORG;probe_env["HF_RECOVERY_RUN"]=RUN;probe_env["HF_RECOVERY_SPEC"]=uid(4)
  actual=subprocess.run(["node","--input-type=module","-e",ACCEPTED_REBIND_PROBE],cwd=ROOT,env=probe_env,capture_output=True,text=True,timeout=40)
  expect(actual.returncode==0,"Accepted recovery proof probe failed: "+actual.stderr[:1000])
@@ -189,7 +193,13 @@ def tests(f):
  check("recovery.offline.expired-budget",lambda:expect(f.ok("recovery.offline.evaluate",{**base,"max_offline_ms":0})["local_continuation"] is False))
  check("recovery.offline.malformed-time",lambda:f.rejected("recovery.offline.evaluate",{**base,"disconnected_at":"2026-02-30T12:00:00.000Z"},"RECOVERY_INPUT_INVALID"))
  check("recovery.offline.unknown-field",lambda:f.rejected("recovery.offline.evaluate",{**base,"authority":True},"RECOVERY_INPUT_INVALID"))
- check("recovery.control.adopt-unproven-supervisor",lambda:f.rejected("recovery.control.adopt",{"scope":SCOPE,"operation_id":uid(51),"session_id":uid(22)},"RECOVERY_DEPENDENCY_UNAVAILABLE"))
+ control_loss(f,snapshot,base)
+ def absent_supervisor():
+  row=f.request("recovery.control.adopt",{"scope":SCOPE,"operation_id":uid(51),"session_id":uid(22)})
+  expect(row.get("ok") is False and row["error"]["code"]=="RECOVERY_DEPENDENCY_UNAVAILABLE" and "supervisor capability absent" in row["error"]["message"],str(row))
+ # Coordinator has not named a runner.supervisors.v1 provider: valid adoption must refuse, not infer.
+ check("recovery.control.adopt-unproven-supervisor",absent_supervisor)
+ session_liveness(f)
  check("recovery.control.active-run-cannot-resume",lambda:f.rejected("recovery.control.resume",{"scope":SCOPE,"operation_id":uid(50)},"RECOVERY_RUN_STATE_INVALID"))
  sql("UPDATE hyperfide.tasks SET current_attempt_id=NULL,generation=generation+1,state_version=state_version+1 WHERE id='"+uid(7)+"';")
  stale=f.ok("recovery.control.reconstruct",SCOPE)
@@ -198,6 +208,73 @@ def tests(f):
  check("recovery.control.cancellation-is-terminal",lambda:f.rejected("recovery.control.resume",{"scope":SCOPE,"operation_id":uid(52)},"RECOVERY_TERMINAL_CONTROL"))
  sql("UPDATE hyperfide.schema_migrations SET checksum='sha256:'||repeat('b',64) WHERE version=24;")
  check("recovery.control.schema-drift-refusal",lambda:f.rejected("recovery.control.reconstruct",SCOPE,"RECOVERY_SCHEMA_NOT_READY"))
+def count_attempts():return sql("SELECT count(*) FROM hyperfide.attempts WHERE organisation_id='"+ORG+"' AND run_id='"+RUN+"';")
+def session(snapshot,identity):
+ found=[item for item in snapshot["session_recovery"] if item["session_id"]==identity];expect(len(found)==1,"session missing from recovery report");return found[0]
+def control_loss(f,initial,base):
+ """V-008: kill control while remote work is active, restart on the same database."""
+ sql("""BEGIN;
+INSERT INTO hyperfide.agent_sessions(organisation_id,run_id,id,role,connector,account_key,native_session_id,state) VALUES('%s','%s','%s','FEATURE_MANAGER','claude','fixture','manager','RUNNING');
+UPDATE hyperfide.feature_packages SET manager_session_id='%s',state_version=state_version+1 WHERE organisation_id='%s' AND run_id='%s' AND id='%s';
+INSERT INTO hyperfide.event_consumers(organisation_id,run_id,id,consumer_key) VALUES('%s','%s','%s','recovery-fixture');
+INSERT INTO hyperfide.outbox_events(organisation_id,run_id,id,aggregate_type,aggregate_id,aggregate_version,event_type,payload) VALUES('%s','%s','%s','task','%s',1,'task.instruction','{}');
+INSERT INTO hyperfide.event_deliveries(organisation_id,run_id,event_id,consumer_id) VALUES('%s','%s','%s','%s');
+COMMIT;"""%(ORG,RUN,uid(29),uid(29),ORG,RUN,uid(6),ORG,RUN,uid(31),ORG,RUN,uid(32),uid(7),ORG,RUN,uid(32),uid(31)))
+ before=f.ok("recovery.control.reconstruct",SCOPE);attempts=count_attempts();offline=f.ok("recovery.offline.evaluate",base)
+ expect(before["event_recovery"]["counts"]["pending_deliveries"]=="1" and len(before["adoption_candidates"])==1,"active remote work fixture not observed")
+ child=f.identity.child;child.kill();child.communicate(timeout=10);f.identity.child=None
+ check("recovery.control.restart-control-process-lost",lambda:expect(child.returncode==-9))
+ f.identity.start()
+ after=f.ok("recovery.control.reconstruct",SCOPE)
+ keys=("packages","sessions","attempts","submission_custody","qualification_jobs","worker_restoration_requests","controls","unreachable_resource_debt","adoption_candidates","session_recovery")
+ check("recovery.control.restart-reconstructs-durable-state",lambda:expect(all(after[k]==before[k] for k in keys) and after["run"]["state_version"]==before["run"]["state_version"],str([k for k in keys if after[k]!=before[k]])))
+ check("recovery.control.restart-pending-messages-reconstructed",lambda:expect(after["event_recovery"]["counts"]==before["event_recovery"]["counts"] and [d["event_id"] for d in after["event_recovery"]["pending_deliveries"]]==[uid(32)]))
+ check("recovery.control.restart-no-duplicate-dispatch",lambda:expect(count_attempts()==attempts and after["new_work_authorized"] is False and [c["attempt_id"] for c in after["adoption_candidates"]]==[ATTEMPT] and all(c["authority"]=="NONE" for c in after["adoption_candidates"])))
+ check("recovery.offline.restart-policy-unchanged",lambda:expect(f.ok("recovery.offline.evaluate",base)==offline and offline["local_continuation"] is True))
+ check("recovery.control.restart-supervision-limit",lambda:expect(after["supervision_failure_domains"]==1 and after["uninterrupted_leadership_failover"]=="UNQUALIFIED"))
+ sql("UPDATE hyperfide.agent_sessions SET state='DISCONNECTED',state_version=state_version+1 WHERE organisation_id='"+ORG+"' AND run_id='"+RUN+"' AND id IN ('"+uid(23)+"','"+uid(29)+"');")
+ lost=f.ok("recovery.control.reconstruct",SCOPE)
+ def leader_manager_loss():
+  for identity in (uid(23),uid(29)):
+   item=session(lost,identity);expect(item["recorded_state"]=="DISCONNECTED" and item["live_progress"] is False and item["recovery_mode"]=="FRESH_SESSION_WITH_RECOVERY_PACKET")
+  expect(lost["packages"][0]["manager_session_id"]==uid(29) and lost["adoption_candidates"]==before["adoption_candidates"] and count_attempts()==attempts)
+ check("recovery.control.leader-manager-loss-keeps-healthy-work",leader_manager_loss)
+def session_liveness(f):
+ """V-043: recorded PIDs, dead pipes and native resume claims are not live progress."""
+ boot=sql("SELECT boot_id FROM hyperfide.sandbox_boots WHERE organisation_id='"+ORG+"' AND sandbox_id='"+uid(9)+"' AND boot_generation=1;")
+ sql("""BEGIN;
+INSERT INTO hyperfide.agent_sessions(organisation_id,run_id,id,role,connector,account_key,native_session_id,attempt_id,sandbox_id,slot_id,sandbox_boot_generation,state) VALUES('%s','%s','%s','WORKER','codex','fixture','worker-pipe','%s','%s','%s',1,'RUNNING');
+INSERT INTO hyperfide.native_session_bindings(organisation_id,run_id,session_id,connector_version,auth_profile,configuration_digest,source_manifest_digest,process_id,process_start_time,boot_id) VALUES('%s','%s','%s','1.0.0','fixture','%s','%s',4242,'1000','%s');
+COMMIT;"""%(ORG,RUN,uid(30),ATTEMPT,uid(9),uid(10),ORG,RUN,uid(30),D,D,boot))
+ recorded=f.ok("recovery.control.reconstruct",SCOPE)
+ check("recovery.control.recorded-pid-not-progress",lambda:expect(session(recorded,uid(30))["process_identity_recorded"] is True and session(recorded,uid(30))["liveness"]=="UNPROVEN" and all(item["live_progress"] is False for item in recorded["session_recovery"]) and recorded["adoption_candidates"][0]["requires"]=="EXACT_SUPERVISOR_IDENTITY_OBSERVATION"))
+ sql("UPDATE hyperfide.native_session_bindings SET process_exited=true WHERE organisation_id='"+ORG+"' AND run_id='"+RUN+"' AND session_id='"+uid(30)+"';")
+ dead=f.ok("recovery.control.reconstruct",SCOPE)
+ check("recovery.control.dead-pipe-not-progress",lambda:expect(session(dead,uid(30))["liveness"]=="PROCESS_EXITED" and session(dead,uid(30))["recorded_state"]=="RUNNING" and len(dead["adoption_candidates"])==0))
+ check("recovery.control.dead-pipe-adoption-refused",lambda:f.rejected("recovery.control.adopt",{"scope":SCOPE,"operation_id":uid(53),"session_id":uid(30)},"RECOVERY_ADOPTION_REFUSED"))
+ # Same PID recorded under a previous boot: the live session's PID may now name an unrelated process.
+ sql("INSERT INTO hyperfide.native_session_bindings(organisation_id,run_id,session_id,connector_version,auth_profile,configuration_digest,source_manifest_digest,process_id,process_start_time,boot_id) VALUES('"+ORG+"','"+RUN+"','"+uid(22)+"','1.0.0','fixture','"+D+"','"+D+"',4242,'1000',gen_random_uuid());")
+ reused=f.ok("recovery.control.reconstruct",SCOPE)
+ check("recovery.control.reused-pid-not-live",lambda:expect(session(reused,uid(22))["liveness"]=="BOOT_IDENTITY_CHANGED" and session(reused,uid(22))["live_progress"] is False))
+ check("recovery.control.reused-pid-adoption-refused",lambda:f.rejected("recovery.control.adopt",{"scope":SCOPE,"operation_id":uid(54),"session_id":uid(22)},"RECOVERY_ADOPTION_REFUSED"))
+ sql("""BEGIN;
+INSERT INTO hyperfide.artifacts(organisation_id,run_id,id,digest,size_bytes,storage_backend,storage_key,status) VALUES('%s','%s','%s','%s',64,'fixture','checkpoint','COMPLETE');
+INSERT INTO hyperfide.checkpoints(organisation_id,run_id,id,attempt_id,attempt_generation,agent_session_id,artifact_id,repository_id,source_object_id,input_packet_digest,support_level) VALUES('%s','%s','%s','%s',1,'%s','%s','%s',repeat('a',40),'%s','NATIVE_RESUME'),('%s','%s','%s','%s',1,'%s','%s','%s',repeat('a',40),'%s','NATIVE_RESUME');
+INSERT INTO hyperfide.native_session_checkpoints(organisation_id,run_id,session_id,checkpoint_id,checkpoint_digest,manifest_digest,source_manifest_digest,configuration_digest,native_session_id) VALUES('%s','%s','%s','%s','%s','%s','%s','%s','worker'),('%s','%s','%s','%s','%s','%s','sha256:%s','%s','worker-pipe');
+COMMIT;"""%(ORG,RUN,uid(40),D,ORG,RUN,uid(41),ATTEMPT,uid(22),uid(40),uid(3),D,ORG,RUN,uid(42),ATTEMPT,uid(30),uid(40),uid(3),D,ORG,RUN,uid(22),uid(41),D,D,D,D,ORG,RUN,uid(30),uid(42),D,D,"b"*64,D))
+ resumed=f.ok("recovery.control.reconstruct",SCOPE)
+ def consistent_checkpoint():
+  item=session(resumed,uid(22))
+  expect(item["checkpoint_id"]==uid(41) and item["checkpoint_consistent"] is True and item["recovery_mode"]=="NATIVE_RESUME_FROM_CHECKPOINT")
+ check("recovery.control.native-resume-consistent-checkpoint",consistent_checkpoint)
+ def diverged_source():
+  item=session(resumed,uid(30))
+  expect(item["checkpoint_consistent"] is False and item["recovery_mode"]=="FRESH_SESSION_WITH_RECOVERY_PACKET" and item["native_resume_limitation"]=="NATIVE_CHECKPOINT_SESSION_OR_SOURCE_INCONSISTENT")
+ check("recovery.control.inconsistent-source-starts-fresh-session",diverged_source)
+ def limitation_reported():
+  expect(all(item["native_resume_verified"] is False for item in resumed["session_recovery"]))
+  expect(session(resumed,uid(22))["native_resume_limitation"]=="NATIVE_RESUME_UNVERIFIED_WITHOUT_SUPERVISOR" and session(resumed,uid(23))["native_resume_limitation"]=="NO_CHECKPOINT")
+ check("recovery.control.native-resume-limitation-reported",limitation_reported)
 def run(task,callback):
  global TASK
  TASK=task
@@ -208,6 +285,6 @@ def run(task,callback):
  try:fixture=setup(task);callback(fixture)
  finally:
   if fixture:fixture.close()
-  complete=cleanup()
+  complete=cleanup(emit=False)
  return 1 if FAILED or not complete else 0
 if __name__=="__main__":sys.exit(run(TASK,tests))

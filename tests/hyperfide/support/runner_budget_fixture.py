@@ -122,7 +122,7 @@ def kernel_parent():
     return None
 class BudgetFixture:
     def __init__(self):
-        self.temp=tempfile.TemporaryDirectory(prefix="runner-budget-",dir="/tmp/hyperfide")
+        self.temp=tempfile.TemporaryDirectory(prefix="runner-budget-")
         self.path=Path(self.temp.name);self.delegated=None
         source=self.path/"driver.c";source.write_text(DRIVER)
         self.binary=self.path/"budget-probe"

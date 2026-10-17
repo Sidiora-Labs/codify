@@ -31,6 +31,7 @@
     "findings.registry.confirm-duplicate",
     "findings.registry.duplicate-replay",
     "findings.registry.duplicate-preserves-reports",
+    "findings.registry.cross-feature-accountability-explicit",
     "findings.registry.duplicate-cycle-rejected",
     "findings.registry.alias-observation-reopens-canonical",
     "findings.registry.context-preserves-provenance",

@@ -1,0 +1,9 @@
+{
+  "task": "3.2",
+  "commit": "4685653a03e4ad271148a6308d2f2fa7cd16fd6f",
+  "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-001 --manifest tests/hyperfide/manifests/tasks/3.2.json && python3 tests/hyperfide/qualify.py --case V-014 --manifest tests/hyperfide/manifests/tasks/3.2.json",
+  "exit_code": 0,
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"919c3e1e-38f8-4854-a0af-50c60b1b9468\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/3.2/campaigns/49b9bfc62b4f3bfba2a4d0cd11a39726e2bd74011f707db835e5a3f6b6bdfb85\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"a5a762cb-db47-4b6a-a38d-c7d856dd515a\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/3.2/campaigns/49b9bfc62b4f3bfba2a4d0cd11a39726e2bd74011f707db835e5a3f6b6bdfb85\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T09:29:30Z",
+  "executed_as": "hf (checkout owner; the trusted checker ignores global git config, so root hits git dubious-ownership)"
+}

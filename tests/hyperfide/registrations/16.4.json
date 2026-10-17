@@ -15,6 +15,22 @@
     "assurance.16.4.auth.absent.assurance.requalification.accept",
     "assurance.16.4.auth.forged.assurance.requalification.accept",
     "assurance.16.4.primary.unbranded-denied",
+    "assurance.16.4.inspect.separated",
+    "assurance.16.4.invalidate.source",
+    "assurance.16.4.invalidate.dependency",
+    "assurance.16.4.invalidate.toolchain",
+    "assurance.16.4.invalidate.configuration",
+    "assurance.16.4.invalidate.graph",
+    "assurance.16.4.invalidate.contract",
+    "assurance.16.4.irrelevant.non-assurance-input",
+    "assurance.16.4.irrelevant.unconsumed-input",
+    "assurance.16.4.idempotency.replay",
+    "assurance.16.4.idempotency.conflict",
+    "assurance.16.4.released.stale-without-resurrection",
+    "assurance.16.4.released.stale-generation-fenced",
+    "assurance.16.4.released.fresh-operation-required",
+    "assurance.16.4.released.unknown-packet-refused",
+    "assurance.16.4.released.cancelled-operation-refused",
     "assurance.16.4.https.signed-missing",
     "assurance.16.4.https.cross-scope",
     "assurance.16.4.https.wrong-role",
@@ -60,6 +76,26 @@
       "id": "hf-task-16.4-signed-files",
       "kind": "local-directory",
       "scope": "task16.4-signed-disposable"
+    },
+    {
+      "id": "hf-task-16.4-behaviour-signed-database",
+      "kind": "postgresql-database",
+      "scope": "task16.4-behaviour-disposable"
+    },
+    {
+      "id": "hf-task-16.4-behaviour-signed-service",
+      "kind": "https-service",
+      "scope": "task16.4-behaviour-disposable"
+    },
+    {
+      "id": "hf-task-16.4-behaviour-signed-role",
+      "kind": "postgresql-role",
+      "scope": "task16.4-behaviour-disposable"
+    },
+    {
+      "id": "hf-task-16.4-behaviour-signed-files",
+      "kind": "local-directory",
+      "scope": "task16.4-behaviour-disposable"
     }
   ],
   "cleanup_argv": [
@@ -70,7 +106,8 @@
   "cleanup_timeout_seconds": 60,
   "required_artifacts": [
     "assurance/observations-16.4.json",
-    "assurance/signed-absence-16.4.json"
+    "assurance/signed-absence-16.4.json",
+    "assurance/signed-absence-16.4-behaviour.json"
   ],
   "source_files": [
     "services/hyperfide/src/assurance/submission.ts",

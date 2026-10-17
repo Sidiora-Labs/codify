@@ -11,7 +11,8 @@
   "actions": [
     "railway.reconciliation.create",
     "railway.inventory.list",
-    "railway.sessions.list"
+    "railway.sessions.list",
+    "railway.qualification.evaluate"
   ],
   "requires": [
     "9.3",

@@ -16,7 +16,20 @@
     "closure.evaluation-immutable",
     "closure.unregistered-assertions-refused",
     "closure.declared-coverage-bound",
-    "closure.policy-valid-shape"
+    "closure.policy-valid-shape",
+    "closure.policy-programme-cases-registered",
+    "closure.dependency-qualified-milestone-only",
+    "closure.lease-expiry-keeps-admitted-work",
+    "closure.competing-custody-refused",
+    "closure.wave-held-without-accepted-candidate",
+    "closure.dependency-integrated-after-acceptance",
+    "closure.wave-held-despite-passing-tasks",
+    "closure.wave-lists-open-blocking-finding",
+    "closure.downstream-activation-withheld",
+    "closure.levels-report-own-status",
+    "closure.programme-requires-end-to-end-rehearsal",
+    "closure.programme-end-to-end-rehearsal-current",
+    "closure.programme-requires-each-wave-closed"
   ],
   "argv": [
     "python3",

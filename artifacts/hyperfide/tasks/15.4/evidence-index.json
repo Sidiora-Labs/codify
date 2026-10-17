@@ -1,0 +1,10 @@
+{
+  "task": "15.4",
+  "commit": "ff0fcb283d7258bee4727b361f9e3e0128018d20",
+  "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-012 --manifest tests/hyperfide/manifests/tasks/15.4.json && python3 tests/hyperfide/qualify.py --case V-054 --manifest tests/hyperfide/manifests/tasks/15.4.json",
+  "exit_code": 0,
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"037647bf-0d4f-4dfc-8f9f-2fd6e22afb7f\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/15.4/campaigns/d137199c9559fcf28fc3857014c5377f0a9416612d706e6eaaac00799f7160a4\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"2e19fb3c-68f3-4d06-98d9-65c37c71b97b\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/15.4/campaigns/d137199c9559fcf28fc3857014c5377f0a9416612d706e6eaaac00799f7160a4\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T09:24:24Z",
+  "campaign_dir": "artifacts/hyperfide/tasks/15.4/campaigns/d137199c9559fcf28fc3857014c5377f0a9416612d706e6eaaac00799f7160a4",
+  "environment_note": "sandbox runs as root over an hf-owned checkout; the top-level and .git directory owner was temporarily set to root for the run because check-evidence.py safe_git disables global config (safe.directory), then restored"
+}

@@ -17,7 +17,8 @@
     "human.adopt",
     "human.bootstrap",
     "human.intent.read",
-    "human.intent.complete"
+    "human.intent.complete",
+    "human.routine.receive"
   ],
   "requires": [
     "4.2",

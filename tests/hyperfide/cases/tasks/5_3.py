@@ -1,14 +1,130 @@
 #!/usr/bin/env python3
 """Stable dispatch identity and fail-closed uncertainty through the real service."""
 from __future__ import annotations
-import concurrent.futures,importlib.util,sys
+import concurrent.futures,contextlib,importlib.util,io,json,socket,subprocess,sys,time
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[4]
 s=importlib.util.spec_from_file_location("hf_scheduler_fixture",ROOT/"tests/hyperfide/cases/tasks/5_1.py");m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
 expect=m.expect;check=m.check;uid=m.uid
+def field(key,value,line):return {"key":key,"raw":json.dumps(value),"value":value,"line":line}
+def accepted_intent(f):
+ """Seed the accepted proof intent sections that spec/obligations.ts now requires
+ (req/acceptance/proof sections plus task.section.fields.reqs). The shared 3.2/5.1
+ fixtures predate that contract and write an empty document; repair it in the
+ disposable database only, before any authority is derived from it."""
+ i=f.ids;p=f.packet_proof;clause=p["clauses"][0];req,ac=clause["id"].rsplit(".",1)
+ sections=[{"name":"req."+req,"line":1,"fields":{"ac_"+ac:field("ac_"+ac,"Fixture accepted criterion",2)}},
+  {"name":"acceptance."+clause["acceptance_ids"][0],"line":3,"fields":{"reqs":field("reqs",[clause["id"]],4)}},
+  {"name":"proof","line":5,"fields":{"rubric_digest":field("rubric_digest",p["rubric_digest"],6)}},
+  {"name":"proof.review."+clause["id"],"line":7,"fields":{"reviewers":field("reviewers",clause["reviewers"],8),"rubric_digest":field("rubric_digest",clause["rubric_digest"],9)}}]
+ section={"name":"task.fixture","line":10,"fields":{"reqs":field("reqs",[clause["id"]],11)}}
+ quote=lambda value:"'"+value.replace("'","''")+"'"
+ f.sql("DO $do$ BEGIN SET LOCAL session_replication_role=replica;"
+  " UPDATE hyperfide.spec_revisions SET document=document||jsonb_build_object('parsed',"+quote(json.dumps({"sections":sections}))+"::jsonb) WHERE organisation_id="+quote(i["organisation"])+" AND id="+quote(i["spec"])+";"
+  " UPDATE hyperfide.tasks SET definition=definition||jsonb_build_object('section',"+quote(json.dumps(section))+"::jsonb) WHERE organisation_id="+quote(i["organisation"])+"; END $do$")
+def describe_access(f):
+ """Let fixture principals read the loaded component registry (system.describe)."""
+ config=json.loads(f.identity_config.read_text())
+ for principal in config["principals"]:
+  if "system.describe" not in principal["allowed_actions"]:principal["allowed_actions"].append("system.describe")
+ f.identity_config.write_text(json.dumps(config))
+ policy=json.loads(f.policy.read_text());policy["allowed_actions"].append("system.describe");f.policy.write_text(json.dumps(policy))
+ f.sql("UPDATE hyperfide.identity_principals SET allowed_actions=array_append(allowed_actions,'system.describe') WHERE NOT 'system.describe'=ANY(allowed_actions)")
+def fixture(describe=False,**kwargs):
+ def setup(f):
+  accepted_intent(f)
+  if describe:describe_access(f)
+ return m.SchedulerFixture(extra_setup=setup,**kwargs)
+def registered(f):
+ declared=json.loads((ROOT/"services/hyperfide/components/5.3.json").read_text())
+ described=f.ok("system.describe",{},key="operator",component="system")
+ entries=[c for c in described["components"] if c["id"]=="5.3"]
+ expect(declared["id"]=="5.3" and len(entries)==1 and sorted(entries[0]["actions"])==sorted(declared["actions"]),"Loaded service does not expose component 5.3 with exactly its declared actions: "+json.dumps(entries))
+# Test-owned trusted reader installed on the actual DispatchReconciler inside a branded
+# primary transaction. It reports an observation bound to the persisted operation; the
+# reconciler still independently checks the command/payload/token tuple and requires a
+# COMPLETED central command_inbox receipt. No provider or process is contacted.
+RECONCILE_JS="""const {DispatchReconciler}=await import('./services/hyperfide/dist/scheduler/dispatch.js');
+const reconciler=new DispatchReconciler(),seen=[];
+reconciler.registerReceiptReader(async(_tx,input)=>{seen.push(input.operation_id);
+ return data.observation===null?null:{command_id:input.operation_id,token:input.token,payload_digest:input.payload_digest,...data.observation};});
+try{if(data.second_reader){try{reconciler.registerReceiptReader(async()=>null);}catch(e){return {second_reader:e.code};}return {second_reader:'INSTALLED'};}
+ return {outcome:await reconciler.reconcile(tx,data.scope,data.request_id),seen};}finally{reconciler.close();}"""
+def reconcile_probe(f,request_id,observation):return f.primary(RECONCILE_JS,{"request_id":request_id,"observation":observation})
+def outcome(response):
+ expect("result" in response,"Trusted reconcile failed: "+json.dumps(response));return response["result"]["outcome"]
+def refused(response,code):expect(response.get("error",{}).get("code")==code,"Expected "+code+", observed "+json.dumps(response))
+def receipt(f,state="COMPLETED"):
+ """Central inbox admission of a native runner receipt (production producer is runner 12.x)."""
+ ident=uid()
+ f.sql("INSERT INTO hyperfide.command_inbox(organisation_id,run_id,id,principal_scope,operation,idempotency_key,request_digest,state,result) VALUES($1,$2,$3,'native-runner','runner.dispatch.receipt',$4,$5,$6,$7)",[f.ids["organisation"],f.ids["run"],ident,ident,m.sha(ident.encode()),state,None if state=="PENDING" else json.dumps({"receipt_id":ident})])
+ return ident
+def dispatch(f,request_id):
+ return f.sql("SELECT id,state,state_version::text,observation_receipt_id,native_session_id FROM hyperfide.scheduler_dispatches WHERE request_id=$1",[request_id])[0]
+def attempt(f,attempt_id):
+ return f.sql("SELECT compute_authority,execution_state FROM hyperfide.attempts WHERE id=$1",[attempt_id])[0]
+LOCK_JS="""import fs from 'node:fs';import {createRequire} from 'node:module';
+const pg=createRequire(process.cwd()+'/services/hyperfide/package.json')('pg'),q=JSON.parse(fs.readFileSync(0,'utf8'));
+const c=new pg.Client({connectionString:process.env.DATABASE_URL});await c.connect();
+try{await c.query('BEGIN');await c.query('SELECT id FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR NO KEY UPDATE',[q.organisation_id,q.run_id]);
+ process.stdout.write('locked\\n');await new Promise(resolve=>setTimeout(resolve,q.hold_ms));await c.query('COMMIT');}finally{await c.end();}"""
+def lost_response(f,action,payload,key,component):
+ """Hold the run row past the client deadline: the client cannot know whether the server
+ committed (the service cancels the request transaction when the client disconnects)."""
+ env=dict(f.env,DATABASE_URL=f.url)
+ locker=subprocess.Popen(["node","--input-type=module","-e",LOCK_JS],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True,cwd=ROOT,env=env)
+ locker.stdin.write(json.dumps({"organisation_id":f.ids["organisation"],"run_id":f.ids["run"],"hold_ms":2500}));locker.stdin.close()
+ try:
+  expect(locker.stdout.readline().strip()=="locked","Run lock was not held")
+  try:f.invoke(action,payload,key=key,component=component,timeout_seconds=0.75);lost=False
+  except (TimeoutError,socket.timeout):lost=True
+ finally:locker.wait(timeout=30)
+ expect(locker.returncode==0,"Run lock holder failed")
+ return lost
+CRASH_JS="""import fs from 'node:fs';
+import {createResourceContainer} from './services/hyperfide/dist/storage/runtime.js';
+import {ensureDispatch} from './services/hyperfide/dist/scheduler/dispatch.js';
+const data=JSON.parse(fs.readFileSync(0,'utf8'));
+const resources=createResourceContainer({role:'control',env:process.env,signal:new AbortController().signal});
+await resources.gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:3},tx=>ensureDispatch(tx,data.token,data.request_id,{consumer_ids:[data.native_consumer]}));
+process.kill(process.pid,'SIGKILL');"""
+def crash_after_commit(f,request):
+ """The dispatcher commits, then dies before any response leaves the process."""
+ return subprocess.run(["node","--input-type=module","-e",CRASH_JS],input=json.dumps({"token":request["token"],"request_id":request["request_id"],"native_consumer":f.ids["native_consumer"]}),text=True,cwd=ROOT,env=f.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
+def wait_rows(f,sql,values,deadline=20):
+ end=time.monotonic()+deadline
+ while time.monotonic()<end:
+  rows=f.sql(sql,values)
+  if rows:return rows
+  time.sleep(.1)
+ return []
+def prepare_replacement(f,name,generation):
+ """Next admitted attempt generation for the same task on a fresh READY slot; the superseded
+ slot stays DRAINING until physical quiescence is reconciled."""
+ i=f.ids;slot=uid()
+ f.sql("INSERT INTO hyperfide.worker_slots(organisation_id,id,sandbox_id,slot_key,boot_generation,capacity_kind,state) VALUES($1,$2,$3,$4,1,'AGENT','READY')",[i["organisation"],slot,i["sandbox"],"replacement-"+name+"-"+generation])
+ request=f.packet_input(task_id=i["task_"+name],slot_id=slot,idempotency_key=uid(),attempt_generation=generation)
+ packet=f.ok("hierarchy.packet.create",request,key="manager",component="3.2")
+ return {"organisation_id":i["organisation"],"run_id":i["run"],"request_id":uid(),"task_id":request["task_id"],"attempt_id":request["attempt_id"],"attempt_generation":generation,"run_spec_generation":"1","spec_generation":"1","spec_revision_id":i["spec"],"authority_epoch":i["epoch"],"leader_generation":"1","package_generation":"2","sandbox_id":i["sandbox"],"slot_id":slot,"sandbox_boot_generation":"1","lease_ms":300000,"input_packet_digest":packet["digest"],"capacity":f.capacity()}
+def cleanup():
+ """Shared 5.1 cleanup observes DB/role/path/listener absence and writes scheduler/cleanup.json;
+ report that observation as explicit absence evidence for the harness."""
+ buffer=io.StringIO()
+ with contextlib.redirect_stdout(buffer):code=m.cleanup_owned("5.3")
+ events=[json.loads(line) for line in buffer.getvalue().splitlines() if line.strip()]
+ event=events[-1] if events else {"type":"cleanup","complete":False,"resources":[{"id":"hf-task-5.3-runtime","status":"unknown"}]}
+ evidence=m.campaign_root()/"scheduler"/"cleanup.json"
+ observed=code==0 and event.get("complete") is True and evidence.is_file() and json.loads(evidence.read_text()).get("complete") is True
+ for resource in event.get("resources",[]):
+  if resource.get("status")=="deleted":
+   if observed:resource.update(observed_absent=True,evidence_artifact="scheduler/cleanup.json")
+   else:resource["status"]="unknown"
+ if not observed:event["complete"]=False
+ print(json.dumps(event),flush=True)
+ return 0 if observed else 1
 def main():
  m.configure_cleanup("5.3")
- f=m.SchedulerFixture();i=f.ids
+ f=fixture();i=f.ids
  try:
   claim=f.claim("a");token=claim["token"];request={"token":token,"request_id":uid(),"leader_generation":"1","package_generation":"2"}
   check("dispatch.role.denied",lambda:f.reject("scheduler.dispatch.ensure",request,"ROLE_DENIED",key="watcher",component="5.3"))
@@ -46,7 +162,7 @@ def main():
 
  finally:
   db=f.database;path=f.path;f.close();check("dispatch.cleanup.observed",lambda:expect(not path.exists() and f.sql("SELECT count(*)::int n FROM pg_database WHERE datname=$1",[db],admin=True)[0]["n"]==0,"Fixture resource remains"))
- q=m.SchedulerFixture()
+ q=fixture()
  try:
   token=q.claim("a")["token"];q.add_principal("controller","COORDINATOR")
   hold=q.primary("return claims.applyExecutionControl(tx,data.scope,{scope_kind:'ATTEMPT',scope_id:data.token.attempt_id,mode:'PAUSE',operation_id:crypto.randomUUID(),reason:'Restore preparation must precede queued START'});",{"token":token})
@@ -54,9 +170,89 @@ def main():
   check("dispatch.consumer.pause-rollback",lambda:expect(q.sql("SELECT count(*)::int n FROM hyperfide.scheduler_dispatches")[0]["n"]==0 and q.sql("SELECT state FROM hyperfide.event_deliveries WHERE consumer_id=$1",[q.ids["dispatch_consumer"]])[0]["state"]=="PENDING","Held event leaked effect or terminal ACK"))
   resumed=q.primary("return claims.applyExecutionControl(tx,data.scope,{scope_kind:'ATTEMPT',scope_id:data.token.attempt_id,mode:'ACTIVE',operation_id:crypto.randomUUID(),reason:'Lower API CAS test only',resume:true,expected_generation:data.generation});",{"token":token,"generation":hold["result"]["generation"]})
   expect("result" in resumed,"Exact resume CAS failed")
-  effect=q.ok("scheduler.dispatch.consume",{},key="controller",component="5.3")
-  check("dispatch.consumer.actual-fresh-intent",lambda:expect(effect["processed"]==1 and effect["results"][0]["result"]["effect"]=="DURABLE_DISPATCH_INTENT" and q.sql("SELECT count(*)::int n FROM hyperfide.scheduler_dispatches")[0]["n"]==1,"Released event did not create exactly one real dispatch intent"))
+  with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:replies=list(pool.map(lambda _:q.invoke("scheduler.dispatch.consume",{"limit":4},key="controller",component="5.3")[1],range(2)))
+  effects=[reply["result"] for reply in replies if reply.get("ok") and reply["result"]["processed"]]
+  def concurrent_consumers():
+   expect(all(reply.get("ok") or reply.get("error",{}).get("code") in ("SERIALIZATION_FAILURE","TRANSACTION_CONFLICT","RETRY_EXHAUSTED") for reply in replies),"Concurrent consumer failed unexpectedly: "+json.dumps(replies))
+   expect(sum(effect["processed"] for effect in effects)==1 and q.sql("SELECT count(*)::int n FROM hyperfide.scheduler_dispatches")[0]["n"]==1 and q.sql("SELECT count(*)::int n FROM hyperfide.outbox_events WHERE event_type='runner.spawn.requested'")[0]["n"]==1,"Concurrent consumers duplicated or lost the dispatch intent")
+  check("dispatch.consumer.concurrent-single-intent",concurrent_consumers)
+  check("dispatch.consumer.actual-fresh-intent",lambda:expect(len(effects)==1 and effects[0]["results"][0]["result"]["effect"]=="DURABLE_DISPATCH_INTENT" and q.sql("SELECT count(*)::int n FROM hyperfide.scheduler_dispatches")[0]["n"]==1,"Released event did not create exactly one real dispatch intent"))
  finally:
   db=q.database;path=q.path;q.close();check("dispatch.consumer.cleanup.observed",lambda:expect(not path.exists() and q.sql("SELECT count(*)::int n FROM pg_database WHERE datname=$1",[db],admin=True)[0]["n"]==0,"Consumer fixture remains"))
+ r=fixture(describe=True,agent_limit=3);ri=r.ids
+ try:
+  check("dispatch.component.registered-entrypoint",lambda:registered(r))
+  # do_2: responses lost across crash/timeout windows; a retry of the same request is the same command.
+  b=r.claim("b");lost_request={"token":b["token"],"request_id":uid(),"leader_generation":"1","package_generation":"2"}
+  crashed=crash_after_commit(r,lost_request)
+  def crash_retry():
+   expect(crashed.returncode==-9 and crashed.stdout=="","Dispatcher did not die before responding: "+crashed.stderr[:500])
+   rows=r.sql("SELECT id FROM hyperfide.scheduler_dispatches WHERE request_id=$1",[lost_request["request_id"]])
+   expect(len(rows)==1,"Crashed dispatcher did not durably commit")
+   retry=r.ok("scheduler.dispatch.ensure",lost_request,key="manager2",component="5.3")
+   expect(retry["operation_id"]==rows[0]["id"] and retry["replayed"] is True,"Retry after lost response minted another command")
+  check("dispatch.lost-response.crash-after-commit",crash_retry)
+  lost=lost_response(r,"scheduler.dispatch.ensure",lost_request,"manager2","5.3")
+  def timeout_retry():
+   expect(lost,"Client received a response; timeout window not exercised")
+   retry=r.ok("scheduler.dispatch.ensure",lost_request,key="manager2",component="5.3")
+   expect(retry["operation_id"]==dispatch(r,lost_request["request_id"])["id"] and retry["replayed"] is True,"Retry after client timeout changed command identity")
+   expect(r.sql("SELECT count(*)::int n FROM hyperfide.outbox_events WHERE event_type='runner.spawn.requested' AND aggregate_id=$1",[retry["operation_id"]])[0]["n"]==1 and r.sql("SELECT count(*)::int n FROM hyperfide.scheduler_dispatches WHERE attempt_id=$1",[b["token"]["attempt_id"]])[0]["n"]==1,"Lost responses duplicated spawn intent")
+  check("dispatch.lost-response.client-timeout-retry",timeout_retry)
+  first=r.claim("a",lease_ms=4000);old=first["token"]
+  old_request={"token":old,"request_id":uid(),"leader_generation":"1","package_generation":"2"}
+  d1=r.ok("scheduler.dispatch.ensure",old_request,key="manager",component="5.3")
+  while r.sql("SELECT lease_expires_at>clock_timestamp() AS live FROM hyperfide.attempts WHERE id=$1",[old["attempt_id"]])[0]["live"]:time.sleep(.05)
+  expired=r.ok("scheduler.compute.expire",{"organisation_id":ri["organisation"],"run_id":ri["run"],"authority_epoch":ri["epoch"],"leader_generation":"1"},component="5.2")
+  check("dispatch.superseded.intent-unreconciled",lambda:expect(expired["expired_attempt_ids"]==[old["attempt_id"]] and dispatch(r,old_request["request_id"])["state"]=="INTENT","Expiry did not leave an unreconciled superseded dispatch"))
+  new=r.claim("a",request=prepare_replacement(r,"a","2"))["token"]
+  new_request={"token":new,"request_id":uid(),"leader_generation":"1","package_generation":"2"}
+  check("dispatch.replacement.claim-is-not-dispatch",lambda:expect(new["attempt_generation"]=="2" and r.sql("SELECT count(*)::int n FROM hyperfide.scheduler_dispatches WHERE attempt_id=$1",[new["attempt_id"]])[0]["n"]==0,"Replacement claim fabricated a dispatch"))
+  check("dispatch.replacement.requires-reconciliation",lambda:r.reject("scheduler.dispatch.ensure",new_request,"RECONCILIATION_REQUIRED",key="manager",component="5.3"))
+  r.add_principal("controller","COORDINATOR")
+  def consumer_waits():
+   r.reject("scheduler.dispatch.consume",{"limit":64},"RECONCILIATION_REQUIRED",key="controller",component="5.3")
+   expect(r.sql("SELECT count(*)::int n FROM hyperfide.scheduler_dispatches WHERE attempt_id=$1",[new["attempt_id"]])[0]["n"]==0 and r.sql("SELECT count(*)::int n FROM hyperfide.event_deliveries WHERE consumer_id=$1 AND state='ACKNOWLEDGED'",[ri["dispatch_consumer"]])[0]["n"]==0,"Consumer dispatched or acknowledged a replacement before reconciliation")
+  check("dispatch.replacement.consumer-waits",consumer_waits)
+  uncertain=reconcile_probe(r,old_request["request_id"],{"state":"UNCERTAIN","central_receipt_id":uid()})
+  check("dispatch.reconcile.uncertain-unknown",lambda:expect(outcome(uncertain)=={"operation_id":d1["operation_id"],"state":"UNKNOWN","reconciliation_required":True,"replacement_allowed":False} and uncertain["result"]["seen"]==[d1["operation_id"]] and dispatch(r,old_request["request_id"])["state"]=="UNKNOWN" and attempt(r,old["attempt_id"])=={"compute_authority":"EXPIRED","execution_state":"FAILED"},"Uncertain outcome was not recorded as UNKNOWN without replacement"))
+  check("dispatch.reconcile.null-observation-unknown",lambda:expect(outcome(reconcile_probe(r,old_request["request_id"],None))["state"]=="UNKNOWN","Missing receipt was not treated as uncertain"))
+  consumed=r.ok("scheduler.dispatch.consume",{"limit":64},key="controller",component="5.3")
+  replacement=r.sql("SELECT id,request_id,state FROM hyperfide.scheduler_dispatches WHERE attempt_id=$1",[new["attempt_id"]])
+  check("dispatch.replacement.after-reconciliation",lambda:expect(len(replacement)==1 and replacement[0]["state"]=="INTENT" and any(item["status"]=="APPLIED" and item["result"]["effect"]=="DURABLE_DISPATCH_INTENT" and item["result"]["dispatch"]["operation_id"]==replacement[0]["id"] for item in consumed["results"]),"Reconciled superseded outcome did not admit exactly one replacement intent"))
+  new_request["request_id"]=replacement[0]["request_id"] if replacement else new_request["request_id"]
+  check("dispatch.replacement.ensure-replays",lambda:expect(r.ok("scheduler.dispatch.ensure",new_request,key="manager",component="5.3")["operation_id"]==replacement[0]["id"],"Replacement ensure minted another command"))
+  stale=reconcile_probe(r,old_request["request_id"],{"state":"EXECUTING","central_receipt_id":receipt(r),"native_session_id":"old-worker"})
+  check("dispatch.reconcile.superseded-executing-no-authority",lambda:expect(outcome(stale)["state"]=="RUNNING" and outcome(stale)["authoritative"] is False and outcome(stale)["reconciliation_required"] is True and attempt(r,old["attempt_id"])=={"compute_authority":"EXPIRED","execution_state":"FAILED"} and r.sql("SELECT current_attempt_id,state FROM hyperfide.tasks WHERE id=$1",[old["task_id"]])[0]=={"current_attempt_id":new["attempt_id"],"state":"RESERVED"},"Delayed superseded worker gained authority"))
+  check("dispatch.superseded.renew-refused",lambda:expect("error" in r.primary("return leases.renewCompute(tx,data.token,300000);",{"token":old}) and attempt(r,old["attempt_id"])["compute_authority"]=="EXPIRED","Superseded worker renewed its lease"))
+  live=reconcile_probe(r,new_request["request_id"],{"state":"EXECUTING","central_receipt_id":receipt(r),"native_session_id":"new-worker"})
+  check("dispatch.reconcile.current-executing-authoritative",lambda:expect(outcome(live)["state"]=="RUNNING" and outcome(live)["authoritative"] is True and outcome(live)["reconciliation_required"] is False and attempt(r,new["attempt_id"])=={"compute_authority":"CURRENT","execution_state":"RUNNING"} and r.sql("SELECT state FROM hyperfide.tasks WHERE id=$1",[new["task_id"]])[0]["state"]=="RUNNING","Current generation did not reach authoritative RUNNING"))
+  late=reconcile_probe(r,old_request["request_id"],{"state":"EXECUTING","central_receipt_id":receipt(r),"native_session_id":"old-worker"})
+  def single_authority():
+   expect(outcome(late)["authoritative"] is False,"Late superseded report gained authority after the current generation")
+   rows=r.sql("SELECT id,compute_authority,execution_state FROM hyperfide.attempts WHERE task_id=$1 AND (compute_authority='CURRENT' OR execution_state='RUNNING')",[new["task_id"]])
+   expect(rows==[{"id":new["attempt_id"],"compute_authority":"CURRENT","execution_state":"RUNNING"}],"Duplicate physical execution produced more than one accepted authority")
+  check("dispatch.duplicate-execution.single-authority",single_authority)
+  before=dispatch(r,new_request["request_id"])
+  def mismatches():
+   for override in ({"command_id":uid()},{"payload_digest":m.sha(b"forged-payload")},{"token":dict(new,slot_id=uid())},{"token":old}):
+    refused(reconcile_probe(r,new_request["request_id"],dict({"state":"EXECUTING","central_receipt_id":receipt(r)},**override)),"NATIVE_RECEIPT_MISMATCH")
+   expect(dispatch(r,new_request["request_id"])==before,"Mismatched receipt changed dispatch state")
+  check("dispatch.reconcile.receipt-mismatch",mismatches)
+  def unadmitted():
+   refused(reconcile_probe(r,new_request["request_id"],{"state":"EXECUTING","central_receipt_id":uid()}),"NATIVE_RECEIPT_UNADMITTED")
+   refused(reconcile_probe(r,new_request["request_id"],{"state":"TERMINAL","terminal_kind":"STOPPED","central_receipt_id":receipt(r,"PENDING")}),"NATIVE_RECEIPT_UNADMITTED")
+   expect(dispatch(r,new_request["request_id"])==before,"Unadmitted receipt changed dispatch state")
+  check("dispatch.reconcile.receipt-unadmitted",unadmitted)
+  check("dispatch.reconcile.terminal-kind-required",lambda:refused(reconcile_probe(r,new_request["request_id"],{"state":"TERMINAL","central_receipt_id":receipt(r)}),"NATIVE_RECEIPT_INCOMPLETE"))
+  check("dispatch.reconcile.single-reader",lambda:expect(r.primary(RECONCILE_JS,{"request_id":new_request["request_id"],"observation":None,"second_reader":True}).get("result")=={"second_reader":"INVALID_RECEIPT_READER"},"A second receipt reader was installed"))
+  absent_receipt=receipt(r);absent=reconcile_probe(r,old_request["request_id"],{"state":"TERMINAL","terminal_kind":"ABSENT","central_receipt_id":absent_receipt})
+  stopped=reconcile_probe(r,lost_request["request_id"],{"state":"TERMINAL","terminal_kind":"STOPPED","central_receipt_id":receipt(r)})
+  check("dispatch.reconcile.terminal-states",lambda:expect(outcome(absent)["state"]=="ABSENT" and outcome(stopped)["state"]=="STOPPED" and not outcome(absent)["authoritative"] and outcome(absent)["resource_release_confirmed"] is False and dispatch(r,old_request["request_id"])["observation_receipt_id"]==absent_receipt and dispatch(r,lost_request["request_id"])["state"]=="STOPPED","Terminal observations did not reach exact terminal states"))
+  replay=reconcile_probe(r,old_request["request_id"],{"state":"EXECUTING","central_receipt_id":receipt(r)})
+  check("dispatch.reconcile.terminal-replay",lambda:expect(outcome(replay)=={"operation_id":d1["operation_id"],"state":"ABSENT","replayed":True,"replacement_allowed":False,"resource_release_confirmed":False} and replay["result"]["seen"]==[],"Terminal dispatch was reopened by a later report"))
+  check("dispatch.reconcile.terminal-no-release",lambda:expect(r.sql("SELECT count(*)::int n FROM hyperfide.reservations WHERE state='RELEASED'")[0]["n"]==0 and r.sql("SELECT count(*)::int n FROM hyperfide.sandbox_execution_charges WHERE state='RELEASED'")[0]["n"]==0 and attempt(r,b["token"]["attempt_id"])["compute_authority"]=="CURRENT","Native terminal observation released capacity or authority"))
+ finally:
+  db=r.database;path=r.path;r.close();check("dispatch.reconcile.cleanup.observed",lambda:expect(not path.exists() and r.sql("SELECT count(*)::int n FROM pg_database WHERE datname=$1",[db],admin=True)[0]["n"]==0,"Reconcile fixture remains"))
  return 1 if m.FAILED else 0
-if __name__=="__main__":raise SystemExit(m.cleanup_owned("5.3") if "--cleanup" in sys.argv else main())
+if __name__=="__main__":raise SystemExit(cleanup() if "--cleanup" in sys.argv else main())

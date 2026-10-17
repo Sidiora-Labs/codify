@@ -15,8 +15,12 @@
     "hierarchy.package.assign",
     "hierarchy.package.handoff.propose",
     "hierarchy.package.handoff.acknowledge",
+    "hierarchy.package.handoff.withdraw",
+    "hierarchy.package.transition",
+    "hierarchy.domain.handoff",
     "hierarchy.role.bind",
-    "hierarchy.inspect"
+    "hierarchy.inspect",
+    "hierarchy.history"
   ],
   "requires": [
     "4.2",

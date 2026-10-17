@@ -1,21 +1,28 @@
 # Memory transport
 
-`cg memory export` and `cg memory import` move agent memories from one Codify
+`hyperfide memory export` and `hyperfide memory import` move agent memories from one Hyperfide
 graph to another: from an old checkout to a new one, from one repository to
 a sibling, or from a project you are retiring into the one that replaces it.
 The file between them is a contract between graphs and between versions of
-`cg`, and this page specifies it.
+the executable, and this page specifies it. The format keeps its 1.x name,
+`codify-memories`, so files written by Codify 1.x and by this build read the
+same way.
+
+Implemented in `src/memory.c` (`cmd_memory_export`, `cmd_memory_import`);
+covered by `tests/integration/39_memory_port.sh`. Examples use `hyperfide`;
+`cg` is the deprecated compatibility alias of the same executable, with
+identical arguments, JSON and exit codes.
 
 ```sh
-cg memory export -o decisions.jsonl --task codify-v12     # in the source
-cg memory import decisions.jsonl --dry-run                # in the target
-cg memory import decisions.jsonl
-cg memory import --from ../old-checkout                   # graph to graph
+hyperfide memory export -o decisions.jsonl --task codify-v12     # in the source
+hyperfide memory import decisions.jsonl --dry-run                # in the target
+hyperfide memory import decisions.jsonl
+hyperfide memory import --from ../old-checkout                   # graph to graph
 ```
 
 ## Commands
 
-### `cg memory export [-o FILE] [--task T] [--type T] [--branch B] [--since DAYS]`
+### `hyperfide memory export [-o FILE] [--task T] [--type T] [--branch B] [--since DAYS]`
 
 Writes the header line and one line per selected memory to stdout, or to
 `FILE` with `-o` (`-o -` is stdout). With `-o`, a one-line report names the
@@ -34,11 +41,11 @@ byte-identical and can be committed and diffed.
 
 Exit status: 0, or 1 when the file cannot be written.
 
-### `cg memory import <FILE|-> [--dry-run] [--keep-branch] [--retask OLD=NEW]`
-### `cg memory import --from DIR [...]`
+### `hyperfide memory import <FILE|-> [--dry-run] [--keep-branch] [--retask OLD=NEW]`
+### `hyperfide memory import --from DIR [...]`
 
 Reads an export from `FILE`, from stdin with `-`, or — with `--from DIR` —
-straight out of the Codify project that owns `DIR`. Every memory whose
+straight out of the project that owns `DIR`. Every memory whose
 content id the target does not hold is inserted; the ones it holds are
 skipped. Then supersession links are restored. All of it is one
 transaction.
@@ -74,6 +81,7 @@ Exit status:
 | 0 | The import ran (invalid lines are reported and skipped; they do not fail it) |
 | 1 | Nothing was written: unreadable input, an unknown format, a newer version, an unusable `--retask`, `--from` naming no project or this project, or a write that failed and was rolled back |
 | 75 | The database stayed busy past the lock wait; nothing was written, retry |
+| 78 | Refused before anything was read: the tree selects a distributed authority descriptor or an invalid `HYPERFIDE_MODE` (see [Authority mode](integrate.md#authority-mode)); `hyperfide memory export` refuses the same way |
 
 ## The format
 
@@ -83,15 +91,15 @@ is tolerated on import). Blank lines are ignored.
 ### Header — the first non-blank line
 
 ```json
-{"format":"codify-memories","version":1,"project":"alpha","cg_version":"1.1.0","count":3}
+{"format":"codify-memories","version":1,"project":"alpha","cg_version":"2.0.0-dev","count":3}
 ```
 
 | Key | Type | Meaning |
 |---|---|---|
 | `format` | string | Always `codify-memories`. Anything else stops the import |
-| `version` | integer | The format version, `1` here. A version newer than the importing `cg` reads stops the import |
+| `version` | integer | The format version, `1` here. A version newer than the importing build reads stops the import |
 | `project` | string | The name (directory basename) of the exporting project; recorded as provenance on import |
-| `cg_version` | string | The `cg` that wrote the file. Informational |
+| `cg_version` | string | The version of the executable that wrote the file (`hyperfide version`). Informational |
 | `count` | integer | The number of memory lines that follow. Informational |
 
 Readers ignore header keys they do not know.
@@ -136,7 +144,7 @@ id = lowercase hex SHA-256 of  type 0x1F task 0x1F body
 separator, no newline. For example the decision `Use WAL` with no task is
 `sha256("decision\x1f\x1fUse WAL")`.
 
-This is exactly what `cg memory compact` treats as one memory — same type,
+This is exactly what `hyperfide memory compact` treats as one memory — same type,
 same task (null and empty alike), same body — so the same note has the same
 id in every graph, whatever its row id, time, anchors, branch, or class.
 `type` is a plain word and a task tag never holds `0x1F` (an import refuses
@@ -168,7 +176,7 @@ the target's row stays as it is. Two identical memories in one file import
 once.
 
 **Kept as written.** `created`, `type`, `task`, `body`, `symbols`, `files`,
-`class`, and `confidence` are stored as they arrive. `cg recall` in the
+`class`, and `confidence` are stored as they arrive. `hyperfide recall` in the
 target returns the same values the source did.
 
 **Provenance.** `source` becomes `import:<project>/<original source>` —
@@ -186,7 +194,7 @@ target already holds for that memory is the target's own decision and is
 left alone. `relinked` counts the links made.
 
 **Full-text index.** Every inserted memory enters `memory_fts` in the same
-transaction, so `cg recall <word>` finds it at once.
+transaction, so `hyperfide recall <word>` finds it at once.
 
 **Events.** An import that changes anything writes one `memory.import`
 event (`{"project","imported","skipped","invalid","relinked"}`) in place of
@@ -195,7 +203,7 @@ the per-row `memory.add` events, which never become visible.
 ### Branches
 
 A memory's `branch` decides which branches see it. When the incoming branch
-is one the target graph tracks (`cg branches`), it is kept. When the target
+is one the target graph tracks (`hyperfide branches`), it is kept. When the target
 does not track it, the branch is cleared — `null`, visible on every branch —
 because a name nothing in the target carries would hide the memory from
 every recall. `--keep-branch` keeps such names anyway, for a graph that will
@@ -213,7 +221,7 @@ empty; `OLD=` with an empty `NEW` clears a whole-tag match.
 
 ### `--from DIR`
 
-`DIR` is resolved the way `cg` finds a project — upward to the directory
+`DIR` is resolved the way `hyperfide` finds a project — upward to the directory
 holding `.codegraph`, or, for a linked git worktree, to the main worktree
 whose graph it shares. That graph is opened with `SQLITE_OPEN_READONLY`:
 no schema upgrade, no triggers, nothing but `SELECT`. (A read-only SQLite
@@ -222,7 +230,7 @@ never writes a page.) An older graph whose `memories` table predates
 `class`, `confidence`, or `branch`, or that has no `memory_superseded`
 table, imports what it has, with those values null.
 
-The memories read are exported in memory, exactly as `cg memory export`
+The memories read are exported in memory, exactly as `hyperfide memory export`
 would write them with no filters, and then imported through the same path
 as a file. Naming the target's own project — directly, through a
 subdirectory, or through one of its worktrees — is refused.

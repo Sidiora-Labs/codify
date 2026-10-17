@@ -4,6 +4,7 @@
 #include "components.h"
 #include "preparation_support.h"
 #include <dirent.h>
+#include <sys/prctl.h>
 
 typedef struct {
   char id[97], url[2049], commit[65];
@@ -64,6 +65,11 @@ static int git_run(const char *cwd, const char *temporary, int *seq,
   argv[n++] = "git";
   argv[n++] = "-c";
   argv[n++] = "core.hooksPath=/dev/null";
+  /* Detached auto-maintenance would outlive the bounded, supervised run. */
+  argv[n++] = "-c";
+  argv[n++] = "maintenance.auto=false";
+  argv[n++] = "-c";
+  argv[n++] = "gc.auto=0";
   argv[n++] = "-c";
   argv[n++] = "protocol.ext.allow=never";
   argv[n++] = "-c";
@@ -853,7 +859,8 @@ static int cache_capture(int cache, const char *cachehex, const char *key,
   }
   return fsync(cache) == 0;
 }
-int hf_component_11_2(const char *action, const char *request, FILE *output) {
+static int materialize(const char *action, const char *request,
+                       FILE *output) {
   static const char *const keys[] = {"schema_version",   "workspace",
                                      "profile_digest",   "preparation_digest",
                                      "boot_id",          "repositories",
@@ -925,6 +932,7 @@ int hf_component_11_2(const char *action, const char *request, FILE *output) {
   sigaction(SIGINT, &handler, &old_int);
   for (int i = 0; i < nrepos; i++) {
     int local = repos[i].url[0] == '/';
+    failure = "SOURCE_FETCH_FAILED";
     char *clone[] = {"clone", "--no-checkout", "--no-hardlinks",
                      "--",    repos[i].url,    repos[i].id,
                      NULL};
@@ -1216,4 +1224,31 @@ invalid:
   free(command_input);
   free(cache_paths);
   return 2;
+}
+/* Job processes run in their own groups and are killed with them, but a killed
+ * grandchild whose parent already exited (a transport helper after a failed
+ * clone, a background job after a timeout) is reparented. Adopt and reap those
+ * here so no bootstrap process outlives the component. */
+static void reap_orphans(void) {
+  long long deadline = hp_millis() + 2000;
+  for (;;) {
+    pid_t pid = waitpid(-1, NULL, WNOHANG);
+    if (pid > 0)
+      continue;
+    if ((pid < 0 && errno != EINTR) || hp_millis() > deadline)
+      return;
+    if (pid == 0) {
+      struct timespec pause = {0, 10 * 1000 * 1000};
+      nanosleep(&pause, NULL);
+    }
+  }
+}
+int hf_component_11_2(const char *action, const char *request, FILE *output) {
+  int adopted = prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) == 0;
+  int result = materialize(action, request, output);
+  if (adopted) {
+    reap_orphans();
+    prctl(PR_SET_CHILD_SUBREAPER, 0, 0, 0, 0);
+  }
+  return result;
 }

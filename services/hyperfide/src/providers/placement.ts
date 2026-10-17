@@ -12,6 +12,7 @@ import {operationPayloadDigest,validateProviderOperation,validateProviderOutcome
 import type {ProviderOperation,ProviderScope,ProviderOutcome} from './contract.js';
 import {providerDatabase,resolveSandboxBinding,assertInvocationRun,providerInvocation,bindProviderInvocation,obj,str,uuid,dec,dg,utc,fail,readDeployment,currentPool,configuredScope,transaction,digestDocument,providerAdapter,poolCapacity} from './pools.js';
 import type {ProviderDatabase,DeploymentConfig,ProviderIsolationFactory} from './pools.js';
+import {compareEnvironmentCompatibility} from '../preparation/manifests.js';
 
 
 export interface FreshEnrollmentProof {
@@ -34,6 +35,13 @@ function placementDependencies(context:ComponentContext):PlacementDependencies {
 }
 export interface EnvironmentCompatibilityProof {compatible:boolean;evidence_digest:string}
 export type EnvironmentCompatibilityVerifier=(source:unknown,target:unknown)=>Promise<EnvironmentCompatibilityProof>;
+/** Compares the published, self-digested preparation manifests (11.1 metadata
+ * validation). It grants neither readiness nor ownership: fresh enrollment and
+ * target-boot probes remain required before any admission. */
+export const preparationCompatibilityVerifier:EnvironmentCompatibilityVerifier=async(source,target)=>{
+ const proof=await compareEnvironmentCompatibility(source,target);
+ return{compatible:proof.compatible,evidence_digest:proof.evidence_digest};
+};
 
 interface Target {name:'coordinator'|'git'|'artifact'|'model';url:string;header_name:string;header_prefix:string;credential_ref:string;expected_status:number;denied_statuses:number[];expected_body_sha256:string|null}
 interface ConnectivityConfig {schema_version:1;evidence_scope:'LIVE_POOL'|'COMPONENT_FIXTURE';targets:Target[];timeout_ms:number;maximum_attempts:number;base_backoff_ms:number;max_backoff_ms:number;proof_max_age_ms:number}
@@ -213,12 +221,21 @@ export async function planRelocation(pool:ProviderDatabase,config:DeploymentConf
     const reachable=await c.query("SELECT id FROM hyperfide.provider_connectivity_probes WHERE organisation_id=$1 AND pool_id=$2 AND configuration_digest=$3 AND endpoints_digest=$4 AND status='PASS' AND expires_at>clock_timestamp() AND evidence_scope=$5 ORDER BY created_at DESC LIMIT 1",
       [config.organisation_id,targetId,scope.configuration_digest,digestDocument(policy.targets),policy.evidence_scope]);
     if(!reachable.rows.length)fail('TARGET_POOL_UNREACHABLE','Current authenticated endpoint qualification is required');
+    let environmentEvidence:string|null=null;
     if(old.preparation_digest!==target.preparation_digest){
       if(!environmentVerifier||!old.profile_id||!target.profile_id)fail('ENVIRONMENT_COMPATIBILITY_UNVERIFIED','Cross-preparation relocation needs a trusted environment compatibility proof');
-      const manifests=await c.query('SELECT id,manifest FROM hyperfide.environment_profiles WHERE organisation_id=$1 AND id=ANY($2::uuid[])',[config.organisation_id,[old.profile_id,target.profile_id]]);
-      const source=manifests.rows.find(r=>r.id===old.profile_id)?.manifest,destination=manifests.rows.find(r=>r.id===target.profile_id)?.manifest;
-      const compatibility=await environmentVerifier(source,destination);dg(compatibility.evidence_digest);
-      if(!compatibility.compatible)fail('ENVIRONMENT_INCOMPATIBLE','Required source environment cannot be preserved');
+      const manifests=await c.query('SELECT id,content_digest,provider,runtime_platform,manifest FROM hyperfide.environment_profiles WHERE organisation_id=$1 AND id=ANY($2::uuid[]) FOR SHARE',[config.organisation_id,[old.profile_id,target.profile_id]]);
+      const source=manifests.rows.find(r=>r.id===old.profile_id),destination=manifests.rows.find(r=>r.id===target.profile_id);
+      // Both published manifests must bind the exact running source and configured target preparations.
+      if(!source||!destination||source.content_digest!==old.preparation_digest||destination.content_digest!==target.preparation_digest||
+        source.manifest?.digest!==source.content_digest||destination.manifest?.digest!==destination.content_digest||
+        destination.provider!==target.provider||source.runtime_platform!==destination.runtime_platform)
+        fail('ENVIRONMENT_COMPATIBILITY_UNVERIFIED','Published preparation manifests do not bind the exact source and target environments');
+      let compatibility:EnvironmentCompatibilityProof;
+      try{compatibility=await environmentVerifier(source.manifest,destination.manifest);dg(compatibility.evidence_digest);}
+      catch{fail('ENVIRONMENT_COMPATIBILITY_UNVERIFIED','Published preparation manifests failed validation');}
+      if(compatibility.compatible!==true)fail('ENVIRONMENT_INCOMPATIBLE','Required source environment cannot be preserved');
+      environmentEvidence=compatibility.evidence_digest;
     }
     const checkpoints=await c.query("SELECT p.*,a.digest AS artifact_digest FROM hyperfide.checkpoints p JOIN hyperfide.artifacts a ON a.organisation_id=p.organisation_id AND a.run_id=p.run_id AND a.id=p.artifact_id WHERE p.organisation_id=$1 AND p.run_id=$2 AND p.id=$3 AND p.attempt_id=$4 AND p.attempt_generation=$5 AND a.status='COMPLETE' AND p.support_level<>'UNSUPPORTED'",[config.organisation_id,run,uuid(input.checkpoint_id),attemptId,generation]);
     const checkpoint=checkpoints.rows[0];
@@ -232,6 +249,7 @@ export async function planRelocation(pool:ProviderDatabase,config:DeploymentConf
     await c.query("UPDATE hyperfide.attempts SET compute_authority='REVOKED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[config.organisation_id,run,attemptId]);
     await c.query("UPDATE hyperfide.compute_leases SET state='REVOKED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND attempt_id=$3 AND state='ACTIVE'",[config.organisation_id,run,attemptId]);
     return{created:true,id,state:'PENDING_ADMISSION',source_manifest:source,source_manifest_digest:digestDocument(source),preparation_digest:target.preparation_digest,
+      environment_compatibility_evidence_digest:environmentEvidence,
       old_compute_fenced:true,physical_termination_confirmed:false,old_capacity_released:false,fresh_enrollment_required:true,admission_granted:false};
   });
 }
@@ -457,7 +475,7 @@ export function createComponent(context:ComponentContext):Component{
   };
   return{apiVersion:1,capabilities:{'provider.observation.v1':{observeConfiguredResource:createProviderIsolationObserver({env:context.env,signal:context.signal,registry:database.runtime.isolation})},'provider.isolation.v1':{isolateConfiguredResource:createProviderIsolation({env:context.env,signal:context.signal,registry:database.runtime.isolation,gateway:database.gateway})}},actions:{
     'provider.placement.record-failure':guarded((i,c,p,database)=>recordPoolFailure(database,c,p,i)),
-    'provider.relocation.plan':guarded((i,c,p,database)=>planRelocation(database,c,p,i)),
+    'provider.relocation.plan':guarded((i,c,p,database)=>planRelocation(database,c,p,i,preparationCompatibilityVerifier)),
     'provider.relocation.confirm-enrollment':guarded(async(input,c,p,database)=>{
       const i=obj(input,['run_id','plan_id','sandbox_id']),run=uuid(i.run_id),planId=uuid(i.plan_id),sandboxId=uuid(i.sandbox_id);assertInvocationRun(database,run);
       return transaction(database,async tx=>{

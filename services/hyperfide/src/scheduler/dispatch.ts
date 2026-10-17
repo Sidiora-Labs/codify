@@ -101,6 +101,12 @@ export async function ensureDispatch(tx:PrimaryTransaction,token:ComputeToken,re
      'FOR UPDATE',
      [scope.organisation_id,scope.run_id,token.attempt_id,token.attempt_generation]);
     if(existing.rows.length)fail('REPLACEMENT_REQUIRES_NEW_ATTEMPT','An attempt has one physical dispatch identity; replacement requires an explicitly admitted new attempt');
+    // A superseded generation's create/spawn outcome is unknown until it enters reconciliation
+    // (UNKNOWN, RUNNING or terminal). Duplicate physical execution may follow, but never unobserved.
+    const unreconciled=await tx.query('SELECT id FROM hyperfide.scheduler_dispatches WHERE organisation_id=$1 AND run_id=$2 AND task_id=$3 '+
+     'AND attempt_generation<$4 AND state=\'INTENT\' ORDER BY id FOR UPDATE',
+     [scope.organisation_id,scope.run_id,token.task_id,token.attempt_generation]);
+    if(unreconciled.rows.length)fail('RECONCILIATION_REQUIRED','A superseded dispatch outcome must enter reconciliation before a compatible replacement is dispatched');
     const packets=await tx.query<{digest:string}>('SELECT digest FROM hyperfide.hierarchy_execution_packets WHERE organisation_id=$1 AND run_id=$2 '+
      'AND task_id=$3 AND attempt_id=$4 AND attempt_generation=$5 AND digest=$6',
      [scope.organisation_id,scope.run_id,token.task_id,token.attempt_id,token.attempt_generation,authority.input_packet_digest]);

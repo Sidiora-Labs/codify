@@ -443,6 +443,11 @@ int hf_transport_sign(const char *path,const char *domain,const char *endpoint,c
     }
     EVP_MD_CTX_free(ctx);EVP_PKEY_free(key);return valid;
 }
+/* Runtime libraries must still satisfy the link contract the binary was built for. */
+int hf_transport_qualified(void) {
+    const curl_version_info_data *version=curl_version_info(CURLVERSION_NOW);
+    return version&&version->version_num>=0x075500&&version->ssl_version&&!strncmp(version->ssl_version,"OpenSSL/",8)&&(version->features&CURL_VERSION_SSL)&&OpenSSL_version_num()>=0x30000000UL;
+}
 static pthread_once_t curl_once=PTHREAD_ONCE_INIT;
 static int curl_ready;
 static void curl_initialize(void) {curl_ready=curl_global_init(CURL_GLOBAL_DEFAULT)==CURLE_OK;}
@@ -457,6 +462,7 @@ static size_t response_write(char *data,size_t size,size_t count,void *opaque) {
 int hf_transport_post(const HfTransportConfig *config,int enrollment,const char *body,const char *seconds,const char *nonce,HfHttpResponse *response) {
     memset(response,0,sizeof *response);
     if (!config||!body||strlen(body)>HF_BODY_LIMIT||!origin_valid(config->origin)) {snprintf(response->error,sizeof response->error,"INVALID_TRANSPORT_INPUT");return 0;}
+    if (!hf_transport_qualified()) {snprintf(response->error,sizeof response->error,"UNQUALIFIED_NATIVE_TLS_RUNTIME");return 0;}
     pthread_once(&curl_once,curl_initialize);
     if (!curl_ready) return 0;
     char identity[37],authorization[256]="",signature[87],auto_seconds[32],auto_nonce[37];

@@ -221,6 +221,13 @@ export class DecisionJobs{
    if(active.rows[0]!.n>=p.max_active)fail('DECISION_OVERLOADED','Bounded active decision capacity reached');
    const claims=await this.outbox.claimPending(tx,{...s,consumer_id:j.consumer_id,limit:64,lease_ms:30000});
    for(const claim of claims){
+    // Core-loop events fan out to every standing consumer; the advisory consumer records them without effect so they never wedge dispatch.
+    if(claim.aggregate_type!=='decision.job'||claim.event_type!=='decision.admitted'){
+     if(claim.aggregate_type==='attempt.instructions')continue;
+     const foreign=await this.inbox.receive(tx,{...s,event_id:claim.id,consumer_id:claim.consumer_id});
+     if((foreign.status==='APPLIED'||foreign.status==='DUPLICATE')&&foreign.inbox_id)await this.outbox.acknowledge(tx,{...s,event_id:claim.id,consumer_id:claim.consumer_id,attempt_count:claim.attempt_count,inbox_id:foreign.inbox_id});
+     continue;
+    }
     const receipt=await tx.query("SELECT id FROM hyperfide.command_inbox WHERE organisation_id=$1 AND run_id=$2 AND principal_scope=$3 AND operation='event.receive' AND idempotency_key=$4 AND state='COMPLETED'",[...scopeValues(s),claim.consumer_id,claim.id]);
     if(receipt.rowCount!==1)fail('DECISION_UNAVAILABLE','Admission delivery lacks exact completed inbox receipt');
     await this.outbox.acknowledge(tx,{...s,event_id:claim.id,consumer_id:claim.consumer_id,attempt_count:claim.attempt_count,inbox_id:receipt.rows[0]!.id});

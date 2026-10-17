@@ -101,11 +101,10 @@ class Fixture:
   else:raise AssertionError("Actual graph resolution did not finish")
   return self.graph("7.3","graph.publish.commit",scoped(build_id=build,channel="replica-packet",expected_generation=expected,operation_id=packets.uid()))
  def graph_packet(self,manifest,label):
-  f=self.f;i=f.ids;task=packets.uid();criteria=sha(("replica-required-graph-"+label).encode())
+  f=self.f;criteria=sha(("replica-required-graph-"+label).encode())
   definition=copy.deepcopy(f.packet_definition);definition["graph_inputs"]={"required":True,"manifest_id":manifest["manifest_id"],"reason":None}
-  f.sql("INSERT INTO hyperfide.tasks(organisation_id,run_id,id,task_key,feature_package_id,spec_revision_id,criteria_digest,definition,wave) VALUES($1,$2,$3,$4,$5,$6,$7,$8,2)",[i["organisation"],i["run"],task,"alpha.replica-graph-"+label,i["package2"],i["spec"],criteria,json.dumps(definition)])
-  policy=copy.deepcopy(f.packet_proof);policy["criteria_digest"]=criteria
-  f.sql("INSERT INTO hyperfide.proof_registries(organisation_id,run_id,task_id,spec_generation,spec_revision_id,criteria_digest,registry_digest,policy) VALUES($1,$2,$3,1,$4,$5,$6,$7)",[i["organisation"],i["run"],task,i["spec"],criteria,packets.identity(policy),json.dumps(policy)])
+  task=f.insert_task("alpha.replica-graph-"+label,definition,criteria=criteria)
+  f.register_proof(task,f.proof_policy(criteria))
   made=f.create_packet(task_id=task,idempotency_key="replica-required-graph-"+label)
   return {k:made[k] for k in ("packet_id","digest","mandatory_digest","packet")}
  def request(self,action,value,key="manager"):

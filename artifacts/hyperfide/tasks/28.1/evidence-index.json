@@ -1,0 +1,106 @@
+{
+  "task": "28.1",
+  "commit": "65e98a51838d56360212693ea53beb702755851f",
+  "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-028 --manifest tests/hyperfide/manifests/tasks/28.1.json && python3 tests/hyperfide/qualify.py --case V-035 --manifest tests/hyperfide/manifests/tasks/28.1.json && python3 tests/hyperfide/qualify.py --case V-052 --manifest tests/hyperfide/manifests/tasks/28.1.json && python3 tests/hyperfide/qualify.py --case V-055 --manifest tests/hyperfide/manifests/tasks/28.1.json",
+  "exit_code": 0,
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"2d5bf030-5151-4a7f-8a88-c4242bb1ab0a\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/28.1/campaigns/f1e0e55d2c4dec68a07a3a7f9b0071767930cc9da19ded4460632da6f762802c\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"00e10690-76d3-4c05-8be7-b4d40ca06075\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/28.1/campaigns/f1e0e55d2c4dec68a07a3a7f9b0071767930cc9da19ded4460632da6f762802c\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"7da23c45-d61f-41c7-8f43-734fbcde749a\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/28.1/campaigns/f1e0e55d2c4dec68a07a3a7f9b0071767930cc9da19ded4460632da6f762802c\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"26155d46-07e6-4681-a100-827988ec37a5\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/28.1/campaigns/f1e0e55d2c4dec68a07a3a7f9b0071767930cc9da19ded4460632da6f762802c\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T09:13:54Z",
+  "run_context": {
+    "user": "hf (owner of the checkout; root is refused by the checker's neutral git as dubious ownership)",
+    "node": "/usr/local/lib/node-24.22.0/bin/node (byte-identical copy of /opt/node/bin/node, sha256 67ca5783febb8bf85736c79fcdd92c8d6d465a0eb2a082672bcdfa76a506751c)",
+    "database": "local PostgreSQL fixture /tmp/hyperfide/postgres/fixture.env"
+  },
+  "scope_note": "Registered task-component variant task:28.1 only; full_case_status INCOMPLETE. V-028/V-035/V-052/V-055 remain UNRUN as full cases; this receipt cannot replace any full-case/provider/connector/campaign receipt.",
+  "documented_workflows": [
+    {
+      "argv": [
+        "./hyperfide",
+        "version"
+      ],
+      "exit_code": 0,
+      "output": "2.0.0-dev"
+    },
+    {
+      "argv": [
+        "./cg",
+        "version"
+      ],
+      "exit_code": 0,
+      "output": "2.0.0-dev"
+    },
+    {
+      "argv": [
+        "node",
+        "--version"
+      ],
+      "exit_code": 0,
+      "output": "v24.22.0"
+    },
+    {
+      "argv": [
+        "python3",
+        "tests/hyperfide/qualify.py",
+        "--help"
+      ],
+      "exit_code": 0,
+      "output": "usage: qualify.py [-h] (--case CASE | --task TASK | --suite SUITE |\n                  --list-cases) [--format {json,text}] [--manifest MANIFEST]\n                  [--registry REGISTRY] [--root ROOT]\n                  [--output-dir OUTPUT_DIR] [--checker CHECKER]\n\nStrict subprocess qualification; candidate observations require independent\nchecking.\n\noptions:\n  -h, --help            show this help message and exit\n  --case CASE\n  --task TASK\n  --suite SUITE\n  --list-cases\n  --format {json,text}\n  --manifest MANIFEST\n  --registry REGISTRY\n  --root ROOT\n  --output-dir OUTPUT_DIR\n  --checker CHECKER"
+    },
+    {
+      "argv": [
+        "python3",
+        "tests/hyperfide/check-evidence.py",
+        "--help"
+      ],
+      "exit_code": 0,
+      "output": "usage: check-evidence.py [-h] --campaign CAMPAIGN [--manifest MANIFEST]\n                         [--receipt RECEIPT] [--relocation RELOCATION]\n\nIndependently verify immutable qualification observations; never execute a\nprobe. Receipt seals detect inconsistency. They are not authentication without\nan external trusted anchor. A successful check validates the selected\ncandidate observations; it does not promote a task component to its parent\ncase or programme qualification.\n\noptions:\n  -h, --help            show this help message and exit\n  --campaign CAMPAIGN\n  --manifest MANIFEST\n  --receipt RECEIPT\n  --relocation RELOCATION\n                        server-owned explicit immutable staging policy; never\n                        accept from an untrusted request"
+    },
+    {
+      "argv": [
+        "node",
+        "services/hyperfide/dist/control.js"
+      ],
+      "exit_code": 1,
+      "output": "{\"ok\":false,\"error\":{\"code\":\"INVALID_ARGS\",\"message\":\"Explicit trusted policy and pinned specification revision required\"}}"
+    },
+    {
+      "argv": [
+        "node",
+        "services/hyperfide/dist/control.js",
+        "--policy",
+        "/nonexistent",
+        "--spec-revision",
+        "X"
+      ],
+      "exit_code": 1,
+      "output": "{\"ok\":false,\"error\":{\"code\":\"POLICY_INVALID\",\"message\":\"Trusted policy file is unavailable\"}}"
+    },
+    {
+      "argv": [
+        "./hyperfide",
+        "config",
+        "check"
+      ],
+      "exit_code": 0,
+      "output": "/work/hyperfide/codify.kvx: ok"
+    },
+    {
+      "argv": [
+        "./hyperfide",
+        "help",
+        "fleet",
+        "down"
+      ],
+      "exit_code": 0,
+      "output": "usage: hyperfide fleet down [--drain] [--wait SECONDS] [RUN]\n\n  stop a run: claims released, branches kept\n\nflags\n  --drain                   let live work finish first\n  --wait SECONDS            how long to wait (default 30)"
+    },
+    {
+      "argv": [
+        "./hyperfide",
+        "help",
+        "docs"
+      ],
+      "exit_code": 0,
+      "output": "usage: hyperfide docs [status|plan|packet|generate|check|trace|close] [-f\n    feature]\n\n  grounded documentation closure evidence\n\nsubcommands\n  status                    mode, effective state, targets, baseline\n  plan                      read-only plan, audiences, target scope\n  packet                    write the evidence packet under .codegraph/docs/\n  check                     validate scope, links, claims, and evidence\n  trace                     claims and snapshots back to their tasks\n  close                     re-check, snapshot, close the @docs attempt\n\nrelated\n  cg spec docs"
+    }
+  ]
+}

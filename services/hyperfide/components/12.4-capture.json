@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "id": "12.4-capture",
+  "task": "12.4",
+  "roles": [
+    "control"
+  ],
+  "module": "runner/capture.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "runner.control.issue",
+    "runner.control.authorize",
+    "runner.control.report",
+    "runner.control.inspect",
+    "runner.capture.put",
+    "runner.workspace.register",
+    "runner.workspace.lease",
+    "runner.workspace.release",
+    "runner.workspace.inspect",
+    "runner.publication.check",
+    "runner.preparation.receipt.record",
+    "runner.preparation.receipt.inspect"
+  ],
+  "requires": [
+    "4.2",
+    "14.1",
+    "15.2"
+  ]
+}

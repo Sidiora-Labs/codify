@@ -148,7 +148,12 @@ export async function artifact(ctx:ComponentContext,action:string,input:Data):Pr
  return result;
 }
 export async function completeArtifact(ctx:ComponentContext,s:[string,string],id:string):Promise<Data>{
- return artifact(ctx,'artifact.object.read',{organisation_id:s[0],run_id:s[1],artifact_id:id});
+ try{return await artifact(ctx,'artifact.object.read',{organisation_id:s[0],run_id:s[1],artifact_id:id});}
+ catch(error){
+  // A fabricated or foreign object identity is missing evidence, never a qualifying reference.
+  if(error instanceof FoundationError&&error.code==='ARTIFACT_NOT_FOUND')fail('QUALIFICATION_ARTIFACT_INCOMPLETE','Required immutable object is unavailable or incomplete');
+  throw error;
+ }
 }
 export async function custodyLock(client:PrimaryClient,s:[string,string],id:string):Promise<Data>{
  const initial=await client.query('SELECT task_id FROM hyperfide.submission_custodies WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[...s,id]);
@@ -230,6 +235,7 @@ export async function submittedGitFacts(ctx:ComponentContext,v:Data,policy:Data,
    source_parent_ids:parents?parents.split(' '):[],owned_scope_digest:hash(ownedScope),changed_paths_digest:hash(paths),changed_path_count:paths.length};
  }catch(error){if(error instanceof FoundationError)throw error;fail('QUALIFICATION_SOURCE_MISMATCH','Result commit does not have the accepted Git baseline ancestry');}
 }
+const STALE_COMPUTE_CODES=new Set(['STALE_COMPUTE','COMPUTE_LEASE_EXPIRED','STALE_SANDBOX_BOOT','STALE_AUTHORITY_EPOCH','COMPUTE_ALLOCATION_INVALID','ACTIVE_SUBMISSION_CUSTODY']);
 async function submit(ctx:ComponentContext,raw:unknown):Promise<Data>{
  const v=fields(raw,['organisation_id','run_id','task_id','request_id','attempt_id','attempt_generation','authority_epoch',
  'sandbox_id','slot_id','sandbox_boot_generation','repository_id','source_object_id','source_manifest_artifact_id','evidence_manifest_artifact_id','criteria_digest','contract_digests']);
@@ -291,7 +297,13 @@ async function submit(ctx:ComponentContext,raw:unknown):Promise<Data>{
   catch{fail('QUALIFICATION_COMPUTE_CAPABILITY_REQUIRED','Actual scheduler compute authority module required');}
   const token={organisation_id:s[0],run_id:s[1],task_id:v.task_id,attempt_id:v.attempt_id,attempt_generation:v.attempt_generation,
    authority_epoch:v.authority_epoch,sandbox_id:v.sandbox_id,slot_id:v.slot_id,sandbox_boot_generation:v.sandbox_boot_generation};
-  const computeIdentity=await compute!.assertCurrentCompute(client,token);
+  let computeIdentity:Data;
+  try{computeIdentity=await compute!.assertCurrentCompute(client,token);}
+  catch(error){
+   // Expired, superseded or reallocated compute is one stale-generation outcome for the submitting worker.
+   if(error instanceof FoundationError&&STALE_COMPUTE_CODES.has(error.code))fail('QUALIFICATION_STALE_COMPUTE','Current primary-clock compute authority is required');
+   throw error;
+  }
   const packet=await loadPacketInputs(client,s,computeIdentity.input_packet_digest);
   const packetIdentity=packet.packet.mandatory.identity;
   if(packetIdentity.organisation_id!==s[0]||packetIdentity.run_id!==s[1]||packetIdentity.task_id!==v.task_id||packetIdentity.attempt_id!==v.attempt_id||String(packetIdentity.attempt_generation)!==v.attempt_generation||

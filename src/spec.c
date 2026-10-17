@@ -1,6 +1,8 @@
 #include <stdio.h>
 extern int hf_client_authority_guard(const char *operation, FILE *output);
 extern int hf_client_authority_guard_args(const char *operation,int argc,char **argv,FILE *output);
+#include "hyperfide/client.h"
+extern int hf_uuid_generate(char output[37]);
 /*
  * cg spec — C port of ion-agent's spec/specgen plus a task engine.
  *
@@ -3114,6 +3116,44 @@ static int spec_implemented_cmd(Spec *s, const char *id, const char *agent,
     return 0;
 }
 
+/* Distributed authority asks the explicit triage purpose instead of the
+ * local Jev store. One bounded submission, no retry: when advice is
+ * unavailable, stale or refused the outcome is the deterministic
+ * manager_review fallback, which grants nothing. Returns true when advice
+ * was submitted. */
+static bool spec_triage_distributed(const char *id, int code,
+                                    const char *tail, StrBuf *mb) {
+    char op[37], key[37], corr[37];
+    size_t tn = strlen(tail);
+    const char *t = tn > 2048 ? tail + tn - 2048 : tail;
+    StrBuf in; sb_init(&in);
+    sb_printf(&in, "{\"task\":");
+    sb_json_str(&in, id);
+    sb_printf(&in, ",\"exit_code\":%d,\"failure_tail\":", code);
+    sb_json_str(&in, t);
+    sb_printf(&in, ",\"authority\":\"NONE\"}");
+    char *out = NULL, *err = NULL; size_t on = 0, en = 0;
+    FILE *o = open_memstream(&out, &on), *e = open_memstream(&err, &en);
+    int rc = 1;
+    if (o && e && hf_uuid_generate(op) && hf_uuid_generate(key) &&
+        hf_uuid_generate(corr))
+        rc = hf_client_decision_invoke(HF_DECISION_TRIAGE, HF_DECISION_SUBMIT,
+                                       in.p, op, key, corr, 2000, o, e);
+    if (o) fclose(o);
+    if (e) fclose(e);
+    if (rc == 0) {
+        printf("hyperfide triage: advisory submitted (operation %s, "
+               "authority NONE)\n", op);
+        sb_printf(mb, " [triage: submitted %s]", op);
+    } else {
+        printf("hyperfide triage: advice unavailable → manager_review "
+               "(deterministic fallback, authority NONE)\n");
+        sb_printf(mb, " [triage: fallback → manager_review]");
+    }
+    free(out); free(err); sb_free(&in);
+    return rc == 0;
+}
+
 /* Run a task's verify command where the operator can watch it and keep its
  * tail for triage: a failure explains itself in its last lines, and there
  * is no second chance to capture them. Returns a wait status like
@@ -3214,6 +3254,9 @@ static int spec_done_cmd(Spec *s, const char *id, const char *agent,
                           t, code);
                 /* Jev says what kind of failure it was and what to do about
                  * it; the exit code above already decided the verdict */
+                if (hf_client_authority_mode() == 1 /* distributed */) {
+                    spec_triage_distributed(id, code, tail, &mb);
+                } else {
                 JevTriage tri;
                 Cg g;
                 bool opened = memory_open_quiet(&g);
@@ -3222,6 +3265,7 @@ static int spec_done_cmd(Spec *s, const char *id, const char *agent,
                     sb_printf(&mb, " [jev: %s → %s]", tri.category, tri.action);
                 }
                 if (opened) cg_close(&g);
+                }
                 spec_note_outcome(s, id, mb.p);
                 sb_free(&mb); free(t); free(vc);
                 return 1;

@@ -6,7 +6,10 @@ known local bytes. This component probe does not claim frontier semantic review
 or external artifact-store qualification.
 """
 from pathlib import Path
-import importlib.util,json,sys,tempfile
+import importlib.util,json,os,sys,tempfile
+# Fixture commits must not leave detached auto-maintenance daemons behind the
+# qualification subreaper; keep Git housekeeping in the foreground and off.
+os.environ.update({"GIT_CONFIG_COUNT":"3","GIT_CONFIG_KEY_0":"maintenance.auto","GIT_CONFIG_VALUE_0":"false","GIT_CONFIG_KEY_1":"gc.auto","GIT_CONFIG_VALUE_1":"0","GIT_CONFIG_KEY_2":"gc.autoDetach","GIT_CONFIG_VALUE_2":"false"})
 ROOT=Path(__file__).resolve().parents[4]
 spec=importlib.util.spec_from_file_location("review_fixture",ROOT/"tests/hyperfide/cases/tasks/17_1.py")
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
@@ -17,6 +20,7 @@ IDS=["review.inputs.exact-obligation-generation","review.inputs.replay-stable","
 "review.receipt.actual-admitted-support","review.receipt.immutable-history","review.receipt.exact-replay",
 "review.coverage.limitations-prevent-completion","review.inputs.changed-policy-stales","review.inputs.reconcile-preserves-history",
 "review.observation.origin-attempt-refused","review.observation.exact-source-attribution","review.observation.history-immutable","review.inputs.partial-task-revision-stales","review.inputs.rebind-fences-old-generation"]
+IDS+=["review.coverage.duplicate-cannot-fill","review.decision-model.rank-cannot-certify","review.decision-model.non-watcher-cannot-satisfy","review.receipt.inspect-advisory-only"]
 IDS+=["review.execution.package-stop-denies-claim","review.execution.sandbox-stop-denies-output","review.execution.old-sandbox-stop-preserves-current-review","review.lease.owner-renewal","review.lease.wrong-owner-renewal-refused","review.semantic-fence.current-authenticated-read","review.graph-custody.quarantine-and-scope-fenced"]
 def seed_inputs(f):
  d=f.identity;profile=m.xid(0x701);build=m.xid(0x702);graph=m.xid(0x703);artifact=m.xid(0x704);attempt=m.xid(0x705);evidence=m.xid(0x706)
@@ -99,9 +103,9 @@ def main():
    f.identity.sql("INSERT INTO hyperfide.run_spec_revisions(organisation_id,run_id,spec_generation,spec_revision_id) VALUES($1,$2,2,$3)",[m.ORG,m.RUN,accepted])
    f.identity.sql("UPDATE hyperfide.runs SET spec_revision_id=$3,spec_generation=2,state=\'PENDING_VALIDATION\',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[m.ORG,m.RUN,accepted])
    f.identity.sql("UPDATE hyperfide.runs SET state='RUNNING',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[m.ORG,m.RUN])
-   m.check(IDS[28],lambda:lock_order_probe(f))
+   m.check(IDS[32],lambda:lock_order_probe(f))
    seed=seed_inputs(f)
-   m.check(IDS[29],lambda:graph_custody_probe(f,seed))
+   m.check(IDS[33],lambda:graph_custody_probe(f,seed))
    binding=dict(m.SCOPE,repository_id=m.REPOSITORY,source_object_id=f.first,policy_digest=f.policy_digest,candidate_digest=m.DIGEST,snapshot=seed["snapshot"])
    bound=f.ok("review.inputs.bind",binding,component="17.3");obligation=f.identity.sql("SELECT id AS obligation_id,generation::text AS generation FROM hyperfide.review_obligations WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 AND source_object_id=$4 AND watcher_id=\'watcher-0\'",[m.ORG,m.RUN,m.REPOSITORY,f.first])[0]
    m.check(IDS[0],lambda:m.expect(len(bound["obligations"])==10 and all(row["generation"]=="1" for row in bound["obligations"]),"input generation denominator wrong"))
@@ -126,11 +130,11 @@ def main():
    f.identity.sql("INSERT INTO hyperfide.execution_controls(organisation_id,run_id,id,scope_kind,scope_id,sandbox_id,mode) VALUES($1,$2,$3,'SANDBOX',$4,$4,'STOP')",[m.ORG,m.RUN,oldhold,oldbox])
    claimed={}
    m.check(IDS[6],lambda:claimed.update(f.ok("review.obligation.claim",claim,component="17.3",key="watcher0")))
-   m.check(IDS[25],lambda:m.expect(bool(claimed.get("lease_generation")) and f.identity.sql("SELECT lease_sandbox_id FROM hyperfide.review_obligations WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[m.ORG,m.RUN,obligation["obligation_id"]])[0]["lease_sandbox_id"]==f.identity.ids["sandbox"],"historical sandbox hold cancelled current independent review"))
+   m.check(IDS[29],lambda:m.expect(bool(claimed.get("lease_generation")) and f.identity.sql("SELECT lease_sandbox_id FROM hyperfide.review_obligations WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[m.ORG,m.RUN,obligation["obligation_id"]])[0]["lease_sandbox_id"]==f.identity.ids["sandbox"],"historical sandbox hold cancelled current independent review"))
    renewal=dict(claim,lease_generation=claimed["lease_generation"])
    renewed={}
-   m.check(IDS[26],lambda:renewed.update(f.ok("review.obligation.renew",renewal,component="17.3",key="watcher0")))
-   m.check(IDS[27],lambda:f.reject("review.obligation.renew",renewal,"REVIEW_LEASE_STALE",component="17.3",key="watcher1"))
+   m.check(IDS[30],lambda:renewed.update(f.ok("review.obligation.renew",renewal,component="17.3",key="watcher0")))
+   m.check(IDS[31],lambda:f.reject("review.obligation.renew",renewal,"REVIEW_LEASE_STALE",component="17.3",key="watcher1"))
    m.expect(renewed.get("lease_generation")==claimed["lease_generation"],"renewal replaced the current ownership generation")
    m.check(IDS[7],lambda:f.reject("review.obligation.claim",claim,"REVIEW_JOB_DENIED",component="17.3",key="watcher1"))
    m.check(IDS[8],lambda:f.reject("review.obligation.claim",claim,"REVIEW_LEASE_CONFLICT",component="17.3",key="watcher0"))
@@ -150,9 +154,38 @@ def main():
    coverage=f.coverage(f.first,candidate_digest=m.DIGEST,input_manifest_digest=bound["input_manifest_digest"])
    m.check(IDS[15],lambda:m.expect(coverage["status"]=="INCOMPLETE" and coverage["complete"]==0,"limited review became complete frontier proof"))
    other=f.identity.sql("SELECT id AS obligation_id,generation::text AS generation FROM hyperfide.review_obligations WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 AND source_object_id=$4 AND watcher_id='watcher-1'",[m.ORG,m.RUN,m.REPOSITORY,f.first])[0]
+   def watcher1_missing():
+    current=f.coverage(f.first,candidate_digest=m.DIGEST,input_manifest_digest=bound["input_manifest_digest"])
+    row=[item for item in current["missing"] if item.get("watcher_id")=="watcher-1"]
+    m.expect(current["status"]=="INCOMPLETE" and current["required"]==10 and len(row)==1 and row[0]["obligation_id"]==other["obligation_id"] and row[0]["reason"]=="RECEIPT_MISSING" and current["complete"]==0,"duplicate/advisory activity filled missing coverage: "+json.dumps(current["missing"],sort_keys=True))
+   def duplicate_cannot_fill():
+    receipts_before=f.identity.sql("SELECT count(*)::text AS count FROM hyperfide.review_receipts")[0]["count"]
+    f.reject("review.receipt.submit",dict(request,request_id=m.xid(0x810),obligation_id=other["obligation_id"],generation=other["generation"]),"REVIEW_INDEPENDENCE_REQUIRED",component="17.3",key="watcher0")
+    f.reject("review.receipt.submit",dict(request,request_id=m.xid(0x811)),"REVIEW_DUPLICATE_ACTIVITY",component="17.3",key="watcher0")
+    m.expect(f.identity.sql("SELECT count(*)::text AS count FROM hyperfide.review_receipts")[0]["count"]==receipts_before,"duplicate reviewer activity persisted a receipt")
+    watcher1_missing()
+   m.check(IDS[23],duplicate_cannot_fill)
+   def rank_cannot_certify():
+    for extra in [{"risk_rank":1},{"confidence":0.99},{"certified":True},{"certifies_correctness":True}]:
+     f.reject("review.receipt.submit",dict(request,request_id=m.xid(0x812),**extra),"REVIEW_INPUT_INVALID",component="17.3",key="watcher0")
+    f.reject("review.receipt.submit",dict(request,request_id=m.xid(0x813),obligation_id=other["obligation_id"],generation=other["generation"],risk_rank=1,confidence=1.0,certified=True),"REVIEW_INPUT_INVALID",component="17.3",key="watcher1")
+    watcher1_missing()
+   m.check(IDS[24],rank_cannot_certify)
+   def non_watcher_cannot_satisfy():
+    f.identity.add_principal("decision-coordinator","COORDINATOR");f.identity.add_principal("decision-leader","LEADER")
+    ranked=dict(request,request_id=m.xid(0x814),obligation_id=other["obligation_id"],generation=other["generation"])
+    for key in ["operator","decision-coordinator","decision-leader"]:
+     f.reject("review.receipt.submit",ranked,"REVIEW_ROLE_DENIED",component="17.3",key=key)
+     f.reject("review.receipt.submit",dict(ranked,risk_rank=1,certified=True),"REVIEW_INPUT_INVALID",component="17.3",key=key)
+    watcher1_missing()
+   m.check(IDS[25],non_watcher_cannot_satisfy)
+   def inspect_advisory():
+    shown=f.ok("review.receipt.inspect",dict(m.SCOPE,receipt_id=receipt["receipt_id"]),component="17.3")
+    m.expect(shown["certifies_correctness"] is False and shown["decision_model_role"]=="ADVISORY_RISK_RANK_ONLY" and shown["receipt"]["reviewer_session_id"]==m.xid(0x200) and shown["evidence_ids"]==[seed["evidence_id"]] and receipt.get("certifies_correctness") is False,"receipt inspection implied certified correctness")
+   m.check(IDS[26],inspect_advisory)
    package_hold=m.xid(0xc01)
    f.identity.sql("INSERT INTO hyperfide.execution_controls(organisation_id,run_id,id,scope_kind,scope_id,package_id,mode) VALUES($1,$2,$3,'PACKAGE',$4,$4,'STOP')",[m.ORG,m.RUN,package_hold,m.xid(0x300)])
-   m.check(IDS[23],lambda:f.reject("review.obligation.claim",dict(m.SCOPE,obligation_id=other["obligation_id"],generation=other["generation"],lease_seconds=120),"EXECUTION_HELD",component="17.3",key="watcher1"))
+   m.check(IDS[27],lambda:f.reject("review.obligation.claim",dict(m.SCOPE,obligation_id=other["obligation_id"],generation=other["generation"],lease_seconds=120),"EXECUTION_HELD",component="17.3",key="watcher1"))
    f.identity.sql("UPDATE hyperfide.execution_controls SET mode='ACTIVE',generation=generation+1,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[m.ORG,m.RUN,package_hold])
    other_lease=f.ok("review.obligation.claim",dict(m.SCOPE,obligation_id=other["obligation_id"],generation=other["generation"],lease_seconds=120),component="17.3",key="watcher1")
    observation={"evidence_id":seed["evidence_id"],"origin_task_id":m.xid(0x301),"origin_attempt_id":m.xid(0xdead),"contract_id":None,"failure_fingerprint":m.DIGEST,"summary":"Fixture-observed unit mismatch, with explicit unknown graph limitation.","severity":"ERROR"}
@@ -161,7 +194,7 @@ def main():
    observation["origin_attempt_id"]=seed["attempt_id"]
    sandbox_hold=m.xid(0xc02)
    f.identity.sql("INSERT INTO hyperfide.execution_controls(organisation_id,run_id,id,scope_kind,scope_id,sandbox_id,mode) VALUES($1,$2,$3,'SANDBOX',$4,$4,'STOP')",[m.ORG,m.RUN,sandbox_hold,f.identity.ids["sandbox"]])
-   m.check(IDS[24],lambda:f.reject("review.receipt.submit",finding_request,"EXECUTION_HELD",component="17.3",key="watcher1"))
+   m.check(IDS[28],lambda:f.reject("review.receipt.submit",finding_request,"EXECUTION_HELD",component="17.3",key="watcher1"))
    f.identity.sql("UPDATE hyperfide.execution_controls SET mode='ACTIVE',generation=generation+1,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[m.ORG,m.RUN,sandbox_hold])
    finding=f.ok("review.receipt.submit",finding_request,component="17.3",key="watcher1")
    def exact_observation():

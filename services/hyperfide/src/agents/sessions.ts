@@ -101,6 +101,41 @@ export async function agentOperation(client:AuthorityTransaction,s:AgentScope,id
  await client.query('INSERT INTO hyperfide.native_session_events(organisation_id,run_id,session_id,operation_id,payload_digest,result) VALUES($1,$2,$3,$4,$5,$6)',[...key(s),id,digest,result]);
  return result;
 }
+const RESUMABLE=['ELIGIBLE_NATIVE_CONTEXT','FRESH_HANDOFF_REQUIRED'];
+// Callers without their own operation ID still persist one decision per signed invocation and exact request.
+function resumeOperationId(invocation:InvocationContext,request:unknown):string{
+ const h=agentDigest({kind:'agent.session.resume-check',invocation_operation_id:invocation.operation.operation_id,request}).slice(7);
+ return h.slice(0,8)+'-'+h.slice(8,12)+'-8'+h.slice(13,16)+'-'+(8|parseInt(h[16]!,16)&3).toString(16)+h.slice(17,20)+'-'+h.slice(20,32);
+}
+// Resumed work names its predecessor, checkpoint and persisted decision; nothing is inferred from recency.
+async function resumeLineage(ctx:ComponentContext,client:AuthorityTransaction,s:AgentScope,admitted:RecordValue,b:RecordValue,r:RecordValue):Promise<RecordValue>{
+ const ps={...s,session_id:String(r.predecessor_session_id)};
+ if(ps.session_id===s.session_id)agentError('AGENT_LINEAGE_INVALID');
+ const prior=await session(client,ps),priorBinding=await binding(client,ps);
+ if(prior.role!==admitted.role||prior.parent_session_id!==admitted.parent_session_id||prior.connector!==admitted.connector||prior.account_key!==admitted.account_key||(prior.attempt_id===null)!==(admitted.attempt_id===null))agentError('AGENT_LINEAGE_INVALID');
+ if(prior.attempt_id!==admitted.attempt_id){
+ const tasks=await client.query('SELECT DISTINCT task_id FROM hyperfide.attempts WHERE organisation_id=$1 AND run_id=$2 AND id IN ($3,$4)',[s.organisation_id,s.run_id,prior.attempt_id,admitted.attempt_id]);
+ if(tasks.rows.length!==1)agentError('AGENT_LINEAGE_INVALID');
+ }
+ if(!priorBinding.process_exited||!['STOPPED','FAILED'].includes(String(prior.state)))agentError('AGENT_LINEAGE_PREDECESSOR_LIVE');
+ const event=(await client.query('SELECT session_id,result FROM hyperfide.native_session_events WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3',[s.organisation_id,s.run_id,r.resume_operation_id])).rows[0] as RecordValue|undefined;
+ const d=event?.result as RecordValue|undefined;
+ if(!event||!d||event.session_id!==ps.session_id||d.kind!=='RESUME_DECISION'||d.checkpoint_id!==r.checkpoint_id||!RESUMABLE.includes(String(d.decision)))agentError('AGENT_RESUME_DECISION_INVALID');
+ const c=(await client.query('SELECT * FROM hyperfide.native_session_checkpoints WHERE organisation_id=$1 AND run_id=$2 AND session_id=$3 AND checkpoint_id=$4',[s.organisation_id,s.run_id,ps.session_id,r.checkpoint_id])).rows[0] as RecordValue|undefined;
+ if(!c||c.native_session_id!==prior.native_session_id||d.native_session_id!==c.native_session_id)agentError('AGENT_CHECKPOINT_UNAVAILABLE');
+ if(b.source_manifest_digest!==c.source_manifest_digest||b.configuration_digest!==c.configuration_digest||d.source_manifest_digest!==c.source_manifest_digest||d.configuration_digest!==c.configuration_digest)agentError('AGENT_CHECKPOINT_MISMATCH');
+ if(d.decision==='ELIGIBLE_NATIVE_CONTEXT'){
+ if(b.native_session_id!==c.native_session_id)agentError('AGENT_NATIVE_ID_MISMATCH');
+ const p=await getNativeSessionProfile(ctx,b.auth_profile),q=p.qualification as RecordValue;
+ if(b.auth_profile!==priorBinding.auth_profile||b.connector_version!==priorBinding.connector_version||q.receipt_digest!==d.native_qualification_digest)agentError('AGENT_NATIVE_RESUME_UNQUALIFIED');
+ }else if(b.native_session_id===c.native_session_id)agentError('AGENT_NATIVE_RESUME_UNQUALIFIED');
+ return {session_id:s.session_id,predecessor_session_id:ps.session_id,checkpoint_id:r.checkpoint_id,resume_operation_id:r.resume_operation_id,decision:d.decision,native_qualification_digest:d.decision==='ELIGIBLE_NATIVE_CONTEXT'?d.native_qualification_digest:null,resumed_native_session_id:c.native_session_id,native_session_id:b.native_session_id,source_manifest_digest:b.source_manifest_digest,configuration_digest:b.configuration_digest,process_id:b.process_id,process_start_time:b.process_start_time,boot_id:b.boot_id};
+}
+async function lineageOf(client:AuthorityTransaction,s:AgentScope):Promise<RecordValue>{
+ const rows=(await client.query('SELECT * FROM hyperfide.native_session_resumptions WHERE organisation_id=$1 AND run_id=$2 AND (session_id=$3 OR predecessor_session_id=$3)',key(s))).rows as RecordValue[];
+ const decisions=await client.query("SELECT operation_id,result,created_at FROM hyperfide.native_session_events WHERE organisation_id=$1 AND run_id=$2 AND session_id=$3 AND result->>'kind'='RESUME_DECISION' ORDER BY created_at,operation_id",key(s));
+ return {resumed_from:rows.find(r=>r.session_id===s.session_id)??null,resumed_by:rows.find(r=>r.predecessor_session_id===s.session_id)??null,resume_decisions:decisions.rows};
+}
 export interface AgentSessionsCapability {
  readonly schema_version:1;
  resumeCheck(input:unknown,invocation:InvocationContext):Promise<unknown>;
@@ -115,12 +150,14 @@ export function createComponent(ctx:ComponentContext):Component{
  const transact=<T>(invocation:InvocationContext,fn:(client:AuthorityTransaction)=>Promise<T>)=>agentTransaction(ctx,invocation,fn);
  const component:Component={apiVersion:1,actions:{
  'agent.session.bind':guard(async(input,invocation)=>{
- const v=exactAgentObject(input,['scope','binding']),s=agentScope(v.scope,invocation);
+ const v=exactAgentObject(input,['scope','binding'],['resume']),s=agentScope(v.scope,invocation);
  const b=exactAgentObject(v.binding,['connector_version','auth_profile','configuration_digest','source_manifest_digest','process_id','process_start_time','boot_id','native_session_id','connector']);
  for(const k of ['connector_version','auth_profile','native_session_id','connector'])agentString(b[k]);
  for(const k of ['configuration_digest','source_manifest_digest'])agentString(b[k],'digest');
  agentString(b.boot_id,'uuid');agentString(b.process_start_time,'decimal');
  if(!Number.isSafeInteger(b.process_id)||Number(b.process_id)<1||Number(b.process_id)>2147483647||!['codex','claude'].includes(String(b.connector)))agentError('AGENT_INPUT_INVALID');
+ const r=v.resume===undefined?null:exactAgentObject(v.resume,['predecessor_session_id','checkpoint_id','resume_operation_id']);
+ if(r)for(const k of ['predecessor_session_id','checkpoint_id','resume_operation_id'])agentString(r[k],'uuid');
  return transact(invocation,async client=>{
  const admitted=await session(client,s);
  if(admitted.connector!==b.connector||admitted.native_session_id!==null&&admitted.native_session_id!==b.native_session_id||admitted.native_session_id===null&&admitted.state!=='REGISTERED')agentError('AGENT_NATIVE_ID_MISMATCH');
@@ -131,21 +168,34 @@ export function createComponent(ctx:ComponentContext):Component{
  }
  if(invocation.principal.role==='RUNNER'&&(admitted.sandbox_id!==invocation.principal.sandbox_id||String(admitted.sandbox_boot_generation)!==invocation.principal.boot_generation||b.boot_id!==invocation.principal.boot_id))agentError('AGENT_SCOPE_DENIED');
  profileMatches(await getNativeSessionProfile(ctx,b.auth_profile),admitted,b);
+ const lineage=r?await resumeLineage(ctx,client,s,admitted,b,r):null;
+ // A native conversation belongs to one admitted session unless an exact qualified resume links the chain.
+ const crossover=await client.query('WITH RECURSIVE chain(id) AS (SELECT $5::uuid WHERE $5::uuid IS NOT NULL UNION SELECT n.predecessor_session_id FROM hyperfide.native_session_resumptions n JOIN chain ON n.session_id=chain.id WHERE n.organisation_id=$1 AND n.run_id=$2) SELECT id FROM hyperfide.agent_sessions WHERE organisation_id=$1 AND run_id=$2 AND connector=$3 AND native_session_id=$4 AND id<>$6 AND id NOT IN (SELECT id FROM chain) LIMIT 1',[s.organisation_id,s.run_id,b.connector,b.native_session_id,lineage?.decision==='ELIGIBLE_NATIVE_CONTEXT'?lineage.predecessor_session_id:null,s.session_id]);
+ if(crossover.rows.length)agentError('AGENT_NATIVE_CROSSOVER');
  if(admitted.native_session_id===null){
  if(!['RUNNER','OPERATOR','COORDINATOR'].includes(invocation.principal.role))agentError('AGENT_SCOPE_DENIED');
  const observed=await client.query("UPDATE hyperfide.agent_sessions SET native_session_id=$4,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND native_session_id IS NULL AND state='REGISTERED' RETURNING id",[...key(s),b.native_session_id]);
  if(observed.rows.length!==1)agentError('AGENT_NATIVE_BINDING_STALE');
  }
+ const existed=(await client.query('SELECT session_id FROM hyperfide.native_session_bindings WHERE organisation_id=$1 AND run_id=$2 AND session_id=$3',key(s))).rows.length===1;
  const values=[...key(s),b.connector_version,b.auth_profile,b.configuration_digest,b.source_manifest_digest,b.process_id,b.process_start_time,b.boot_id];
  await client.query('INSERT INTO hyperfide.native_session_bindings(organisation_id,run_id,session_id,connector_version,auth_profile,configuration_digest,source_manifest_digest,process_id,process_start_time,boot_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING',values);
  const actual=await binding(client,s);
  for(const k of ['connector_version','auth_profile','configuration_digest','source_manifest_digest','process_id','process_start_time','boot_id'])if(actual[k]!==b[k])agentError('AGENT_BINDING_CONFLICT');
- return {bound:true,scope:s,binding:actual,grants_authority:false};
+ // Lineage is recorded only with the first binding; an already-bound session cannot adopt a predecessor later.
+ if(lineage&&!existed){
+ const names=Object.keys(lineage);
+ await client.query('INSERT INTO hyperfide.native_session_resumptions(organisation_id,run_id,'+names.join(',')+') VALUES($1,$2,'+names.map((_,n)=>'$'+(n+3)).join(',')+') ON CONFLICT DO NOTHING',[s.organisation_id,s.run_id,...names.map(k=>lineage[k])]);
+ }
+ const linked=(await client.query('SELECT * FROM hyperfide.native_session_resumptions WHERE organisation_id=$1 AND run_id=$2 AND session_id=$3',key(s))).rows[0] as RecordValue|undefined;
+ if(lineage&&!linked)agentError(existed?'AGENT_BINDING_CONFLICT':'AGENT_LINEAGE_SUPERSEDED');
+ if(!lineage&&linked||lineage&&linked&&Object.keys(lineage).some(k=>linked[k]!==lineage[k]))agentError('AGENT_BINDING_CONFLICT');
+ return {bound:true,scope:s,binding:actual,resumed_from:linked??null,grants_authority:false};
  });
  }),
  'agent.session.inspect':guard(async(input,invocation)=>{
  const s=agentScope(exactAgentObject(input,['scope']).scope,invocation);
- return transact(invocation,async client=>{const admitted=await session(client,s),b=await binding(client,s);assertNativeRunnerScope(invocation,admitted,b);return {session:admitted,binding:b,grants_authority:false};});
+ return transact(invocation,async client=>{const admitted=await session(client,s),b=await binding(client,s);assertNativeRunnerScope(invocation,admitted,b);return {session:admitted,binding:b,lineage:await lineageOf(client,s),grants_authority:false};});
  }),
  'agent.session.transition':guard(async(input,invocation)=>{
  const v=exactAgentObject(input,['scope','operation_id','expected_state_version','state','process']),s=agentScope(v.scope,invocation),id=agentString(v.operation_id,'uuid'),expected=agentString(v.expected_state_version,'decimal');
@@ -184,22 +234,28 @@ export function createComponent(ctx:ComponentContext):Component{
  },invocation));
  }),
  'agent.session.resume-check':guard(async(input,invocation)=>{
- const v=exactAgentObject(input,['scope','checkpoint_id','native_session_id','configuration_digest','source_manifest_digest']),s=agentScope(v.scope,invocation);
+ const v=exactAgentObject(input,['scope','checkpoint_id','native_session_id','configuration_digest','source_manifest_digest'],['operation_id']),s=agentScope(v.scope,invocation);
  agentString(v.checkpoint_id,'uuid');agentString(v.native_session_id);agentString(v.configuration_digest,'digest');agentString(v.source_manifest_digest,'digest');
- return transact(invocation,async client=>{
+ const {operation_id:explicit,...request}=v,id=explicit===undefined?resumeOperationId(invocation,request):agentString(explicit,'uuid');
+ // Every decision is persisted under its operation ID so lineage remains auditable after restart.
+ return transact(invocation,client=>agentOperation(client,s,id,request,async()=>{
  const admitted=await session(client,s),b=await binding(client,s);assertNativeRunnerScope(invocation,admitted,b);
  if(v.native_session_id!==admitted.native_session_id||v.configuration_digest!==b.configuration_digest||v.source_manifest_digest!==b.source_manifest_digest)agentError('AGENT_CHECKPOINT_MISMATCH');
  const found=await client.query('SELECT n.*,c.support_level,a.status AS artifact_status,a.digest AS artifact_digest FROM hyperfide.native_session_checkpoints n JOIN hyperfide.checkpoints c ON c.organisation_id=n.organisation_id AND c.run_id=n.run_id AND c.id=n.checkpoint_id JOIN hyperfide.artifacts a ON a.organisation_id=c.organisation_id AND a.run_id=c.run_id AND a.id=c.artifact_id WHERE n.organisation_id=$1 AND n.run_id=$2 AND n.session_id=$3 AND n.checkpoint_id=$4',[...key(s),v.checkpoint_id]);
  const c=found.rows[0] as RecordValue|undefined;
  if(!c||c.artifact_status!=='COMPLETE'||c.artifact_digest!==c.checkpoint_digest)agentError('AGENT_CHECKPOINT_UNAVAILABLE');
  if(c.native_session_id!==v.native_session_id||c.configuration_digest!==v.configuration_digest||c.source_manifest_digest!==v.source_manifest_digest)agentError('AGENT_CHECKPOINT_MISMATCH');
- if(!b.process_exited||!['STOPPED','FAILED'].includes(String(admitted.state)))return {decision:'RECONCILE_PROCESS',context_restored:false,grants_authority:false};
+ const superseded=await client.query('SELECT session_id FROM hyperfide.native_session_resumptions WHERE organisation_id=$1 AND run_id=$2 AND predecessor_session_id=$3',key(s));
+ if(superseded.rows.length)agentError('AGENT_LINEAGE_SUPERSEDED');
+ const decided=(decision:string,digest:string|null)=>({kind:'RESUME_DECISION',decision,operation_id:id,native_session_id:admitted.native_session_id,checkpoint_id:v.checkpoint_id,configuration_digest:v.configuration_digest,source_manifest_digest:v.source_manifest_digest,native_qualification_digest:digest,context_restored:false,grants_authority:false});
+ if(!b.process_exited||!['STOPPED','FAILED'].includes(String(admitted.state)))return decided('RECONCILE_PROCESS',null);
  const p=await getNativeSessionProfile(ctx,b.auth_profile);profileMatches(p,admitted,b);
  const q=p.qualification as RecordValue,cap=p.capabilities as RecordValue;
  const qualified=q.state==='QUALIFIED'&&q.live_qualified===true&&typeof q.receipt_digest==='string'&&DIGEST.test(q.receipt_digest)&&
  cap.explicit_resume===true&&cap.unattended===true&&typeof p.observed_model_id==='string'&&p.observed_model_id.length>0&&typeof p.observed_provider_id==='string'&&p.observed_provider_id.length>0;
- return {decision:c.support_level==='NATIVE_RESUME'&&qualified?'ELIGIBLE_NATIVE_CONTEXT':'FRESH_HANDOFF_REQUIRED',native_session_id:admitted.native_session_id,checkpoint_id:v.checkpoint_id,native_qualification_digest:qualified?q.receipt_digest:null,context_restored:false,grants_authority:false};
- });
+ const eligible=c.support_level==='NATIVE_RESUME'&&qualified;
+ return decided(eligible?'ELIGIBLE_NATIVE_CONTEXT':'FRESH_HANDOFF_REQUIRED',eligible?String(q.receipt_digest):null);
+ },invocation));
  })
  }};
  const capability:AgentSessionsCapability=Object.freeze({

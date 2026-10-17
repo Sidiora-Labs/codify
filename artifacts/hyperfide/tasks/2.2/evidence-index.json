@@ -1,0 +1,9 @@
+{
+  "task": "2.2",
+  "commit": "d6b01c031b4151cf6ee730f482f1f8f92711c148",
+  "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-001 --manifest tests/hyperfide/manifests/tasks/2.2.json && python3 tests/hyperfide/qualify.py --case V-024 --manifest tests/hyperfide/manifests/tasks/2.2.json",
+  "exit_code": 0,
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"4d65d49b-14d1-4d5e-aea4-b5701d5d0ab6\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/2.2/campaigns/df177d29dcb52c19f3def34ee74f7e0091d852693740d4a848c2946c1d852dcb\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"205490a2-f2c5-4096-8620-e448f7ef959a\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/2.2/campaigns/df177d29dcb52c19f3def34ee74f7e0091d852693740d4a848c2946c1d852dcb\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\nexit=0",
+  "ran_at": "2026-10-17T09:32:31Z",
+  "execution_note": "Run as the checkout owner (uid hf) against the local PostgreSQL fixture; check-evidence.py's neutral-config git read rejects a root caller on an hf-owned checkout (dubious ownership)."
+}

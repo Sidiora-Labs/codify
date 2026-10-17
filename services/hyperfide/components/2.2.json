@@ -16,7 +16,6 @@
   ],
   "requires": [
     "spec-import",
-    "spec-obligations",
     "4.2",
     "14.1"
   ]

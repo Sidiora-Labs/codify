@@ -24,9 +24,27 @@ typedef struct {
 } HfRunnerBinding;
 int hf_runner_binding(const char *request,HfRunnerBinding *binding);
 int hf_runner_processes(const HfRunnerBinding *,HfProcessIdentity *,size_t);
+/* Complete job tree (task 12.3): exact agent descendants of any UID, slot-UID
+ * orphans adopted by the broker and escaped slot-UID processes. Every member
+ * carries pid+start_time+boot identity and stays accountable for stop/checkpoint. */
+enum {HF_TREE_AGENT=1,HF_TREE_DESCENDANT,HF_TREE_ADOPTED,HF_TREE_ESCAPED};
+typedef struct {
+ HfProcessIdentity process;pid_t session;
+ int relation,depth,uid_changed,native_child;long threads;
+ unsigned long long cpu_ticks;
+} HfTreeMember;
+typedef struct {
+ HfTreeMember members[1024];
+ int count,agent_index,broker_present,raced;
+} HfProcessTree;
+int hf_process_tree_inventory(const HfRunnerBinding *,HfProcessTree *);
+int hf_process_tree_cancel(const HfRunnerBinding *,int rounds,int *remaining);
 int hf_runner_job_claim(const char *,const char *,HfHttpResponse *);
 int hf_runner_job_placement(const char *,const char *);
 int hf_runner_job_execute(const char *,FILE *);
+/* Task 12.4 control: durable admission fences and the authenticated runner API helper. */
+int hf_runner_admission_closed(const char *state_dir,uid_t uid);
+int hf_runner_control_api(const char *config_path,const char *component,const char *action,const char *input,HfHttpResponse *response);
 
 /* Dedicated slot UID cleanup survives a blocked or dead supervising broker. */
 pid_t hf_slot_watchdog(uid_t uid, long long deadline_ns, int *writer, const char *owner);
@@ -56,6 +74,8 @@ int hf_budget_attach(HfBudgetHandle *,const HfProcessIdentity *);
 int hf_budget_observe(const HfBudgetHandle *,FILE *);
 int hf_budget_release(HfBudgetHandle *);
 int hf_supervisor_daemon(const char *request,FILE *out);
+/* Registered inventory derived from the root-private slot ledger (JSON array). */
+int hf_slot_inventory(const char *root,const char *boot_id,const char *preparation,char **json,size_t *length);
 
 typedef struct {
  uid_t uid;gid_t gid;

@@ -79,38 +79,45 @@ static int placement(const RunnerConfig *c,const char *action,const char *job,co
  free(j);hf_http_response_free(&response);return ok;
 }
 static int atstring(const HfJson *j,int o,const char *key,char *out,size_t n){return hf_json_string(j,hf_json_field(j,o,key),out,n);}
+/* Handoff and poll packets share one immutable shape; both are re-verified here. */
+static int parse_packet(const RunnerConfig *c,const HfJson *j,int r,Instruction *i,long long started) {
+ HfJson *body=malloc(sizeof *body);int ok=body!=NULL&&r>=0,accepted=0;char actual[128],*encoded=NULL;
+ ok=ok&&hf_json_bool(j,hf_json_field(j,r,"accepted"),&accepted)&&accepted;
+ const char *names[]={"organisation_id","run_id","sandbox_id","boot_id","sandbox_boot_generation"};
+ const char *expected[]={c->organisation,c->run,c->sandbox,c->boot,c->generation};
+ for(unsigned k=0;ok&&k<5;++k)ok=atstring(j,r,names[k],actual,sizeof actual)&&!strcmp(actual,expected[k]);
+ ok=ok&&atstring(j,r,"command_id",i->command,sizeof i->command)&&hf_uuid_valid(i->command)&&atstring(j,r,"kind",i->kind,sizeof i->kind)&&
+  atstring(j,r,"attempt_id",i->attempt,sizeof i->attempt)&&hf_uuid_valid(i->attempt)&&atstring(j,r,"attempt_generation",i->attempt_generation,sizeof i->attempt_generation)&&decimal(i->attempt_generation)&&
+  atstring(j,r,"authority_epoch",i->epoch,sizeof i->epoch)&&hf_uuid_valid(i->epoch)&&atstring(j,r,"sequence",i->sequence,sizeof i->sequence)&&decimal(i->sequence)&&
+  atstring(j,r,"payload_digest",i->digest,sizeof i->digest)&&strlen(i->digest)==71&&!strncmp(i->digest,"sha256:",7);
+ int t=ok?hf_json_field(j,r,"payload_base64url"):-1;if(ok&&t>=0){encoded=malloc(j->tokens[t].end-j->tokens[t].start+1);ok=encoded&&hf_json_string(j,t,encoded,j->tokens[t].end-j->tokens[t].start+1);}else ok=0;
+ size_t bytes=0;unsigned char *decoded=ok?hf_base64url_decode(encoded,&bytes):NULL;char hash[65];
+ ok=ok&&decoded&&bytes<=65536&&!memchr(decoded,0,bytes)&&hf_sha256_bytes(decoded,bytes,hash)&&!strcmp(i->digest+7,hash);
+ if(ok){i->body=malloc(bytes+1);ok=i->body!=NULL;if(ok){memcpy(i->body,decoded,bytes);i->body[bytes]=0;ok=hf_json_parse(body,i->body)&&hf_json_get(body,"launch_id",i->launch,sizeof i->launch)&&hf_uuid_valid(i->launch);}}
+ free(decoded);
+ int64_t remaining=0;ok=ok&&hf_json_i64(j,hf_json_field(j,r,"remaining_lease_ms"),&remaining)&&remaining>=0&&remaining<=300000;
+ if(ok&&(!strcmp(i->kind,"START")||!strcmp(i->kind,"STEER"))){i->deadline_ns=started+remaining*1000000LL;ok=remaining>0&&monotonic_ns()<i->deadline_ns;}
+ if(ok&&!strcmp(i->kind,"START"))ok=hf_json_get(body,"slot_id",i->slot,sizeof i->slot)&&hf_uuid_valid(i->slot)&&hf_json_get(body,"agent_session_id",i->session,sizeof i->session)&&hf_uuid_valid(i->session)&&hf_json_get(body,"connector_plan_digest",i->plan_digest,sizeof i->plan_digest)&&strlen(i->plan_digest)==71&&!strncmp(i->plan_digest,"sha256:",7);
+ ok=ok&&(!strcmp(i->kind,"START")||!strcmp(i->kind,"STEER")||!strcmp(i->kind,"CANCEL"));
+ free(encoded);free(body);if(!ok){free(i->body);i->body=NULL;}return ok;
+}
 static int fetch_instruction(const RunnerConfig *c,const char *event,Instruction *i) {
  memset(i,0,sizeof *i);if(!hf_uuid_valid(event))return 0;snprintf(i->event,sizeof i->event,"%s",event);long long started=monotonic_ns();if(started<0)return 0;
  char *input=NULL;size_t n=0;FILE *out=open_memstream(&input,&n);if(!out)return 0;
  fprintf(out,"{\"organisation_id\":\"%s\",\"run_id\":\"%s\",\"event_id\":\"%s\",\"consumer_id\":",c->organisation,c->run,event);hf_json_write_string(out,c->consumer);fputc('}',out);fclose(out);
- HfHttpResponse response={0};HfJson *j=malloc(sizeof *j),*body=malloc(sizeof *body);int ok=0,accepted=0;char actual[128],*encoded=NULL;
- if(j&&body&&api(c,"6.3","instructions.handoff",input,&response)&&result_json(&response,j)) {
-  int r=hf_json_field(j,0,"result");
-  ok=hf_json_bool(j,hf_json_field(j,r,"accepted"),&accepted)&&accepted;
-  const char *names[]={"organisation_id","run_id","sandbox_id","boot_id","sandbox_boot_generation"};
-  const char *expected[]={c->organisation,c->run,c->sandbox,c->boot,c->generation};
-  for(unsigned k=0;ok&&k<5;++k)ok=atstring(j,r,names[k],actual,sizeof actual)&&!strcmp(actual,expected[k]);
-  ok=ok&&atstring(j,r,"command_id",i->command,sizeof i->command)&&hf_uuid_valid(i->command)&&atstring(j,r,"kind",i->kind,sizeof i->kind)&&
-   atstring(j,r,"attempt_id",i->attempt,sizeof i->attempt)&&hf_uuid_valid(i->attempt)&&atstring(j,r,"attempt_generation",i->attempt_generation,sizeof i->attempt_generation)&&decimal(i->attempt_generation)&&
-   atstring(j,r,"authority_epoch",i->epoch,sizeof i->epoch)&&hf_uuid_valid(i->epoch)&&atstring(j,r,"sequence",i->sequence,sizeof i->sequence)&&decimal(i->sequence)&&
-   atstring(j,r,"payload_digest",i->digest,sizeof i->digest)&&strlen(i->digest)==71&&!strncmp(i->digest,"sha256:",7);
-  int t=hf_json_field(j,r,"payload_base64url");if(ok&&t>=0){encoded=malloc(j->tokens[t].end-j->tokens[t].start+1);ok=encoded&&hf_json_string(j,t,encoded,j->tokens[t].end-j->tokens[t].start+1);}else ok=0;
-  size_t bytes=0;unsigned char *decoded=ok?hf_base64url_decode(encoded,&bytes):NULL;char hash[65];
-  ok=ok&&decoded&&bytes<=65536&&!memchr(decoded,0,bytes)&&hf_sha256_bytes(decoded,bytes,hash)&&!strcmp(i->digest+7,hash);
-  if(ok){i->body=malloc(bytes+1);ok=i->body!=NULL;if(ok){memcpy(i->body,decoded,bytes);i->body[bytes]=0;ok=hf_json_parse(body,i->body)&&hf_json_get(body,"launch_id",i->launch,sizeof i->launch)&&hf_uuid_valid(i->launch);}}
-  free(decoded);
-  int64_t remaining=0;ok=ok&&hf_json_i64(j,hf_json_field(j,r,"remaining_lease_ms"),&remaining)&&remaining>=0&&remaining<=300000;
-  if(ok&&(!strcmp(i->kind,"START")||!strcmp(i->kind,"STEER"))){i->deadline_ns=started+remaining*1000000LL;ok=remaining>0&&monotonic_ns()<i->deadline_ns;}
-  if(ok&&!strcmp(i->kind,"START"))ok=hf_json_get(body,"slot_id",i->slot,sizeof i->slot)&&hf_uuid_valid(i->slot)&&hf_json_get(body,"agent_session_id",i->session,sizeof i->session)&&hf_uuid_valid(i->session)&&hf_json_get(body,"connector_plan_digest",i->plan_digest,sizeof i->plan_digest)&&strlen(i->plan_digest)==71&&!strncmp(i->plan_digest,"sha256:",7);
- }
- free(encoded);free(input);free(j);free(body);hf_http_response_free(&response);if(!ok){free(i->body);i->body=NULL;}return ok;
+ HfHttpResponse response={0};HfJson *j=malloc(sizeof *j);int ok=0;
+ if(j&&api(c,"6.3","instructions.handoff",input,&response)&&result_json(&response,j))ok=parse_packet(c,j,hf_json_field(j,0,"result"),i,started);
+ free(input);free(j);hf_http_response_free(&response);return ok;
 }
 static sqlite3 *ledger(const RunnerConfig *c) {
  char path[4200];snprintf(path,sizeof path,"%s/launches.db",c->state);struct stat st;
  if(!lstat(path,&st)&&(!S_ISREG(st.st_mode)||st.st_uid!=geteuid()||(st.st_mode&077)||st.st_nlink!=1))return NULL;
  sqlite3 *db=NULL;mode_t mask=umask(077);int rc=sqlite3_open_v2(path,&db,SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE|SQLITE_OPEN_FULLMUTEX,NULL);umask(mask);
  if(rc!=SQLITE_OK){sqlite3_close(db);return NULL;}sqlite3_busy_timeout(db,5000);
- if(sqlite3_exec(db,"PRAGMA journal_mode=WAL;PRAGMA synchronous=FULL;CREATE TABLE IF NOT EXISTS launches(id TEXT PRIMARY KEY,command TEXT UNIQUE NOT NULL,digest TEXT NOT NULL,body TEXT NOT NULL,state TEXT NOT NULL,uid INTEGER NOT NULL,gid INTEGER NOT NULL,slot TEXT NOT NULL,identity TEXT NOT NULL,broker_pid INTEGER,broker_start TEXT,agent_pid INTEGER,agent_start TEXT,os_boot TEXT,exit_code INTEGER,updated INTEGER NOT NULL);CREATE UNIQUE INDEX IF NOT EXISTS active_slot_uid ON launches(uid) WHERE state NOT IN ('STOPPED','EXITED');CREATE TABLE IF NOT EXISTS native_ack_outbox(command TEXT NOT NULL,version INTEGER NOT NULL,payload TEXT NOT NULL,delivered INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(command,version));CREATE TABLE IF NOT EXISTS frames(id TEXT PRIMARY KEY,launch TEXT NOT NULL,digest TEXT NOT NULL,state TEXT NOT NULL);",NULL,NULL,NULL)!=SQLITE_OK){sqlite3_close(db);return NULL;}return db;
+ if(sqlite3_exec(db,"PRAGMA journal_mode=WAL;PRAGMA synchronous=FULL;CREATE TABLE IF NOT EXISTS launches(id TEXT PRIMARY KEY,command TEXT UNIQUE NOT NULL,digest TEXT NOT NULL,body TEXT NOT NULL,state TEXT NOT NULL,uid INTEGER NOT NULL,gid INTEGER NOT NULL,slot TEXT NOT NULL,identity TEXT NOT NULL,broker_pid INTEGER,broker_start TEXT,agent_pid INTEGER,agent_start TEXT,os_boot TEXT,exit_code INTEGER,updated INTEGER NOT NULL);CREATE UNIQUE INDEX IF NOT EXISTS active_slot_uid ON launches(uid) WHERE state NOT IN ('STOPPED','EXITED');CREATE TABLE IF NOT EXISTS native_ack_outbox(command TEXT NOT NULL,version INTEGER NOT NULL,payload TEXT NOT NULL,delivered INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(command,version));CREATE TABLE IF NOT EXISTS frames(id TEXT PRIMARY KEY,launch TEXT NOT NULL,digest TEXT NOT NULL,state TEXT NOT NULL);"
+  "CREATE TABLE IF NOT EXISTS native_event_outbox(id TEXT PRIMARY KEY,launch TEXT NOT NULL,sequence INTEGER NOT NULL,kind TEXT NOT NULL,payload TEXT NOT NULL,delivered INTEGER NOT NULL DEFAULT 0,UNIQUE(launch,sequence));"
+  "CREATE TABLE IF NOT EXISTS instructions(event TEXT PRIMARY KEY,command TEXT UNIQUE NOT NULL,kind TEXT NOT NULL,digest TEXT NOT NULL,launch TEXT NOT NULL,state TEXT NOT NULL,outcome TEXT,updated INTEGER NOT NULL);"
+  "CREATE TABLE IF NOT EXISTS fences(launch TEXT PRIMARY KEY,command TEXT NOT NULL,attempt_generation TEXT NOT NULL);",NULL,NULL,NULL)!=SQLITE_OK){sqlite3_close(db);return NULL;}return db;
 }
 /* A frame UUID is one immutable launch/byte identity. Exact retries never
  * write stdin again; conflicting retries must not masquerade as duplicates. */
@@ -131,13 +138,66 @@ static int queue_ack(sqlite3 *db,const RunnerConfig *c,const Instruction *i,int 
  if(ok){sqlite3_bind_text(q,1,i->command,-1,SQLITE_STATIC);sqlite3_bind_int(q,2,version);sqlite3_bind_text(q,3,payload,-1,SQLITE_STATIC);ok=sqlite3_step(q)==SQLITE_DONE;}sqlite3_finalize(q);q=NULL;
  if(ok){ok=sqlite3_prepare_v2(db,"SELECT payload FROM native_ack_outbox WHERE command=? AND version=?",-1,&q,NULL)==SQLITE_OK;if(ok){sqlite3_bind_text(q,1,i->command,-1,SQLITE_STATIC);sqlite3_bind_int(q,2,version);ok=sqlite3_step(q)==SQLITE_ROW&&!strcmp((const char*)sqlite3_column_text(q,0),payload);}}sqlite3_finalize(q);free(payload);return ok;
 }
-static void flush_acks(sqlite3 *db,const RunnerConfig *c,const Instruction *i) {
- for(int round=0;round<4;++round){sqlite3_stmt *q=NULL;char *payload=NULL;int version=0;
-  if(sqlite3_prepare_v2(db,"SELECT version,payload FROM native_ack_outbox WHERE command=? AND delivered=0 ORDER BY version LIMIT 1",-1,&q,NULL)!=SQLITE_OK)return;
-  sqlite3_bind_text(q,1,i->command,-1,SQLITE_STATIC);if(sqlite3_step(q)==SQLITE_ROW){version=sqlite3_column_int(q,0);payload=strdup((const char*)sqlite3_column_text(q,1));}sqlite3_finalize(q);if(!payload)return;
-  HfHttpResponse response={0};HfJson *j=malloc(sizeof *j);int ok=j&&api(c,"6.3","instructions.ack",payload,&response)&&result_json(&response,j);free(j);free(payload);hf_http_response_free(&response);if(!ok)return;
-  if(sqlite3_prepare_v2(db,"UPDATE native_ack_outbox SET delivered=1 WHERE command=? AND version=?",-1,&q,NULL)==SQLITE_OK){sqlite3_bind_text(q,1,i->command,-1,SQLITE_STATIC);sqlite3_bind_int(q,2,version);sqlite3_step(q);}sqlite3_finalize(q);
+/* Structured launch events are a bounded durable spool keyed by immutable
+ * event UUID and per-launch sequence. Replays after reconnect re-send the same
+ * bytes; the coordinator deduplicates by event_id. A full spool refuses new
+ * rows instead of silently evicting undelivered evidence. */
+#define HF_EVENT_SPOOL_LIMIT 4096
+#define HF_EVENT_DATA_LIMIT 16384
+static int queue_event(sqlite3 *db,const RunnerConfig *c,const char *launch,const char *command,const char *kind,const char *data) {
+ if(!hf_uuid_valid(launch)||!data||strlen(data)>HF_EVENT_DATA_LIMIT)return 0;
+ int own=sqlite3_get_autocommit(db);if(own&&sqlite3_exec(db,"BEGIN IMMEDIATE",NULL,NULL,NULL)!=SQLITE_OK)return 0;
+ sqlite3_stmt *q=NULL;long long pending=-1,sequence=0;
+ if(sqlite3_prepare_v2(db,"SELECT (SELECT count(*) FROM native_event_outbox WHERE delivered=0),(SELECT COALESCE(MAX(sequence),0)+1 FROM native_event_outbox WHERE launch=?)",-1,&q,NULL)==SQLITE_OK){sqlite3_bind_text(q,1,launch,-1,SQLITE_STATIC);if(sqlite3_step(q)==SQLITE_ROW){pending=sqlite3_column_int64(q,0);sequence=sqlite3_column_int64(q,1);}}sqlite3_finalize(q);q=NULL;
+ char id[37],*payload=NULL;size_t n=0;FILE *out=pending>=0&&pending<HF_EVENT_SPOOL_LIMIT&&hf_uuid_generate(id)?open_memstream(&payload,&n):NULL;int ok=out!=NULL;
+ if(out){fprintf(out,"{\"schema_version\":1,\"event_id\":\"%s\",\"organisation_id\":\"%s\",\"run_id\":\"%s\",\"sandbox_id\":\"%s\",\"boot_id\":\"%s\",\"sandbox_boot_generation\":\"%s\",\"launch_id\":\"%s\",\"command_id\":",id,c->organisation,c->run,c->sandbox,c->boot,c->generation,launch);
+  if(command&&hf_uuid_valid(command))fprintf(out,"\"%s\"",command);else fputs("null",out);
+  fprintf(out,",\"sequence\":\"%lld\",\"kind\":",sequence);hf_json_write_string(out,kind);fprintf(out,",\"observed_at_seconds\":%lld,\"data\":%s}",(long long)time(NULL),data);ok=!fclose(out);}
+ if(ok){ok=sqlite3_prepare_v2(db,"INSERT INTO native_event_outbox(id,launch,sequence,kind,payload) VALUES(?,?,?,?,?)",-1,&q,NULL)==SQLITE_OK;if(ok){sqlite3_bind_text(q,1,id,-1,SQLITE_STATIC);sqlite3_bind_text(q,2,launch,-1,SQLITE_STATIC);sqlite3_bind_int64(q,3,sequence);sqlite3_bind_text(q,4,kind,-1,SQLITE_STATIC);sqlite3_bind_text(q,5,payload,-1,SQLITE_STATIC);ok=sqlite3_step(q)==SQLITE_DONE;}sqlite3_finalize(q);}
+ free(payload);
+ if(own){if(ok)ok=sqlite3_exec(db,"COMMIT",NULL,NULL,NULL)==SQLITE_OK;if(!ok)sqlite3_exec(db,"ROLLBACK",NULL,NULL,NULL);}
+ return ok;
+}
+/* One bounded upload round over both spools. Returns 0 on the first transport
+ * or coordinator failure so callers back off; undelivered rows stay durable. */
+static int flush_outbox(sqlite3 *db,const RunnerConfig *c,const char *command,const char *launch,int limit,int *acks,int *events) {
+ for(int kind=0;kind<2;++kind)for(int round=0;round<limit;++round){
+  sqlite3_stmt *q=NULL;char *payload=NULL,key[64]="";int version=0;
+  const char *select=kind==0?(command?"SELECT command,version,payload FROM native_ack_outbox WHERE delivered=0 AND command=? ORDER BY rowid LIMIT 1":"SELECT command,version,payload FROM native_ack_outbox WHERE delivered=0 ORDER BY rowid LIMIT 1"):
+   (launch?"SELECT id,0,payload FROM native_event_outbox WHERE delivered=0 AND launch=? ORDER BY rowid LIMIT 1":"SELECT id,0,payload FROM native_event_outbox WHERE delivered=0 ORDER BY rowid LIMIT 1");
+  const char *filter=kind==0?command:launch;
+  if(sqlite3_prepare_v2(db,select,-1,&q,NULL)!=SQLITE_OK)return 0;
+  if(filter)sqlite3_bind_text(q,1,filter,-1,SQLITE_STATIC);
+  if(sqlite3_step(q)==SQLITE_ROW){snprintf(key,sizeof key,"%s",sqlite3_column_text(q,0));version=sqlite3_column_int(q,1);payload=strdup((const char*)sqlite3_column_text(q,2));}sqlite3_finalize(q);q=NULL;
+  if(!payload)break;
+  HfHttpResponse response={0};HfJson *j=malloc(sizeof *j);
+  int ok=j&&api(c,kind==0?"6.3":"12.2",kind==0?"instructions.ack":"runner.launch.event.record",payload,&response)&&result_json(&response,j);
+  if(ok&&kind==1){int r=hf_json_field(j,0,"result"),recorded=0;char id[64];ok=hf_json_bool(j,hf_json_field(j,r,"recorded"),&recorded)&&recorded&&atstring(j,r,"event_id",id,sizeof id)&&!strcmp(id,key);}
+  free(j);free(payload);hf_http_response_free(&response);if(!ok)return 0;
+  if(sqlite3_prepare_v2(db,kind==0?"UPDATE native_ack_outbox SET delivered=1 WHERE command=? AND version=?":"UPDATE native_event_outbox SET delivered=1 WHERE id=?",-1,&q,NULL)==SQLITE_OK){sqlite3_bind_text(q,1,key,-1,SQLITE_STATIC);if(kind==0)sqlite3_bind_int(q,2,version);sqlite3_step(q);}sqlite3_finalize(q);
+  if(kind==0&&acks)++*acks;
+  if(kind==1&&events)++*events;
  }
+ return 1;
+}
+static long long undelivered(sqlite3 *db,const char *command,const char *launch) {
+ sqlite3_stmt *q=NULL;long long n=-1;
+ if(sqlite3_prepare_v2(db,"SELECT (SELECT count(*) FROM native_ack_outbox WHERE delivered=0 AND command=?)+(SELECT count(*) FROM native_event_outbox WHERE delivered=0 AND launch=?)",-1,&q,NULL)==SQLITE_OK){sqlite3_bind_text(q,1,command,-1,SQLITE_STATIC);sqlite3_bind_text(q,2,launch,-1,SQLITE_STATIC);if(sqlite3_step(q)==SQLITE_ROW)n=sqlite3_column_int64(q,0);}
+ sqlite3_finalize(q);return n;
+}
+/* The broker holds an exclusive flock on <state>/<launch>.lock for its whole
+ * life. A free lock proves no broker owns that launch, independent of PID
+ * reuse; a held lock is a live owner whose IPC can be re-attached. */
+static int launch_lock(const char *state,const char *launch,int create,int *held) {
+ char path[4200];if(held)*held=0;if(!hf_uuid_valid(launch)||snprintf(path,sizeof path,"%s/%s.lock",state,launch)>=(int)sizeof path)return -1;
+ int fd=open(path,O_RDWR|O_CLOEXEC|O_NOFOLLOW|(create?O_CREAT:0),0600);struct stat st;if(fd<0)return errno==ENOENT&&!create?-2:-1;
+ if(fstat(fd,&st)||!S_ISREG(st.st_mode)||st.st_uid!=geteuid()||(st.st_mode&077)||st.st_nlink!=1){close(fd);return -1;}
+ if(flock(fd,LOCK_EX|LOCK_NB)){if(held&&errno==EWOULDBLOCK)*held=1;close(fd);return -1;}
+ return fd;
+}
+/* 1: a live broker owns the launch, 0: no owner, -1: untrusted lock state. */
+static int broker_owner(const char *state,const char *launch) {
+ int held=0,fd=launch_lock(state,launch,0,&held);if(fd>=0){close(fd);return 0;}return fd==-2?0:held?1:-1;
 }
 static int input_permitted(sqlite3 *db,const char *launch) {
  sqlite3_stmt *q=NULL;int ok=sqlite3_prepare_v2(db,"SELECT state FROM launches WHERE id=?",-1,&q,NULL)==SQLITE_OK;
@@ -251,9 +311,23 @@ static char *broker_observation(const RunnerConfig *c,const Instruction *i,const
  HfProcessIdentity list[1024];int count=uid_processes(i->uid,list,1024);fputs(",\"processes\":[",out);for(int k=0;k<count;++k){if(k)fputc(',',out);hf_process_json(out,&list[k]);}
  fprintf(out,"],\"remaining_descendants\":%d,\"ipc_closed\":%s,\"required_artifacts\":[],\"credential_revocation\":[],\"cleanup_complete\":false,\"resource_observation_complete\":%s}",count<0?-1:count,ipc_closed?"true":"false",count<0?"false":"true");fclose(out);return data;
 }
+static void spool_json(FILE *out,const RunnerConfig *c,const char *launch,const char *suffix,unsigned long long observed) {
+ char path[4200],hash[65]="";snprintf(path,sizeof path,"%s/%s.%s",c->state,launch,suffix);struct stat st;
+ int fd=open(path,O_RDONLY|O_NOFOLLOW|O_CLOEXEC),ok=fd>=0&&!fstat(fd,&st)&&S_ISREG(st.st_mode)&&hash_fd(fd,hash);if(fd>=0)close(fd);
+ fprintf(out,"{\"observed_bytes\":\"%llu\",\"spooled_bytes\":\"%lld\",\"digest\":",observed,ok?(long long)st.st_size:-1LL);if(ok)fprintf(out,"\"sha256:%s\"}",hash);else fputs("null}",out);
+}
+/* Terminal evidence binds the complete local spool by size and digest, so it
+ * stays verifiable after any provider output retention limit. */
+static char *terminal_data(const RunnerConfig *c,const Instruction *i,const char *state,int exit_code,unsigned long long out_bytes,unsigned long long err_bytes,const char *stopped_by) {
+ char *data=NULL;size_t n=0;FILE *out=open_memstream(&data,&n);if(!out)return NULL;
+ fprintf(out,"{\"state\":\"%s\",\"exit_code\":%d,\"agent_session_id\":\"%s\",\"stopped_by_command\":",state,exit_code,i->session);
+ if(stopped_by&&*stopped_by)fprintf(out,"\"%s\"",stopped_by);else fputs("null",out);
+ fputs(",\"stdout\":",out);spool_json(out,c,i->launch,"stdout",out_bytes);fputs(",\"stderr\":",out);spool_json(out,c,i->launch,"stderr",err_bytes);
+ fputs(",\"native_acknowledged\":false}",out);if(fclose(out)){free(data);return NULL;}return data;
+}
 static int append_log(int fd,const void *data,size_t n){const char *p=data;while(n){ssize_t w=write(fd,p,n);if(w<0&&errno==EINTR)continue;if(w<=0)return 0;p+=w;n-=(size_t)w;}return 1;}
 static void broker(const RunnerConfig *c,const Instruction *i,HfJson *plan,char **argv,int binary,int ready) {
- signal(SIGPIPE,SIG_IGN);prctl(PR_SET_CHILD_SUBREAPER,1);setsid();
+ signal(SIGPIPE,SIG_IGN);signal(SIGTERM,SIG_DFL);prctl(PR_SET_CHILD_SUBREAPER,1);setsid();
  int nullfd=open("/dev/null",O_RDWR|O_CLOEXEC);if(nullfd<0)_exit(125);
  for(int descriptor=0;descriptor<3;++descriptor)if(dup2(nullfd,descriptor)<0)_exit(125);
  if(nullfd>2)close(nullfd);
@@ -281,21 +355,34 @@ static void broker(const RunnerConfig *c,const Instruction *i,HfJson *plan,char 
  close(gate[0]);close(input[0]);close(output[1]);close(error[1]);close(binary);
  HfProcessIdentity bp,ap;int identity=hf_process_identity(getpid(),&bp)&&hf_process_identity(agent,&ap);sqlite3_stmt *q=NULL;
  if(identity&&sqlite3_prepare_v2(db,"UPDATE launches SET state='RUNNING',broker_pid=?,broker_start=?,agent_pid=?,agent_start=?,os_boot=?,updated=unixepoch() WHERE id=? AND state='ACCEPTED'",-1,&q,NULL)==SQLITE_OK){char bs[32],as[32];snprintf(bs,sizeof bs,"%llu",bp.start_time);snprintf(as,sizeof as,"%llu",ap.start_time);sqlite3_bind_int(q,1,getpid());sqlite3_bind_text(q,2,bs,-1,SQLITE_TRANSIENT);sqlite3_bind_int(q,3,agent);sqlite3_bind_text(q,4,as,-1,SQLITE_TRANSIENT);sqlite3_bind_text(q,5,ap.os_boot_id,-1,SQLITE_STATIC);sqlite3_bind_text(q,6,i->launch,-1,SQLITE_STATIC);identity=sqlite3_step(q)==SQLITE_DONE&&sqlite3_changes(db)==1;}else identity=0;sqlite3_finalize(q);
+ char *running=NULL;size_t running_n=0;FILE *running_out=identity?open_memstream(&running,&running_n):NULL;
+ if(running_out){fprintf(running_out,"{\"state\":\"RUNNING\",\"agent_session_id\":\"%s\",\"slot_id\":\"%s\",\"stdin_owner\":\"broker\",\"broker\":",i->session,i->slot);hf_process_json(running_out,&bp);fputs(",\"agent\":",running_out);hf_process_json(running_out,&ap);fputc('}',running_out);if(fclose(running_out)){free(running);running=NULL;}}
+ identity=identity&&running&&queue_event(db,c,i->launch,i->command,"launch.running",running);free(running);
  if(!identity||!queue_ack(db,c,i,2,"EXECUTING",&ap)||monotonic_ns()>=i->deadline_ns||write(gate[1],"G",1)!=1){kill(agent,SIGKILL);close(gate[1]);waitpid(agent,NULL,0);goto failed;}close(gate[1]);
  fcntl(input[1],F_SETFL,O_NONBLOCK);fcntl(output[0],F_SETFL,O_NONBLOCK);fcntl(error[0],F_SETFL,O_NONBLOCK);
  if(write(ready,"R",1)!=1){/* Controller loss is not cancellation. */}close(ready);ready=-1;
- long long deadline=i->deadline_ns,next_refresh=0;
+ long long deadline=i->deadline_ns,next_refresh=0,terminal_at=0;
  const char *state="RUNNING";int exit_code=-1,stdin_open=1;unsigned long long bytes_out=0,bytes_err=0;char stopped_by[37]="";
  for(;;){
   long long now=monotonic_ns();
   if(!strcmp(state,"RUNNING")&&now>=deadline){if(stdin_open){close(input[1]);stdin_open=0;}stop_uid(i->uid);hf_slot_watchdog_finish(watchdog,&watch_write);state="LEASE_EXPIRED";state_update(db,i->launch,state,exit_code);if(!queue_ack(db,c,i,3,"TERMINAL",&ap)){stop_uid(i->uid);state="UNCERTAIN";state_update(db,i->launch,state,exit_code);}}
   if(now>=next_refresh){
    if(!strcmp(state,"RUNNING")){Instruction fresh;if(fetch_instruction(c,i->event,&fresh)){if(!strcmp(fresh.command,i->command)&&!strcmp(fresh.digest,i->digest)&&fresh.deadline_ns>monotonic_ns()&&monotonic_ns()<deadline){long long next=fresh.deadline_ns;if(write(watch_write,&next,sizeof next)==sizeof next)deadline=next;else{stop_uid(i->uid);state="UNCERTAIN";}}free(fresh.body);}}
-   flush_acks(db,c,i);next_refresh=monotonic_ns()+30000000000LL;
+   flush_outbox(db,c,i->command,i->launch,4,NULL,NULL);next_refresh=monotonic_ns()+(terminal_at?2000000000LL:30000000000LL);
   }
+  /* A terminal broker retires once its own spool is delivered (or after a
+   * bounded linger); the serve loop keeps replaying anything left behind. */
+  if(terminal_at&&((now-terminal_at>1000000000LL&&undelivered(db,i->command,i->launch)==0)||now-terminal_at>600000000000LL))goto retire;
   int status=0;pid_t reaped;while((reaped=waitpid(-1,&status,WNOHANG))>0)if(reaped==agent){exit_code=WIFEXITED(status)?WEXITSTATUS(status):128+WTERMSIG(status);if(stdin_open){close(input[1]);stdin_open=0;}int absent=stop_uid(i->uid);hf_slot_watchdog_finish(watchdog,&watch_write);state=absent?"EXITED":"UNCERTAIN";state_update(db,i->launch,state,exit_code);if(!queue_ack(db,c,i,3,"TERMINAL",&ap)){stop_uid(i->uid);state="UNCERTAIN";state_update(db,i->launch,state,exit_code);}}
   struct pollfd fds[]={{server,POLLIN,0},{output[0],POLLIN,0},{error[0],POLLIN,0}};int polled=poll(fds,3,200);if(polled<0&&errno!=EINTR){state="UNCERTAIN";break;}
   for(int k=1;k<3;++k)if(fds[k].revents&(POLLIN|POLLHUP)){char buffer[65536];ssize_t n;while((n=read(fds[k].fd,buffer,sizeof buffer))>0){unsigned long long *total=k==1?&bytes_out:&bytes_err;if(*total+(unsigned long long)n>64ULL*1024*1024||!append_log(k==1?log_out:log_err,buffer,(size_t)n)){state="SPOOL_EXHAUSTED";stop_uid(i->uid);break;}*total+=(unsigned long long)n;}}
+  if(strcmp(state,"RUNNING")&&!terminal_at){
+   if(stdin_open){close(input[1]);stdin_open=0;}
+   fsync(log_out);fsync(log_err);state_update(db,i->launch,state,exit_code);
+   queue_ack(db,c,i,3,!strcmp(state,"EXITED")||!strcmp(state,"STOPPED")||!strcmp(state,"LEASE_EXPIRED")?"TERMINAL":"UNCERTAIN",&ap);
+   char *data=terminal_data(c,i,state,exit_code,bytes_out,bytes_err,stopped_by);if(data)queue_event(db,c,i->launch,i->command,"launch.terminal",data);free(data);
+   terminal_at=monotonic_ns();if(terminal_at<=0)terminal_at=1;next_refresh=0;
+  }
   if(!(fds[0].revents&POLLIN))continue;
   int client=accept4(server,NULL,NULL,SOCK_CLOEXEC);if(client<0)continue;struct ucred peer;socklen_t peer_size=sizeof peer;struct timeval timeout={.tv_sec=3};setsockopt(client,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof timeout);setsockopt(client,SOL_SOCKET,SO_SNDTIMEO,&timeout,sizeof timeout);
   if(getsockopt(client,SOL_SOCKET,SO_PEERCRED,&peer,&peer_size)||peer.uid!=geteuid()){close(client);continue;}
@@ -321,46 +408,261 @@ static void broker(const RunnerConfig *c,const Instruction *i,HfJson *plan,char 
   if(out){fclose(out);if(reply)send_packet(client,reply);}free(reply);free(request);free(j);close(client);
  }
  stop_uid(i->uid);state_update(db,i->launch,"UNCERTAIN",exit_code);
+ retire:
+ if(server>=0){close(server);server=-1;unlink(socketname);}
  failed:
  if(watch_write>=0)close(watch_write);
  if(ready>=0){ssize_t notice=write(ready,"F",1);(void)notice;close(ready);}if(db)sqlite3_close(db);if(server>=0)close(server);if(log_out>=0)close(log_out);if(log_err>=0)close(log_err);_exit(0);
 }
+static const char *last_refusal="";
+static int refuse(FILE *out,const char *code){last_refusal=code;return hf_native_error(out,code);}
+static int fenced(sqlite3 *db,const char *launch) {
+ sqlite3_stmt *q=NULL;int found=sqlite3_prepare_v2(db,"SELECT 1 FROM fences WHERE launch=?",-1,&q,NULL)==SQLITE_OK;
+ if(found){sqlite3_bind_text(q,1,launch,-1,SQLITE_STATIC);found=sqlite3_step(q)==SQLITE_ROW;}sqlite3_finalize(q);return found;
+}
 static int launch_start(const RunnerConfig *c,Instruction *i,FILE *out) {
- if(strcmp(i->kind,"START"))return hf_native_error(out,"NOT_A_START_INSTRUCTION");
- sqlite3 *db=ledger(c);if(!db)return hf_native_error(out,"LEDGER_UNAVAILABLE");sqlite3_stmt *q=NULL;
- if(sqlite3_exec(db,"BEGIN IMMEDIATE",NULL,NULL,NULL)!=SQLITE_OK){sqlite3_close(db);return hf_native_error(out,"LEDGER_BUSY");}
+ last_refusal="";
+ if(strcmp(i->kind,"START"))return refuse(out,"NOT_A_START_INSTRUCTION");
+ sqlite3 *db=ledger(c);if(!db)return refuse(out,"LEDGER_UNAVAILABLE");sqlite3_stmt *q=NULL;
+ if(sqlite3_exec(db,"BEGIN IMMEDIATE",NULL,NULL,NULL)!=SQLITE_OK){sqlite3_close(db);return refuse(out,"LEDGER_BUSY");}
  int rc=sqlite3_prepare_v2(db,"SELECT command,digest,state FROM launches WHERE id=?",-1,&q,NULL);if(rc==SQLITE_OK)sqlite3_bind_text(q,1,i->launch,-1,SQLITE_STATIC);
- if(rc!=SQLITE_OK){sqlite3_exec(db,"ROLLBACK",NULL,NULL,NULL);sqlite3_close(db);return 1;}
- int step=sqlite3_step(q);if(step==SQLITE_ROW){int same=!strcmp((const char*)sqlite3_column_text(q,0),i->command)&&!strcmp((const char*)sqlite3_column_text(q,1),i->digest);char state[32];snprintf(state,sizeof state,"%s",sqlite3_column_text(q,2));sqlite3_finalize(q);sqlite3_exec(db,"ROLLBACK",NULL,NULL,NULL);sqlite3_close(db);if(!same)return hf_native_error(out,"START_IDENTITY_CONFLICT");fprintf(out,"{\"launch_id\":\"%s\",\"state\":\"%s\",\"replayed\":true,\"spawned_again\":false}",i->launch,state);return 0;}
- sqlite3_finalize(q);
- if(!slot_identity(c,i)||!placement(c,"runner.agent.launch","implementation","native.spawn")){sqlite3_exec(db,"ROLLBACK",NULL,NULL,NULL);sqlite3_close(db);return hf_native_error(out,"SLOT_OR_PLACEMENT_NOT_CURRENT");}
- HfJson *plan=malloc(sizeof *plan);char *plan_source=NULL,**argv=NULL;int binary=-1;
- if(!plan||!read_plan(c,i,plan,&plan_source,&argv,&binary)){if(binary>=0)close(binary);free_argv(argv);free(plan_source);free(plan);sqlite3_exec(db,"ROLLBACK",NULL,NULL,NULL);sqlite3_close(db);return hf_native_error(out,"CONNECTOR_PLAN_NOT_QUALIFIED");}
- char *identity=NULL;size_t n=0;FILE *writer=open_memstream(&identity,&n);if(!writer){sqlite3_exec(db,"ROLLBACK",NULL,NULL,NULL);sqlite3_close(db);close(binary);free_argv(argv);free(plan_source);free(plan);return 1;}
- fprintf(writer,"{\"organisation_id\":\"%s\",\"run_id\":\"%s\",\"sandbox_id\":\"%s\",\"boot_id\":\"%s\",\"boot_generation\":\"%s\",\"attempt_id\":\"%s\",\"attempt_generation\":\"%s\",\"authority_epoch\":\"%s\",\"agent_session_id\":\"%s\"}",c->organisation,c->run,c->sandbox,c->boot,c->generation,i->attempt,i->attempt_generation,i->epoch,i->session);fclose(writer);
- rc=sqlite3_prepare_v2(db,"INSERT INTO launches(id,command,digest,body,state,uid,gid,slot,identity,updated) VALUES(?,?,?,?,'ACCEPTED',?,?,?,?,unixepoch())",-1,&q,NULL);
- if(rc==SQLITE_OK){sqlite3_bind_text(q,1,i->launch,-1,SQLITE_STATIC);sqlite3_bind_text(q,2,i->command,-1,SQLITE_STATIC);sqlite3_bind_text(q,3,i->digest,-1,SQLITE_STATIC);sqlite3_bind_text(q,4,i->body,-1,SQLITE_STATIC);sqlite3_bind_int64(q,5,i->uid);sqlite3_bind_int64(q,6,i->gid);sqlite3_bind_text(q,7,i->slot,-1,SQLITE_STATIC);sqlite3_bind_text(q,8,identity,-1,SQLITE_STATIC);rc=sqlite3_step(q);}sqlite3_finalize(q);free(identity);
- int accepted=rc==SQLITE_DONE&&queue_ack(db,c,i,1,"ACCEPTED",NULL)&&sqlite3_exec(db,"COMMIT",NULL,NULL,NULL)==SQLITE_OK;if(!accepted)sqlite3_exec(db,"ROLLBACK",NULL,NULL,NULL);sqlite3_close(db);int ready[2];
- if(!accepted||pipe2(ready,O_CLOEXEC)){close(binary);free_argv(argv);free(plan_source);free(plan);return hf_native_error(out,"DURABLE_ACCEPTANCE_FAILED");}
- pid_t child=fork();if(child==0){close(ready[0]);broker(c,i,plan,argv,binary,ready[1]);}close(ready[1]);close(binary);free_argv(argv);free(plan_source);free(plan);
+ if(rc!=SQLITE_OK){sqlite3_exec(db,"ROLLBACK",NULL,NULL,NULL);sqlite3_close(db);return refuse(out,"LEDGER_UNAVAILABLE");}
+ int step=sqlite3_step(q);if(step==SQLITE_ROW){int same=!strcmp((const char*)sqlite3_column_text(q,0),i->command)&&!strcmp((const char*)sqlite3_column_text(q,1),i->digest);char state[32];snprintf(state,sizeof state,"%s",sqlite3_column_text(q,2));sqlite3_finalize(q);sqlite3_exec(db,"ROLLBACK",NULL,NULL,NULL);sqlite3_close(db);if(!same)return refuse(out,"START_IDENTITY_CONFLICT");
+  /* Replays inspect the existing owner; they never spawn a second session. */
+  int owner=broker_owner(c->state,i->launch);
+  fprintf(out,"{\"launch_id\":\"%s\",\"state\":\"%s\",\"replayed\":true,\"spawned_again\":false,\"broker_alive\":%s}",i->launch,state,owner==1?"true":"false");return 0;}
+ sqlite3_finalize(q);q=NULL;
+ if(fenced(db,i->launch)){sqlite3_exec(db,"ROLLBACK",NULL,NULL,NULL);sqlite3_close(db);return refuse(out,"CANCELLED_BEFORE_START");}
+ int lock=launch_lock(c->state,i->launch,1,NULL);
+ if(lock<0){sqlite3_exec(db,"ROLLBACK",NULL,NULL,NULL);sqlite3_close(db);return refuse(out,"LAUNCH_OWNER_ACTIVE");}
+ HfJson *plan=NULL;char *plan_source=NULL,**argv=NULL,*identity=NULL,*accepted_data=NULL;int binary=-1,accepted=0;const char *code="DURABLE_ACCEPTANCE_FAILED";size_t n=0;
+ if(!slot_identity(c,i)||!placement(c,"runner.agent.launch","implementation","native.spawn"))code="SLOT_OR_PLACEMENT_NOT_CURRENT";
+ else if(!(plan=malloc(sizeof *plan))||!read_plan(c,i,plan,&plan_source,&argv,&binary))code="CONNECTOR_PLAN_NOT_QUALIFIED";
+ else {
+  FILE *writer=open_memstream(&identity,&n);
+  if(writer){fprintf(writer,"{\"organisation_id\":\"%s\",\"run_id\":\"%s\",\"sandbox_id\":\"%s\",\"boot_id\":\"%s\",\"boot_generation\":\"%s\",\"attempt_id\":\"%s\",\"attempt_generation\":\"%s\",\"authority_epoch\":\"%s\",\"agent_session_id\":\"%s\"}",c->organisation,c->run,c->sandbox,c->boot,c->generation,i->attempt,i->attempt_generation,i->epoch,i->session);if(fclose(writer)){free(identity);identity=NULL;}}
+  writer=identity?open_memstream(&accepted_data,&n):NULL;
+  if(writer){fprintf(writer,"{\"state\":\"ACCEPTED\",\"agent_session_id\":\"%s\",\"slot_id\":\"%s\",\"attempt_generation\":\"%s\",\"payload_digest\":\"%s\",\"connector_plan_digest\":\"%s\",\"spawned\":false}",i->session,i->slot,i->attempt_generation,i->digest,i->plan_digest);if(fclose(writer)){free(accepted_data);accepted_data=NULL;}}
+  rc=accepted_data?sqlite3_prepare_v2(db,"INSERT INTO launches(id,command,digest,body,state,uid,gid,slot,identity,updated) VALUES(?,?,?,?,'ACCEPTED',?,?,?,?,unixepoch())",-1,&q,NULL):SQLITE_ERROR;
+  if(rc==SQLITE_OK){sqlite3_bind_text(q,1,i->launch,-1,SQLITE_STATIC);sqlite3_bind_text(q,2,i->command,-1,SQLITE_STATIC);sqlite3_bind_text(q,3,i->digest,-1,SQLITE_STATIC);sqlite3_bind_text(q,4,i->body,-1,SQLITE_STATIC);sqlite3_bind_int64(q,5,i->uid);sqlite3_bind_int64(q,6,i->gid);sqlite3_bind_text(q,7,i->slot,-1,SQLITE_STATIC);sqlite3_bind_text(q,8,identity,-1,SQLITE_STATIC);rc=sqlite3_step(q);}sqlite3_finalize(q);
+  accepted=rc==SQLITE_DONE&&queue_ack(db,c,i,1,"ACCEPTED",NULL)&&queue_event(db,c,i->launch,i->command,"launch.accepted",accepted_data)&&sqlite3_exec(db,"COMMIT",NULL,NULL,NULL)==SQLITE_OK;
+ }
+ free(identity);free(accepted_data);
+ if(!accepted)sqlite3_exec(db,"ROLLBACK",NULL,NULL,NULL);
+ sqlite3_close(db);int ready[2];
+ if(!accepted||pipe2(ready,O_CLOEXEC)){close(lock);if(binary>=0)close(binary);free_argv(argv);free(plan_source);free(plan);return refuse(out,code);}
+ /* The broker inherits the launch lock; this process drops its reference. */
+ pid_t child=fork();if(child==0){close(ready[0]);broker(c,i,plan,argv,binary,ready[1]);}close(ready[1]);close(lock);close(binary);free_argv(argv);free(plan_source);free(plan);
  struct pollfd pollfd={ready[0],POLLIN,0};char status='F';if(child>0&&poll(&pollfd,1,10000)>0&&read(ready[0],&status,1)!=1)status='F';close(ready[0]);
  fprintf(out,"{\"launch_id\":\"%s\",\"command_id\":\"%s\",\"state\":\"%s\",\"durably_accepted\":true,\"replayed\":false,\"native_session_observed\":false}",i->launch,i->command,status=='R'?"EXECUTING":"UNCERTAIN");return 0;
 }
+/* Restart reconciliation never forks. A held launch lock is a live broker that
+ * still owns agent stdin and is re-attached over IPC. Without a broker, stdin
+ * ownership is unrecoverable: a still-matching agent is reported ORPHANED, a
+ * quiescent slot becomes NOT_SPAWNED/LOST and anything else UNCERTAIN, each with
+ * its evidence. Dead pipes and reused PIDs never count as live progress. */
+typedef struct {char launch[37],command[37],state[32],broker_start[32],agent_start[32],os_boot[37],identity[2048];long long uid,gid,broker_pid,agent_pid;} LaunchRow;
+typedef struct {int adopted,orphaned,lost,not_spawned,uncertain;} ReconcileStats;
+static int ack_instruction(sqlite3 *db,const char *launch,const char *command,Instruction *i,int *version) {
+ memset(i,0,sizeof *i);sqlite3_stmt *q=NULL;char *payload=NULL;
+ if(sqlite3_prepare_v2(db,"SELECT payload,(SELECT MAX(version) FROM native_ack_outbox WHERE command=?1) FROM native_ack_outbox WHERE command=?1 AND version=1",-1,&q,NULL)==SQLITE_OK){sqlite3_bind_text(q,1,command,-1,SQLITE_STATIC);if(sqlite3_step(q)==SQLITE_ROW){payload=strdup((const char*)sqlite3_column_text(q,0));*version=sqlite3_column_int(q,1)+1;}}
+ sqlite3_finalize(q);HfJson *j=payload?malloc(sizeof *j):NULL;
+ int ok=j&&hf_json_parse(j,payload)&&hf_json_get(j,"attempt_id",i->attempt,sizeof i->attempt)&&hf_json_get(j,"attempt_generation",i->attempt_generation,sizeof i->attempt_generation)&&
+  hf_json_get(j,"authority_epoch",i->epoch,sizeof i->epoch)&&hf_json_get(j,"sequence",i->sequence,sizeof i->sequence)&&hf_json_get(j,"payload_digest",i->digest,sizeof i->digest);
+ snprintf(i->command,sizeof i->command,"%s",command);snprintf(i->launch,sizeof i->launch,"%s",launch);free(j);free(payload);return ok;
+}
+static int agent_current(const LaunchRow *r,HfProcessIdentity *seen) {
+ return r->agent_pid>0&&hf_process_identity((pid_t)r->agent_pid,seen)&&seen->state!='Z'&&seen->state!='X'&&seen->uid==(uid_t)r->uid&&!strcmp(seen->os_boot_id,r->os_boot)&&seen->start_time==strtoull(r->agent_start,NULL,10);
+}
+static int reconcile(const RunnerConfig *c,FILE *out,ReconcileStats *stats) {
+ sqlite3 *db=ledger(c);if(!db)return 0;sqlite3_stmt *q=NULL;LaunchRow *rows=calloc(256,sizeof *rows);int count=0;
+ if(rows&&sqlite3_prepare_v2(db,"SELECT id,command,state,uid,gid,identity,COALESCE(broker_pid,0),COALESCE(broker_start,''),COALESCE(agent_pid,0),COALESCE(agent_start,''),COALESCE(os_boot,'') FROM launches WHERE state IN ('ACCEPTED','RUNNING','STOPPING') ORDER BY rowid LIMIT 256",-1,&q,NULL)==SQLITE_OK)
+  while(sqlite3_step(q)==SQLITE_ROW){LaunchRow *r=&rows[count++];
+   snprintf(r->launch,sizeof r->launch,"%s",sqlite3_column_text(q,0));snprintf(r->command,sizeof r->command,"%s",sqlite3_column_text(q,1));snprintf(r->state,sizeof r->state,"%s",sqlite3_column_text(q,2));
+   r->uid=sqlite3_column_int64(q,3);r->gid=sqlite3_column_int64(q,4);snprintf(r->identity,sizeof r->identity,"%s",sqlite3_column_text(q,5));r->broker_pid=sqlite3_column_int64(q,6);
+   snprintf(r->broker_start,sizeof r->broker_start,"%s",sqlite3_column_text(q,7));r->agent_pid=sqlite3_column_int64(q,8);snprintf(r->agent_start,sizeof r->agent_start,"%s",sqlite3_column_text(q,9));snprintf(r->os_boot,sizeof r->os_boot,"%s",sqlite3_column_text(q,10));}
+ sqlite3_finalize(q);if(!rows){sqlite3_close(db);return 0;}
+ if(out)fputc('[',out);
+ for(int k=0;k<count;++k){LaunchRow *r=&rows[k];HfProcessIdentity seen,list[1024];
+  int owner=broker_owner(c->state,r->launch),broker_current=0,agent_alive=agent_current(r,&seen),residual=uid_processes((uid_t)r->uid,list,1024),observed=0;
+  HfProcessIdentity broker_seen;if(r->broker_pid>0&&hf_process_identity((pid_t)r->broker_pid,&broker_seen))broker_current=broker_seen.state!='Z'&&broker_seen.uid==0&&!strcmp(broker_seen.os_boot_id,r->os_boot)&&broker_seen.start_time==strtoull(r->broker_start,NULL,10);
+  const char *outcome,*next=NULL;
+  if(owner==1){outcome="ADOPTED";++stats->adopted;
+   HfJson *j=malloc(sizeof *j);char attempt[37]="",generation[32]="",*payload=NULL,*reply=NULL;size_t n=0,m=0;
+   if(j&&hf_json_parse(j,r->identity)&&hf_json_get(j,"attempt_id",attempt,sizeof attempt)&&hf_json_get(j,"attempt_generation",generation,sizeof generation)){
+    FILE *w=open_memstream(&payload,&n);if(w){fprintf(w,"{\"launch_id\":\"%s\",\"attempt_id\":\"%s\",\"attempt_generation\":\"%s\",\"sandbox_id\":\"%s\",\"boot_id\":\"%s\",\"boot_generation\":\"%s\"}",r->launch,attempt,generation,c->sandbox,c->boot,c->generation);fclose(w);}
+    FILE *o=payload?open_memstream(&reply,&m):NULL;if(o){int rc=hf_launch_rpc(c->state,"launch.status",payload,o);fclose(o);char status[64];observed=!rc&&reply&&hf_json_parse(j,reply)&&hf_json_get(j,"launch_id",status,sizeof status)&&!strcmp(status,r->launch);}
+   }
+   free(j);free(payload);free(reply);
+  }
+  else if(owner<0){outcome="UNCERTAIN";next="UNCERTAIN";++stats->uncertain;}
+  else if(agent_alive){outcome="ORPHANED_NO_STDIN";next="ORPHANED";++stats->orphaned;}
+  else if(residual!=0){outcome="UNCERTAIN";next="UNCERTAIN";++stats->uncertain;}
+  else if(r->agent_pid<=0&&!strcmp(r->state,"ACCEPTED")){outcome="NOT_SPAWNED";next="NOT_SPAWNED";++stats->not_spawned;}
+  else {outcome="LOST";next="LOST";++stats->lost;}
+  char *data=NULL;size_t n=0;FILE *w=open_memstream(&data,&n);
+  if(w){fprintf(w,"{\"launch_id\":\"%s\",\"command_id\":\"%s\",\"prior_state\":\"%s\",\"outcome\":\"%s\",\"state\":\"%s\",\"broker_lock_held\":%s,\"broker_identity_current\":%s,\"agent_identity_current\":%s,\"ipc_observed\":%s,\"stdin_owned\":%s,\"slot_uid_processes\":%d,\"recorded_agent\":",
+    r->launch,r->command,r->state,outcome,next?next:r->state,owner==1?"true":"false",broker_current?"true":"false",agent_alive?"true":"false",observed?"true":"false",owner==1?"true":"false",residual);
+   if(r->agent_pid>0)fprintf(w,"{\"pid\":%lld,\"start_time\":\"%s\",\"os_boot_id\":\"%s\"}",r->agent_pid,r->agent_start,r->os_boot);else fputs("null",w);
+   fputs(",\"relaunch_permitted\":false}",w);if(fclose(w)){free(data);data=NULL;}}
+  if(sqlite3_exec(db,"BEGIN IMMEDIATE",NULL,NULL,NULL)==SQLITE_OK){
+   int ok=1;
+   if(next){ok=sqlite3_prepare_v2(db,"UPDATE launches SET state=?,updated=unixepoch() WHERE id=? AND state=?",-1,&q,NULL)==SQLITE_OK;if(ok){sqlite3_bind_text(q,1,next,-1,SQLITE_STATIC);sqlite3_bind_text(q,2,r->launch,-1,SQLITE_STATIC);sqlite3_bind_text(q,3,r->state,-1,SQLITE_STATIC);ok=sqlite3_step(q)==SQLITE_DONE&&sqlite3_changes(db)==1;}sqlite3_finalize(q);q=NULL;
+    Instruction i;int version=0;if(ok&&ack_instruction(db,r->launch,r->command,&i,&version))ok=queue_ack(db,c,&i,version,"UNCERTAIN",NULL);}
+   ok=ok&&data&&queue_event(db,c,r->launch,r->command,"launch.reconciled",data);
+   sqlite3_exec(db,ok?"COMMIT":"ROLLBACK",NULL,NULL,NULL);
+  }
+  if(out&&data){if(k)fputc(',',out);fputs(data,out);}free(data);
+ }
+ if(out)fputc(']',out);
+ free(rows);sqlite3_close(db);return 1;
+}
+static int mark_instruction(sqlite3 *db,const char *event,const char *state,const char *outcome) {
+ sqlite3_stmt *q=NULL;int ok=sqlite3_prepare_v2(db,"UPDATE instructions SET state=?,outcome=?,updated=unixepoch() WHERE event=?",-1,&q,NULL)==SQLITE_OK;
+ if(ok){sqlite3_bind_text(q,1,state,-1,SQLITE_STATIC);sqlite3_bind_text(q,2,outcome,-1,SQLITE_STATIC);sqlite3_bind_text(q,3,event,-1,SQLITE_STATIC);ok=sqlite3_step(q)==SQLITE_DONE;}sqlite3_finalize(q);return ok;
+}
+/* 1: process (new or interrupted), 0: already completed, -1: identity conflict, -2: ledger fault. */
+static int instruction_admit(sqlite3 *db,const Instruction *i) {
+ sqlite3_stmt *q=NULL;int ok=sqlite3_prepare_v2(db,"INSERT INTO instructions(event,command,kind,digest,launch,state,updated) VALUES(?,?,?,?,?,'RECEIVED',unixepoch()) ON CONFLICT DO NOTHING",-1,&q,NULL)==SQLITE_OK;
+ if(ok){sqlite3_bind_text(q,1,i->event,-1,SQLITE_STATIC);sqlite3_bind_text(q,2,i->command,-1,SQLITE_STATIC);sqlite3_bind_text(q,3,i->kind,-1,SQLITE_STATIC);sqlite3_bind_text(q,4,i->digest,-1,SQLITE_STATIC);sqlite3_bind_text(q,5,i->launch,-1,SQLITE_STATIC);ok=sqlite3_step(q)==SQLITE_DONE;}
+ int inserted=ok&&sqlite3_changes(db)==1;sqlite3_finalize(q);q=NULL;if(!ok)return -2;if(inserted)return 1;
+ int result=-1;if(sqlite3_prepare_v2(db,"SELECT command,kind,digest,launch,state FROM instructions WHERE event=?",-1,&q,NULL)==SQLITE_OK){sqlite3_bind_text(q,1,i->event,-1,SQLITE_STATIC);
+  if(sqlite3_step(q)==SQLITE_ROW&&!strcmp((const char*)sqlite3_column_text(q,0),i->command)&&!strcmp((const char*)sqlite3_column_text(q,1),i->kind)&&!strcmp((const char*)sqlite3_column_text(q,2),i->digest)&&!strcmp((const char*)sqlite3_column_text(q,3),i->launch))
+   result=strcmp((const char*)sqlite3_column_text(q,4),"DONE")?1:0;}
+ sqlite3_finalize(q);return result;
+}
+static char *control_payload(const RunnerConfig *c,const Instruction *i) {
+ HfJson *body=malloc(sizeof *body);char *payload=NULL;size_t n=0;FILE *writer=body&&hf_json_parse(body,i->body)?open_memstream(&payload,&n):NULL;int ok=writer!=NULL;
+ if(writer){
+  fprintf(writer,"{\"launch_id\":\"%s\",\"attempt_id\":\"%s\",\"attempt_generation\":\"%s\",\"sandbox_id\":\"%s\",\"boot_id\":\"%s\",\"boot_generation\":\"%s\",\"command_id\":\"%s\"",i->launch,i->attempt,i->attempt_generation,c->sandbox,c->boot,c->generation,i->command);
+  if(!strcmp(i->kind,"STEER")){char frame[8192],id[37];if(hf_json_get(body,"frame_b64",frame,sizeof frame)&&hf_json_get(body,"request_id",id,sizeof id)&&hf_uuid_valid(id)){fputs(",\"frame_b64\":",writer);hf_json_write_string(writer,frame);fprintf(writer,",\"request_id\":\"%s\"",id);}else ok=0;}
+  fputc('}',writer);if(fclose(writer))ok=0;
+ }
+ free(body);if(!ok){free(payload);payload=NULL;}return payload;
+}
+typedef struct {int rounds,polls_ok,poll_failures,commands,observations,invalid,starts,replays,refusals,steers,cancels,redelivered,conflicts,acks,events;long long max_backoff_ms;} ServeStats;
+static int final_state(const char *state){return !strcmp(state,"EXITED")||!strcmp(state,"STOPPED")||!strcmp(state,"NOT_SPAWNED")||!strcmp(state,"LOST")||!strcmp(state,"LEASE_EXPIRED");}
+/* STEER/CANCEL are durably received (ACK v1) before any IPC; their outcome is
+ * ACK v2 plus a structured event. Frame UUIDs keep stdin writes exactly-once,
+ * and a CANCEL leaves a fence that refuses any later START for that launch. */
+static void deliver_control(const RunnerConfig *c,const Instruction *i,ServeStats *st) {
+ int cancel=!strcmp(i->kind,"CANCEL");sqlite3 *db=ledger(c);if(!db)return;
+ int ok=queue_ack(db,c,i,1,"ACCEPTED",NULL);sqlite3_stmt *q=NULL;char row_state[32]="";long long uid=-1;
+ if(ok&&cancel&&sqlite3_prepare_v2(db,"INSERT INTO fences(launch,command,attempt_generation) VALUES(?,?,?) ON CONFLICT DO NOTHING",-1,&q,NULL)==SQLITE_OK){sqlite3_bind_text(q,1,i->launch,-1,SQLITE_STATIC);sqlite3_bind_text(q,2,i->command,-1,SQLITE_STATIC);sqlite3_bind_text(q,3,i->attempt_generation,-1,SQLITE_STATIC);ok=sqlite3_step(q)==SQLITE_DONE;}
+ sqlite3_finalize(q);q=NULL;
+ if(ok&&sqlite3_prepare_v2(db,"SELECT state,uid FROM launches WHERE id=?",-1,&q,NULL)==SQLITE_OK){sqlite3_bind_text(q,1,i->launch,-1,SQLITE_STATIC);if(sqlite3_step(q)==SQLITE_ROW){snprintf(row_state,sizeof row_state,"%s",sqlite3_column_text(q,0));uid=sqlite3_column_int64(q,1);}}
+ sqlite3_finalize(q);sqlite3_close(db);if(!ok)return;
+ const char *delivery="UNCERTAIN";int terminal=0;char *payload=control_payload(c,i);
+ if(!payload){delivery="INVALID_INSTRUCTION_BODY";terminal=1;}
+ else if(!*row_state){delivery=cancel?"FENCED_BEFORE_START":"NO_ACTIVE_SESSION";terminal=1;}
+ else {int owner=broker_owner(c->state,i->launch);
+  if(owner==1){char *reply=NULL;size_t m=0;FILE *o=open_memstream(&reply,&m);int rc=o?hf_launch_rpc(c->state,cancel?"launch.cancel":"launch.send",payload,o):1;if(o)fclose(o);
+   HfJson *j=malloc(sizeof *j);char value[64]="";
+   if(rc||!reply||!j||!hf_json_parse(j,reply))delivery="IPC_DELIVERY_UNCERTAIN";
+   else if(cancel){delivery=hf_json_get(j,"status",value,sizeof value)&&!strcmp(value,"CONFIRMED_STOPPED")?"STOPPED":"STOP_UNCERTAIN";terminal=!strcmp(delivery,"STOPPED");}
+   else if(hf_json_get(j,"delivery",value,sizeof value)){static char copy[64];snprintf(copy,sizeof copy,"%s",value);delivery=copy;terminal=strcmp(value,"UNCERTAIN")&&strcmp(value,"LEDGER_UNAVAILABLE");}
+   free(j);free(reply);}
+  else if(owner==0){
+   if(final_state(row_state)){delivery="ALREADY_TERMINAL";terminal=1;}
+   else if(cancel&&uid>0){int absent=stop_uid((uid_t)uid);delivery=absent?"STOPPED_WITHOUT_BROKER":"STOP_UNCERTAIN";terminal=absent;
+    if(absent&&(db=ledger(c))){state_update(db,i->launch,"STOPPED",-1);sqlite3_close(db);}}
+   else {delivery="NO_ACTIVE_SESSION";terminal=1;}
+  }
+  else delivery="UNTRUSTED_OWNER_STATE";
+ }
+ free(payload);
+ if(cancel)++st->cancels;else ++st->steers;
+ char data[512];snprintf(data,sizeof data,"{\"kind\":\"%s\",\"delivery\":\"%s\",\"launch_state_before\":\"%s\",\"native_acknowledged\":false,\"replay_safe\":false}",i->kind,delivery,*row_state?row_state:"ABSENT");
+ if(!(db=ledger(c)))return;
+ if(sqlite3_exec(db,"BEGIN IMMEDIATE",NULL,NULL,NULL)==SQLITE_OK){
+  queue_ack(db,c,i,2,terminal?"TERMINAL":"UNCERTAIN",NULL);queue_event(db,c,i->launch,i->command,cancel?"instruction.cancel":"instruction.steer",data);mark_instruction(db,i->event,"DONE",data);
+  sqlite3_exec(db,"COMMIT",NULL,NULL,NULL);
+ }
+ sqlite3_close(db);
+}
+static void process_instruction(const RunnerConfig *c,Instruction *i,ServeStats *st) {
+ sqlite3 *db=ledger(c);if(!db)return;int admit=instruction_admit(db,i);sqlite3_close(db);
+ if(admit==0){++st->redelivered;return;}if(admit<0){++st->conflicts;return;}
+ if(strcmp(i->kind,"START")){deliver_control(c,i,st);return;}
+ char *result=NULL;size_t n=0;FILE *out=open_memstream(&result,&n);if(!out)return;
+ int rc=launch_start(c,i,out);fclose(out);
+ if(!(db=ledger(c))){free(result);return;}
+ if(!rc){if(strstr(result,"\"replayed\":true"))++st->replays;else ++st->starts;mark_instruction(db,i->event,"DONE",result);}
+ else {++st->refusals;char data[256];snprintf(data,sizeof data,"{\"kind\":\"START\",\"refusal\":\"%s\",\"spawned\":false}",last_refusal);
+  /* A fenced START is permanently refused; other refusals stay retryable. */
+  if(!strcmp(last_refusal,"CANCELLED_BEFORE_START")&&sqlite3_exec(db,"BEGIN IMMEDIATE",NULL,NULL,NULL)==SQLITE_OK){
+   queue_ack(db,c,i,1,"TERMINAL",NULL);queue_event(db,c,i->launch,i->command,"instruction.start.refused",data);mark_instruction(db,i->event,"DONE",data);sqlite3_exec(db,"COMMIT",NULL,NULL,NULL);}
+  else mark_instruction(db,i->event,"REFUSED",data);
+ }
+ sqlite3_close(db);free(result);
+}
+/* One bounded poll of the 6.3 runner command route over the 12.1 transport. */
+static int poll_once(const RunnerConfig *c,ServeStats *st) {
+ char input[256];snprintf(input,sizeof input,"{\"organisation_id\":\"%s\",\"run_id\":\"%s\",\"limit\":8,\"lease_ms\":5000}",c->organisation,c->run);
+ long long started=monotonic_ns();HfHttpResponse response={0};HfJson *j=malloc(sizeof *j);int ok=j&&api(c,"6.3","instructions.runner.poll",input,&response)&&result_json(&response,j);
+ int r=ok?hf_json_field(j,0,"result"):-1;char value[128];
+ const char *names[]={"organisation_id","run_id","consumer_id","sandbox_id","boot_id","boot_generation"};const char *expected[]={c->organisation,c->run,c->consumer,c->sandbox,c->boot,c->generation};
+ for(unsigned k=0;ok&&k<6;++k)ok=atstring(j,r,names[k],value,sizeof value)&&!strcmp(value,expected[k]);
+ int commands=ok?hf_json_field(j,r,"commands"):-1,observations=ok?hf_json_field(j,r,"observations"):-1;
+ ok=ok&&commands>=0&&j->tokens[commands].type=='['&&j->tokens[commands].count<=16&&observations>=0&&j->tokens[observations].type=='[';
+ if(ok){st->observations+=j->tokens[observations].count;
+  for(int t=commands+1;t<j->tokens[commands].next;t=j->tokens[t].next){Instruction i;memset(&i,0,sizeof i);++st->commands;
+   if(!atstring(j,t,"event_id",i.event,sizeof i.event)||!hf_uuid_valid(i.event)||!atstring(j,t,"consumer_id",value,sizeof value)||strcmp(value,c->consumer)||
+    !parse_packet(c,j,hf_json_field(j,t,"packet"),&i,started)||strcmp(i.command,i.event)){++st->invalid;free(i.body);continue;}
+   process_instruction(c,&i,st);free(i.body);
+  }
+ }
+ free(j);hf_http_response_free(&response);return ok;
+}
+static volatile sig_atomic_t serve_stop;
+static void serve_signal(int signal_number){(void)signal_number;serve_stop=1;}
+static void pause_ms(long long ms,long long end){while(ms>0&&!serve_stop&&monotonic_ns()<end){struct timespec d={0,(ms>50?50:ms)*1000000L};nanosleep(&d,NULL);ms-=50;}}
+/* The supervisor-owned command loop. Brokers it forks are independent of this
+ * process and of HTTPS: killing either leaves agent stdin with its broker, and
+ * a restart reconciles before polling again. Transport loss backs off
+ * exponentially (250 ms .. 8 s) while the local spools stay durable. */
+static int serve(const RunnerConfig *c,long long run_seconds,long long interval_ms,FILE *out) {
+ struct sigaction action={0};action.sa_handler=serve_signal;sigemptyset(&action.sa_mask);sigaction(SIGTERM,&action,NULL);sigaction(SIGINT,&action,NULL);
+ ServeStats st={0};ReconcileStats rs={0};char *recon=NULL;size_t rn=0;FILE *ro=open_memstream(&recon,&rn);
+ int reconciled=ro&&reconcile(c,ro,&rs);if(ro)fclose(ro);if(!reconciled){free(recon);return refuse(out,"RECONCILIATION_FAILED");}
+ long long end=monotonic_ns()+run_seconds*1000000000LL,backoff=0;
+ while(!serve_stop&&monotonic_ns()<end){
+  ++st.rounds;while(waitpid(-1,NULL,WNOHANG)>0){}
+  int ok=poll_once(c,&st);if(ok)++st.polls_ok;
+  sqlite3 *db=ledger(c);if(db){if(!flush_outbox(db,c,NULL,NULL,8,&st.acks,&st.events))ok=0;sqlite3_close(db);}
+  if(ok){backoff=0;pause_ms(interval_ms,end);}
+  else {++st.poll_failures;backoff=backoff?(backoff*2>8000?8000:backoff*2):250;if(backoff>st.max_backoff_ms)st.max_backoff_ms=backoff;pause_ms(backoff,end);}
+ }
+ while(waitpid(-1,NULL,WNOHANG)>0){}
+ fprintf(out,"{\"rounds\":%d,\"polls_ok\":%d,\"poll_failures\":%d,\"max_backoff_ms\":%lld,\"commands_received\":%d,\"observations\":%d,\"invalid_packets\":%d,\"starts\":%d,\"start_replays\":%d,\"start_refusals\":%d,\"steers\":%d,\"cancels\":%d,\"redelivered_skipped\":%d,\"identity_conflicts\":%d,\"acks_delivered\":%d,\"events_delivered\":%d,\"stopped_by_signal\":%s,\"reconciled\":{\"adopted\":%d,\"orphaned\":%d,\"lost\":%d,\"not_spawned\":%d,\"uncertain\":%d,\"launches\":%s}}",
+  st.rounds,st.polls_ok,st.poll_failures,st.max_backoff_ms,st.commands,st.observations,st.invalid,st.starts,st.replays,st.refusals,st.steers,st.cancels,st.redelivered,st.conflicts,st.acks,st.events,serve_stop?"true":"false",rs.adopted,rs.orphaned,rs.lost,rs.not_spawned,rs.uncertain,recon);
+ free(recon);return 0;
+}
+static int bounded_i64(const HfJson *j,const char *key,long long min,long long max,long long *value){int64_t v=0;if(!hf_json_i64(j,hf_json_field(j,0,key),&v)||v<min||v>max)return 0;*value=v;return 1;}
 int hf_component_12_2(const char *action,const char *request,FILE *out) {
- HfJson *j=malloc(sizeof *j);char config_path[4096],event[37];RunnerConfig c;Instruction instruction;const char *keys[]={"config_path","event_id"};
+ HfJson *j=malloc(sizeof *j);char config_path[4096],event[37];RunnerConfig c;Instruction instruction;
+ if(!strcmp(action,"launch.reconcile")||!strcmp(action,"launch.serve")){
+  const char *keys[]={"config_path","run_seconds","poll_interval_ms"};int serving=!strcmp(action,"launch.serve");long long seconds=0,interval=0;
+  int ok=j&&hf_json_parse(j,request)&&hf_json_only(j,0,keys,serving?3:1)&&hf_json_get(j,"config_path",config_path,sizeof config_path)&&
+   (!serving||(bounded_i64(j,"run_seconds",1,86400,&seconds)&&bounded_i64(j,"poll_interval_ms",50,60000,&interval)))&&load_config(config_path,&c);free(j);
+  if(!ok)return hf_native_error(out,"UNTRUSTED_RUNNER_CONFIG");
+  if(serving)return serve(&c,seconds,interval,out);
+  ReconcileStats rs={0};char *list=NULL;size_t n=0;FILE *o=open_memstream(&list,&n);int done=o&&reconcile(&c,o,&rs);if(o)fclose(o);
+  if(done)fprintf(out,"{\"adopted\":%d,\"orphaned\":%d,\"lost\":%d,\"not_spawned\":%d,\"uncertain\":%d,\"relaunched\":0,\"launches\":%s}",rs.adopted,rs.orphaned,rs.lost,rs.not_spawned,rs.uncertain,list);
+  free(list);return done?0:hf_native_error(out,"RECONCILIATION_FAILED");
+ }
+ const char *keys[]={"config_path","event_id"};
  int ok=j&&hf_json_parse(j,request)&&hf_json_only(j,0,keys,2)&&hf_json_get(j,"config_path",config_path,sizeof config_path)&&hf_json_get(j,"event_id",event,sizeof event)&&load_config(config_path,&c);free(j);
  if(!ok)return hf_native_error(out,"UNTRUSTED_RUNNER_CONFIG");
  if(!fetch_instruction(&c,event,&instruction))return hf_native_error(out,"CURRENT_INSTRUCTION_UNAVAILABLE");
  int result=1;if(!strcmp(action,"launch.start"))result=launch_start(&c,&instruction,out);
  else if(!strcmp(action,"launch.instruction")){
   if(!strcmp(instruction.kind,"START"))result=launch_start(&c,&instruction,out);
-  else {HfJson *body=malloc(sizeof *body);char *payload=NULL;size_t n=0;FILE *writer=open_memstream(&payload,&n);if(body&&writer&&hf_json_parse(body,instruction.body)){
-    fprintf(writer,"{\"launch_id\":\"%s\",\"attempt_id\":\"%s\",\"attempt_generation\":\"%s\",\"sandbox_id\":\"%s\",\"boot_id\":\"%s\",\"boot_generation\":\"%s\",\"command_id\":\"%s\"",instruction.launch,instruction.attempt,instruction.attempt_generation,c.sandbox,c.boot,c.generation,instruction.command);
-    if(!strcmp(instruction.kind,"STEER")){char frame[8192],id[37];if(hf_json_get(body,"frame_b64",frame,sizeof frame)&&hf_json_get(body,"request_id",id,sizeof id)&&hf_uuid_valid(id)){fputs(",\"frame_b64\":",writer);hf_json_write_string(writer,frame);fprintf(writer,",\"request_id\":\"%s\"",id);}else result=hf_native_error(out,"INVALID_FRAME");}
-    fputc('}',writer);fclose(writer);writer=NULL;
-    if(!strcmp(instruction.kind,"CANCEL"))result=hf_launch_rpc(c.state,"launch.cancel",payload,out);
-    else if(!strcmp(instruction.kind,"STEER"))result=hf_launch_rpc(c.state,"launch.send",payload,out);
-   }if(writer)fclose(writer);free(payload);free(body);}
+  else {char *payload=control_payload(&c,&instruction);
+   if(!payload)result=hf_native_error(out,"INVALID_FRAME");
+   else if(!strcmp(instruction.kind,"CANCEL"))result=hf_launch_rpc(c.state,"launch.cancel",payload,out);
+   else if(!strcmp(instruction.kind,"STEER"))result=hf_launch_rpc(c.state,"launch.send",payload,out);
+   free(payload);}
  }else result=hf_native_error(out,"UNKNOWN_ACTION");free(instruction.body);return result;
 }
 

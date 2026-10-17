@@ -11,7 +11,8 @@
   "actions": [
     "integration.release.create",
     "integration.release.inspect",
-    "integration.release.evaluate"
+    "integration.release.evaluate",
+    "integration.release.recover"
   ],
   "requires": [
     "19.2",

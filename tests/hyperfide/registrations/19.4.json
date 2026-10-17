@@ -13,7 +13,16 @@
     "release.empty-set-refused",
     "release.caller-cannot-claim-published",
     "release.immutable-manifest",
-    "release.partial-remains-explicit"
+    "release.partial-remains-explicit",
+    "release.interrupted-unknown-reconciles",
+    "release.interrupted-partial-explicit",
+    "release.recovery-follows-recorded-policy",
+    "release.advance-successor-manifest",
+    "release.successor-releases-after-completion",
+    "release.audit-history-preserved",
+    "release.compensation-required",
+    "release.compensation-direct-push-refused",
+    "release.compensation-through-gateway"
   ],
   "argv": [
     "python3",

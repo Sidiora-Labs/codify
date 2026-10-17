@@ -28,7 +28,16 @@
     "publication.custody-preflight-no-mint",
     "publication.source-url-rewrite-isolated",
     "publication.https-source-config-isolated",
-    "publication.invalid-token-response-revokes"
+    "publication.invalid-token-response-revokes",
+    "publication.cas-head-advanced-refused",
+    "publication.stale-worker-fenced",
+    "publication.direct-push-after-db-fence-refused",
+    "publication.lost-response-outcome-unknown",
+    "publication.unknown-intent-not-superseded",
+    "publication.custody-held-through-unknown",
+    "publication.lost-response-reconciled-from-ref",
+    "publication.custody-release-held-until-accept",
+    "publication.changed-inputs-refused"
   ],
   "argv": [
     "python3",

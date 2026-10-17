@@ -149,27 +149,43 @@ static void captured(FILE *out,const unsigned char *bytes,size_t n,int complete)
  char sha[65],*encoded=standard64(bytes,n);if(!encoded||!hf_sha256_bytes(bytes,n,sha)){free(encoded);fputs("null",out);return;}
  fprintf(out,"{\"base64\":\"%s\",\"digest\":\"sha256:%s\",\"size_bytes\":\"%zu\",\"complete\":%s}",encoded,sha,n,complete?"true":"false");free(encoded);
 }
+/* Dependency preparation is a registered runner tool (policy/placement.ts) that the
+ * 12.2 placement helper does not map; authorise it over the same 12.1 transport. */
+static int preparation_placement(const char *config){
+ HfHttpResponse response={0};HfJson *j=malloc(sizeof *j);int ok=j&&hf_runner_control_api(config,"1.1","placement.runner.authorize","{\"runner_action\":\"runner.preparation.execute\"}",&response)&&response.status>=200&&response.status<300&&response.body&&hf_json_parse(j,response.body);
+ int accepted=0,authorized=0,result=ok?hf_json_field(j,0,"result"):-1;char text[128];
+ ok=ok&&hf_json_bool(j,hf_json_field(j,0,"ok"),&accepted)&&accepted&&result>=0&&hf_json_bool(j,hf_json_field(j,result,"authorized"),&authorized)&&authorized&&
+  string_at(j,result,"runner_action",text,sizeof text)&&!strcmp(text,"runner.preparation.execute")&&string_at(j,result,"job_class",text,sizeof text)&&!strcmp(text,"dependency_preparation")&&
+  string_at(j,result,"tool",text,sizeof text)&&!strcmp(text,"native.spawn")&&string_at(j,result,"location",text,sizeof text)&&!strcmp(text,"REMOTE_EXECUTION");
+ free(j);hf_http_response_free(&response);return ok;
+}
 int hf_runner_job_execute(const char *request,FILE *out){
  HfJson *input=malloc(sizeof *input),*job=malloc(sizeof *job);char config[4096],operation[37];const char *keys[]={"config_path","operation_id"};HfHttpResponse response={0};
  int ok=input&&job&&hf_json_parse(input,request)&&hf_json_only(input,0,keys,2)&&hf_json_get(input,"config_path",config,sizeof config)&&hf_json_get(input,"operation_id",operation,sizeof operation)&&hf_uuid_valid(operation)&&geteuid()==0;
  if(!ok){free(input);free(job);return hf_native_error(out,"UNTRUSTED_JOB_TOKEN");}free(input);long long request_started=mono();
  if(!hf_runner_job_claim(config,operation,&response)||!response.body||!hf_json_parse(job,response.body)){hf_http_response_free(&response);free(job);return hf_native_error(out,"CURRENT_JOB_CLAIM_UNAVAILABLE");}
  int result=hf_json_field(job,0,"result"),plan=hf_json_field(job,result,"plan"),binding=hf_json_field(job,result,"binding");char state_dir[4096],workspace[4096],relative_cwd[4096],expected_executable[72],expected_environment[72],plan_digest[72],kind[32]="",slot[37];
- int64_t uid=0,gid=0,timeout=0,remaining=0;char actual_operation[37];
+ int64_t uid=0,gid=0,timeout=0,remaining=0;char actual_operation[37],job_class[32]="EXECUTION";string_at(job,result,"job_class",job_class,sizeof job_class);int preparing=!strcmp(job_class,"PREPARATION");
  ok=result>=0&&plan>=0&&binding>=0&&string_at(job,result,"operation_id",actual_operation,sizeof actual_operation)&&!strcmp(actual_operation,operation)&&string_at(job,result,"plan_digest",plan_digest,sizeof plan_digest)&&
  string_at(job,binding,"state_dir",state_dir,sizeof state_dir)&&string_at(job,binding,"workspace_path",workspace,sizeof workspace)&&string_at(job,binding,"capacity_kind",kind,sizeof kind)&&string_at(job,binding,"slot_id",slot,sizeof slot)&&
  hf_json_i64(job,hf_json_field(job,binding,"uid"),&uid)&&uid>0&&uid<=UINT32_MAX&&hf_json_i64(job,hf_json_field(job,binding,"gid"),&gid)&&gid>0&&gid<=UINT32_MAX&&
  hf_json_i64(job,hf_json_field(job,plan,"timeout_ms"),&timeout)&&timeout>0&&timeout<=259200000&&hf_json_i64(job,hf_json_field(job,result,"remaining_ms"),&remaining)&&remaining>0&&
  string_at(job,plan,"cwd",relative_cwd,sizeof relative_cwd)&&(!strcmp(relative_cwd,".")||relative(relative_cwd))&&string_at(job,plan,"executable_digest",expected_executable,sizeof expected_executable)&&strlen(expected_executable)==71&&string_at(job,plan,"environment_digest",expected_environment,sizeof expected_environment)&&strlen(expected_environment)==71;
- const char *tool=!strcmp(kind,"TEST")?"runner.test.execute":!strcmp(kind,"REVIEW")?"runner.review.execute":!strcmp(kind,"INTEGRATION")?"runner.integration.execute":!strcmp(kind,"INDEX")?"runner.index.execute":!strcmp(kind,"BUILD")?"runner.build.execute":NULL;
- if(!ok||!tool||!hf_runner_job_placement(config,tool)){hf_http_response_free(&response);free(job);return hf_native_error(out,"JOB_SCOPE_OR_PLACEMENT_DENIED");}
+ const char *tool=preparing?"runner.preparation.execute":!strcmp(kind,"TEST")?"runner.test.execute":!strcmp(kind,"REVIEW")?"runner.review.execute":!strcmp(kind,"INTEGRATION")?"runner.integration.execute":!strcmp(kind,"INDEX")?"runner.index.execute":!strcmp(kind,"BUILD")?"runner.build.execute":NULL;
+ if(!ok||!tool||!(preparing?preparation_placement(config):hf_runner_job_placement(config,tool))){hf_http_response_free(&response);free(job);return hf_native_error(out,"JOB_SCOPE_OR_PLACEMENT_DENIED");}
+ /* Pause/drain/cancel/stop close admission durably before any new job may start on the slot UID. */
+ if(hf_runner_admission_closed(state_dir,(uid_t)uid)){hf_http_response_free(&response);free(job);return hf_native_error(out,"JOB_ADMISSION_FENCED");}
  HfProcessIdentity owned[1024];size_t owned_count=0;MeasuredSource measured={0};
- if(!no_processes((uid_t)uid,owned,&owned_count)||owned_count||!readiness(job,result,config,&measured,(uid_t)uid,(gid_t)gid,request_started+(timeout<remaining?timeout:remaining)*1000000LL,operation)){hf_http_response_free(&response);free(job);return hf_native_error(out,"ACTUAL_WORKSPACE_NOT_READY_OR_SLOT_BUSY");}
+ if(!no_processes((uid_t)uid,owned,&owned_count)||owned_count||(!preparing&&!readiness(job,result,config,&measured,(uid_t)uid,(gid_t)gid,request_started+(timeout<remaining?timeout:remaining)*1000000LL,operation))){hf_http_response_free(&response);free(job);return hf_native_error(out,"ACTUAL_WORKSPACE_NOT_READY_OR_SLOT_BUSY");}
+ /* Preparation jobs execute only against the privileged immutable stage for this exact claim. */
+ HfPreparationStage stage;memset(&stage,0,sizeof stage);
+ if(preparing&&!hf_runner_stage_preparation(config,job,result,&stage)){hf_http_response_free(&response);free(job);return hf_native_error(out,"PREPARATION_STAGE_FAILED");}
  int root=open(workspace,O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW),cwd=-1;struct stat st;if(root>=0&&!fstat(root,&st)&&st.st_uid==(uid_t)uid&&!(st.st_mode&077))cwd=!strcmp(relative_cwd,".")?dup(root):open_beneath(root,relative_cwd,1);
  int array=hf_json_field(job,plan,"argv");char **argv=NULL;int argc=0,binary=-1;char executable[65],environment_digest[65];EnvEntry env[64]={0};int env_count=0;
  ok=cwd>=0&&array>=0&&job->tokens[array].type=='['&&job->tokens[array].count>0&&job->tokens[array].count<=256;
  if(ok){argv=calloc((size_t)job->tokens[array].count+1,sizeof *argv);ok=argv!=NULL;}
  for(int t=array+1;ok&&t<job->tokens[array].next;t=job->tokens[t].next){argv[argc]=calloc(4096,1);ok=argv[argc]&&hf_json_string(job,t,argv[argc],4096);++argc;}
+ if(ok&&preparing)ok=argc==4&&!strcmp(argv[2],"--job-context")&&!strcmp(argv[3],stage.context_path)&&!strcmp(argv[0],stage.node_path);
  if(ok&&argv[0][0]=='/')binary=open(argv[0],O_RDONLY|O_CLOEXEC|O_NOFOLLOW);
  ok=ok&&binary>=0&&!fstat(binary,&st)&&S_ISREG(st.st_mode)&&st.st_uid==0&&!(st.st_mode&022)&&fd_hash(binary,executable)&&!strcmp(expected_executable+7,executable)&&environment(job,plan,env,&env_count,environment_digest)&&!strcmp(expected_environment+7,environment_digest);
  int artifacts=hf_json_field(job,plan,"artifact_paths");if(ok)ok=artifacts>=0&&job->tokens[artifacts].type=='['&&job->tokens[artifacts].count<=64;
@@ -178,12 +194,18 @@ int hf_runner_job_execute(const char *request,FILE *out){
  if(ok&&db){int rc=sqlite3_prepare_v2(db,"INSERT INTO jobs(id,digest,state,uid) VALUES(?,?,'INTENT',?)",-1,&q,NULL);if(rc==SQLITE_OK){sqlite3_bind_text(q,1,operation,-1,SQLITE_STATIC);sqlite3_bind_text(q,2,plan_digest,-1,SQLITE_STATIC);sqlite3_bind_int64(q,3,uid);rc=sqlite3_step(q);}sqlite3_finalize(q);ok=rc==SQLITE_DONE;}else ok=0;
  if(!ok){if(binary>=0)close(binary);if(root>=0)close(root);if(cwd>=0)close(cwd);sqlite3_close(db);for(int k=0;k<argc;++k)free(argv[k]);
  free(argv);for(int k=0;k<64;++k){free(env[k].key);free(env[k].value);}hf_http_response_free(&response);free(job);return hf_native_error(out,"IMMUTABLE_JOB_OR_EXECUTABLE_CONFLICT");}
- int pipes_in[2],pipes_out[2],pipes_err[2],gate[2];if(pipe2(pipes_in,O_CLOEXEC)||pipe2(pipes_out,O_CLOEXEC)||pipe2(pipes_err,O_CLOEXEC)||pipe2(gate,O_CLOEXEC)){sqlite3_close(db);return hf_native_error(out,"IPC_UNAVAILABLE");}
+ int pipes_in[2],pipes_out[2],pipes_err[2],gate[2],dropped[2],attach_gate[2];if(pipe2(pipes_in,O_CLOEXEC)||pipe2(pipes_out,O_CLOEXEC)||pipe2(pipes_err,O_CLOEXEC)||pipe2(gate,O_CLOEXEC)||pipe2(dropped,O_CLOEXEC)||pipe2(attach_gate,O_CLOEXEC)){sqlite3_close(db);return hf_native_error(out,"IPC_UNAVAILABLE");}
+ /* A held per-boot charge from the authenticated claim is enforced through the
+  * delegated cgroup-v2 backend (<state_dir>/budget.json); absence is reported. */
+ HfBudgetHandle charge_budget;memset(&charge_budget,0,sizeof charge_budget);charge_budget.root_fd=charge_budget.scope_fd=-1;int budget_status=-2,budget_attached=-2,budget_released=-2;
+ {int charge=hf_json_field(job,result,"budget");char *charge_raw=charge>=0?hf_json_raw(job,charge):NULL;
+  if(charge_raw&&strcmp(charge_raw,"null")){char budget_config[4200];snprintf(budget_config,sizeof budget_config,"%s/budget.json",state_dir);budget_status=hf_budget_prepare(budget_config,charge_raw,&charge_budget);}
+  free(charge_raw);}
  long long budget=timeout<remaining?timeout:remaining,deadline=request_started+budget*1000000LL;int watch_writer=-1;
  pid_t watchdog=hf_slot_watchdog((uid_t)uid,deadline,&watch_writer,operation);if(watchdog<0){sqlite3_close(db);return hf_native_error(out,"JOB_WATCHDOG_UNAVAILABLE");}
  char started_at[40],ended_at[40];long long measured_start=mono();if(!utc_now(started_at)){close(watch_writer);sqlite3_close(db);return hf_native_error(out,"CLOCK_UNAVAILABLE");}
  prctl(PR_SET_CHILD_SUBREAPER,1);signal(SIGPIPE,SIG_IGN);pid_t supervisor=getpid();pid_t child=fork();
- if(child==0){close(gate[1]);close(pipes_in[1]);close(pipes_out[0]);close(pipes_err[0]);pid_t parent=supervisor;prctl(PR_SET_PDEATHSIG,SIGKILL);if(getppid()!=parent)_exit(125);setpgid(0,0);char release;
+ if(child==0){close(gate[1]);close(pipes_in[1]);close(pipes_out[0]);close(pipes_err[0]);close(dropped[0]);close(attach_gate[1]);pid_t parent=supervisor;prctl(PR_SET_PDEATHSIG,SIGKILL);if(getppid()!=parent)_exit(125);setpgid(0,0);char release;
   if(read(gate[0],&release,1)!=1||release!='G')_exit(125);
   if(dup2(pipes_in[0],0)<0||dup2(pipes_out[1],1)<0||dup2(pipes_err[1],2)<0||fchdir(cwd))_exit(125);
   char home[4096],tmp[4096];if(!string_at(job,binding,"home_path",home,sizeof home)||!string_at(job,binding,"tmp_path",tmp,sizeof tmp))_exit(125);
@@ -193,12 +215,19 @@ int hf_runner_job_execute(const char *request,FILE *out){
   struct rlimit process_limit={512,512},file_limit={512,512};if(setrlimit(RLIMIT_NPROC,&process_limit)||setrlimit(RLIMIT_NOFILE,&file_limit))_exit(125);
   umask(077);if(prctl(PR_SET_PDEATHSIG,SIGKILL)||getppid()!=parent)_exit(125);
   if(binary!=3&&dup3(binary,3,O_CLOEXEC)<0)_exit(125);
+  /* Privileges are dropped: the parent attaches this exact identity to the budget cgroup. */
+  char attached;if(write(dropped[1],"R",1)!=1||read(attach_gate[0],&attached,1)!=1||attached!='B')_exit(125);
   if(close_range(4,~0U,0))_exit(125);
   fexecve(3,argv,environ);_exit(127);
  }
- close(gate[0]);close(pipes_in[0]);close(pipes_out[1]);close(pipes_err[1]);close(binary);HfProcessIdentity identity;ok=child>0&&hf_process_identity(child,&identity);
+ close(gate[0]);close(pipes_in[0]);close(pipes_out[1]);close(pipes_err[1]);close(binary);close(dropped[1]);close(attach_gate[0]);HfProcessIdentity identity;ok=child>0&&hf_process_identity(child,&identity);
  if(ok&&sqlite3_prepare_v2(db,"UPDATE jobs SET state='START_RECORDED',pid=?,start_time=?,os_boot_id=? WHERE id=?",-1,&q,NULL)==SQLITE_OK){char start[32];snprintf(start,sizeof start,"%llu",identity.start_time);sqlite3_bind_int(q,1,child);sqlite3_bind_text(q,2,start,-1,SQLITE_TRANSIENT);sqlite3_bind_text(q,3,identity.os_boot_id,-1,SQLITE_STATIC);sqlite3_bind_text(q,4,operation,-1,SQLITE_STATIC);ok=sqlite3_step(q)==SQLITE_DONE;}else ok=0;sqlite3_finalize(q);
- if(!ok||mono()>=deadline||write(gate[1],"G",1)!=1){if(child>0)kill(child,SIGKILL);close(gate[1]);terminate_uid((uid_t)uid);sqlite3_close(db);return hf_native_error(out,"DURABLE_START_FAILED");}close(gate[1]);
+ if(!ok||mono()>=deadline||write(gate[1],"G",1)!=1){if(child>0)kill(child,SIGKILL);close(gate[1]);close(dropped[0]);close(attach_gate[1]);terminate_uid((uid_t)uid);if(budget_status==HF_BUDGET_READY)hf_budget_release(&charge_budget);sqlite3_close(db);return hf_native_error(out,"DURABLE_START_FAILED");}close(gate[1]);
+ {char ready=0;struct pollfd wait_ready={dropped[0],POLLIN,0};int polled=poll(&wait_ready,1,(int)((deadline-mono())/1000000LL>10000?10000:(deadline-mono())/1000000LL));
+  HfProcessIdentity dropped_identity;ok=polled==1&&read(dropped[0],&ready,1)==1&&ready=='R'&&hf_process_identity(child,&dropped_identity)&&dropped_identity.start_time==identity.start_time;
+  if(ok&&budget_status==HF_BUDGET_READY)ok=(budget_attached=hf_budget_attach(&charge_budget,&dropped_identity))==HF_BUDGET_READY;
+  if(!ok||write(attach_gate[1],"B",1)!=1){kill(child,SIGKILL);close(dropped[0]);close(attach_gate[1]);terminate_uid((uid_t)uid);hf_slot_watchdog_finish(watchdog,&watch_writer);while(waitpid(-1,NULL,WNOHANG)>0){}if(budget_status==HF_BUDGET_READY)hf_budget_release(&charge_budget);sqlite3_close(db);return hf_native_error(out,budget_status==HF_BUDGET_READY?"BUDGET_ATTACH_FAILED":"PRIVILEGE_DROP_FAILED");}
+  close(dropped[0]);close(attach_gate[1]);}
  fcntl(pipes_in[1],F_SETFL,O_NONBLOCK);fcntl(pipes_out[0],F_SETFL,O_NONBLOCK);fcntl(pipes_err[0],F_SETFL,O_NONBLOCK);
  unsigned char *stdout_bytes=malloc(JOB_STREAM_LIMIT),*stderr_bytes=malloc(JOB_STREAM_LIMIT);size_t sizes[2]={0,0};int eof[2]={0,0},timed_out=0,interrupted=0,truncated=0,exit_code=-1,signal_number=0,finished=0,input_open=1;
  int input_token=hf_json_field(job,plan,"stdin");char *stdin_bytes=NULL;size_t input_length=0,input_offset=0;
@@ -233,7 +262,17 @@ int hf_runner_job_execute(const char *request,FILE *out){
  size_t artifact_bytes=0;int artifact_count=0,artifact_complete=1;
  for(int t=artifacts+1;t<job->tokens[artifacts].next;t=job->tokens[t].next){char name[4096];if(!hf_json_string(job,t,name,sizeof name)){artifact_complete=0;break;}int fd=open_beneath(cwd,name,0);struct stat before,after;if(fd<0||fstat(fd,&before)||!S_ISREG(before.st_mode)||before.st_size<0||(unsigned long long)before.st_size>JOB_ARTIFACT_LIMIT-artifact_bytes){if(fd>=0)close(fd);artifact_complete=0;break;}size_t length=(size_t)before.st_size;unsigned char *bytes=malloc(length?length:1);size_t offset=0;while(bytes&&offset<length){ssize_t n=read(fd,bytes+offset,length-offset);if(n<=0)break;offset+=(size_t)n;}int stable=bytes&&offset==length&&!fstat(fd,&after)&&before.st_dev==after.st_dev&&before.st_ino==after.st_ino&&before.st_size==after.st_size&&before.st_mtim.tv_sec==after.st_mtim.tv_sec&&before.st_mtim.tv_nsec==after.st_mtim.tv_nsec;close(fd);if(!stable){free(bytes);artifact_complete=0;break;}char sha[65],*encoded=standard64(bytes,length);if(!encoded||!hf_sha256_bytes(bytes,length,sha)){free(bytes);free(encoded);artifact_complete=0;break;}if(artifact_count++)fputc(',',writer);fputs("{\"path\":",writer);hf_json_write_string(writer,name);fprintf(writer,",\"base64\":\"%s\",\"digest\":\"sha256:%s\",\"size_bytes\":\"%zu\",\"complete\":true}",encoded,sha,length);free(bytes);free(encoded);artifact_bytes+=length;
  }
- fprintf(writer,"],\"artifacts_complete\":%s,\"cleanup_status\":\"%s\",\"observed_process_absent\":%s,\"plan_digest\":\"%s\",\"authority_renewed\":false}",artifact_complete?"true":"false",absent?"CONFIRMED":"UNKNOWN",absent?"true":"false",plan_digest);int closed=fclose(writer)==0;
+ fprintf(writer,"],\"artifacts_complete\":%s,\"cleanup_status\":\"%s\",\"observed_process_absent\":%s,\"plan_digest\":\"%s\",\"authority_renewed\":false",artifact_complete?"true":"false",absent?"CONFIRMED":"UNKNOWN",absent?"true":"false",plan_digest);
+ fprintf(writer,",\"job_class\":\"%s\",\"admission_fenced_at_completion\":%s,\"budget\":",preparing?"PREPARATION":"EXECUTION",hf_runner_admission_closed(state_dir,(uid_t)uid)?"true":"false");
+ if(budget_status==-2)fputs("{\"status\":\"UNCHARGED\"}",writer);else hf_budget_observe(&charge_budget,writer);
+ if(budget_status==HF_BUDGET_READY)budget_released=hf_budget_release(&charge_budget);
+ fprintf(writer,",\"budget_attach_code\":%d,\"budget_release_code\":%d,\"preparation_stage\":",budget_attached,budget_released);
+ if(preparing){char context_digest[65]="";int fd=open(stage.context_path,O_RDONLY|O_CLOEXEC|O_NOFOLLOW);if(fd<0||!fd_hash(fd,context_digest))context_digest[0]=0;if(fd>=0)close(fd);
+  const char *names[]={"stage_root","context_path","out_root","diagnostics_root","workspace_path","node_path","recipe_path"};const char *values[]={stage.stage_root,stage.context_path,stage.out_root,stage.diagnostics_root,stage.workspace_path,stage.node_path,stage.recipe_path};
+  fputc('{',writer);for(unsigned k=0;k<7;++k){if(k)fputc(',',writer);hf_json_write_string(writer,names[k]);fputc(':',writer);hf_json_write_string(writer,values[k]);}
+  fprintf(writer,",\"context_digest\":\"sha256:%s\",\"node_digest\":\"%s\",\"recipe_digest\":\"%s\",\"uid\":%lu,\"gid\":%lu}",context_digest,stage.node_digest,stage.recipe_digest,(unsigned long)stage.uid,(unsigned long)stage.gid);}
+ else fputs("null",writer);
+ fputc('}',writer);int closed=fclose(writer)==0;
  char receipt_digest[65],*encoded=closed&&hf_sha256_bytes(receipt,receipt_length,receipt_digest)?hf_base64url((const unsigned char*)receipt,receipt_length):NULL;
  int persisted=encoded&&hf_private_write(receipt_path,receipt,receipt_length,0);
  if(persisted&&sqlite3_prepare_v2(db,"UPDATE jobs SET state='TERMINAL' WHERE id=?",-1,&q,NULL)==SQLITE_OK){sqlite3_bind_text(q,1,operation,-1,SQLITE_STATIC);sqlite3_step(q);}sqlite3_finalize(q);sqlite3_close(db);

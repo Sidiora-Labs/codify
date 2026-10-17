@@ -87,10 +87,18 @@ export async function checkDrift(input:unknown,context:ComponentContext):Promise
   if(!gate.eligible)reasons.push('original_gate_not_eligible');
   if(hash(r.scorecard_id)!==gate.scorecard_id)reasons.push('unapproved_scorecard_revision');
   if(Date.parse(gate.valid_until)<Date.now())reasons.push('required_qualification_expired');
-  if(canonical(profile(r.current_profile))!==canonical(gate.policy.profile))reasons.push('model_route_or_rubric_changed');
+  const current=profile(r.current_profile);
+  if(canonical(current)!==canonical(gate.policy.profile))reasons.push('model_route_or_rubric_changed');
   if(Date.parse(gate.policy.expires_at)<Date.now())reasons.push('policy_expired');
+  const drifted=reasons.length>0;
+  // Drift never self-heals: name the holdout replay and full-case requalification the changed profile must pass before any re-promotion.
+  const requalification=drifted?{profile:current,profile_digest:digest(current),approved_profile_digest:digest(gate.policy.profile),
+    approved_scorecard_id:gate.scorecard_id,observed_scorecard_id:hash(r.scorecard_id),policy_version:gate.policy.version,purpose:gate.policy.purpose,
+    replay:{dataset_id:gate.policy.dataset_id,holdout_digest:gate.policy.holdout_digest,split:'holdout'},
+    required_cases:gate.policy.required_cases,next_action:'evaluation.promotion.assess'}:null;
   const result={gate_id:hash(r.gate_id),scorecard_id:hash(r.scorecard_id),policy_version:gate.policy.version,
-    model_action_policy_enabled:reasons.length===0,action:reasons.length?'disable_model_action_policy':'retain_qualified_policy',
+    model_action_policy_enabled:!drifted,action:drifted?'disable_model_action_policy':'retain_qualified_policy',
+    replay_required:drifted,requalification_required:drifted,requalification,
     reasons:[...new Set(reasons)],retain_existing_workers:true,retain_artifacts:true,alter_accepted_evidence:false,deterministic_core_continue:true};
   const artifact_id=await store.put('drift_gate',result);return {artifact_id,...result};
 }
@@ -100,7 +108,9 @@ export function createComponent(_context:ComponentContext):Component{
     'evaluation.selfhost.optional':async(input)=>{
       const r=fields(input,['requested']);
       if(typeof r.requested!=='boolean')fail('Explicit optional capability choice required');
-      return {requested:r.requested,enabled:false,requires_separate_qualification:r.requested,hosted_baseline_blocked:false};
+      return {requested:r.requested,enabled:false,requires_separate_qualification:r.requested,hosted_baseline_blocked:false,
+        replay_required_before_capability_change:r.requested,
+        qualification_dimensions:r.requested?['remote_gpu','licence','engine','correctness','overload','restart']:[]};
     }
   }};
 }

@@ -70,6 +70,14 @@ def main():
                 p["body"]["subject_digest"]=digest(p["body"]["payload"]);bad["predictions"][1]=f.resign(p)
                 value=f.ask("evaluation.scorecard",bad);require(value["metrics"]["span"]["actual_cost_microusd"]is None,"unknown usage became free")
             check("evaluation.scorecard.unknown-cost-not-zero",unknown_usage)
+            def error_rate():
+                require(result["metrics"]["span"]["error_rate"]==0 and result["metrics"]["span"]["error_rate_interval"]["upper"]>0,"error rate absent or overconfident")
+                bad=copy.deepcopy(request);i=next(n for n,p in enumerate(bad["predictions"])if p["body"]["payload"]["profile"]["id"]=="span")
+                p=bad["predictions"][i];p["body"]["payload"].update(status="error",decision=None,probabilities=None)
+                p["body"]["subject_digest"]=digest(p["body"]["payload"]);bad["predictions"][i]=f.resign(p)
+                m=f.ask("evaluation.scorecard",bad)["metrics"]["span"]
+                require(m["errors"]==1 and abs(m["error_rate"]-1/3)<1e-9 and m["coverage"]==2/3,"error rate not reported")
+            check("evaluation.scorecard.error-rate-visible",error_rate)
         finally:f.close()
     print(json.dumps({"type":"cleanup","resources":[],"complete":True}),flush=True)
     return 1 if FAILED else 0

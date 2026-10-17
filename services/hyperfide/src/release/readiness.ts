@@ -78,6 +78,8 @@ export function validateReadinessInventory(contract:ReleaseContract,value:unknow
  if(!exact(inventory.resource_ids,[...resources.keys()]))reasons.push('resource_inventory_incomplete');
  for(const r of resources.values())if(r.state!=='CLEANED'&&(r.state!=='RETAINED'||!r.retention_authorised||!r.owner||!r.expires_at||!Number.isFinite(Date.parse(r.expires_at))||Date.parse(r.expires_at)<=Date.now()))reasons.push('unexplained_or_expired_resource:'+r.id);
  if(new Set(inventory.unsupported_features.map(x=>x.feature)).size!==inventory.unsupported_features.length)reasons.push('duplicate_unsupported_feature');
+ // An excluded feature cannot simultaneously be presented as a qualified clause or case.
+ for(const x of inventory.unsupported_features)if(expectedClauses.includes(x.feature)||x.feature in contract.cases)reasons.push('unsupported_feature_claimed_as_supported:'+x.feature);
  return {complete:reasons.length===0,reasons:[...new Set(reasons)],contract_digest:contract.contract_digest,inventory_digest:contentDigest(inventory),
  clauses_checked:expectedClauses.length,cases_checked:expectedCases.length,gate_kinds:[...RELEASE_GATES],
  evidence_receipts:[...used].sort().map(r=>({reference:r,receipt_digest:evidence.get(r)?.receipt_digest??null})),
@@ -180,9 +182,10 @@ async function trustedEvidence(context:ComponentContext,scope:{organisation_id:s
 }
 export async function assessReleaseReadiness(input:unknown,context:ComponentContext):Promise<RecordValue>{
  const r=fields(input,['inventory']),inventory=parse(r.inventory),i=invocationOf(context);
- const scope={organisation_id:i.principal.organisation_id,run_id:i.principal.run_id},loaded=await loadReleaseContract();
+ const scope={organisation_id:i.principal.organisation_id,run_id:i.principal.run_id};
  const references=[...new Set([...inventory.case_evidence.map(e=>e.evidence_ref),...inventory.clause_evidence.flatMap(e=>e.evidence_refs),...inventory.gate_evidence.flatMap(e=>e.evidence_refs)])];
- const verified=await trustedEvidence(context,scope,references),validation=validateReadinessInventory(loaded.contract,inventory,verified);
+ // Admission is checked first so absent trusted evidence is reported as such; the contract is still validated before any result.
+ const verified=await trustedEvidence(context,scope,references),loaded=await loadReleaseContract(),validation=validateReadinessInventory(loaded.contract,inventory,verified);
  if(validation.complete!==true)return {...validation,ready:false,sealed:false,scope:'RELEASE_READINESS',grants_authority:false};
  const url=new URL('../integration/closure.js',import.meta.url);
  let external:unknown;try{external=await import(url.href);}catch{throw new FoundationError('RELEASE_DEPENDENCY_UNAVAILABLE','Actual programme closure inspector is required');}

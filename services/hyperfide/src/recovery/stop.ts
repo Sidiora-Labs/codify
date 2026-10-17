@@ -1,6 +1,6 @@
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError} from '../policy/programme.js';
-import {record,scopeOf,uuid,positive,digest,timestamp,recoveryTransaction,operationReplay,finishOperation,capability,isSupervisor,inspectRecoveryHold,createRecoveryControlCapability,inspectIntegrationRecovery,isExecutionControls,derivedOperationId} from './control.js';
+import {record,scopeOf,uuid,positive,digest,timestamp,recoveryTransaction,operationReplay,finishOperation,capability,isSupervisor,type RecoverySupervisor,inspectRecoveryHold,createRecoveryControlCapability,inspectIntegrationRecovery,isExecutionControls,derivedOperationId} from './control.js';
 
 const modes=['PAUSE','DRAIN','CANCEL','STOP'] as const;
 const ranks:Record<string,number>={PAUSE:2,DRAIN:1,CANCEL:4,STOP:3};
@@ -135,10 +135,13 @@ export function createComponent(_context:ComponentContext):Component{
    }
    const debts=plan.debts;
    if(debts.length>1000)throw new FoundationError('RECOVERY_INVENTORY_TOO_LARGE','Reconcile bounded resource partitions');
-   const supervisor=debts.some(row=>row.resource_kind==='SUPERVISOR')?capability(context,'12.4','runner.supervisors.v1',isSupervisor):undefined;
+   // An absent trusted supervisor leaves every process debt explicitly unreachable; it never confirms or completes a stop.
+   let supervisor:RecoverySupervisor|undefined;
+   if(debts.some(row=>row.resource_kind==='SUPERVISOR'))try{supervisor=capability(context,'12.4','runner.supervisors.v1',isSupervisor);}catch(error){if(!(error instanceof FoundationError)||error.code!=='RECOVERY_DEPENDENCY_UNAVAILABLE')throw error;}
    const observations:Record<string,unknown>[]=[];
    for(const debt of debts){
-    if(debt.resource_kind!=='SUPERVISOR'||!supervisor){observations.push({debt_id:debt.id,status:'UNKNOWN'});continue;}
+    if(debt.resource_kind==='SUPERVISOR'&&!supervisor){observations.push({debt_id:debt.id,resource_kind:debt.resource_kind,resource_id:debt.resource_id,status:'SUPERVISOR_UNAVAILABLE'});continue;}
+    if(debt.resource_kind!=='SUPERVISOR'||!supervisor){observations.push({debt_id:debt.id,resource_kind:debt.resource_kind,resource_id:debt.resource_id,status:'UNKNOWN'});continue;}
     let receipt;
     if(debt.desired_state==='QUIESCENT'){
      const ready=await recoveryTransaction(context,scope,async tx=>(await tx.query("SELECT count(*)::text AS count FROM hyperfide.recovery_resource_debts WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3 AND resource_kind='CHECKPOINT' AND resource_id=$4 AND status<>'RESOLVED'",[scope.organisation_id,scope.run_id,id,debt.resource_id])).rows[0]!.count==='0');
@@ -172,10 +175,13 @@ export function createComponent(_context:ComponentContext):Component{
     if(unresolved.length===0&&!publication&&plan.intent.scope_kind==='RUN'&&['PAUSE','DRAIN'].includes(String(plan.intent.mode))){
      const active=(await tx.query("SELECT EXISTS(SELECT 1 FROM hyperfide.attempts WHERE organisation_id=$1 AND run_id=$2 AND compute_authority='CURRENT' AND lease_expires_at>clock_timestamp()) OR EXISTS(SELECT 1 FROM hyperfide.qualification_jobs WHERE organisation_id=$1 AND run_id=$2 AND state='RUNNING' AND lease_expires_at>clock_timestamp()) AS present",[scope.organisation_id,scope.run_id])).rows[0]!.present;
      if(active===false){
-      const changed=await tx.query("UPDATE hyperfide.runs SET state=$3,state_version=state_version+1 WHERE organisation_id=$1 AND id=$2 AND state=$4 RETURNING id",[scope.organisation_id,scope.run_id,plan.intent.mode==='PAUSE'?'PAUSED':'DRAINED',plan.intent.mode==='PAUSE'?'PAUSING':'DRAINING']);stable=changed.rows.length===1;
+      const target=plan.intent.mode==='PAUSE'?'PAUSED':'DRAINED';
+      const changed=await tx.query("UPDATE hyperfide.runs SET state=$3,state_version=state_version+1 WHERE organisation_id=$1 AND id=$2 AND state=$4 RETURNING id",[scope.organisation_id,scope.run_id,target,plan.intent.mode==='PAUSE'?'PAUSING':'DRAINING']);
+      // A repeated reconcile reports the same durable quiescence instead of a regression.
+      stable=changed.rows.length===1||(await tx.query('SELECT state FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2',[scope.organisation_id,scope.run_id])).rows[0]?.state===target;
      }
     }
-    return {scope,operation_id:id,observations,unreachable_resource_debt:unresolved,quiescence_complete:stable,process_stop_complete:unresolved.length===0,publication_reconciled:!publication,
+    return {scope,operation_id:id,observations,supervisor_available:supervisor!==undefined,unreachable_resource_debt:unresolved,quiescence_complete:stable,process_stop_complete:unresolved.length===0,publication_reconciled:!publication,
      cleanup_complete:false,stop_complete:false,reason:unresolved.length?'UNREACHABLE_OR_UNCONFIRMED_RESOURCES':publication?'PUBLICATION_OUTCOME_UNKNOWN':'ARTIFACT_AND_CREDENTIAL_CLEANUP_REQUIRES_QUALIFIED_RECEIPTS'};
    });
   }

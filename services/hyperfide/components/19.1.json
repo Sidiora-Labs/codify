@@ -14,7 +14,9 @@
     "integration.candidate.inspect",
     "integration.candidate.verify",
     "integration.candidate.admit",
-    "integration.candidate.reconcile"
+    "integration.candidate.reconcile",
+    "integration.candidate.status",
+    "integration.candidate.cleanup"
   ],
   "requires": [
     "4.1",

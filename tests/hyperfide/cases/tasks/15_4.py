@@ -10,7 +10,9 @@ def module(name,path):
  spec=importlib.util.spec_from_file_location(name,path);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);return m
 objects=module('actual_artifact_objects',ROOT/'tests/hyperfide/cases/tasks/15_2.py')
 identity=module('actual_retention_identity',ROOT/'tests/hyperfide/support/identity_fixture.py')
-IDS=['retention.reference.unresolved-finding', 'retention.reference.finding-reopen', 'retention.actual.authenticated', 'retention.policy.required', 'retention.policy.digest', 'retention.minimum-age', 'retention.indefinite', 'retention.deadline', 'retention.explicit-hold', 'retention.reference.hold', 'retention.reference.release', 'retention.policy.audit', 'retention.collect.conditional', 'retention.collect.deleted-unreadable', 'retention.collect.no-blind-retry', 'retention.reconcile.absent', 'retention.delete.forbidden', 'retention.delete.precondition', 'retention.delete.etag-required', 'retention.delete.redirect', 'retention.reference.quarantine-race', 'retention.manifest.children', 'retention.scope.authenticated', 'retention.auth.required', 'retention.gc.binding', 'retention.gc.idempotency-conflict', 'retention.reference.release-audit', 'retention.reference.foreign-key-id', 'retention.reference.foreign-key-digest', 'retention.cleanup.physical']
+IDS=['retention.reference.unresolved-finding', 'retention.reference.finding-reopen', 'retention.actual.authenticated', 'retention.policy.required', 'retention.policy.digest', 'retention.minimum-age', 'retention.indefinite', 'retention.deadline', 'retention.explicit-hold', 'retention.reference.hold', 'retention.reference.release', 'retention.policy.audit', 'retention.collect.conditional', 'retention.collect.deleted-unreadable', 'retention.collect.no-blind-retry', 'retention.reconcile.absent', 'retention.delete.forbidden', 'retention.delete.precondition', 'retention.delete.etag-required', 'retention.delete.redirect', 'retention.reference.quarantine-race', 'retention.manifest.children', 'retention.scope.authenticated', 'retention.auth.required', 'retention.gc.binding', 'retention.gc.idempotency-conflict', 'retention.reference.release-audit', 'retention.reference.foreign-key-id', 'retention.reference.foreign-key-digest', 'retention.reference.required-evidence', 'retention.collect.crash-reconcile', 'retention.debt.visible-after-restart', 'retention.destruction.prior-boot-custody', 'retention.destruction.never-worked', 'retention.cleanup.physical']
+DATABASE='hf_task_15_4_qualification'
+RESOURCE='hf-task-15.4-database'
 RESULTS=[]
 def expect(value,message):
  if not value:raise AssertionError(message)
@@ -23,7 +25,7 @@ def output():
  p=Path(os.environ.get('HYPERFIDE_CAMPAIGN_DIR','/tmp/hyperfide/task-15.4-standalone'))/'retention';p.mkdir(parents=True,exist_ok=True);return p
 class DeleteFixture(objects.ObjectFixture):
  def __init__(self):
-  super().__init__();self.delete_modes={};self.deletes=[]
+  super().__init__();self.delete_modes={};self.deletes=[];self.crash_hook=lambda:None
   fixture=self;handler=self.http.RequestHandlerClass;reply=handler.reply
   def patched_reply(h,status,data=b'',*,length=None,headers=None):
    headers=dict(headers or {})
@@ -37,6 +39,12 @@ class DeleteFixture(objects.ObjectFixture):
     fixture.bad_signatures.append({'method':'DELETE'});h.reply(403);return
    fixture.deletes.append({'path':h.path,'if_match':h.headers.get('if-match'),'signature_verified':True})
    mode=fixture.delete_modes.get(h.path,'')
+   if mode=='crash':
+    # Control process dies while its DELETE is in flight; storage never acted.
+    fixture.crash_hook();h.close_connection=True
+    try:h.connection.shutdown(socket.SHUT_RDWR)
+    except OSError:pass
+    return
    if mode=='forbidden':h.reply(403);return
    if mode=='redirect':h.reply(307,headers={'Location':fixture.sink_url+h.path});return
    with fixture.lock:
@@ -53,6 +61,26 @@ class DeleteFixture(objects.ObjectFixture):
     return
    h.reply(204)
   handler.reply=patched_reply;handler.do_DELETE=delete
+def cleanup():
+ database=DATABASE;role=None
+ try:
+  target=output()/'database-target.json'
+  if target.exists():
+   record=json.loads(target.read_text())
+   expect(record.get('resource_id')==RESOURCE and record.get('database')==DATABASE,'invalid owned fixture resource record')
+   role=record.get('runtime_role')
+   expect(role is None or (isinstance(role,str) and len(role)==38 and role.startswith('hf_ir_') and all(c in '0123456789abcdef' for c in role[6:])),'invalid owned runtime role record')
+  objects.sql('DROP DATABASE IF EXISTS "'+database+'" WITH (FORCE);',database='postgres')
+  if role:objects.sql('DROP ROLE IF EXISTS "'+role+'";',database='postgres')
+  absent=objects.sql("SELECT datname FROM pg_database WHERE datname='"+database+"';",database='postgres').stdout.strip()==''
+  role_absent=role is None or objects.sql("SELECT rolname FROM pg_roles WHERE rolname='"+role+"';",database='postgres').stdout.strip()==''
+  complete=absent and role_absent
+  (output()/'database-absence.json').write_text(json.dumps({'database':database,'observed_absent':absent,'runtime_role':role,'runtime_role_absent':role_absent,'observer':'pg_database/pg_roles after owned DROP'},sort_keys=True)+'\n')
+  print(json.dumps({'type':'cleanup','complete':complete,'resources':[{'id':RESOURCE,'status':'deleted' if complete else 'unknown','observed_absent':complete,'evidence_artifact':'retention/database-absence.json'}]}),flush=True)
+  return 0 if complete else 1
+ except Exception:
+  print(json.dumps({'type':'cleanup','complete':False,'resources':[{'id':RESOURCE,'status':'unknown'}]}),flush=True)
+  return 1
 def main():
  backend=DeleteFixture();service=None;closed=False
  policy={'schema_version':1,'organisation_id':None,'policy_id':identity.uid(),'policy_revision':1,
@@ -63,9 +91,13 @@ def main():
    nonlocal policy_path,policy_digest,scope
    scope={'organisation_id':f.ids['organisation'],'run_id':f.ids['run']}
    objects.ORG=scope['organisation_id'];objects.RUN=scope['run_id'];objects.SCOPE=scope
-   for name in ['0008-provider-coordination.sql','0015-artifact-adoption.sql','0029-artifact-retention.sql']:
+   for name in ['0005-scheduling.sql','0008-provider-coordination.sql','0015-artifact-adoption.sql','0029-artifact-retention.sql']:
     f.apply_migration(name[:-4])
    f.sql("CREATE TABLE hyperfide.fixture_release_links(organisation_id uuid NOT NULL,run_id uuid NOT NULL,id uuid NOT NULL DEFAULT gen_random_uuid(),artifact_id uuid NOT NULL,PRIMARY KEY(organisation_id,run_id,id),FOREIGN KEY(organisation_id,run_id,artifact_id) REFERENCES hyperfide.artifacts(organisation_id,run_id,id));CREATE TABLE hyperfide.fixture_prepared_links(organisation_id uuid NOT NULL,source_run_id uuid NOT NULL,manifest_digest hyperfide.digest NOT NULL,PRIMARY KEY(organisation_id,source_run_id,manifest_digest),FOREIGN KEY(organisation_id,source_run_id,manifest_digest) REFERENCES hyperfide.artifacts(organisation_id,run_id,digest));")
+   limits={'SANDBOX':'100','PROVISIONING':'10','CPU_MILLIS':'1000000','MEMORY_BYTES':'107374182400','DISK_BYTES':'1073741824000'}
+   f.provider_pool=identity.uid();pools=f.path/'pools.json'
+   pools.write_text(json.dumps({'schema_version':1,'organisation_id':scope['organisation_id'],'revision':'component-fixture-only','accounts':[{'provider':'railway','account_key':'retention-fixture-account','approved_limits':limits,'planning_limits':{'SANDBOX':'3000'}}],'pools':[{'id':f.provider_pool,'provider':'railway','account_key':'retention-fixture-account','environment_key':'retention-fixture-environment','region':'retention-fixture-region','profile_id':None,'preparation_digest':f.preparation,'approved_limits':limits,'planning_limits':{'SANDBOX':'3000'},'create_policy':{'seed_reference':'retention-fixture-seed','network':'ISOLATED','stdin_required':False}}],'maximum_operation_ms':10000}));pools.chmod(0o600)
+   f.env['HYPERFIDE_POOL_CONFIG']=str(pools)
    policy['organisation_id']=scope['organisation_id'];policy_path=f.path/'retention-policy.json'
    raw=json.dumps(policy,separators=(',',':')).encode();policy_path.write_bytes(raw);policy_digest=sha(raw)
    f.env.update({'HF_ARTIFACT_RETENTION_POLICY_FILE':str(policy_path),
@@ -74,7 +106,8 @@ def main():
    'HF_ARTIFACT_S3_ACCESS_KEY_ID':objects.KEY,'HF_ARTIFACT_S3_SECRET_ACCESS_KEY':objects.SECRET,
    'HF_ARTIFACT_S3_SESSION_TOKEN':objects.TOKEN,'HF_ARTIFACT_ORGANISATION_ID':scope['organisation_id'],
    'HF_ARTIFACT_ALLOWED_RUN_IDS':json.dumps([scope['run_id']])})
-  service=identity.IdentityFixture(extra_components=('8.2','8.3','15.2','15.4'),extra_setup=setup,database='hf_task_15_4_qualification')
+  service=identity.IdentityFixture(extra_components=('8.2','8.3','15.2','15.4'),extra_setup=setup,database=DATABASE)
+  (output()/'database-target.json').write_text(json.dumps({'resource_id':RESOURCE,'database':service.database,'runtime_role':service.runtime_role})+'\n')
   def invoke(action,value,*,body=None):
    return service.request(body or service.operation('15.4',action,value))
   def ok(action,value,component='15.4',body=None):
@@ -178,9 +211,10 @@ def main():
    result=ok('artifact.retention.reconcile',dict(scope,gc_operation_id=unknown['operation']['operation_id'],policy_digest=policy_digest))
    expect(result['current_object_absent'] and len(backend.deletes)==before,'absent object was blindly deleted again')
   check('retention.reconcile.absent',reconcile)
+  debts={}
   def delete_fault(label):
    data=('retention fault '+label).encode();artifact=put(data);path=backend.key(data);backend.delete_modes[path]=label
-   before=len(backend.deletes);result=collect(artifact)
+   before=len(backend.deletes);result=collect(artifact);debts[label]=result['operation']['operation_id']
    expect(result['cleanup_debt'] and not result['current_object_absent'] and path in backend.objects,'uncertain deletion lost explicit debt')
    if label=='no-etag':expect(len(backend.deletes)==before,'DELETE executed without strong ETag')
    return artifact
@@ -250,6 +284,70 @@ def main():
    expect(collect(artifact)['current_object_absent'],'released unneeded object could not be collected')
   check('retention.reference.foreign-key-id',lambda:discovered_fk('id'))
   check('retention.reference.foreign-key-digest',lambda:discovered_fk('digest'))
+  def required_evidence():
+   # PENDING evidence may still be the only copy a verifier needs: never destroyed.
+   data=b'pending evidence only copy';artifact=put(data);h=historical;evidence=identity.uid()
+   service.sql("INSERT INTO hyperfide.evidence(organisation_id,run_id,id,attempt_id,attempt_generation,repository_id,source_object_id,criteria_digest,manifest_digest,artifact_id) VALUES($1,$2,$3,$4,1,$5,$6,$7,$8,$9)",[scope['organisation_id'],scope['run_id'],evidence,h['attempt'],h['repository'],'d'*40,sha(b'criteria'),artifact['artifact']['digest'],artifact['artifact']['artifact_id']])
+   expect('REQUIRED_EVIDENCE' in inspect(artifact)['blockers'],'pending evidence did not retain its artifact')
+   before=len(backend.deletes);result=collect(artifact)
+   expect(result['operation']['state']=='RETAINED' and not result['cleanup_debt'] and len(backend.deletes)==before and backend.objects.get(backend.key(data))==data,'only copy of required evidence was destroyed')
+   objects.verified(ok('artifact.object.read',dict(scope,artifact_id=artifact['artifact']['artifact_id']),component='15.2'),data)
+  check('retention.reference.required-evidence',required_evidence)
+  crashed={}
+  def crash_reconcile():
+   data=b'control crash during delete';artifact=put(data);path=backend.key(data);backend.delete_modes[path]='crash'
+   def crash():
+    service.child.kill()
+   backend.crash_hook=crash;before=len(backend.deletes)
+   try:collect(artifact);raise AssertionError('collect survived a killed control process')
+   except AssertionError as error:
+    if 'survived' in str(error):raise
+   except Exception:pass
+   finally:backend.crash_hook=lambda:None
+   service.child.wait(timeout=10);service.child=None;backend.delete_modes.pop(path)
+   expect(len(backend.deletes)==before+1 and backend.objects.get(path)==data,'crash fixture did not interrupt an in-flight DELETE')
+   row=service.sql('SELECT g.operation_id,g.state,a.status FROM hyperfide.artifact_gc_operations g JOIN hyperfide.artifacts a ON a.organisation_id=g.organisation_id AND a.run_id=g.run_id AND a.id=g.artifact_id WHERE g.organisation_id=$1 AND g.run_id=$2 AND g.artifact_id=$3',[scope['organisation_id'],scope['run_id'],artifact['artifact']['artifact_id']])
+   expect(len(row)==1 and row[0]['state']=='REQUESTED' and row[0]['status']=='QUARANTINED','tombstone did not precede the destructive request')
+   crashed.update(artifact=artifact,path=path,operation_id=row[0]['operation_id'])
+   service.start()
+  check('retention.collect.crash-reconcile',crash_reconcile)
+  def debt_after_restart():
+   service.stop();service.start()
+   listed=ok('artifact.retention.debt',dict(scope,policy_digest=policy_digest))
+   ids={item['operation_id'] for item in listed['debt']}
+   expect(not listed['clean'] and set(debts.values())|{crashed['operation_id']}<=ids,'unresolved deletion vanished after restart')
+   before=len(backend.deletes)
+   result=ok('artifact.retention.reconcile',dict(scope,gc_operation_id=crashed['operation_id'],policy_digest=policy_digest))
+   expect(result['current_object_absent'] and not result['cleanup_debt'] and len(backend.deletes)==before+1 and crashed['path'] not in backend.objects,'crashed collection did not reconcile with one conditional DELETE')
+   again=ok('artifact.retention.reconcile',dict(scope,gc_operation_id=crashed['operation_id'],policy_digest=policy_digest))
+   expect(again['current_object_absent'] and len(backend.deletes)==before+1,'reconcile was not idempotent')
+   listed=ok('artifact.retention.debt',dict(scope,policy_digest=policy_digest));ids={item['operation_id'] for item in listed['debt']}
+   expect(crashed['operation_id'] not in ids and set(debts.values())<=ids and not listed['clean'],'debt inventory differs after reconcile')
+  check('retention.debt.visible-after-restart',debt_after_restart)
+  destroy={}
+  def prior_boot():
+   # A later empty boot cannot hide work done on an earlier boot of the same sandbox.
+   service.stop();service.service_role='provisioner';service.start()
+   expect(ok('provider.pools.configure',{},component='8.2')['configured']==1,'fixture pool not configured')
+   o=scope['organisation_id'];target=identity.uid()
+   service.sql("INSERT INTO hyperfide.sandboxes(organisation_id,id,pool_id,native_sandbox_id,observed_state,preparation_digest) VALUES($1,$2,$3,$4,'RUNNING',$5)",[o,target,service.provider_pool,'retention-prior-'+target,service.preparation])
+   slot=identity.uid();service.sql("INSERT INTO hyperfide.worker_slots(organisation_id,id,sandbox_id,slot_key,boot_generation,capacity_kind,state) VALUES($1,$2,$3,'retention-prior',1,'AGENT','RETIRED')",[o,slot,target])
+   service.sql("INSERT INTO hyperfide.agent_sessions(organisation_id,run_id,id,role,connector,account_key,native_session_id,state,slot_id,sandbox_id,sandbox_boot_generation) VALUES($1,$2,$3,'COMMIT_WATCHER','fixture','fixture',$4,'STOPPED',$5,$6,1)",[o,scope['run_id'],identity.uid(),identity.uid(),slot,target])
+   service.sql("UPDATE hyperfide.sandboxes SET boot_generation=2,state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[o,target])
+   destroy.update(run_id=scope['run_id'],pool_id=service.provider_pool,deadline_at=__import__('time').strftime('%Y-%m-%dT%H:%M:%S.000Z',__import__('time').gmtime(__import__('time').time()+5)),reason='retention destruction gate fixture')
+   status,response=service.request(service.operation('8.3','provider.intents.prepare-destroy',dict(destroy,sandbox_id=target,request_key=identity.uid())))
+   expect(response.get('ok') is False and response.get('error',{}).get('code')=='DESTRUCTION_CUSTODY_REQUIRED','sandbox with prior-boot work destroyed without custody proof')
+   expect(service.sql("SELECT desired_state FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2",[o,target])[0]['desired_state']=='RUNNING','refused destruction still changed desired state')
+  check('retention.destruction.prior-boot-custody',prior_boot)
+  def never_worked():
+   o=scope['organisation_id'];target=identity.uid()
+   service.sql("INSERT INTO hyperfide.sandboxes(organisation_id,id,pool_id,native_sandbox_id,observed_state,preparation_digest) VALUES($1,$2,$3,$4,'RUNNING',$5)",[o,target,service.provider_pool,'retention-empty-'+target,service.preparation])
+   value=dict(destroy,sandbox_id=target,request_key=identity.uid())
+   first=ok('provider.intents.prepare-destroy',value,component='8.3')
+   expect(first['created'] is True and first['external_call_performed'] is False,'never-worked sandbox destruction refused')
+   expect(ok('provider.intents.prepare-destroy',value,component='8.3')['created'] is False,'destroy intent was not idempotent')
+  check('retention.destruction.never-worked',never_worked)
+  service.stop();service.service_role='control';service.start()
   owned=service;owned.close();database_absent=not owned.sql('SELECT datname FROM pg_database WHERE datname=$1',[owned.database],admin=True);service=None;closed=backend.stop()
   check('retention.cleanup.physical',lambda:expect(closed and database_absent,'owned fixture database/listener remains'))
  finally:
@@ -258,4 +356,4 @@ def main():
   (output()/'observations.json').write_text(json.dumps({'scope':'task-component','live_version_erasure':'NOT_EVALUATED','checks':RESULTS,'delete_operations':backend.deletes,'bad_signatures':backend.bad_signatures,'fixture_observed_absent':True},sort_keys=True)+'\n')
  expect([name for name,_ in RESULTS]==IDS,'retention assertion inventory differs')
  return 0 if all(actual=='observed' for _,actual in RESULTS) else 1
-if __name__=='__main__':raise SystemExit(main())
+if __name__=='__main__':raise SystemExit(cleanup() if '--cleanup' in sys.argv else main())

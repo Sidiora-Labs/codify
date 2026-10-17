@@ -13,7 +13,11 @@
     "graph.query.status",
     "graph.query.search",
     "graph.query.context",
-    "graph.query.traverse"
+    "graph.query.traverse",
+    "graph.query.contracts",
+    "graph.query.projection.facts",
+    "graph.query.projection.delta",
+    "graph.query.projection.view"
   ],
   "requires": [
     "4.2",

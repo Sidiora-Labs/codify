@@ -1298,6 +1298,15 @@ void help_overview(void) {
     o_wrap(&o, "hyperfide help <command> (or hyperfide <command> --help) for its usage, "
            "flags, and examples; hyperfide help --all for every command", 0);
     o_nl(&o);
+    o_nl(&o);
+    o_on(&o, BOLD); o_str(&o, "command names"); o_on(&o, OFF); o_nl(&o);
+    o_wrap(&o, "hyperfide is the canonical command. cg is a deprecated "
+           "compatibility alias installed from the same executable, with "
+           "identical arguments, JSON and exit codes; it stays for the "
+           "supported compatibility window of the approved release and is "
+           "removed only in a later release that announces it. No shorter "
+           "alias is reserved.", 0);
+    o_nl(&o);
     o_flush(&o, stdout);
 }
 

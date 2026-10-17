@@ -1,4 +1,7 @@
 """Real native privileged-staging integration against signed HTTPS/PG/SigV4.
+The stager is driven through the linked 12.4 component action
+(build/hyperfide-native --component 12.4 --action runner.preparation.stage),
+the same hf_runner_stage_preparation the PREPARATION job path calls.
 The helper does not claim source semantics, remote execution or launch authority.
 """
 from __future__ import annotations
@@ -15,6 +18,28 @@ import uuid
 def sha(data):
     return "sha256:"+hashlib.sha256(data).hexdigest()
 
+class StageService:
+    """Actual signed HTTPS/PG/SigV4 15.2 service through the shared identity fixture."""
+    def __init__(self, root, objects, fixture, database):
+        spec=importlib.util.spec_from_file_location("stage_identity_fixture",root/"tests/hyperfide/support/identity_fixture.py")
+        identity=importlib.util.module_from_spec(spec);spec.loader.exec_module(identity)
+        def setup(f):
+            f.env.update({"HF_ARTIFACT_S3_ENDPOINT":fixture.endpoint,"HF_ARTIFACT_ALLOW_LOOPBACK_HTTP":"1","HF_ARTIFACT_S3_REGION":objects.REGION,"HF_ARTIFACT_S3_BUCKET":objects.BUCKET,
+                "HF_ARTIFACT_S3_ACCESS_KEY_ID":objects.KEY,"HF_ARTIFACT_S3_SECRET_ACCESS_KEY":objects.SECRET,"HF_ARTIFACT_S3_SESSION_TOKEN":objects.TOKEN,
+                "HF_ARTIFACT_ORGANISATION_ID":f.ids["organisation"],"HF_ARTIFACT_ALLOWED_RUN_IDS":json.dumps([f.ids["run"]])})
+        self.auth=identity.IdentityFixture(extra_components=("15.2",),extra_setup=setup,database=database)
+        self.scope={"organisation_id":self.auth.ids["organisation"],"run_id":self.auth.ids["run"]}
+        # The object fixture derives backend keys from the 15.2 module's scope globals.
+        objects.ORG,objects.RUN=self.scope["organisation_id"],self.scope["run_id"]
+    def ok(self, action, value):
+        status,response=self.auth.invoke(action,value,component="15.2")
+        if status!=200 or response.get("ok") is not True:raise AssertionError("authenticated artifact service refused "+action+": "+str(response.get("error")))
+        return response["result"]
+    def put(self, data):
+        return self.ok("artifact.object.put",{**self.scope,"digest":sha(data),"size_bytes":str(len(data)),"data_base64":__import__("base64").b64encode(data).decode(),"retention_class":"RUN","retention_until":None,"retention_hold":False})
+    def close(self):
+        self.auth.close()
+
 def run_probe(binary, service_root):
     root=Path(service_root).resolve()
     spec=importlib.util.spec_from_file_location("actual_stage_artifacts",root/"tests/hyperfide/cases/tasks/15_2.py")
@@ -28,7 +53,7 @@ def run_probe(binary, service_root):
         checks.append({"id":name,"passed":True})
     try:
         fixture=objects.ObjectFixture()
-        service=objects.Service(root,fixture,database="hf_stage_"+uuid.uuid4().hex)
+        service=StageService(root,objects,fixture,"hf_stage_"+uuid.uuid4().hex)
         auth=service.auth;scope=service.scope
         transport=owned/"transport.json"
         transport.write_text(json.dumps({"origin":auth.origin,"ca_file":str(auth.ca),"key_path":str(auth.keys["operator"]["path"]),"credential_id":auth.ids["operator"],"timeout_ms":10000}))
@@ -78,9 +103,11 @@ def run_probe(binary, service_root):
             return value
         def invoke(value,config_path=None):
             path=owned/"claim.json";path.write_text(json.dumps(value));path.chmod(0o600)
-            result=subprocess.run([str(binary),str(config_path or config),str(path)],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=90)
-            check("native-output-secret-free-"+str(len(checks)),str(auth.keys["operator"]["path"]) not in result.stdout and objects.SECRET not in result.stdout and not result.stderr)
-            return result,json.loads(result.stdout)
+            request=json.dumps({"config_path":str(config_path or config),"claim_path":str(path)})
+            result=subprocess.run([str(binary),"--component","12.4","--action","runner.preparation.stage"],input=request,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=90)
+            check("native-output-secret-free-"+str(len(checks)),all(term not in stream for term in (str(auth.keys["operator"]["path"]),objects.SECRET) for stream in (result.stdout,result.stderr)))
+            envelope=json.loads(result.stdout)
+            return result,({"ok":True,**envelope["result"]} if envelope.get("ok") else {"ok":False})
         value=claim();result,reply=invoke(value)
         check("native-staging-real-https-manifest",result.returncode==0 and reply["ok"])
         context_path=Path(reply["context_path"]);context=json.loads(context_path.read_text())

@@ -39,7 +39,9 @@ def main():
             plan,approval,trial,observations,report,score=build_trial(f)
             check("evaluation.trial.balanced-group-assignment",lambda:require(sum(u["arm"]=="candidate"for u in trial["units"])==2,"unbalanced assignment"))
             check("evaluation.trial.assignment-stable",lambda:require(f.ask("evaluation.trial.create",{"plan":plan,"approval":approval})["artifact_id"]==trial["artifact_id"],"assignment changed"))
-            check("evaluation.trial.actual-observation-metrics",lambda:require(report["complete"]and report["per_arm"]["candidate"]["qualified"]==4 and report["per_arm"]["baseline"]["actual_cost_microusd"]==200,"observed outcomes lost"))
+            check("evaluation.trial.actual-observation-metrics",lambda:require(report["complete"]and report["per_arm"]["candidate"]["qualified"]==4 and report["per_arm"]["baseline"]["actual_cost_microusd"]==200
+              and report["per_arm"]["candidate"]["retries"]==4 and report["per_arm"]["candidate"]["qualified_per_hour"]==4*3600000/10000
+              and report["totals"]=={"retries":8,"qualified":6,"qualified_per_hour":6*3600000/20000,"total_cost_microusd":400},"observed outcomes lost"))
             check("evaluation.trial.synthetic-cannot-promote",lambda:require(not report["production_eligible"]and not report["benefit_demonstrated"]and report["evidence_class"]=="synthetic","synthetic trial became live evidence"))
             check("evaluation.trial.interval-and-counts",lambda:require(report["benefit_interval"]["lower"]<report["benefit_interval"]["upper"]and report["count"]==4,"interval/count absent"))
             def missing_approval():
@@ -86,7 +88,8 @@ def main():
             check("evaluation.trial.cost-stop",budget_stop)
             def shadow():
                 _,_,value,_,summary,_=build_trial(f,"shadow")
-                require(all(u["arm"]=="baseline"for u in value["units"])and not summary["production_eligible"]and summary["shadow_cannot_prove_live_benefit"],"shadow changed actions or claimed benefit")
+                require(all(u["arm"]=="baseline"for u in value["units"])and not summary["production_eligible"]and summary["shadow_cannot_prove_live_benefit"]
+                and not summary["counterfactual_claim"]and summary["effect_basis"]=="shadow_observation_only","shadow changed actions or claimed benefit")
             check("evaluation.trial.shadow-preserves-baseline",shadow)
         finally:f.close()
     print(json.dumps({"type":"cleanup","resources":[],"complete":True}),flush=True)

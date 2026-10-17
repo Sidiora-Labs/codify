@@ -1,0 +1,180 @@
+{
+  "schema_version": 1,
+  "campaign_id": "hyperfide-task-24.1-control-recovery-component-v1",
+  "registered_variant": "task:24.1",
+  "scope": "task-component",
+  "case_ids": [
+    "V-008",
+    "V-043"
+  ],
+  "expected_assertion_ids": [
+    "recovery.control.real-registered-process",
+    "recovery.control.failover-requires-qualified-standby",
+    "recovery.control.supervisor-capability-absent-reported",
+    "recovery.control.rebind-equal-epoch-refused",
+    "recovery.control.rebind-outside-trusted-topology-refused",
+    "recovery.control.committed-global-epoch-without-physical-completion-refused",
+    "recovery.control.consistent-snapshot",
+    "recovery.control.no-duplicate-dispatch",
+    "recovery.control.event-state-same-primary",
+    "recovery.control.custody-independent",
+    "recovery.control.supervision-limit",
+    "recovery.control.stale-epoch",
+    "recovery.control.cross-organisation",
+    "recovery.offline.bounded-local",
+    "recovery.offline.reject-claim",
+    "recovery.offline.reject-renew",
+    "recovery.offline.reject-submit",
+    "recovery.offline.reject-publish",
+    "recovery.offline.reject-provision",
+    "recovery.offline.reject-qualify",
+    "recovery.offline.trusted-budget-ceiling",
+    "recovery.offline.safe-pause",
+    "recovery.offline.expired-budget",
+    "recovery.offline.malformed-time",
+    "recovery.offline.unknown-field",
+    "recovery.control.restart-control-process-lost",
+    "recovery.control.restart-reconstructs-durable-state",
+    "recovery.control.restart-pending-messages-reconstructed",
+    "recovery.control.restart-no-duplicate-dispatch",
+    "recovery.offline.restart-policy-unchanged",
+    "recovery.control.restart-supervision-limit",
+    "recovery.control.leader-manager-loss-keeps-healthy-work",
+    "recovery.control.adopt-unproven-supervisor",
+    "recovery.control.recorded-pid-not-progress",
+    "recovery.control.dead-pipe-not-progress",
+    "recovery.control.dead-pipe-adoption-refused",
+    "recovery.control.reused-pid-not-live",
+    "recovery.control.reused-pid-adoption-refused",
+    "recovery.control.native-resume-consistent-checkpoint",
+    "recovery.control.inconsistent-source-starts-fresh-session",
+    "recovery.control.native-resume-limitation-reported",
+    "recovery.control.active-run-cannot-resume",
+    "recovery.control.task-pointer-fences-adoption",
+    "recovery.control.cancellation-is-terminal",
+    "recovery.control.schema-drift-refusal"
+  ],
+  "approval": {
+    "approved": true,
+    "allowed_actions": [
+      "postgresql.fixture.create",
+      "postgresql.fixture.drop",
+      "https.fixture.listen"
+    ]
+  },
+  "inputs": [
+    {
+      "path": "services/hyperfide/components/24.1.json",
+      "sha256": "d80fd4bc8186b9c46750c6350b91d3a9697b905d75c882b539cf6867f04a0ec8",
+      "size": 446
+    },
+    {
+      "path": "services/hyperfide/dist/control.js",
+      "sha256": "1383288f00472de29607207d1d318e257c6e80c0fb2c05ca9fb2d974040e8032",
+      "size": 118
+    },
+    {
+      "path": "services/hyperfide/dist/recovery/control.js",
+      "sha256": "224b810aa00f58dbf75b16934643e43c93161eb88934d4309eadc617f6492e4f",
+      "size": 45166
+    },
+    {
+      "path": "services/hyperfide/dist/recovery/fencing.js",
+      "sha256": "f7df4b32ba6a08f741124a684faa48bb6c14cc3af6419317ad54f24d6083647c",
+      "size": 43090
+    },
+    {
+      "path": "services/hyperfide/dist/storage/authority_journal.js",
+      "sha256": "fc3ded1c722173ae999ca59b558dbcb133502e4365b20ebb97cba059f3ab01a5",
+      "size": 23960
+    },
+    {
+      "path": "services/hyperfide/dist/storage/durability.js",
+      "sha256": "4df6cec256cba5f6804c19cf089d7e21d171c137e1288dd861d6766cc74b709c",
+      "size": 31282
+    },
+    {
+      "path": "services/hyperfide/dist/storage/runtime.js",
+      "sha256": "79edb921337c7546f593720dd063655e6843a0ca09c270973077da79b1bb26cd",
+      "size": 18037
+    },
+    {
+      "path": "services/hyperfide/dist/transport/protocol.js",
+      "sha256": "fe965513abe410e78b8941de532bd2e4b7df12056a7fb35cd8645dc429e1e88d",
+      "size": 12240
+    },
+    {
+      "path": "services/hyperfide/migrations/0024-recovery.sql",
+      "sha256": "1fa85902851893983c51e9c1d146126db59379aabe4bf189021f3a5d7718c9ec",
+      "size": 11353
+    },
+    {
+      "path": "services/hyperfide/package-lock.json",
+      "sha256": "101f5bc9fbb5864f227051eb2d0388449925df88c0fdd0e5755b40b808a4cfbb",
+      "size": 128778
+    },
+    {
+      "path": "services/hyperfide/package.json",
+      "sha256": "51c686f08fdfa47386af869cd6cdb63f1d2553f99366741239ded92dfe0d4398",
+      "size": 766
+    },
+    {
+      "path": "services/hyperfide/src/recovery/control.ts",
+      "sha256": "98a7e1235ae2af6b321457cdbe5d28b9329820f20dde178c2717e51dcb237323",
+      "size": 45337
+    },
+    {
+      "path": "services/hyperfide/tsconfig.json",
+      "sha256": "2b45e09325652f23d0bf4ec53439e4552cf4c2854d7288ce40186d4074f894bb",
+      "size": 487
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/24_1.py",
+      "sha256": "f17e11e00c4b6d1b33e2bf488b3e09fc86d5874cfb755c18a5db3c6ba3b4a97f",
+      "size": 29503
+    },
+    {
+      "path": "tests/hyperfide/check-evidence.py",
+      "sha256": "cc8de56fb25bea153490b4143a231f1ff6f4dac758baaea4bf90fb7d9ba236a0",
+      "size": 30633
+    },
+    {
+      "path": "tests/hyperfide/manifest.schema.json",
+      "sha256": "3407092d7e6e452bb288e996f840bd5bab22d6c0f494a49bf944cd73c18078b8",
+      "size": 3216
+    },
+    {
+      "path": "tests/hyperfide/qualify.py",
+      "sha256": "8aa17f5e2572c8557f15353f7267e98600547fb0f2693486c0e0f2fc1abce8c2",
+      "size": 37538
+    },
+    {
+      "path": "tests/hyperfide/registrations/24.1.json",
+      "sha256": "6b66a2bcd862308bd6801e4953767b757c7dcafe2ca5ff14257412cdd7ef1e6f",
+      "size": 4139
+    },
+    {
+      "path": "tests/hyperfide/support/identity_fixture.py",
+      "sha256": "2b992fd5eab4d903909a4dd621b2ce3c7278fa932e163cbad8f33cf2b65efe0a",
+      "size": 29318
+    }
+  ],
+  "resources": [
+    {
+      "id": "hf-task-24.1-database",
+      "kind": "postgresql-database",
+      "scope": "task24.1-disposable"
+    }
+  ],
+  "seed": 241,
+  "policy": {
+    "component_only": true,
+    "execution": "remote-only",
+    "full_case_status": "INCOMPLETE",
+    "cloud_provisioning": false,
+    "frontier_calls": false,
+    "supervisor_adoption": "REFUSED: no component exports runner.supervisors.v1; coordinator decision pending",
+    "standby": "No qualified standby; uninterrupted failover is not claimed",
+    "simulation": "Control-service loss is a real SIGKILL of the registered HTTPS control process restarted on the same disposable PostgreSQL database; leader/manager/process loss is recorded fixture state, not live agent or provider processes."
+  }
+}

@@ -81,21 +81,37 @@ export async function inspectCoverage(db:Queryable,s:CoverageScope,custodyId:str
  const receipt=valid.find(row=>row.receipt_digest===c.current_receipt_digest)??valid[0];
  const judgements=await db.query('SELECT clause_id,reviewer_id,rubric_digest,input_manifest_digest,requalification_id,support,limitations,disposition FROM hyperfide.assurance_judgements WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3',params);
  const clauses:Data[]=[];
+ const inputDigest=hash(c.input_manifest);
  for(const clause of policy.clauses as Data[]){
-  let satisfied=false,reason:string;
+  let satisfied=false,reason:string,evidence:Data|null=null,review:Data|null=null;
+  // Every judgement for this exact clause stays visible; only a policy-permitted one can close it.
+  const recorded=judgements.rows.filter((j:Data)=>j.clause_id===clause.id).map((j:Data)=>({reviewer_id:j.reviewer_id,
+   approved_reviewer:clause.mode==='REVIEW'&&clause.reviewers.includes(j.reviewer_id),rubric_digest:j.rubric_digest,
+   input_manifest_digest:j.input_manifest_digest,current_inputs:j.input_manifest_digest===inputDigest,requalification_id:j.requalification_id??null,
+   support_artifact_ids:j.support??[],limitations:j.limitations,disposition:j.disposition}));
   if(clause.mode==='EXECUTABLE'){
-   satisfied=!!receipt&&clause.checks.every((id:string)=>receipt.receipt.checks.some((gate:Data)=>gate.check_id===id&&gate.outcome==='PASS'));
+   const passed=receipt?clause.checks.filter((id:string)=>receipt.receipt.checks.some((gate:Data)=>gate.check_id===id&&gate.outcome==='PASS')):[];
+   satisfied=!!receipt&&passed.length===clause.checks.length;
+   evidence={kind:'EXECUTABLE_RECEIPT',receipt_digest:receipt?.receipt_digest??null,job_id:receipt?.job_id??null,
+    required_check_ids:clause.checks,passed_check_ids:passed,missing_check_ids:clause.checks.filter((id:string)=>!passed.includes(id))};
    reason=satisfied?'Exact registered executable proof is complete':'Required executable proof missing, failed, stale or incomplete';
   }else{
-   const review=judgements.rows.find((j:Data)=>j.clause_id===clause.id&&j.input_manifest_digest===hash(c.input_manifest)&&(!freshOperation||j.requalification_id===freshOperation)&&clause.reviewers.includes(j.reviewer_id)&&j.rubric_digest===clause.rubric_digest&&j.disposition==='PASS'&&j.limitations&&j.support?.length);
-   satisfied=!!review;
-   if(review)for(const id of review.support){
+   const candidate=judgements.rows.find((j:Data)=>j.clause_id===clause.id&&j.input_manifest_digest===inputDigest&&(!freshOperation||j.requalification_id===freshOperation)&&clause.reviewers.includes(j.reviewer_id)&&j.rubric_digest===clause.rubric_digest&&j.disposition==='PASS'&&j.limitations&&j.support?.length);
+   satisfied=!!candidate;
+   const unavailable:string[]=[];
+   if(candidate)for(const id of candidate.support){
     const support=await db.query("SELECT status FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[s.organisation_id,s.run_id,id]);
-    if(support.rows[0]?.status!=='COMPLETE')satisfied=false;
+    if(support.rows[0]?.status!=='COMPLETE'){satisfied=false;unavailable.push(id);}
    }
+   if(candidate)review={reviewer_id:candidate.reviewer_id,rubric_digest:candidate.rubric_digest,input_manifest_digest:candidate.input_manifest_digest,
+    requalification_id:candidate.requalification_id??null,support_artifact_ids:candidate.support,unavailable_support_artifact_ids:unavailable,
+    limitations:candidate.limitations,disposition:candidate.disposition};
+   evidence={kind:'REVIEW_JUDGEMENT',rubric_digest:clause.rubric_digest,permitted_reviewers:clause.reviewers,
+    support_artifact_ids:candidate?.support??[]};
    reason=satisfied?'Policy-permitted independent rubric judgement with complete supporting artifacts':'Required independent rubric judgement missing or unsupported';
   }
-  clauses.push({id:clause.id,mode:clause.mode,acceptance_ids:clause.acceptance_ids,check_ids:clause.mode==='EXECUTABLE'?clause.checks:[],satisfied,reason});
+  clauses.push({id:clause.id,mode:clause.mode,acceptance_ids:clause.acceptance_ids,check_ids:clause.mode==='EXECUTABLE'?clause.checks:[],satisfied,reason,
+   evidence,review,judgements:recorded,mandatory_proof:clause.mode==='EXECUTABLE'?'EXECUTABLE':'POLICY_PERMITTED_REVIEW'});
  }
  const proofComplete=!!receipt&&clauses.length>0&&clauses.every(clause=>clause.satisfied);
  const applicability=registryCurrent?c.applicability:c.applicability==='CURRENT'?'STALE':c.applicability;
@@ -113,6 +129,9 @@ async function inspect(ctx:ComponentContext,raw:unknown):Promise<Data>{
  return transaction(ctx,async client=>inspectCoverage(client,{organisation_id:s[0],run_id:s[1]},id),false,'READ');
 }
 async function judgement(ctx:ComponentContext,raw:unknown):Promise<Data>{
+ // A model score or confidence is never a judgement, support or substitute for mandatory executable proof.
+ if(raw&&typeof raw==='object'&&Object.keys(raw).some(key=>/score|confidence|probability/i.test(key)))
+  fail('QUALIFICATION_INPUT_INVALID','Model score or confidence cannot be recorded as review judgement or proof');
  const v=fields(raw,['organisation_id','run_id','submission_id','custody_generation','expected_state_version','clause_id',
  'rubric_digest','support_artifact_ids','limitations','disposition'],['requalification_id']);
  const s=scope(ctx,v),id=uuid(v.submission_id),generation=decimal(v.custody_generation),version=decimal(v.expected_state_version);

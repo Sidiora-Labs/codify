@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "11.4-provisioner",
+  "task": "11.4",
+  "roles": [
+    "provisioner"
+  ],
+  "module": "preparation/prewarm.js",
+  "entry": "createProvisionerComponent",
+  "api_version": 1,
+  "actions": [
+    "preparation.jobs.execute",
+    "preparation.jobs.report",
+    "preparation.jobs.get"
+  ],
+  "requires": [
+    "4.2",
+    "14.1",
+    "8.2",
+    "8.3"
+  ]
+}

@@ -14,6 +14,7 @@
     "findings.routing.replay-intent-conflict",
     "findings.routing.stale-finding-event",
     "findings.routing.operator-cannot-ack-manager",
+    "findings.routing.control-restart-durable",
     "findings.routing.current-manager-ack",
     "findings.routing.ack-idempotent",
     "findings.routing.collaborator-wrong-manager",

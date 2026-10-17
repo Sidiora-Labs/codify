@@ -148,12 +148,35 @@ export async function readControlSnapshot(tx:Pick<RecoveryTransaction,'query'>,s
   const debts=await query("SELECT id,operation_id,resource_kind,resource_id,sandbox_boot_generation,command_id,status,desired_state,observed_state,observed_at,created_at FROM hyperfide.recovery_resource_debts WHERE organisation_id=$1 AND run_id=$2 AND status<>'RESOLVED' ORDER BY id LIMIT 10001");
   const controls=await inspectRecoveryHold(tx,scope);
   const integration=await inspectIntegrationRecovery(tx,scope);
+  const sessionRecovery=await inspectSessionRecovery(tx,scope);
   const eventRecovery=events?await events.recoverySnapshot(tx as RecoveryTransaction,{organisation_id:scope.organisation_id,run_id:scope.run_id,limit:64}):{ready:false,reason:'PRIMARY_BRANDED_EVENT_READER_REQUIRED',task_completion_authority:false};
 
-  if([packages,sessions,attempts,custody,jobs,debts].some(rows=>rows.length>10000))fail('RECOVERY_SNAPSHOT_TOO_LARGE','Recovery snapshot exceeds bounded inventory; partition the run explicitly');
+  if([packages,sessions,attempts,custody,jobs,debts,sessionRecovery].some(rows=>rows.length>10000))fail('RECOVERY_SNAPSHOT_TOO_LARGE','Recovery snapshot exceeds bounded inventory; partition the run explicitly');
   return {scope,run:runs.rows[0],packages,sessions,attempts,submission_custody:custody,worker_restoration_requests:restorationRequests,qualification_jobs:jobs,integration_recovery:integration,event_recovery:eventRecovery,controls,unreachable_resource_debt:debts,
-   adoption_candidates:attempts.filter(row=>row.compute_token_current).map(row=>({attempt_id:row.id,generation:row.generation,authority:'NONE',requires:'EXACT_SUPERVISOR_IDENTITY_OBSERVATION'})),
+   session_recovery:sessionRecovery,
+   adoption_candidates:attempts.filter(row=>row.compute_token_current&&!sessionRecovery.some(item=>item.attempt_id===row.id&&item.liveness!=='UNPROVEN')).map(row=>({attempt_id:row.id,generation:row.generation,authority:'NONE',requires:'EXACT_SUPERVISOR_IDENTITY_OBSERVATION'})),
    supervision_failure_domains:1,uninterrupted_leadership_failover:'UNQUALIFIED',snapshot_consistency:'SERIALIZABLE',new_work_authorized:false};
+}
+/** Recorded state, a PID or an open pipe is never live progress; only an exact supervisor identity observation is.
+ * Native resume support is reported from durable checkpoints and is never claimed as verified here. */
+export async function inspectSessionRecovery(tx:Pick<RecoveryTransaction,'query'>,scope:RecoveryScope):Promise<Record<string,unknown>[]>{
+ const found=await tx.query("SELECT to_regclass('hyperfide.native_session_bindings') IS NOT NULL AND to_regclass('hyperfide.native_session_checkpoints') IS NOT NULL AS ready");
+ const native=found.rows[0]?.ready===true;
+ const rows=(await tx.query(native?
+  "SELECT s.id,s.role,s.connector,s.attempt_id,s.state,s.native_session_id,a.generation AS attempt_generation,b.process_id IS NOT NULL AS process_identity_recorded,COALESCE(b.process_exited,false) AS process_exited,(b.boot_id IS NOT NULL AND cb.boot_id IS DISTINCT FROM b.boot_id) AS boot_identity_changed,c.id AS checkpoint_id,c.support_level,c.attempt_id AS checkpoint_attempt_id,c.attempt_generation AS checkpoint_generation,(n.checkpoint_id IS NOT NULL AND n.native_session_id=s.native_session_id AND n.source_manifest_digest=b.source_manifest_digest AND n.configuration_digest=b.configuration_digest) AS native_checkpoint_consistent FROM hyperfide.agent_sessions s LEFT JOIN hyperfide.attempts a ON a.organisation_id=s.organisation_id AND a.run_id=s.run_id AND a.id=s.attempt_id LEFT JOIN hyperfide.native_session_bindings b ON b.organisation_id=s.organisation_id AND b.run_id=s.run_id AND b.session_id=s.id LEFT JOIN hyperfide.sandboxes x ON x.organisation_id=s.organisation_id AND x.id=s.sandbox_id LEFT JOIN hyperfide.sandbox_boots cb ON cb.organisation_id=x.organisation_id AND cb.sandbox_id=x.id AND cb.boot_generation=x.boot_generation LEFT JOIN LATERAL (SELECT id,support_level,attempt_id,attempt_generation FROM hyperfide.checkpoints k WHERE k.organisation_id=s.organisation_id AND k.run_id=s.run_id AND k.agent_session_id=s.id ORDER BY k.created_at DESC,k.id DESC LIMIT 1) c ON true LEFT JOIN hyperfide.native_session_checkpoints n ON n.organisation_id=s.organisation_id AND n.run_id=s.run_id AND n.session_id=s.id AND n.checkpoint_id=c.id WHERE s.organisation_id=$1 AND s.run_id=$2 ORDER BY s.id LIMIT 10001":
+  "SELECT s.id,s.role,s.connector,s.attempt_id,s.state,s.native_session_id,a.generation AS attempt_generation,false AS process_identity_recorded,false AS process_exited,false AS boot_identity_changed,c.id AS checkpoint_id,c.support_level,c.attempt_id AS checkpoint_attempt_id,c.attempt_generation AS checkpoint_generation,false AS native_checkpoint_consistent FROM hyperfide.agent_sessions s LEFT JOIN hyperfide.attempts a ON a.organisation_id=s.organisation_id AND a.run_id=s.run_id AND a.id=s.attempt_id LEFT JOIN LATERAL (SELECT id,support_level,attempt_id,attempt_generation FROM hyperfide.checkpoints k WHERE k.organisation_id=s.organisation_id AND k.run_id=s.run_id AND k.agent_session_id=s.id ORDER BY k.created_at DESC,k.id DESC LIMIT 1) c ON true WHERE s.organisation_id=$1 AND s.run_id=$2 ORDER BY s.id LIMIT 10001",
+  [scope.organisation_id,scope.run_id])).rows;
+ return rows.map(row=>{
+  const liveness=row.process_exited?'PROCESS_EXITED':row.boot_identity_changed?'BOOT_IDENTITY_CHANGED':'UNPROVEN';
+  const sameAttempt=row.checkpoint_id!==null&&row.checkpoint_attempt_id===row.attempt_id&&row.checkpoint_generation===row.attempt_generation;
+  const support=row.checkpoint_id===null?'UNKNOWN':String(row.support_level);
+  const consistent=sameAttempt&&(support==='SOURCE_ONLY'||(support==='NATIVE_RESUME'&&row.native_checkpoint_consistent===true));
+  const recovery_mode=consistent&&support==='NATIVE_RESUME'?'NATIVE_RESUME_FROM_CHECKPOINT':consistent?'FRESH_SESSION_FROM_SOURCE_CHECKPOINT':'FRESH_SESSION_WITH_RECOVERY_PACKET';
+  const limitation=row.checkpoint_id===null?'NO_CHECKPOINT':!sameAttempt?'CHECKPOINT_ATTEMPT_MISMATCH':support==='UNSUPPORTED'?'CONNECTOR_NATIVE_RESUME_UNSUPPORTED':support==='NATIVE_RESUME'&&!consistent?'NATIVE_CHECKPOINT_SESSION_OR_SOURCE_INCONSISTENT':support==='SOURCE_ONLY'?'SOURCE_ONLY_CHECKPOINT':'NATIVE_RESUME_UNVERIFIED_WITHOUT_SUPERVISOR';
+  return {session_id:row.id,role:row.role,connector:row.connector,attempt_id:row.attempt_id,recorded_state:row.state,
+   process_identity_recorded:row.process_identity_recorded===true,liveness,live_progress:false,liveness_requires:'EXACT_SUPERVISOR_IDENTITY_OBSERVATION',
+   checkpoint_id:row.checkpoint_id,checkpoint_consistent:consistent,native_resume_support:support,native_resume_verified:false,native_resume_limitation:limitation,recovery_mode};
+ });
 }
 export async function reconstructControl(pool:pg.Pool,scope:RecoveryScope):Promise<Record<string,unknown>>{
  const tx=await pool.connect();
@@ -208,11 +231,19 @@ export function createRecoveryControlCapability(){
   }
  });
 }
+export const SUPERVISOR_PROVIDER={id:'12.4',capability:'runner.supervisors.v1'} as const;
+export function supervisorCapability(context:ComponentContext):RecoverySupervisor{
+ try{return capability(context,SUPERVISOR_PROVIDER.id,SUPERVISOR_PROVIDER.capability,isSupervisor);}
+ catch{fail('RECOVERY_DEPENDENCY_UNAVAILABLE','Recovery supervisor capability absent: no declared component provides '+SUPERVISOR_PROVIDER.capability+'; adoption is refused, never inferred');}
+}
+function supervisorPresent(context:ComponentContext):boolean{try{supervisorCapability(context);return true;}catch{return false;}}
 export function createComponent(startup:ComponentContext):Component{
  const events=capability(startup,'6.4','events.recovery.v1',isRecoveryEvents);
  const snapshots:RecoverySnapshotReader=Object.freeze({read:(tx:RecoveryTransaction,scope:RecoveryScope)=>readControlSnapshot(tx,scope,events)});
  return {apiVersion:1,capabilities:{'recovery.snapshots.v1':snapshots},actions:{
-  'recovery.control.describe':(input,context)=>{record(input,[]);return {api_version:1,supervision_failure_domains:1,uninterrupted_failover:'UNQUALIFIED',compute_authority:'PRIMARY_GUARDED',offline_external_mutations:false};},
+  'recovery.control.describe':(input,context)=>{record(input,[]);return {api_version:1,supervision_failure_domains:1,uninterrupted_failover:'UNQUALIFIED',standby_qualification:'ABSENT',uninterrupted_failover_requires:'SEPARATELY_QUALIFIED_STANDBY',
+   supervisor_capability:supervisorPresent(context)?'PRESENT':'ABSENT',compute_authority:'PRIMARY_GUARDED',offline_external_mutations:false,
+   offline_policy:['PAUSE','BOUNDED_LOCAL'].includes(context.env.HYPERFIDE_OFFLINE_POLICY??'PAUSE')?context.env.HYPERFIDE_OFFLINE_POLICY??'PAUSE':'INVALID'};},
   'recovery.control.reconstruct':(input,context)=>{const scope=scopeOf(input);return recoveryTransaction(context,scope,tx=>snapshots.read(tx,scope),false,true);},
   'recovery.offline.evaluate':(input,context)=>{
    const mode=context.env.HYPERFIDE_OFFLINE_POLICY??'PAUSE',budget=context.env.HYPERFIDE_MAX_OFFLINE_MS??'0';
@@ -222,13 +253,15 @@ export function createComponent(startup:ComponentContext):Component{
   'recovery.control.adopt':async(input,context)=>{
    const value=record(input,['scope','operation_id','session_id']);
    const scope=scopeOf(value.scope),id=uuid(value.operation_id),sessionId=uuid(value.session_id);
-   const supervisor=capability(context,'12.4','runner.supervisors.v1',isSupervisor);
    const before=await recoveryTransaction(context,scope,async tx=>{
     const sessions=await tx.query("SELECT s.id,s.attempt_id,s.sandbox_id,s.sandbox_boot_generation,s.state,a.generation,a.compute_authority,a.lease_expires_at,a.authority_epoch,a.execution_state,t.current_attempt_id,t.generation AS task_generation,b.boot_generation AS observed_boot FROM hyperfide.agent_sessions s LEFT JOIN hyperfide.attempts a ON a.organisation_id=s.organisation_id AND a.run_id=s.run_id AND a.id=s.attempt_id LEFT JOIN hyperfide.tasks t ON t.organisation_id=a.organisation_id AND t.run_id=a.run_id AND t.id=a.task_id LEFT JOIN hyperfide.sandboxes b ON b.organisation_id=s.organisation_id AND b.id=s.sandbox_id WHERE s.organisation_id=$1 AND s.run_id=$2 AND s.id=$3",[scope.organisation_id,scope.run_id,sessionId]);
     const row=sessions.rows[0];if(!row||!row.attempt_id||row.compute_authority!=='CURRENT'||row.authority_epoch!==scope.authority_epoch||row.current_attempt_id!==row.attempt_id||row.task_generation!==row.generation||row.sandbox_boot_generation!==row.observed_boot||Date.parse(String(row.lease_expires_at))<=Date.now())
      fail('RECOVERY_ADOPTION_REFUSED','Session lacks an exact live current compute token');
+    const liveness=(await inspectSessionRecovery(tx,scope)).find(item=>item.session_id===sessionId);
+    if(liveness?.liveness!=='UNPROVEN')fail('RECOVERY_ADOPTION_REFUSED','Recorded process exited or belongs to another boot; a dead pipe or reused PID is not live progress');
     return row;
    },true);
+   const supervisor=supervisorCapability(context);
    const observed=await supervisor.observe({scope,session_id:sessionId,attempt_id:before.attempt_id as string,sandbox_id:before.sandbox_id as string,boot_generation:before.sandbox_boot_generation as string});
    digest(observed.evidence_digest);const at=timestamp(observed.observed_at);
    if(observed.status!=='MATCHED_RUNNING'||Math.abs(Date.now()-at)>30000)fail('RECOVERY_ADOPTION_REFUSED','Exact current supervisor identity was not freshly observed');

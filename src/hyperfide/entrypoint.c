@@ -22,6 +22,7 @@ int hf_entrypoint_dispatch(int argc,char **argv) {
     const char *module=NULL;
     if(!strcmp(argv[1],"bootstrap"))module="bootstrap.js";
     else if(!strcmp(argv[1],"issue-watcher"))module="issue-watcher.js";
+    else if(!strcmp(argv[1],"supervisory-host"))module="supervisory-host.js";
     else return -1;
     char root[PATH_MAX],executable[PATH_MAX],node[PATH_MAX],entry[PATH_MAX];
     const char *configured=getenv("HYPERFIDE_RELEASE_ROOT");
@@ -58,6 +59,6 @@ int hf_component_entrypoint(const char *action,const char *request_json,FILE *ou
     if(strcmp(action,"entrypoint.launchers.describe")||!valid){
         fputs("{\"ok\":false,\"error\":{\"code\":\"INVALID_REQUEST\"}}\n",output);return 1;
     }
-    fputs("{\"ok\":true,\"canonical_command\":\"hyperfide\",\"compatibility_command\":\"cg\",\"launchers\":[\"bootstrap\",\"issue-watcher\"],\"runtime_resolution\":\"PACKAGED_RELEASE_ONLY\",\"path_fallback\":false,\"supervision_required\":true}\n",output);
+    fputs("{\"ok\":true,\"canonical_command\":\"hyperfide\",\"compatibility_command\":\"cg\",\"launchers\":[\"bootstrap\",\"issue-watcher\",\"supervisory-host\"],\"runtime_resolution\":\"PACKAGED_RELEASE_ONLY\",\"path_fallback\":false,\"supervision_required\":true}\n",output);
     return 0;
 }

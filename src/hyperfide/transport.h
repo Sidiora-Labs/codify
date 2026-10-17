@@ -33,6 +33,7 @@ typedef struct {
     long timeout_ms;
 } HfTransportConfig;
 typedef struct { long status;char *body;size_t length;int uncertain;char error[128]; } HfHttpResponse;
+int hf_transport_qualified(void);
 int hf_transport_config(const char *path,HfTransportConfig *config);
 int hf_transport_keygen(const char *path,char public_key[44]);
 int hf_transport_sign(const char *key_path,const char *domain,const char *endpoint,

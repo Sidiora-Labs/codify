@@ -327,17 +327,17 @@ class Service:
                 "HF_ARTIFACT_S3_SESSION_TOKEN": TOKEN, "HF_ARTIFACT_ORGANISATION_ID": ORG,
                 "HF_ARTIFACT_ALLOWED_RUN_IDS": json.dumps([RUN, RUN2]),
             })
+            # Startup bootstrap only verifies DB-issued principals, so every configured principal is seeded first.
             config = json.loads(f.identity_config.read_text())
-            for principal in config["principals"]:
-                principal["allowed_actions"].append("system.describe")
             self.second_credential = identity.uid()
             second = dict(config["principals"][0], credential_id=self.second_credential,
                           actor_id=identity.uid(), run_id=RUN2)
+            f.seed_fixture_principal(second)
             config["principals"].append(second)
             f.identity_config.write_text(json.dumps(config))
-            policy = json.loads(f.policy.read_text()); policy["allowed_actions"].append("system.describe")
-            f.policy.write_text(json.dumps(policy))
-        options = {"database": database or DATABASE} if "database" in inspect.signature(identity.IdentityFixture).parameters else {}
+        parameters = inspect.signature(identity.IdentityFixture).parameters
+        options = {"database": database or DATABASE} if "database" in parameters else {}
+        options["extra_actions"] = ("system.describe",)
         self.auth = identity.IdentityFixture(extra_components=("15.2",), extra_setup=setup, **options)
         self.env = self.auth.env
         self.policy = self.auth.policy

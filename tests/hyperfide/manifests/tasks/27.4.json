@@ -55,6 +55,13 @@
     "campaign.faults.pass-label-not-proof",
     "campaign.faults.missing-fault-kind",
     "campaign.faults.single-fault-only-rejected",
+    "campaign.faults.replica-lag-required",
+    "campaign.faults.replica-lag-mandatory-pair",
+    "campaign.faults.reversed-commits-required",
+    "campaign.faults.reversed-commits-mandatory-pair",
+    "campaign.faults.duplicate-provision-required",
+    "campaign.faults.duplicate-provision-mandatory-pair",
+    "campaign.faults.replica-lag-after-failover-not-composite",
     "campaign.faults.duplicate-fault-id",
     "campaign.faults.unknown-fault-kind",
     "campaign.faults.approved-composites-required",
@@ -80,8 +87,8 @@
     },
     {
       "path": "tests/hyperfide/registry.json",
-      "sha256": "77d72fc82aa56142b5cd19b93b0e8ecc469c01ed6182ea3d5ae53b2955580e61",
-      "size": 8284
+      "sha256": "59c858064cf8f112221068f9b2c6b7c9a3d5480aaad0792baa0845e1e601b52e",
+      "size": 11102
     },
     {
       "path": "tests/hyperfide/campaigns/deterministic.py",
@@ -95,13 +102,13 @@
     },
     {
       "path": "tests/hyperfide/campaigns/faults.py",
-      "sha256": "06a7548a2b2b7b5aed7039d3886f0d363bdb0c141a04e1086089d87b694f3c10",
-      "size": 14356
+      "sha256": "112248c00aca98f35712d18ab617ddc57e9313e40e37e295de28e2e4be6ad260",
+      "size": 14854
     },
     {
       "path": "tests/hyperfide/selftest_harness.py",
-      "sha256": "443edc59b5a640e5cfbf85a0cc4c70aef3d034f4b60dfe881e28a17aad35638e",
-      "size": 34670
+      "sha256": "62e964148c0d8e9cfc6450bc96f3c4ff5e663668507fb0e238a0c2d963c4b840",
+      "size": 34865
     },
     {
       "path": "tests/hyperfide/test_required_artifact_receipts.py",
@@ -110,8 +117,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/27_4.py",
-      "sha256": "559a4a641e983657248ae1fc21931db8e384c1cb009f02128e1b703f8405a352",
-      "size": 10349
+      "sha256": "04964f80b45bc6f0a6b52f08f1a6dadf419d2a44306227aa5221bcc5081d6584",
+      "size": 12399
     }
   ],
   "policy": {
@@ -119,7 +126,14 @@
     "fixture_scope": "Public synthetic component validation plus actual bounded subprocess/canonical-checker boundaries; no live fleet occupancy",
     "full_campaign_source_binding": "policy.source_manifest_digest must equal actual19 integratedRepositoryManifest sha256-prefixed digest",
     "full_campaigns": "UNRUN; require actual signed API bridges and approved pinned corpus/auth/profile/SLO inputs",
-    "full_case_status": "INCOMPLETE"
+    "full_case_status": "INCOMPLETE",
+    "full_campaign_blockers": {
+      "O-06": "UNSATISFIED",
+      "O-09": "UNSATISFIED",
+      "destructive_execution_approval": "UNSATISFIED: faults.py refuses to run without --execute and approved pinned inputs",
+      "database_failover_topology": "UNSATISFIED: no approved primary/replica failover topology is pinned",
+      "task_27_3_full_receipts": "UNSATISFIED: no externally anchored 27.3 provider/connector campaign receipts are pinned"
+    }
   },
   "registered_variant": "task:27.4",
   "resources": [],

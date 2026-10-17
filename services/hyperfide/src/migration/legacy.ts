@@ -9,7 +9,8 @@ function hash(value:string|Buffer):string{return 'sha256:'+createHash('sha256').
 export interface LegacyWriterInput {deployment_id:string;operation_id:string;source_epoch:string|null;signal?:AbortSignal}
 export interface LegacyAdmissionReceipt {deployment_id:string;operation_id:string;source_epoch:string|null;status:'ADMISSION_DISABLED';topology_digest:string;observed_at:string;evidence_digest:string;visibility:{scope:'CONFIGURED_PID_NAMESPACE';pid_namespace:string;mount_namespace:string}}
 export interface LegacyIsolationReceipt {deployment_id:string;operation_id:string;source_epoch:string|null;status:'ISOLATED';topology_digest:string;isolated_writer:string;observed_at:string;expires_at:string;evidence_digest:string;visibility:{scope:'CONFIGURED_PID_NAMESPACE';pid_namespace:string;mount_namespace:string;checked_processes:number;checked_mount_namespaces:number};admission_disabled:true;writable_fds:0;writable_shared_mappings:0;read_only_aliases:number}
-export interface LegacyWriterCapability {disableAdmission(input:LegacyWriterInput):Promise<LegacyAdmissionReceipt>;observeIsolation(input:LegacyWriterInput):Promise<LegacyIsolationReceipt>}
+export interface LegacyRestoreReceipt {deployment_id:string;operation_id:string;source_epoch:string|null;status:'ADMISSION_RESTORED';topology_digest:string;restored_descriptor_digest:string;observed_at:string;evidence_digest:string}
+export interface LegacyWriterCapability {disableAdmission(input:LegacyWriterInput):Promise<LegacyAdmissionReceipt>;observeIsolation(input:LegacyWriterInput):Promise<LegacyIsolationReceipt>;restoreAdmission(input:LegacyWriterInput):Promise<LegacyRestoreReceipt>}
 interface Config {schema_version:1;deployment_id:string;source_epoch:string|null;workspace_root:string;data_roots:string[];legacy_writer_id:string;expected_pid_namespace:string;expected_mount_namespace:string}
 interface Mount {id:string;device:string;root:string;point:string;readonly:boolean;filesystem:string}
 interface Target {device:string;root:string;directory:string}
@@ -119,6 +120,24 @@ export class LegacyWriterAdmission {
  const admission_digest=await admission(config,input),observed_at=new Date().toISOString();
  return {...this.binding(input),status:'ADMISSION_DISABLED',topology_digest:topology,observed_at,evidence_digest:hash(canonical({topology,admission_digest,visibility,observed_at})),visibility};
  }
+ /** Rollback before any new authoritative PostgreSQL write is the only caller. The exact
+ * descriptor bound to this deployment/epoch is removed atomically; an unrelated or changed
+ * descriptor is refused, and an already-absent descriptor is an idempotent replay. */
+ async restoreAdmission(input:LegacyWriterInput):Promise<LegacyRestoreReceipt>{
+ const {config,topology}=await configuration(this.env,input),visibility=await namespaces(config),directory=path.join(config.workspace_root,'.hyperfide');
+ await exactDirectory(directory);
+ const marker=path.join(directory,'authority.json');let restored:string;
+ try{restored=await admission(config,input);}
+ catch(error){if(!object(error)||error.code!=='ENOENT')throw error;restored=hash(descriptor(config,input));}
+ alive(input);
+ try{const quarantine=path.join(directory,'.restored-'+randomUUID());await fs.rename(marker,quarantine);
+ if(hash(await fs.readFile(quarantine))!==restored){await fs.rename(quarantine,marker);fail('LEGACY_ADMISSION_INVALID','Admission descriptor changed during restoration');}
+ await fs.rm(quarantine);}
+ catch(error){if(!object(error)||error.code!=='ENOENT')throw error;}
+ const dir=await fs.open(directory,'r');try{await dir.sync();}finally{await dir.close();}
+ const observed_at=new Date().toISOString();
+ return {...this.binding(input),status:'ADMISSION_RESTORED',topology_digest:topology,restored_descriptor_digest:restored,observed_at,evidence_digest:hash(canonical({topology,restored,visibility,observed_at}))};
+ }
  private binding(input:LegacyWriterInput){return {deployment_id:input.deployment_id,operation_id:input.operation_id,source_epoch:input.source_epoch};}
  async observeIsolation(input:LegacyWriterInput):Promise<LegacyIsolationReceipt>{
  const {config,roots,topology}=await configuration(this.env,input),visibility=await namespaces(config),admission_digest=await admission(config,input);
@@ -177,9 +196,15 @@ export class LegacyWriterAdmission {
 export function createLegacyWriterAdmission(env:Readonly<NodeJS.ProcessEnv>):LegacyWriterAdmission{return new LegacyWriterAdmission(env);}
 
 export function createLegacyComponent(ctx:ComponentContext):Component {
- return {apiVersion:1,capabilities:{'migration.legacy-writers.v1':createLegacyWriterAdmission(ctx.env)},actions:{
- 'legacy.writer.describe':async(raw:unknown)=>{
+ const capabilities={'migration.legacy-writers.v1':createLegacyWriterAdmission(ctx.env)};
+ // Description reports the instance actually exported to dependants, so the
+ // capability contract is observable through the service rather than by import.
+ const exported=Object.entries(capabilities).map(([name,value])=>({name,implementation:value instanceof LegacyWriterAdmission?'LegacyWriterAdmission':'UNKNOWN',
+  methods:(['disableAdmission','observeIsolation'] as const).filter(m=>typeof value[m]==='function'),request_invocable:false}));
+ return {apiVersion:1,capabilities,actions:{
+ 'legacy.writer.describe':async(raw:unknown,context:ComponentContext)=>{
  if(!object(raw)||Object.keys(raw).length)fail('LEGACY_FENCE_INPUT','Description takes empty input');
- return {server_only:true,proof_visibility:'CONFIGURED_PID_NAMESPACE',whole_host_authority:false,request_fence_registration:false};
+ return {server_only:true,service_role:context.role,proof_visibility:'CONFIGURED_PID_NAMESPACE',whole_host_authority:false,request_fence_registration:false,
+  topology_configured:Boolean(context.env.HF_LEGACY_WRITER_CONFIG_FILE),capabilities:exported,authority:'NONE'};
  }}};
 }

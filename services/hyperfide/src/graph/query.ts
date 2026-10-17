@@ -7,22 +7,45 @@ import {assertPrimaryTransaction} from '../storage/transactions.js';
 import type {QuerySession} from '../storage/transactions.js';
 import {canonical,digest,exact,fail,text,uuid} from './extraction.js';
 import {graphTransaction,scopeInput,semanticProjectionDebt} from './ingestion.js';
-import type {GraphScope,GraphTransaction} from './ingestion.js';
+import type {GraphScope} from './ingestion.js';
 import {publishedGraph} from './publication.js';
 import type {JsonObject} from './extraction.js';
+import {contracts} from './contract_query.js';
+import {projectionDelta,projectionFacts,projectionView} from './projection.js';
+import {cacheCapacity,GraphQueryCache,routedGraphQueryExecutor} from './replica_query.js';
 
 export interface GraphQueryDescriptor {kind:string;input:JsonObject;max_bytes:number;read_options?:unknown}
 export type GraphQueryExecutor=<T extends JsonObject>(ctx:ComponentContext,scope:GraphScope,manifestId:string,query:GraphQueryDescriptor,operation:(session:QuerySession,manifest:JsonObject)=>Promise<T>)=>Promise<T>;
 export const primaryGraphQueryExecutor:GraphQueryExecutor=async(ctx,scope,manifestId,_query,operation)=>graphTransaction(ctx,scope,async tx=>{
  assertPrimaryTransaction(tx);return operation(tx,await publishedGraph(tx,scope,manifestId));
 },false);
-function semanticInput(input:JsonObject):JsonObject{const {read_options,...semantic}=input;void read_options;return semantic;}
+export function semanticInput(input:JsonObject):JsonObject{const {read_options,...semantic}=input;void read_options;return semantic;}
 
-function bounded(value:unknown,base:number,min:number,max:number):number{if(value===undefined)return base;if(!Number.isSafeInteger(value)||Number(value)<min||Number(value)>max)fail('GRAPH_INVALID','Invalid query budget');return Number(value);}
+export function bounded(value:unknown,base:number,min:number,max:number):number{if(value===undefined)return base;if(!Number.isSafeInteger(value)||Number(value)<min||Number(value)>max)fail('GRAPH_INVALID','Invalid query budget');return Number(value);}
 function ids(value:unknown,max=128):string[]{if(!Array.isArray(value)||value.length>max)fail('GRAPH_INVALID','Bounded ID array required');const all=value.map(uuid);if(new Set(all).size!==all.length)fail('GRAPH_INVALID','Duplicate query IDs');return all;}
-function provenance(manifest:JsonObject):JsonObject{return {manifest_id:manifest.id,manifest_digest:manifest.manifest_digest,source_manifest_digest:manifest.source_manifest_digest,source_set:manifest.source_set,source_coverage:manifest.source_coverage,provenance:{route:'PRIMARY',exact_version:true,cache:'NONE',snapshot:'SERIALIZABLE_PRIMARY'}};}
-function budget(value:unknown):number{return bounded(value,262144,4096,786432);}
-function packet<T extends JsonObject>(value:T,max:number):T {if(Buffer.byteLength(JSON.stringify(value))>max)fail('GRAPH_PACKET_TOO_LARGE','Exact graph packet exceeds requested byte budget');return value;}
+// Routed executors annotate the manifest with the route that actually served the read.
+export function provenance(manifest:JsonObject):JsonObject{const routed=manifest.query_route;return {manifest_id:manifest.id,manifest_digest:manifest.manifest_digest,source_manifest_digest:manifest.source_manifest_digest,source_set:manifest.source_set,source_coverage:manifest.source_coverage,provenance:routed&&typeof routed==='object'?routed:{route:'PRIMARY',exact_version:true,cache:'NONE',snapshot:'SERIALIZABLE_PRIMARY'}};}
+export function budget(value:unknown):number{return bounded(value,262144,4096,786432);}
+export function packet<T extends JsonObject>(value:T,max:number):T {if(Buffer.byteLength(JSON.stringify(value))>max)fail('GRAPH_PACKET_TOO_LARGE','Exact graph packet exceeds requested byte budget');return value;}
+export function decodeCursor(value:unknown,queryDigest:string):number{
+ const raw=text(value,'cursor',1024);let c:JsonObject;
+ try{const bytes=Buffer.from(raw,'base64url');if(bytes.toString('base64url')!==raw)throw new Error();c=exact(JSON.parse(bytes.toString('utf8')),['query_digest','offset']);}catch{fail('GRAPH_CURSOR_INVALID','Invalid pinned search cursor');}
+ if(c.query_digest!==queryDigest||!Number.isSafeInteger(c.offset)||Number(c.offset)<0||Number(c.offset)>1000000)fail('GRAPH_CURSOR_INVALID','Cursor belongs to different immutable query');
+ return Number(c.offset);
+}
+export function encodeCursor(queryDigest:string,offset:number):string{return Buffer.from(canonical({query_digest:queryDigest,offset})).toString('base64url');}
+// Legacy SQLite FTS5 query operators have no equivalent in plainto_tsquery; refusing them
+// is the approved difference, rather than silently matching operators as literal words.
+function legacySyntax(q:string):void{
+ const operators=q.split(/\s+/).filter(token=>['AND','OR','NOT','NEAR'].includes(token)||/^NEAR\(/.test(token));
+ const symbols=[...new Set(q.match(/["*^(){}:]/g)??[])];
+ if(operators.length||symbols.length)fail('GRAPH_QUERY_UNSUPPORTED','Legacy FTS5 query syntax is unsupported: '+[...new Set(operators),...symbols].join(' ')+'; use plain words or a trigram mode');
+}
+function legacyWords(q:string):string[]{
+ const words=[...new Set(q.split(/[^\p{L}\p{N}]+/u).filter(Boolean).map(word=>word.toLowerCase()))];
+ if(!words.length||words.length>16)fail('GRAPH_INVALID','Full-text query requires one to sixteen words');
+ return words;
+}
 async function status(input:unknown,ctx:ComponentContext):Promise<unknown>{
  const r=exact(input,['organisation_id','run_id','authority_epoch'],['manifest_id','channel']),s=scopeInput(r,ctx);
  if((r.manifest_id===undefined)===(r.channel===undefined))fail('GRAPH_INVALID','Name exactly one manifest or channel');
@@ -40,26 +63,37 @@ export async function search(input:unknown,ctx:ComponentContext,executor:GraphQu
  const r=exact(input,['organisation_id','run_id','authority_epoch','manifest_id','mode','q'],['limit','cursor','max_bytes','read_options']),s=scopeInput(r,ctx),manifestId=uuid(r.manifest_id),
  q=text(r.q,'search query',256),limit=bounded(r.limit,50,1,200),max=budget(r.max_bytes),mode=r.mode;
  if(!['symbol','body','comment','trigram','body-trigram'].includes(String(mode)))fail('GRAPH_INVALID','Unsupported search mode');
- const queryDigest=digest(canonical({manifest_id:manifestId,mode,q,limit,max_bytes:max}));let offset=0;
- if(r.cursor!==undefined){
-  const raw=text(r.cursor,'cursor',1024);let c:JsonObject;
-  try{const bytes=Buffer.from(raw,'base64url');if(bytes.toString('base64url')!==raw)throw new Error();c=exact(JSON.parse(bytes.toString('utf8')),['query_digest','offset']);}catch{fail('GRAPH_CURSOR_INVALID','Invalid pinned search cursor');}
-  if(c.query_digest!==queryDigest||!Number.isSafeInteger(c.offset)||Number(c.offset)<0||Number(c.offset)>1000000)fail('GRAPH_CURSOR_INVALID','Cursor belongs to different immutable query');offset=Number(c.offset);
- }
+ if(mode!=='trigram'&&mode!=='body-trigram')legacySyntax(q);
+ const queryDigest=digest(canonical({manifest_id:manifestId,mode,q,limit,max_bytes:max})),offset=r.cursor===undefined?0:decodeCursor(r.cursor,queryDigest);
  return executor(ctx,s,manifestId,{kind:'search',input:semanticInput(r),max_bytes:max,read_options:r.read_options},async(tx,manifest)=>{
   const p=[s.organisation_id,s.run_id,manifest.build_id,q,limit+1,offset];
   let sql:string;
-  if(mode==='body')sql="SELECT b.bundle_digest,b.path,b.content_digest,left(b.body,512) AS snippet,ts_rank_cd(b.search_vector,plainto_tsquery('simple',$4))::text AS score FROM hyperfide.graph_source_bodies b WHERE b.organisation_id=$1 AND b.run_id=$2 AND b.graph_id=$3 AND b.search_vector@@plainto_tsquery('simple',$4) ORDER BY ts_rank_cd(b.search_vector,plainto_tsquery('simple',$4)) DESC,b.bundle_digest,b.path LIMIT $5 OFFSET $6";
-  else if(mode==='body-trigram')sql="SELECT b.bundle_digest,b.path,b.content_digest,left(b.body,512) AS snippet,'1'::text AS score FROM hyperfide.graph_source_bodies b WHERE b.organisation_id=$1 AND b.run_id=$2 AND b.graph_id=$3 AND position(lower($4) IN lower(b.body))>0 AND b.body ILIKE $7 ORDER BY b.bundle_digest,b.path LIMIT $5 OFFSET $6";
-  else if(mode==='trigram')sql="SELECT f.bundle_digest,f.family,f.fact_key,f.payload,'1'::text AS score FROM hyperfide.graph_fact_rows f WHERE f.organisation_id=$1 AND f.run_id=$2 AND f.graph_id=$3 AND f.family IN ('symbols','comments') AND position(lower($4) IN lower(COALESCE(f.payload->>'name',f.payload->>'body','')))>0 AND COALESCE(f.payload->>'name',f.payload->>'body','') ILIKE $7 ORDER BY f.family,f.bundle_digest,f.fact_key LIMIT $5 OFFSET $6";
+  // Substring modes fold ASCII case only, like legacy `cg grep -i`, independent of database locale;
+  // ILIKE stays as the trigram-index prefilter because it never folds less than that.
+  const unicodeCased=[...q].some(c=>c.charCodeAt(0)>127&&c.toLowerCase()!==c.toUpperCase());
+  if(mode!=='trigram'&&mode!=='body-trigram'&&unicodeCased){
+   const locale=(await tx.query<{provider:string;ctype:string}>('SELECT datlocprovider::text AS provider,datctype AS ctype FROM pg_database WHERE datname=current_database()')).rows[0]!;
+   if(locale.provider==='c'&&['C','POSIX'].includes(locale.ctype))fail('GRAPH_QUERY_UNSUPPORTED','Unicode case folding for full-text search requires a Unicode-aware database ctype (ctype='+locale.ctype+'); use body-trigram or trigram mode');
+  }
+  // Legacy unicode61 splits words at every non-alphanumeric character (including '.', '_' and '-');
+  // the PostgreSQL parser keeps tokens such as JSON.parse whole. Each query word must therefore
+  // match either a lexeme or a delimited token, and an ILIKE prefilter keeps the trigram index usable.
+  const words=mode==='body'||mode==='comment'?legacyWords(q):[],wordStart=p.length+1;
+  if(words.length)p.push(words,...words.map(word=>'%'+word+'%'));
+  const wordMatch=(vector:string,body:string,indexedBody:string)=>" AND NOT EXISTS(SELECT 1 FROM unnest($"+wordStart+"::text[]) AS w(word) WHERE NOT ("+vector+"@@plainto_tsquery('simple',w.word) OR "+body+" ~* ('(^|[^[:alnum:]])'||w.word||'([^[:alnum:]]|$)')))"+
+   words.map((_word,index)=>" AND "+indexedBody+" ILIKE $"+(wordStart+1+index)).join('');
+  if(mode==='body')sql="SELECT b.bundle_digest,b.path,b.content_digest,left(b.body,512) AS snippet,ts_rank_cd(b.search_vector,plainto_tsquery('simple',$4))::text AS score FROM hyperfide.graph_source_bodies b WHERE b.organisation_id=$1 AND b.run_id=$2 AND b.graph_id=$3"+wordMatch('b.search_vector','b.body','b.body')+" ORDER BY ts_rank_cd(b.search_vector,plainto_tsquery('simple',$4)) DESC,b.bundle_digest,b.path LIMIT $5 OFFSET $6";
+  else if(mode==='body-trigram')sql="SELECT b.bundle_digest,b.path,b.content_digest,left(b.body,512) AS snippet,'1'::text AS score FROM hyperfide.graph_source_bodies b WHERE b.organisation_id=$1 AND b.run_id=$2 AND b.graph_id=$3 AND position(lower($4::text COLLATE \"C\") IN lower(b.body COLLATE \"C\"))>0 AND b.body ILIKE $7 ORDER BY b.bundle_digest,b.path LIMIT $5 OFFSET $6";
+  else if(mode==='trigram')sql="SELECT f.bundle_digest,f.family,f.fact_key,f.payload,'1'::text AS score FROM hyperfide.graph_fact_rows f WHERE f.organisation_id=$1 AND f.run_id=$2 AND f.graph_id=$3 AND f.family IN ('symbols','comments') AND position(lower($4::text COLLATE \"C\") IN lower(COALESCE(f.payload->>'name',f.payload->>'body','') COLLATE \"C\"))>0 AND COALESCE(f.payload->>'name',f.payload->>'body','') ILIKE $7 ORDER BY f.family,f.bundle_digest,f.fact_key LIMIT $5 OFFSET $6";
   else{
    const family=mode==='symbol'?'symbols':'comments',expression=mode==='symbol'?"COALESCE(f.payload->>'name','')||' '||COALESCE(f.payload->>'sig','')":"COALESCE(f.payload->>'body','')";
-   sql="SELECT f.bundle_digest,f.family,f.fact_key,f.payload,ts_rank_cd(to_tsvector('simple',"+expression+"),plainto_tsquery('simple',$4))::text AS score FROM hyperfide.graph_fact_rows f WHERE f.organisation_id=$1 AND f.run_id=$2 AND f.graph_id=$3 AND f.family='"+family+"' AND to_tsvector('simple',"+expression+")@@plainto_tsquery('simple',$4) ORDER BY ts_rank_cd(to_tsvector('simple',"+expression+"),plainto_tsquery('simple',$4)) DESC,f.bundle_digest,f.fact_key LIMIT $5 OFFSET $6";
+   const match=mode==='symbol'?" AND to_tsvector('simple',"+expression+")@@plainto_tsquery('simple',$4)":wordMatch("to_tsvector('simple',"+expression+")",expression,"COALESCE(f.payload->>'name',f.payload->>'body','')");
+   sql="SELECT f.bundle_digest,f.family,f.fact_key,f.payload,ts_rank_cd(to_tsvector('simple',"+expression+"),plainto_tsquery('simple',$4))::text AS score FROM hyperfide.graph_fact_rows f WHERE f.organisation_id=$1 AND f.run_id=$2 AND f.graph_id=$3 AND f.family='"+family+"'"+match+" ORDER BY ts_rank_cd(to_tsvector('simple',"+expression+"),plainto_tsquery('simple',$4)) DESC,f.bundle_digest,f.fact_key LIMIT $5 OFFSET $6";
   }
   if(mode==='body-trigram'||mode==='trigram')p.push('%'+q.replace(/[\\%_]/g,c=>'\\'+c)+'%');
   const all=(await tx.query(sql,p)).rows;const truncated=all.length>limit,rows=all.slice(0,limit);
   const result={...provenance(manifest),mode,ranking:(mode==='trigram'||mode==='body-trigram')?'STABLE_IDENTITY':'POSTGRES_SIMPLE_TS_RANK_CD_WITH_STABLE_TIES',
-   rows,complete:!truncated,truncated,next_cursor:truncated?Buffer.from(canonical({query_digest:queryDigest,offset:offset+rows.length})).toString('base64url'):null,
+   rows,complete:!truncated,truncated,next_cursor:truncated?encodeCursor(queryDigest,offset+rows.length):null,
    limitations:['Task component ranking is explicit; full legacy FTS/ranking parity requires its independently approved corpus']};
   return packet(result,max);
  });
@@ -113,13 +147,22 @@ export async function traverse(input:unknown,ctx:ComponentContext,executor:Graph
 export function createComponent(ctx:ComponentContext):Component {
  const wrap=(fn:(input:unknown,context:ComponentContext)=>Promise<unknown>)=>async(input:unknown,context:ComponentContext)=>{try{return await fn(input,context);}catch(e){if(e instanceof FoundationError)throw e;throw new FoundationError('GRAPH_QUERY_FAILED','Exact graph query could not complete within its storage budget');}};
  const bound=(invocation:InvocationContext):ComponentContext=>{const context=Object.freeze({...ctx,invocation});invocationOf(context);return context;};
+ // Requests without read_options keep the exact primary path; read_options select a routed read.
+ const cache=new GraphQueryCache(cacheCapacity(ctx.env)),executor=routedGraphQueryExecutor(primaryGraphQueryExecutor,cache);
+ const routed=(fn:(input:unknown,context:ComponentContext,executor:GraphQueryExecutor)=>Promise<unknown>)=>(input:unknown,context:ComponentContext)=>fn(input,context,executor);
  return {apiVersion:1,capabilities:{'graph.query.v1':Object.freeze({
- traverse:(input:unknown,invocation:InvocationContext)=>traverse(input,bound(invocation)),
- context:(input:unknown,invocation:InvocationContext)=>context(input,bound(invocation)),
- search:(input:unknown,invocation:InvocationContext)=>search(input,bound(invocation)),
- status:(input:unknown,invocation:InvocationContext)=>status(input,bound(invocation))
+ traverse:(input:unknown,invocation:InvocationContext)=>traverse(input,bound(invocation),executor),
+ context:(input:unknown,invocation:InvocationContext)=>context(input,bound(invocation),executor),
+ search:(input:unknown,invocation:InvocationContext)=>search(input,bound(invocation),executor),
+ status:(input:unknown,invocation:InvocationContext)=>status(input,bound(invocation)),
+ contracts:(input:unknown,invocation:InvocationContext)=>contracts(input,bound(invocation),executor),
+ projectionView:(input:unknown,invocation:InvocationContext)=>projectionView(input,bound(invocation),executor)
  })},actions:{
-  'graph.query.describe':input=>{exact(input,[]);return {schema_version:1,exact_manifest_required:true,max_depth:4,max_nodes:500,route:'PRIMARY',replica_qualification:'NOT_CLAIMED',cache_authority:'NONE'};},
-  'graph.query.status':wrap(status),'graph.query.search':wrap(search),'graph.query.context':wrap(context),'graph.query.traverse':wrap(traverse)
+  'graph.query.describe':input=>{exact(input,[]);return {schema_version:1,exact_manifest_required:true,max_depth:4,max_nodes:500,route:'PRIMARY',
+   routes:{default:'PRIMARY',replica:'PRIMARY_ADMISSION_WAL_BARRIER_THEN_REPEATABLE_READ_STANDBY',fallback:'DECLARED_PRIMARY_ONLY',offline:'REFUSED'},
+   replica_qualification:'TASK_COMPONENT_ONLY',cache_authority:'NONE',cache:cache.describe(),performance_claim:'NONE'};},
+  'graph.query.status':wrap(status),'graph.query.search':wrap(routed(search)),'graph.query.context':wrap(routed(context)),'graph.query.traverse':wrap(routed(traverse)),
+  'graph.query.contracts':wrap(routed(contracts)),'graph.query.projection.facts':wrap(routed(projectionFacts)),
+  'graph.query.projection.delta':wrap(routed(projectionDelta)),'graph.query.projection.view':wrap(routed(projectionView))
  }};
 }

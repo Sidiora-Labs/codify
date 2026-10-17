@@ -59,10 +59,12 @@ def seed(f,task):
     for key,manager in (('package','manager'),('collaborator','peer')):
         insert(f,'feature_packages',scoped(f,id=x[key],package_key='fixture-'+key,wave=1,manager_session_id=x[manager]))
         insert(f,'hierarchy_packages',scoped(f,package_id=x[key],feature_key='fixture-'+key,allocation_policy='FEATURE_STABLE',state='ACTIVE'))
-    insert(f,'tasks',scoped(f,id=x['task'],task_key='18.fixture.origin',feature_package_id=x['package'],spec_revision_id=i['spec'],criteria_digest=D,definition={},wave=1))
     executable=Path(subprocess.check_output(['node','-p','process.execPath'],text=True).strip()).resolve(strict=True);proof_check={'id':'finding.repaired','argv':[str(executable),'--version'],'executable_digest':sha(executable.read_bytes()),'timeout_ms':1000,'required_artifacts':['fixture/stdout.log'],'input_keys':['source','dependency','toolchain','configuration','graph','contract']}
-    proof_policy={'schema_version':1,'criteria_digest':D,'spec_revision_id':i['spec'],'spec_generation':'1','repository_id':x['repository'],'source_object_id':OID,'rubric_digest':RUBRIC,'checks':[proof_check,dict(proof_check,id='finding.other')],'clauses':[{'id':'18.1','mode':'EXECUTABLE','acceptance_ids':['V-032'],'checks':['finding.repaired','finding.other']}],'inputs':{name:sha(('fixture-'+name).encode()) for name in ('source','dependency','toolchain','configuration','graph','contract')},'contract_digests':[]}
-    insert(f,'proof_registries',scoped(f,task_id=x['task'],spec_generation='1',spec_revision_id=i['spec'],criteria_digest=D,registry_digest=sha(json.dumps(proof_policy,sort_keys=True,separators=(',',':')).encode()),policy=proof_policy))
+    # Accepted proof authority (domain2) binds the origin task to explicit accepted clause, scenario and check intent.
+    accepted=accept_spec(f,proof_check);i['accepted_spec'],definition=accepted
+    insert(f,'tasks',scoped(f,id=x['task'],task_key='18.fixture.origin',feature_package_id=x['package'],spec_revision_id=i['accepted_spec'],spec_generation='2',criteria_digest=D,definition=definition,wave=1))
+    proof_policy={'schema_version':1,'criteria_digest':D,'spec_revision_id':i['accepted_spec'],'spec_generation':'2','repository_id':x['repository'],'source_object_id':OID,'rubric_digest':RUBRIC,'checks':[proof_check,dict(proof_check,id='finding.other')],'clauses':[{'id':'18.1','mode':'EXECUTABLE','acceptance_ids':['V-032'],'checks':['finding.repaired','finding.other']}],'inputs':{name:sha(('fixture-'+name).encode()) for name in ('source','dependency','toolchain','configuration','graph','contract')},'contract_digests':[]}
+    insert(f,'proof_registries',scoped(f,task_id=x['task'],spec_generation='2',spec_revision_id=i['accepted_spec'],criteria_digest=D,registry_digest=sha(json.dumps(proof_policy,sort_keys=True,separators=(',',':')).encode()),policy=proof_policy))
     insert(f,'attempts',scoped(f,id=x['attempt'],task_id=x['task'],generation='1',authority_epoch=i['epoch'],input_packet_digest=sha(b'fixture-input'),execution_state='SUBMITTED',compute_authority='RELEASED'))
     insert(f,'artifacts',scoped(f,id=x['artifact'],digest=sha(b'fixture-artifact'),size_bytes='1',storage_backend='fixture',storage_key='finding-evidence',status='COMPLETE',retention_class='RUN'))
     insert(f,'evidence',scoped(f,id=x['evidence'],attempt_id=x['attempt'],attempt_generation='1',repository_id=x['repository'],source_object_id=OID,criteria_digest=D,manifest_digest=sha(b'fixture-manifest'),artifact_id=x['artifact'],admission_state='ADMITTED'))
@@ -75,6 +77,18 @@ def seed(f,task):
     insert(f,'review_receipts',scoped(f,id=x['receipt'],request_id=uid(),request_digest=sha(b'fixture-request'),obligation_id=x['obligation'],lease_generation='1',generation='1',reviewer_session_id=x['watcher'],rubric_digest=RUBRIC,input_manifest_digest=inputs,candidate_digest=candidate,outcome='FINDINGS',limitations=[]))
     insert(f,'review_receipt_evidence',scoped(f,receipt_id=x['receipt'],evidence_id=x['evidence']))
     f.sql("UPDATE hyperfide.review_obligations SET state='COMPLETE',input_manifest_digest=$1,candidate_digest=$2,current_receipt_id=$3 WHERE id=$4",[inputs,candidate,x['receipt'],x['obligation']])
+def accept_spec(f,proof_check):
+    checks=[proof_check,dict(proof_check,id='finding.other')]
+    source='[req.18]\ntitle = "Finding lifecycle"\nac_1 = "Canonical findings retain provenance"\n[acceptance.V-032]\nreqs = ["18.1"]\nchecks = ["finding.repaired", "finding.other"]\n[task.18.1]\nreqs = ["18.1"]\nacceptance_ids = ["V-032"]\n[proof]\nrubric_digest = '+json.dumps(RUBRIC)+'\n'
+    for item in checks:source+='[proof.check.'+item['id']+']\n'+''.join(key+' = '+json.dumps(item[key])+'\n' for key in ('argv','executable_digest','timeout_ms','required_artifacts','input_keys'))
+    parsed=json.loads(subprocess.check_output(['node','--input-type=module','-e',"import{parseKvx}from'./services/hyperfide/dist/spec/import.js';let s='';for await(const c of process.stdin)s+=c;process.stdout.write(JSON.stringify(parseKvx(s)));"],input=source.encode(),cwd=ROOT))
+    accepted=uid();i=f.ids
+    document={'schema_version':1,'revision_digest':sha(b'finding-accepted-envelope-'+accepted.encode()),'source_digest':sha(source.encode()),'repositories':[{'repository_id':f.x['repository'],'source_object_id':OID,'integration_ref':'refs/heads/main'}],'allowed_actions':[],'closure_policy':{'required_evidence':['finding.repaired','finding.other'],'required_review_roles':[],'publication':'AFTER_QUALIFICATION'},'provenance':None,'parsed':parsed,'runtime_wave_offset':0}
+    insert(f,'spec_revisions',{'organisation_id':i['organisation'],'project_id':i['project'],'id':accepted,'source_digest':sha(source.encode()),'source_content':source,'document':document,'schema_version':1,'revision_digest':document['revision_digest']})
+    insert(f,'run_spec_revisions',scoped(f,spec_generation='2',spec_revision_id=accepted))
+    f.sql('UPDATE hyperfide.runs SET spec_revision_id=$3,spec_generation=2,state_version=state_version+1 WHERE organisation_id=$1 AND id=$2',[i['organisation'],i['run'],accepted])
+    section=next(item for item in parsed['sections'] if item['name']=='task.18.1')
+    return accepted,{'schema_version':1,'section':section,'feature_key':'fixture-package','declared_wave':1,'runtime_wave_offset':0,'declared_status':None,'history_only':True}
 def observation(f,fingerprint='same-reproducer',severity='ERROR',source=OID,evidence=None):
     value=uid();insert(f,'review_observations',scoped(f,id=value,review_receipt_id=f.x['receipt'],evidence_id=evidence or f.x['evidence'],observer_session_id=f.x['watcher'],origin_task_id=f.x['task'],origin_attempt_id=f.x['attempt'],repository_id=f.x['repository'],source_object_id=source,failure_fingerprint=sha(fingerprint.encode()),summary='Synthetic actionable finding',severity=severity));return value
 def call(f,action,payload,component='finding-registry',key='operator'):
@@ -121,10 +135,11 @@ def main():
         check('findings.registry.missing-finding',lambda:reject(f,'finding.inspect',{'finding_id':uid()},'FINDING_NOT_FOUND'))
         check('findings.registry.bounded-pagination',lambda:expect(len(call(f,'finding.list',{'limit':1})['findings'])==1 and call(f,'finding.list',{'limit':1})['next_after_id'] is not None))
         check('findings.registry.reject-pagination-overflow',lambda:reject(f,'finding.list',{'limit':101},'INVALID_REQUEST'))
-        before=call(f,'finding.inspect',{'finding_id':distinct['finding_id']})['finding'];packet={'source_finding_id':distinct['finding_id'],'target_finding_id':fid,'reason':'Reviewed equivalent failure','evidence_ids':[f.x['evidence']],'expected_state_version':str(before['registry_version'])}
+        third=cross_feature_owner(f,distinct['finding_id']);before=call(f,'finding.inspect',{'finding_id':distinct['finding_id']})['finding'];packet={'source_finding_id':distinct['finding_id'],'target_finding_id':fid,'reason':'Reviewed equivalent failure','evidence_ids':[f.x['evidence']],'expected_state_version':str(before['registry_version'])}
         check('findings.registry.confirm-duplicate',lambda:expect(call(f,'finding.duplicate.confirm',packet)['replayed'] is False))
         check('findings.registry.duplicate-replay',lambda:expect(call(f,'finding.duplicate.confirm',packet)['replayed'] is True))
         check('findings.registry.duplicate-preserves-reports',lambda:expect(len(call(f,'finding.inspect',{'finding_id':distinct['finding_id']})['reports'])==1))
+        check('findings.registry.cross-feature-accountability-explicit',lambda:cross_feature_explicit(f,fid,distinct['finding_id'],third))
         check('findings.registry.duplicate-cycle-rejected',lambda:reject(f,'finding.duplicate.confirm',dict(packet,source_finding_id=fid,target_finding_id=distinct['finding_id'],expected_state_version=str(snapshot['finding']['registry_version'])),'DUPLICATE_CYCLE'))
         f.sql("UPDATE hyperfide.finding_registry_records SET phase='RESOLVED',state_version=state_version+1 WHERE finding_id=$1",[fid]);f.sql("UPDATE hyperfide.findings SET state='RESOLVED',state_version=state_version+1 WHERE id=$1",[fid])
         reopened=finding(f,observation(f,'different-reproducer'))
@@ -140,6 +155,18 @@ def main():
         check('findings.registry.signed-cross-run-refused',lambda:expect(f.request(f.operation('finding-registry','finding.list',{},run=uid()))[1].get('ok') is False))
     finally:f.close()
     return int(any(actual!='observed' for _,actual in RESULTS))
+def cross_feature_owner(f,finding_id):
+    # A routed alias owned by another feature; consolidation must keep that accountability explicit, not transfer or drop it.
+    third=uid();insert(f,'feature_packages',scoped(f,id=third,package_key='fixture-third',wave=1,manager_session_id=f.x['successor']))
+    insert(f,'hierarchy_packages',scoped(f,package_id=third,feature_key='fixture-third',allocation_policy='FEATURE_STABLE',state='ACTIVE'))
+    f.sql('UPDATE hyperfide.findings SET owner_package_id=$2,state_version=state_version+1 WHERE id=$1',[finding_id,third]);return third
+def cross_feature_explicit(f,target,source,third):
+    canonical=call(f,'finding.inspect',{'finding_id':target})['finding']
+    expect(canonical['owner_package_id']==f.x['package'] and third in canonical['collaborator_package_ids'] and f.x['collaborator'] in canonical['collaborator_package_ids'],'Cross-feature accountability was transferred or dropped')
+    events=f.sql("SELECT payload FROM hyperfide.outbox_events WHERE aggregate_type='finding' AND aggregate_id=$1 AND event_type='finding.duplicate-confirmed'",[source])
+    expect(len(events)==1,'Duplicate consolidation event missing')
+    payload=events[0]['payload'];payload=json.loads(payload) if isinstance(payload,str) else payload
+    expect(payload['accountability_review_required'] is True and payload['accountable_package_id']==f.x['package'] and payload['affected_package_ids']==[third],'Ambiguous accountability is not explicit for leader resolution')
 def missing_context_hierarchy(f):
     f.sql('BEGIN; ALTER TABLE hyperfide.hierarchy_packages RENAME TO hierarchy_packages_context_fixture; COMMIT;')
     try:reject(f,'finding.context.read',{},'MIGRATION_REQUIRED')

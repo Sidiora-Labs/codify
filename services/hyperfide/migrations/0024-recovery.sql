@@ -92,6 +92,35 @@ BEGIN
  RETURN NEW;
 END $$;
 CREATE TRIGGER recovery_replacement_guard BEFORE UPDATE OR DELETE ON hyperfide.recovery_replacement_requests FOR EACH ROW EXECUTE FUNCTION hyperfide.guard_recovery_replacement();
+-- Restoration binds one compatible checkpoint to one new attempt identity; outputs are append-only provenance.
+ALTER TABLE hyperfide.recovery_replacement_requests
+ ADD COLUMN checkpoint_id uuid,
+ ADD COLUMN replacement_attempt_id uuid,
+ ADD COLUMN replacement_attempt_generation bigint CHECK(replacement_attempt_generation>1),
+ ADD COLUMN hold_reason text CHECK(length(hold_reason) BETWEEN 1 AND 1024),
+ ADD COLUMN restoration_digest hyperfide.digest,
+ ADD COLUMN restoration jsonb CHECK(jsonb_typeof(restoration)='object' AND octet_length(restoration::text)<=262144),
+ ADD COLUMN enrollment jsonb CHECK(jsonb_typeof(enrollment)='object' AND octet_length(enrollment::text)<=16384),
+ ADD COLUMN outputs jsonb NOT NULL DEFAULT '[]' CHECK(jsonb_typeof(outputs)='array' AND jsonb_array_length(outputs)<=256 AND octet_length(outputs::text)<=262144),
+ ADD CONSTRAINT recovery_replacement_ready_bound CHECK(state NOT IN ('RESTORING','READY') OR (checkpoint_id IS NOT NULL AND replacement_attempt_id IS NOT NULL AND replacement_attempt_generation>source_attempt_generation)),
+ ADD CONSTRAINT recovery_replacement_held_reason CHECK(state<>'HELD' OR hold_reason IS NOT NULL),
+ ADD CONSTRAINT recovery_replacement_enrolled_ready CHECK(enrollment IS NULL OR state='READY'),
+ ADD CONSTRAINT recovery_replacement_attempt FOREIGN KEY(organisation_id,run_id,replacement_attempt_id,replacement_attempt_generation) REFERENCES hyperfide.attempts(organisation_id,run_id,id,generation),
+ ADD CONSTRAINT recovery_replacement_checkpoint FOREIGN KEY(organisation_id,run_id,checkpoint_id) REFERENCES hyperfide.checkpoints(organisation_id,run_id,id);
+CREATE UNIQUE INDEX recovery_replacement_one_owner ON hyperfide.recovery_replacement_requests(organisation_id,run_id,replacement_attempt_id) WHERE replacement_attempt_id IS NOT NULL;
+CREATE FUNCTION hyperfide.guard_recovery_replacement_binding() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF OLD.replacement_attempt_id IS NOT NULL AND (NEW.replacement_attempt_id,NEW.replacement_attempt_generation,NEW.checkpoint_id,NEW.restoration_digest,NEW.restoration)
+ IS DISTINCT FROM (OLD.replacement_attempt_id,OLD.replacement_attempt_generation,OLD.checkpoint_id,OLD.restoration_digest,OLD.restoration)
+ THEN RAISE EXCEPTION 'Recovery replacement binding is immutable'; END IF;
+ IF OLD.enrollment IS NOT NULL AND NEW.enrollment IS DISTINCT FROM OLD.enrollment THEN RAISE EXCEPTION 'Recovery enrollment is immutable'; END IF;
+ IF jsonb_array_length(NEW.outputs)<jsonb_array_length(OLD.outputs) THEN RAISE EXCEPTION 'Recovery output provenance is append-only'; END IF;
+ FOR i IN 0..jsonb_array_length(OLD.outputs)-1 LOOP
+  IF NEW.outputs->i IS DISTINCT FROM OLD.outputs->i THEN RAISE EXCEPTION 'Recovery output provenance is append-only'; END IF;
+ END LOOP;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER recovery_replacement_binding BEFORE UPDATE ON hyperfide.recovery_replacement_requests FOR EACH ROW EXECUTE FUNCTION hyperfide.guard_recovery_replacement_binding();
 
 -- Accepted-run rebind is separate from global activation and grants no dispatch.
 CREATE TABLE hyperfide.recovery_accepted_run_intents (
@@ -125,3 +154,8 @@ CREATE TABLE hyperfide.recovery_accepted_run_debts (
 );
 CREATE TRIGGER immutable_binding BEFORE UPDATE OR DELETE ON hyperfide.recovery_accepted_run_debts FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','recovery_operation_id','reference','source_epoch','target_epoch','created_at');
 CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.recovery_accepted_run_debts FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+-- Task24.4 (additive): measured drill reconciliation evidence gates any resumption of drill-scoped authority.
+ALTER TABLE hyperfide.recovery_drill_runs ADD COLUMN reconciliation jsonb CHECK(reconciliation IS NULL OR (jsonb_typeof(reconciliation)='object' AND octet_length(reconciliation::text)<=8192));
+ALTER TABLE hyperfide.recovery_drill_runs ADD COLUMN resume_state text NOT NULL DEFAULT 'BLOCKED' CHECK(resume_state IN ('BLOCKED','RECONCILED'));
+ALTER TABLE hyperfide.recovery_drill_runs ADD CONSTRAINT recovery_drill_resume_requires_measurement CHECK(resume_state<>'RECONCILED' OR (state='MEASURED' AND reconciliation IS NOT NULL));

@@ -19,6 +19,8 @@ import tempfile
 from urllib.parse import urlsplit,urlunsplit
 
 ROOT=Path(__file__).resolve().parents[4]
+# Fixture Git must never daemonize auto-maintenance: detached children outlive the probe.
+os.environ.update({"GIT_CONFIG_COUNT":"2","GIT_CONFIG_KEY_0":"maintenance.auto","GIT_CONFIG_VALUE_0":"false","GIT_CONFIG_KEY_1":"gc.auto","GIT_CONFIG_VALUE_1":"0"})
 TASK=os.environ.get("HYPERFIDE_INTEGRATION_TEST_TASK","19.1")
 DATABASE="hf_integration_"+TASK.replace(".","_")
 FAILED=[]
@@ -26,16 +28,16 @@ U=lambda n:f"00000000-0000-4000-8000-{n:012x}"
 SCOPE={"organisation_id":U(1),"run_id":U(5)}
 D="sha256:"+"c"*64
 IDS={
-"19.1":["candidate.registered-wire","candidate.strict-input","candidate.scope-denied","candidate.real-merge","candidate.deterministic-objects","candidate.conflict-refused","candidate.typed-generations","candidate.immutable-request","candidate.empty-targets-refused","candidate.authenticated-run-bound"],
-"19.2":["publication.registered-wire","publication.strict-input","publication.role-denied","publication.unsigned-push-denied","publication.target-unchanged","publication.immutable-admission","publication.target-lock-exclusive","publication.effective-hook-path-pinned","publication.github-configured-boundary","publication.github-sole-publisher","publication.github-worker-bypass-refused","publication.github-force-bypass-refused","publication.github-unknown-bypass-refused","publication.client-hook-suppressed","publication.server-hook-still-enforced","publication.token-persist-failure-revokes","publication.askpass-failure-revokes","publication.orphan-remains-unknown","publication.custody-preflight-no-mint","publication.source-url-rewrite-isolated","publication.https-source-config-isolated","publication.invalid-token-response-revokes"],
-"19.3":["closure.registered-wire","closure.level-required","closure.wave-required","closure.programme-cannot-narrow","closure.policy-requires-gates","closure.policy-requires-acceptance","closure.evaluation-immutable","closure.unregistered-assertions-refused","closure.declared-coverage-bound","closure.policy-valid-shape"],
-"19.4":["release.registered-wire","release.strict-input","release.empty-set-refused","release.caller-cannot-claim-published","release.immutable-manifest","release.partial-remains-explicit"]
+"19.1":["candidate.registered-wire","candidate.strict-input","candidate.scope-denied","candidate.real-merge","candidate.deterministic-objects","candidate.conflict-refused","candidate.typed-generations","candidate.immutable-request","candidate.empty-targets-refused","candidate.authenticated-run-bound","candidate.remote-gates-required","candidate.combined-fail-rejected","candidate.successor-not-released","candidate.level-status-explicit","candidate.input-change-invalidates","candidate.history-intact","candidate.cleanup-reconciles","candidate.cleanup-idempotent"],
+"19.2":["publication.registered-wire","publication.strict-input","publication.role-denied","publication.unsigned-push-denied","publication.target-unchanged","publication.immutable-admission","publication.target-lock-exclusive","publication.effective-hook-path-pinned","publication.github-configured-boundary","publication.github-sole-publisher","publication.github-worker-bypass-refused","publication.github-force-bypass-refused","publication.github-unknown-bypass-refused","publication.client-hook-suppressed","publication.server-hook-still-enforced","publication.token-persist-failure-revokes","publication.askpass-failure-revokes","publication.orphan-remains-unknown","publication.custody-preflight-no-mint","publication.source-url-rewrite-isolated","publication.https-source-config-isolated","publication.invalid-token-response-revokes","publication.cas-head-advanced-refused","publication.stale-worker-fenced","publication.direct-push-after-db-fence-refused","publication.lost-response-outcome-unknown","publication.unknown-intent-not-superseded","publication.custody-held-through-unknown","publication.lost-response-reconciled-from-ref","publication.custody-release-held-until-accept","publication.changed-inputs-refused"],
+"19.3":["closure.registered-wire","closure.level-required","closure.wave-required","closure.programme-cannot-narrow","closure.policy-requires-gates","closure.policy-requires-acceptance","closure.evaluation-immutable","closure.unregistered-assertions-refused","closure.declared-coverage-bound","closure.policy-valid-shape","closure.policy-programme-cases-registered","closure.dependency-qualified-milestone-only","closure.lease-expiry-keeps-admitted-work","closure.competing-custody-refused","closure.wave-held-without-accepted-candidate","closure.dependency-integrated-after-acceptance","closure.wave-held-despite-passing-tasks","closure.wave-lists-open-blocking-finding","closure.downstream-activation-withheld","closure.levels-report-own-status","closure.programme-requires-end-to-end-rehearsal","closure.programme-end-to-end-rehearsal-current","closure.programme-requires-each-wave-closed"],
+"19.4":["release.registered-wire","release.strict-input","release.empty-set-refused","release.caller-cannot-claim-published","release.immutable-manifest","release.partial-remains-explicit","release.interrupted-unknown-reconciles","release.interrupted-partial-explicit","release.recovery-follows-recorded-policy","release.advance-successor-manifest","release.successor-releases-after-completion","release.audit-history-preserved","release.compensation-required","release.compensation-direct-push-refused","release.compensation-through-gateway"]
 }
 ACTIONS={
-"19.1":["integration.candidate.create","integration.candidate.inspect","integration.candidate.verify","integration.candidate.admit"],
-"19.2":["integration.publication.capabilities","integration.publication.authorize","integration.publication.execute","integration.publication.reconcile","integration.publication.inspect"],
-"19.3":["integration.closure.evaluate","integration.closure.verify","integration.closure.inspect"],
-"19.4":["integration.release.create","integration.release.inspect","integration.release.evaluate"]
+"19.1":["integration.candidate.create","integration.candidate.inspect","integration.candidate.verify","integration.candidate.admit","integration.candidate.status","integration.candidate.cleanup"],
+"19.2":["integration.publication.capabilities","integration.publication.authorize","integration.publication.execute","integration.publication.reconcile","integration.publication.inspect","integration.publication.accept"],
+"19.3":["integration.closure.evaluate","integration.closure.verify","integration.closure.inspect","integration.closure.reconcile"],
+"19.4":["integration.release.create","integration.release.inspect","integration.release.evaluate","integration.release.recover"]
 }
 def expect(condition,message):
     if not condition:raise AssertionError(message)
@@ -61,7 +63,7 @@ def sql(statement,*,database=DATABASE,allow_error=False):
     return result
 def node(source,args=None,env=None):
     return run(["node","--input-type=module","-e",source,*[str(x) for x in (args or [])]],env=env or db_env())
-def cleanup():
+def cleanup(emit=True):
     sql("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='"+DATABASE+"' AND pid<>pg_backend_pid()",database="postgres")
     sql('DROP DATABASE IF EXISTS "'+DATABASE+'";',database="postgres")
     absent=not sql("SELECT datname FROM pg_database WHERE datname='"+DATABASE+"'",database="postgres").stdout.strip()
@@ -74,7 +76,8 @@ def cleanup():
         proof=json.loads(authartifact.read_text())
         authabsent=proof.get("observed_absent") is True and isinstance(proof.get("database"),str) and re.fullmatch(r"hf_integration_identity_[a-z0-9_]{1,55}",proof["database"]) is not None and not sql("SELECT datname FROM pg_database WHERE datname='"+proof["database"]+"'",database="postgres").stdout.strip()
     resources=[{"id":"integration-"+TASK+"-database","status":"deleted" if absent else "unknown","observed_absent":absent,"evidence_artifact":"integration/database-absence.json"},{"id":"integration-"+TASK+"-identity-database","status":"deleted" if authabsent else "unknown","observed_absent":authabsent,"evidence_artifact":"integration/identity-database-absence.json"}]
-    print(json.dumps({"type":"cleanup","complete":absent and authabsent,"resources":resources}),flush=True)
+    if emit:print(json.dumps({"type":"cleanup","complete":absent and authabsent,"resources":resources}),flush=True)
+    return absent and authabsent
 def bootstrap():
     sql('CREATE DATABASE "'+DATABASE+'";',database="postgres")
     sql((ROOT/"services/hyperfide/migrations/0001-authority.sql").read_text())
@@ -89,7 +92,7 @@ class Fixture:
         self.repository=base/"repository";self.receive=base/"receive.git"
         self.repository.mkdir()
         run(["git","init","-q","-b","main"],cwd=self.repository)
-        self.gitenv={**os.environ,"GIT_CONFIG_NOSYSTEM":"1","GIT_CONFIG_GLOBAL":"/dev/null","GIT_AUTHOR_NAME":"Fixture","GIT_AUTHOR_EMAIL":"fixture@example.invalid","GIT_COMMITTER_NAME":"Fixture","GIT_COMMITTER_EMAIL":"fixture@example.invalid","GIT_AUTHOR_DATE":"2000-01-01T00:00:00Z","GIT_COMMITTER_DATE":"2000-01-01T00:00:00Z"}
+        self.gitenv={**os.environ,"GIT_CONFIG_NOSYSTEM":"1","GIT_CONFIG_GLOBAL":"/dev/null","GIT_AUTHOR_NAME":"Fixture","GIT_AUTHOR_EMAIL":"fixture@example.invalid","GIT_COMMITTER_NAME":"Fixture","GIT_COMMITTER_EMAIL":"fixture@example.invalid","GIT_AUTHOR_DATE":"2000-01-01T00:00:00Z","GIT_COMMITTER_DATE":"2000-01-01T00:00:00Z","GIT_CONFIG_COUNT":"1","GIT_CONFIG_KEY_0":"maintenance.auto","GIT_CONFIG_VALUE_0":"false"}
         (self.repository/"base.txt").write_text("base\n")
         self.g(["add","base.txt"]);self.g(["commit","-qm","base"])
         self.base_oid=self.g(["rev-parse","HEAD"]).stdout.strip()
@@ -100,6 +103,7 @@ class Fixture:
         self.g(["checkout","-q","main"])
         self.gate={"id":"actual-test","kind":"test","argv":["python3","-c","import json;print(json.dumps({'type':'assertion','id':'actual','expected':1,'actual':1}))"],"timeout_ms":3000,"proof":{"manifest_path":"tests/hyperfide/manifests/tasks/19.1.json","manifest_digest":D,"registry_path":"tests/hyperfide/registry.json","registry_digest":D,"expected_assertion_ids":["fixture.actual-assertion"],"case_ids":["V-034"]}}
         self.cfg={"version":1,"organisation_id":U(1),"root":str(base),"repositories":[{"repository_id":U(3),"path":str(self.repository),"target_ref":"refs/heads/main","receive_path":str(self.receive),"gates":[self.gate],"review_policy_digest":D,"review_rubrics":[D],"required_graph":True}],"closure":{"wave_gates":[{**self.gate,"covers":["V-034"]}],"programme_gates":[{**self.gate,"covers":["V-034"]}],"required_acceptance_ids":["V-034"],"required_docs":False}}
+        if TASK=="19.4":self.cfg["repositories"]+=release_repositories(self)
         self.config=base/"integration.json";self.config.write_text(json.dumps(self.cfg))
         self.key=base/"gateway.key";self.key.write_bytes(os.urandom(32));self.key.chmod(0o600)
         self.env={**db_env(),"HYPERFIDE_INTEGRATION_CONFIG":str(self.config),"HYPERFIDE_GATEWAY_KEY_FILE":str(self.key),"HYPERFIDE_INTEGRATION_EXECUTOR_ID":U(200)}
@@ -163,6 +167,42 @@ class Fixture:
         expect(row.get("ok") is True,"Registry describe failed")
         data=row.get("result",row.get("output",{}))
         expect(TASK in json.dumps(data) and all(a in json.dumps(data) for a in ACTIONS[TASK]),"Task component/action not linked")
+def canon(value):return json.dumps(value,sort_keys=True,separators=(",",":"),ensure_ascii=False)
+def sha(value):return "sha256:"+hashlib.sha256(value.encode() if isinstance(value,str) else value).hexdigest()
+def q(value):return "NULL" if value is None else "'"+str(value).replace("'","''")+"'"
+def integration_seed(ids,run,repository,oids,gate):
+    """Recorded rows for two independently qualified contributors and two immutable combined candidates.
+    Candidate700 holds the recorded remote FAIL of its combined commit set; candidate701 holds a recorded PASS.
+    These rows stand in for 16.x qualification/12.4 remote execution which cannot run in this sandbox."""
+    o,r,R=ids["organisation"],ids["run"],repository
+    s=[f"INSERT INTO hyperfide.repositories(organisation_id,project_id,id,name,url) VALUES({q(o)},{q(ids['project'])},{q(R)},'integration-fixture','https://example.invalid/integration.git');"]
+    for key in ("base","left","right","head"):s.append(f"INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id) VALUES({q(o)},{q(R)},{q(oids[key])});")
+    s.append(f"INSERT INTO hyperfide.run_repositories(organisation_id,run_id,repository_id,source_object_id,integration_ref) VALUES({q(o)},{q(r)},{q(R)},{q(oids['base'])},'refs/heads/main');")
+    s.append(f"INSERT INTO hyperfide.feature_packages(organisation_id,run_id,id,package_key,wave) VALUES({q(o)},{q(r)},{q(U(600))},'integration',1);")
+    contributors=[]
+    for n,key in enumerate(("left","right")):
+        task,attempt,custody=U(610+n),U(620+n),U(630+n)
+        s.append(f"INSERT INTO hyperfide.tasks(organisation_id,run_id,id,task_key,feature_package_id,spec_revision_id,criteria_digest,definition,wave) VALUES({q(o)},{q(r)},{q(task)},{q('19.1-'+key)},{q(U(600))},{q(run['spec_revision_id'])},{q(D)},'{{}}',1);")
+        s.append(f"INSERT INTO hyperfide.attempts(organisation_id,run_id,id,task_id,generation,authority_epoch,input_packet_digest,execution_state) VALUES({q(o)},{q(r)},{q(attempt)},{q(task)},1,{q(run['authority_epoch'])},{q(D)},'SUCCEEDED');")
+        s.append(f"INSERT INTO hyperfide.submission_custodies(organisation_id,run_id,id,task_id,source_attempt_id,source_generation,custody_generation,authority_epoch,repository_id,source_object_id,source_manifest_digest,evidence_manifest_digest,criteria_digest,authority,qualification_outcome) VALUES({q(o)},{q(r)},{q(custody)},{q(task)},{q(attempt)},1,1,{q(run['authority_epoch'])},{q(R)},{q(oids[key])},{q(D)},{q(D)},{q(D)},'ACTIVE','PASS');")
+        s.append(f"UPDATE hyperfide.tasks SET current_custody_id={q(custody)},state='QUALIFIED',state_version=state_version+1 WHERE organisation_id={q(o)} AND run_id={q(r)} AND id={q(task)};")
+        contributors.append({"custody_id":custody,"custody_generation":"1","task_id":task,"source_object_id":oids[key],"criteria_digest":D,"source_manifest_digest":D,"evidence_manifest_digest":D,"proof_criteria_digest":D,"qualification_receipt_digest":sha("isolated-qualification-"+key),"proof_source_manifest_digest":D})
+    s.append(f"INSERT INTO hyperfide.branch_authorities(organisation_id,run_id,id,repository_id,branch_ref,branch_generation,authority_epoch,expected_old_head) VALUES({q(o)},{q(r)},{q(U(640))},{q(R)},'refs/heads/main',1,{q(run['authority_epoch'])},{q(oids['base'])});")
+    s.append(f"INSERT INTO hyperfide.capacity_accounts(organisation_id,id,pool_id,dimension,configured_limit,provenance_digest) VALUES({q(o)},{q(U(650))},{q(ids['pool'])},'TEST',10,{q(D)});")
+    for n in range(4):s.append(f"INSERT INTO hyperfide.reservations(organisation_id,run_id,id,request_id,capacity_account_id,quantity,expires_at,state) VALUES({q(o)},{q(r)},{q(U(660+n))},{q(U(670+n))},{q(U(650))},1,clock_timestamp()+interval '1 hour','ALLOCATED');")
+    commit_set=[{"repository_id":R,"candidate_head":oids["head"],"expected_old_head":oids["base"]}];digests={}
+    for n,(candidate,state) in enumerate(((U(700),"FAILED"),(U(701),"PENDING"))):
+        manifest={"version":1,"request_id":U(710+n),"run_id":r,"spec_revision_id":run["spec_revision_id"],"spec_generation":str(run["spec_generation"]),"policy_digest":run["policy_digest"],"authority_epoch":run["authority_epoch"],"repository_id":R,"branch_authority_id":U(640),"branch_generation":"1","target_ref":"refs/heads/main","expected_old_head":oids["base"],"candidate_head":oids["head"],"tree":oids["tree"],"parents":oids["parents"],"git_provenance_manifest":{"kind":"GIT_CANDIDATE_PROVENANCE_V1","source_object_id":oids["head"]},"git_provenance_manifest_digest":sha(canon({"kind":"GIT_CANDIDATE_PROVENANCE_V1","source_object_id":oids["head"]})),"contributors":contributors,"commit_set":commit_set,"execution_session_id":U(720),"execution_receipt_digest":D,"declared_context":{"environment_digest":D,"contract_digest":D,"authority":"UNVERIFIED_CALLER_LABELS"},"context_authority":"IMMUTABLE_REVIEW_INPUT_BINDINGS","required_gates":[gate],"review_policy_digest":D,"review_rubrics":[D],"required_graph":True,"review_sources":sorted({oids["head"],oids["left"],oids["right"]})}
+        digests[candidate]=sha(canon(manifest));first=contributors[0]
+        s.append(f"INSERT INTO hyperfide.integration_candidates(organisation_id,run_id,id,task_id,custody_id,custody_generation,repository_id,branch_authority_id,branch_generation,expected_old_head,candidate_head,input_manifest_digest,request_id,state) VALUES({q(o)},{q(r)},{q(candidate)},{q(first['task_id'])},{q(first['custody_id'])},1,{q(R)},{q(U(640))},1,{q(oids['base'])},{q(oids['head'])},{q(digests[candidate])},{q(U(730+n))},{q(state)});")
+        s.append(f"INSERT INTO hyperfide.integration_candidate_manifests(organisation_id,run_id,candidate_id,manifest) VALUES({q(o)},{q(r)},{q(candidate)},{q(canon(manifest))}::jsonb);")
+        for c in contributors:s.append(f"INSERT INTO hyperfide.candidate_custodies(organisation_id,run_id,candidate_id,custody_id,custody_generation,task_id,repository_id) VALUES({q(o)},{q(r)},{q(candidate)},{q(c['custody_id'])},1,{q(c['task_id'])},{q(R)});")
+    for job,candidate,reservation,state,outcome in ((U(740),U(700),U(660),"FAILED","FAIL"),(U(741),U(701),U(661),"SUCCEEDED","PASS"),(U(742),U(700),U(662),"RUNNING",None)):
+        s.append(f"INSERT INTO hyperfide.integration_jobs(organisation_id,run_id,id,candidate_id,executor_id,reservation_id,state,finished_at,source_object_id,source_tree_id,review_bindings_digest,verification_input_digest,execution_manifest) VALUES({q(o)},{q(r)},{q(job)},{q(candidate)},{q(U(720))},{q(reservation)},{q(state)},{'NULL' if state=='RUNNING' else 'clock_timestamp()'},{q(oids['head'])},{q(oids['tree'])},{q(D)},{q(D)},{q(canon([{'gate':gate,'remote':{'plan':{'operation_id':U(750)}}}] if state=='RUNNING' else []))}::jsonb);")
+        if outcome:
+            out=canon({"type":"assertion","id":"fixture.actual-assertion","outcome":outcome})+"\n"
+            s.append(f"INSERT INTO hyperfide.integration_gate_receipts(organisation_id,run_id,candidate_id,job_id,gate_id,input_manifest_digest,outcome,exit_code,assertion_count,stdout_digest,stderr_digest,stdout,stderr,proof) VALUES({q(o)},{q(r)},{q(candidate)},{q(job)},{q(gate['id'])},{q(digests[candidate])},{q(outcome)},{0 if outcome=='PASS' else 1},1,{q(sha(out))},{q(sha(''))},{q(out)},'',{q(canon({'scope_digest':D}))}::jsonb);")
+    return "\n".join(s),commit_set
 def candidate_cases(f):
     check(IDS[TASK][0],f.wire)
     check(IDS[TASK][1],lambda:f.reject(TASK,"integration.candidate.create",{**SCOPE,"claim_pass":True},"INTEGRATION_INVALID"))
@@ -185,7 +225,157 @@ def candidate_cases(f):
     check(IDS[TASK][7],immutable)
     check(IDS[TASK][8],lambda:f.reject(TASK,"integration.candidate.create",{**SCOPE,"request_id":U(102),"targets":[],"environment_digest":D,"contract_digest":D},"INTEGRATION_INVALID"))
     check(IDS[TASK][9],lambda:f.reject(TASK,"integration.candidate.inspect",{**SCOPE,"run_id":U(998),"candidate_id":U(81)},"INTEGRATION_SCOPE_DENIED"))
+    integration_cases(f)
+def integration_cases(f):
+    """do_1..do_3 and cleanup through the running service against recorded remote outcomes."""
+    state={}
+    def prepare():
+        if "error" in state:raise AssertionError(state["error"])
+        if state:return state
+        try:
+            expect(f.auth is not None,"Real authenticated dependency closure unavailable: "+str(f.auth_error))
+            def commit(name,base,filename):
+                f.g(["checkout","-qb",name,base]);(f.repository/filename).write_text(name+"\n");f.g(["add",filename]);f.g(["commit","-qm",name]);oid=f.g(["rev-parse","HEAD"]).stdout.strip();f.g(["checkout","-q","main"]);return oid
+            left=commit("task-a",f.base_oid,"task-a.txt");right=commit("task-b",f.base_oid,"task-b.txt")
+            env={**f.gitenv,"GIT_AUTHOR_NAME":"Hyperfide","GIT_AUTHOR_EMAIL":"integration@hyperfide.invalid","GIT_COMMITTER_NAME":"Hyperfide","GIT_COMMITTER_EMAIL":"integration@hyperfide.invalid"}
+            head=f.base_oid
+            for source in (left,right):
+                tree=f.g(["merge-tree","--write-tree",head,source]).stdout.strip()
+                head=run(["git","commit-tree",tree,"-p",head,"-p",source,"-m","Hyperfide immutable integration candidate"],cwd=f.repository,env=env).stdout.strip()
+            oids={"base":f.base_oid,"left":left,"right":right,"head":head,"tree":f.g(["rev-parse",head+"^{tree}"]).stdout.strip(),"parents":f.g(["show","-s","--format=%P",head]).stdout.split()}
+            run_row=f.auth.sql("SELECT spec_revision_id,spec_generation::text AS spec_generation,policy_digest,authority_epoch FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2",[f.auth.ids["organisation"],f.auth.ids["run"]])[0]
+            statements,commit_set=integration_seed(f.auth.ids,run_row,U(3),oids,f.gate)
+            f.auth.sql(statements)
+            state.update(oids=oids,commit_set=commit_set,run=run_row)
+            return state
+        except Exception as error:
+            state["error"]=type(error).__name__+": "+str(error);raise
+    def db(statement,values=None):return f.auth.sql(statement,values or [])
+    def result(row):
+        expect(row.get("ok") is True,"Service refused: "+json.dumps(row)[:1500]);return row.get("result",row.get("output"))
+    def status(candidate):return result(f.invoke(TASK,"integration.candidate.status",{**SCOPE,"candidate_id":candidate}))
+    def remote_required():
+        prepare()
+        row=f.invoke(TASK,"integration.candidate.verify",{**SCOPE,"candidate_id":U(701),"reservation_id":U(663),"session_id":U(720)})
+        code=row.get("error",{}).get("code")
+        # Positive remote dispatch needs a live runner.remote.v1 provider: UNVERIFIED here, refusal must be explicit.
+        expect(row.get("ok") is False and code in ("INTEGRATION_REMOTE_EXECUTOR_UNAVAILABLE","INTEGRATION_REMOTE_RUNTIME_UNAVAILABLE"),"Gates were not refused explicitly without the remote executor: "+json.dumps(row)[:800])
+        expect(db("SELECT count(*)::int AS n FROM hyperfide.integration_jobs WHERE candidate_id=$1 AND reservation_id=$2",[U(701),U(663)])[0]["n"]==0,"Refused verification created job authority")
+        expect(db("SELECT count(*)::int AS n FROM hyperfide.integration_gate_receipts")[0]["n"]==2,"Refused verification fabricated a gate receipt")
+        expect(db("SELECT state FROM hyperfide.reservations WHERE id=$1",[U(663)])[0]["state"]=="ALLOCATED","Refused verification consumed the separate reservation")
+    check(IDS[TASK][10],remote_required)
+    def combined_rejected():
+        prepare()
+        row=f.invoke(TASK,"integration.candidate.admit",{**SCOPE,"candidate_id":U(700)})
+        error=row.get("error",{})
+        expect(row.get("ok") is False and error.get("code")=="INTEGRATION_CANDIDATE_REJECTED","Failing combined candidate was not rejected: "+json.dumps(row)[:800])
+        expect(sha(canon(state["commit_set"])) in error.get("message","") and state["oids"]["head"] in error.get("message",""),"Rejection lacks exact commit-set evidence")
+        report=status(U(700))
+        expect(report["verdict"]=="REJECTED" and report["evidence"]["commit_set"]==state["commit_set"] and report["evidence"]["commit_set_digest"]==sha(canon(state["commit_set"])),"Status lacks exact rejected commit set")
+        gate=report["gates"][0]
+        expect(gate["outcome"]=="FAIL" and gate["exit_code"]==1 and gate["job_id"]==U(740) and gate["stdout_digest"].startswith("sha256:"),"Status lacks recorded failing gate evidence")
+        expect([c["isolated_qualification"] for c in report["contributors"]]==["PASS","PASS"] and sorted(c["source_object_id"] for c in report["evidence"]["contributors"])==sorted([state["oids"]["left"],state["oids"]["right"]]),"Individually passing contributors not preserved as evidence")
+        expect(db("SELECT state FROM hyperfide.integration_candidates WHERE id=$1",[U(700)])[0]["state"]=="FAILED","Rejected candidate state changed")
+    check(IDS[TASK][11],combined_rejected)
+    def successor_held():
+        prepare()
+        report=status(U(700))
+        expect(report["successors_released"] is False and report["integrated"] is False and report["candidate_qualified"] is False and all(c["integrated"] is False and c["task_state"]=="QUALIFIED" for c in report["contributors"]),"Isolated qualification implied integration")
+        program="""import {ResourceContainer} from './services/hyperfide/dist/storage/runtime.js';import {requireMilestone} from './services/hyperfide/dist/scheduler/claim.js';
+const [organisation_id,run_id,task]=process.argv.slice(1),r=new ResourceContainer('control',process.env,new AbortController().signal),out={};
+try{for(const milestone of ['QUALIFIED','INTEGRATED']){try{await r.gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:0},tx=>requireMilestone(tx,{organisation_id,run_id},task,milestone));out[milestone]='RELEASED'}catch(e){out[milestone]=e.code??String(e.message)}}}finally{await r.close?.()}
+console.log(JSON.stringify(out));"""
+        env={**f.auth.env};observed=json.loads(run(["node","--input-type=module","-e",program,f.auth.ids["organisation"],f.auth.ids["run"],U(610)],env=env).stdout.strip().splitlines()[-1])
+        expect(observed=={"QUALIFIED":"RELEASED","INTEGRATED":"DEPENDENCY_NOT_INTEGRATED"},"Scheduler released an integration-dependent successor from isolated qualification: "+json.dumps(observed))
+    check(IDS[TASK][12],successor_held)
+    def level_status():
+        prepare()
+        report=status(U(701))
+        names=[o["id"] for o in report["obligations"]]
+        expect(names==["run_admits_integration","candidate_not_rejected","run_inputs","branch_authority","contributors","repository_set","reviews","gates","findings"],"Candidate obligations not individually reported: "+json.dumps(names))
+        by={o["id"]:o for o in report["obligations"]}
+        expect(by["candidate_not_rejected"]["status"]=="MET" and by["run_inputs"]["status"]=="MET" and by["branch_authority"]["status"]=="MET","Current candidate inputs misreported")
+        expect(by["contributors"]["status"]=="UNMET" and by["reviews"]["status"]=="UNMET" and by["gates"]["status"]=="UNMET","Missing qualification/review evidence silently satisfied")
+        expect(report["gates"][0]["outcome"]=="PASS" and report["verdict"]=="HELD" and report["candidate_qualified"] is False and report["unmet_obligations"],"A passing lower-level gate closed the candidate level: "+json.dumps(report)[:800])
+        row=f.invoke(TASK,"integration.candidate.admit",{**SCOPE,"candidate_id":U(701)})
+        expect(row.get("ok") is False and row["error"]["code"] in report["unmet_obligations"] and row["error"]["code"]!="INTEGRATION_INPUT_STALE","Admission disagreed with reported obligations: "+json.dumps(row)[:600])
+        state["admit_before"]=row["error"]["code"]
+    check(IDS[TASK][13],level_status)
+    history_sql=["SELECT row_to_json(c)::text AS v FROM hyperfide.submission_custodies c ORDER BY id","SELECT json_build_object('id',id,'state',state,'custody',current_custody_id,'v',state_version)::text AS v FROM hyperfide.tasks WHERE id=ANY($1::uuid[]) ORDER BY id","SELECT row_to_json(r)::text AS v FROM hyperfide.integration_gate_receipts r ORDER BY attempt","SELECT row_to_json(j)::text AS v FROM hyperfide.integration_jobs j WHERE id=ANY($1::uuid[]) ORDER BY id","SELECT row_to_json(m)::text AS v FROM hyperfide.integration_candidate_manifests m ORDER BY candidate_id"]
+    def history():return [[r["v"] for r in db(sql_text,[[U(610),U(611),U(740),U(741)]] if "$1" in sql_text else [])] for sql_text in history_sql]
+    def input_changed():
+        prepare()
+        state["history"]=history()
+        expect("admit_before" in state,"Pre-change admission was not observed")
+        changed=sha("changed-dependency-policy")
+        db("UPDATE hyperfide.runs SET policy_digest=$3,state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[f.auth.ids["organisation"],f.auth.ids["run"],changed])
+        row=f.invoke(TASK,"integration.candidate.admit",{**SCOPE,"candidate_id":U(701)})
+        expect(row.get("ok") is False and row["error"]["code"]=="INTEGRATION_INPUT_STALE","Changed dependency input did not invalidate admission: "+json.dumps(row)[:600])
+        report=status(U(701));by={o["id"]:o for o in report["obligations"]}
+        expect(by["run_inputs"]["status"]=="UNMET" and by["run_inputs"]["code"]=="INTEGRATION_INPUT_STALE" and report["verdict"]=="HELD","Status did not invalidate the affected candidate")
+        expect(db("SELECT state FROM hyperfide.integration_candidates WHERE id=$1",[U(701)])[0]["state"]=="PENDING","Stale candidate was admitted")
+    check(IDS[TASK][14],input_changed)
+    def history_intact():
+        prepare()
+        expect("history" in state,"History snapshot unavailable")
+        after=history()
+        expect(after==state["history"] and len(after[0])==2 and len(after[2])==2,"Historical isolated task or gate results changed")
+        expect([r["qualification_outcome"] for r in db("SELECT qualification_outcome FROM hyperfide.submission_custodies ORDER BY id")]==["PASS","PASS"],"Isolated qualification history lost")
+    check(IDS[TASK][15],history_intact)
+    def leftovers():
+        leftover=[]
+        for directory in (f.repository,f.receive):
+            ref="refs/hyperfide/integration/"+U(760 if directory==f.repository else 761)
+            run(["git","--git-dir="+str(directory if directory==f.receive else directory/".git"),"update-ref",ref,f.base_oid]);leftover.append((directory,ref))
+        bundle=f.base/("candidate-transfer-"+U(762)+".bundle");bundle.write_bytes(b"partial bundle");return leftover,bundle
+    def refs_of(directory):return run(["git","--git-dir="+str(directory if directory==f.receive else directory/".git"),"for-each-ref","--format=%(refname)","refs/hyperfide/integration/"]).stdout.split()
+    def cleanup_reconciles():
+        prepare()
+        leftover,bundle=leftovers()
+        report=result(f.invoke(TASK,"integration.candidate.cleanup",SCOPE))
+        expect(all(not refs_of(directory) for directory,_ in leftover) and sorted(d["ref"] for d in report["deleted_refs"])==sorted(r for _,r in leftover),"Leftover candidate refs not deleted: "+json.dumps(report)[:800])
+        expect(not bundle.exists() and report["removed_paths"]==[str(bundle)],"Candidate transfer leftover not removed")
+        reservations={r["id"]:r["state"] for r in db("SELECT id,state FROM hyperfide.reservations WHERE id=ANY($1::uuid[])",[[U(660),U(661),U(662),U(663)]])}
+        expect(reservations=={U(660):"RELEASE_PENDING",U(661):"RELEASE_PENDING",U(662):"ALLOCATED",U(663):"ALLOCATED"} and sorted(r["reservation_id"] for r in report["released_reservations"])==[U(660),U(661)],"Terminal job reservations not released exactly: "+json.dumps(reservations))
+        kinds={(d["kind"],d["resource"]) for d in report["debt"]}
+        expect(report["complete"] is False and ("REMOTE_JOB_OUTCOME_UNKNOWN","integration_job:"+U(742)) in kinds and ("REMOTE_WORKSPACE_UNREACHABLE","/tmp/hyperfide/integration-"+U(750)) in kinds,"Unreachable abandoned remote work not reported as debt: "+json.dumps(report["debt"]))
+        state["cleanup_debt"]=report["debt"]
+    check(IDS[TASK][16],cleanup_reconciles)
+    def cleanup_idempotent():
+        prepare()
+        expect("cleanup_debt" in state,"First cleanup unobserved")
+        report=result(f.invoke(TASK,"integration.candidate.cleanup",SCOPE))
+        expect(report["deleted_refs"]==[] and report["removed_paths"]==[] and report["released_reservations"]==[],"Repeated cleanup was not idempotent: "+json.dumps(report)[:800])
+        expect(report["complete"] is False and report["debt"]==state["cleanup_debt"],"Repeated cleanup erased unresolved debt")
+        expect(db("SELECT state FROM hyperfide.integration_jobs WHERE id=$1",[U(742)])[0]["state"]=="RUNNING","Cleanup fabricated an outcome for abandoned remote work")
+    check(IDS[TASK][17],cleanup_idempotent)
+def adopt_orphans():
+    """Git abandons short-lived helpers on rejected pushes; adopt them so they are reaped, never leaked."""
+    import ctypes
+    ctypes.CDLL(None).prctl(36,1,0,0,0)
+def reap_orphans(keep):
+    import signal,time
+    deadline=time.monotonic()+5
+    while True:
+        pending=[]
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit() or int(entry) in keep:continue
+            try:fields=open("/proc/"+entry+"/stat").read().rsplit(")",1)[1].split()
+            except OSError:continue
+            if int(fields[1])!=os.getpid():continue
+            if fields[0]!="Z" and time.monotonic()>deadline:
+                try:os.kill(int(entry),signal.SIGKILL)
+                except ProcessLookupError:pass
+            try:os.waitpid(int(entry),os.WNOHANG if fields[0]!="Z" else 0)
+            except ChildProcessError:pass
+            pending.append(entry)
+        if not pending:return
+        time.sleep(0.05)
 def publication_cases(f):
+    adopt_orphans()
+    try:publication_checks(f)
+    finally:reap_orphans({f.auth.child.pid} if f.auth and f.auth.child else set())
+def publication_checks(f):
     check(IDS[TASK][0],f.wire)
     check(IDS[TASK][1],lambda:f.reject(TASK,"integration.publication.execute",{**SCOPE,"operation_id":U(1),"new_head":f.feature_oid},"INTEGRATION_INVALID"))
     check(IDS[TASK][2],lambda:f.reject(TASK,"integration.publication.execute",{**SCOPE,"operation_id":U(1)},"PUBLICATION_ROLE_DENIED"))
@@ -259,6 +449,8 @@ else{const result=await adapter.publish(intent,repo);if(minted!==1||revoked<1||r
     check(IDS[TASK][13],lambda:expect(not sentinel.exists(),"Product managed publication executed an untrusted client pre-push hook"))
     check(IDS[TASK][14],lambda:expect("server-hook-rejected" in probe.stdout and run(["git","--git-dir="+str(f.receive),"rev-parse","refs/heads/main"]).stdout.strip()==f.base_oid,"Suppressing client hooks disabled server enforcement or mutated target"))
 
+    for index,mode in [(15,"persist"),(16,"askpass"),(17,"orphan"),(18,"preflight")]:
+        check(IDS[TASK][index],lambda mode=mode:node(fault_source,[f.repository,f.base_oid,f.feature_oid,f.base/("github-fault-"+mode),mode]))
     check(IDS[TASK][19],lambda:expect(not transport_sentinel.exists() and "server-hook-rejected" in probe.stdout,"Source-owned URL rewrite redirected managed publication"))
     def https_isolated():
         run(["git","-C",str(f.repository),"config","url."+rewrite+".insteadOf","https://127.0.0.1:1/fixture"])
@@ -266,10 +458,213 @@ else{const result=await adapter.publish(intent,repo);if(minted!==1||revoked<1||r
         node(source,[f.repository,f.feature_oid])
         expect(not transport_sentinel.exists(),"Source config redirected HTTPS transport")
     check(IDS[TASK][20],https_isolated)
-    for index,mode in [(15,"persist"),(16,"askpass"),(17,"orphan"),(18,"preflight"),(21,"invalid")]:
-        check(IDS[TASK][index],lambda mode=mode:node(fault_source,[f.repository,f.base_oid,f.feature_oid,f.base/("github-fault-"+mode),mode]))
+    check(IDS[TASK][21],lambda:node(fault_source,[f.repository,f.base_oid,f.feature_oid,f.base/"github-fault-invalid","invalid"]))
+    publication_gateway_cases(f,module)
 
+def closure_uuid():return str(__import__("uuid").uuid4())
+def closure_digest(label):return "sha256:"+hashlib.sha256(label.encode()).hexdigest()
+def closure_seed(f):
+    """Seed one actual wave-1 task with qualified custody and wave-2 dependents bound at declared milestones."""
+    a=f.auth;org,run,spec=a.ids["organisation"],a.ids["run"],a.ids["spec"];x={k:closure_uuid() for k in ["repository","package1","package2","task","dependent_q","dependent_i","attempt","custody","branch","candidate","intent","publication","package_owner","finding","account","reservation","job"]}
+    crit=closure_digest("closure-criteria");x["criteria"]=crit
+    a.sql("INSERT INTO hyperfide.repositories(organisation_id,id,project_id,name,url) VALUES($1,$2,$3,'closure-fixture','https://example.invalid/closure.git')",[org,x["repository"],a.ids["project"]])
+    a.sql("INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id) VALUES($1,$2,$3),($1,$2,$4)",[org,x["repository"],f.base_oid,f.feature_oid])
+    a.sql("INSERT INTO hyperfide.run_repositories(organisation_id,run_id,repository_id,source_object_id,integration_ref) VALUES($1,$2,$3,$4,'refs/heads/main')",[org,run,x["repository"],f.base_oid])
+    for key,wave in (("package1",1),("package2",2)):a.sql("INSERT INTO hyperfide.feature_packages(organisation_id,run_id,id,package_key,wave) VALUES($1,$2,$3,$4,$5)",[org,run,x[key],"closure-"+key,wave])
+    for key,name,package,wave in (("task","closure.alpha","package1",1),("dependent_q","closure.after-qualified","package2",2),("dependent_i","closure.after-integrated","package2",2)):
+        a.sql("INSERT INTO hyperfide.tasks(organisation_id,run_id,id,task_key,feature_package_id,spec_revision_id,spec_generation,criteria_digest,definition,wave) VALUES($1,$2,$3,$4,$5,$6,1,$7,'{}',$8)",[org,run,x[key],name,x[package],spec,crit,wave])
+    a.sql("INSERT INTO hyperfide.attempts(organisation_id,run_id,id,task_id,generation,authority_epoch,input_packet_digest,compute_authority,execution_state) VALUES($1,$2,$3,$4,1,$5,$6,'RELEASED','SUBMITTED')",[org,run,x["attempt"],x["task"],a.ids["epoch"],closure_digest("closure-packet")])
+    a.sql("INSERT INTO hyperfide.submission_custodies(organisation_id,run_id,id,task_id,source_attempt_id,source_generation,custody_generation,authority_epoch,repository_id,source_object_id,source_manifest_digest,evidence_manifest_digest,criteria_digest,qualification_outcome) VALUES($1,$2,$3,$4,$5,1,1,$6,$7,$8,$9,$10,$11,'PASS')",[org,run,x["custody"],x["task"],x["attempt"],a.ids["epoch"],x["repository"],f.feature_oid,closure_digest("closure-source"),closure_digest("closure-evidence"),crit])
+    a.sql("UPDATE hyperfide.tasks SET current_custody_id=$3,state='QUALIFIED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$4",[org,run,x["custody"],x["task"]])
+    a.sql("INSERT INTO hyperfide.task_dependencies(organisation_id,run_id,task_id,predecessor_run_id,predecessor_task_id,milestone,revision,binding_schema_version,predecessor_spec_generation,predecessor_spec_revision_id,predecessor_repository_id,integration_ref) VALUES($1,$2,$3,$2,$4,'QUALIFIED',1,1,1,$5,NULL,NULL),($1,$2,$6,$2,$4,'INTEGRATED',1,1,1,$5,$7,'refs/heads/main')",[org,run,x["dependent_q"],x["task"],spec,x["dependent_i"],x["repository"]])
+    return x
+def closure_publish(f,x):
+    """Record the actual published candidate of the qualified custody (19.2 publication rows), without acceptance."""
+    a=f.auth;org,run=a.ids["organisation"],a.ids["run"]
+    a.sql("INSERT INTO hyperfide.branch_authorities(organisation_id,run_id,id,repository_id,branch_ref,branch_generation,authority_epoch,expected_old_head) VALUES($1,$2,$3,$4,'refs/heads/main',1,$5,$6)",[org,run,x["branch"],x["repository"],a.ids["epoch"],f.base_oid])
+    manifest={"version":1,"repository_id":x["repository"],"target_ref":"refs/heads/main","candidate_head":f.feature_oid,"expected_old_head":f.base_oid,"contributors":[{"task_id":x["task"],"custody_id":x["custody"],"custody_generation":"1","criteria_digest":x["criteria"]}]}
+    a.sql("INSERT INTO hyperfide.integration_candidates(organisation_id,run_id,id,task_id,custody_id,custody_generation,repository_id,branch_authority_id,branch_generation,expected_old_head,candidate_head,input_manifest_digest,request_id,state) VALUES($1,$2,$3,$4,$5,1,$6,$7,1,$8,$9,$10,$11,'PUBLISHED')",[org,run,x["candidate"],x["task"],x["custody"],x["repository"],x["branch"],f.base_oid,f.feature_oid,closure_digest(json.dumps(manifest,sort_keys=True)),closure_uuid()])
+    a.sql("INSERT INTO hyperfide.integration_candidate_manifests(organisation_id,run_id,candidate_id,manifest) VALUES($1,$2,$3,$4::jsonb)",[org,run,x["candidate"],json.dumps(manifest)])
+    a.sql("INSERT INTO hyperfide.publication_intents(organisation_id,run_id,id,candidate_id,intent_digest) VALUES($1,$2,$3,$4,$5)",[org,run,x["intent"],x["candidate"],closure_digest("closure-intent")])
+    a.sql("INSERT INTO hyperfide.publication_operations(organisation_id,run_id,id,publication_intent_id,candidate_id,branch_authority_id,branch_generation,authority_epoch,repository_id,expected_old_head,candidate_head,request_id,state,observed_head) VALUES($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10,$11,'PUBLISHED',$10)",[org,run,x["publication"],x["intent"],x["candidate"],x["branch"],a.ids["epoch"],x["repository"],f.base_oid,f.feature_oid,closure_uuid()])
+    a.sql("UPDATE hyperfide.tasks SET state='INTEGRATING',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,run,x["task"]])
+def closure_accept(f,x):
+    """Mirror the 19.2 accept writes: release custody, mark INTEGRATED and persist the ACCEPTED receipt."""
+    a=f.auth;org,run=a.ids["organisation"],a.ids["run"]
+    a.sql("UPDATE hyperfide.submission_custodies SET authority='RELEASED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,run,x["custody"]])
+    a.sql("UPDATE hyperfide.tasks SET state='INTEGRATED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,run,x["task"]])
+    a.sql("INSERT INTO hyperfide.publication_acceptance_receipts(organisation_id,run_id,id,operation_id,outcome,reasons,manifest) VALUES($1,$2,$3,$4,'ACCEPTED',ARRAY[]::text[],'{}'::jsonb)",[org,run,closure_uuid(),x["publication"]])
+def closure_open_finding(f,x):
+    a=f.auth;org,run=a.ids["organisation"],a.ids["run"]
+    a.sql("INSERT INTO hyperfide.findings(organisation_id,run_id,id,dedup_digest,owner_package_id,repository_id,source_object_id,severity,summary) VALUES($1,$2,$3,$4,$5,$6,$7,'CRITICAL','Open blocking closure finding')",[org,run,x["finding"],closure_digest("closure-finding"),x["package1"],x["repository"],f.feature_oid])
+def closure_expire_lease(f,x):
+    a=f.auth;a.sql("UPDATE hyperfide.attempts SET compute_authority='EXPIRED',lease_expires_at=clock_timestamp()-interval '1 hour',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[a.ids["organisation"],a.ids["run"],x["attempt"]])
+def closure_programme_receipt(f,x,gate,covered,digest):
+    """Seed one succeeded PROGRAMME scope job receipt (bounded synthetic stand-in for an executed full-case gate)."""
+    a=f.auth;org,run=a.ids["organisation"],a.ids["run"]
+    if "account_seeded" not in x:
+        a.sql("INSERT INTO hyperfide.capacity_accounts(organisation_id,id,pool_id,dimension,capacity_class,configured_limit,reserved,provenance_digest,qualification_state) VALUES($1,$2,$3,'CPU_MILLIS','EXECUTION',100,1,$4,'QUALIFIED')",[org,x["account"],a.ids["pool"],closure_digest("closure-capacity")])
+        a.sql("INSERT INTO hyperfide.reservations(organisation_id,run_id,id,request_id,capacity_account_id,quantity,expires_at) VALUES($1,$2,$3,$4,$5,1,clock_timestamp()+interval '1 hour')",[org,run,x["reservation"],closure_uuid(),x["account"]]);x["account_seeded"]=True
+    job=closure_uuid()
+    a.sql("INSERT INTO hyperfide.integration_scope_jobs(organisation_id,run_id,id,executor_id,reservation_id,level,wave,input_manifest_digest,state) VALUES($1,$2,$3,$4,$5,'PROGRAMME',NULL,$6,'SUCCEEDED')",[org,run,job,closure_uuid(),x["reservation"],digest])
+    a.sql("INSERT INTO hyperfide.integration_scope_receipts(organisation_id,run_id,id,level,wave,input_manifest_digest,manifest,gate_id,covered_ids,outcome,exit_code,assertion_count,stdout,stderr,job_id) VALUES($1,$2,$3,'PROGRAMME',NULL,$4,'{}'::jsonb,$5,$6::text[],'PASS',0,1,'','',$7)",[org,run,closure_uuid(),digest,gate,covered,job])
+def closure_policy_file(f):
+    """Specify programme end-to-end and activation/rehearsal obligations in the trusted closure policy before first use."""
+    policy=json.loads(json.dumps(f.cfg["closure"]))
+    rehearsal={**f.gate,"id":"activation-rehearsal","covers":["V-055"],"proof":{**f.gate["proof"],"case_ids":["V-055"]}}
+    policy["programme_gates"].append(rehearsal);policy["end_to_end_ids"]=["V-034"];policy["activation_rehearsal_ids"]=["V-055"]
+    current=json.loads(f.config.read_text());current["closure"]=policy;f.config.write_text(json.dumps(current))
+    return {**f.cfg,"closure":policy}
+def closure_evaluate(f,**scope):
+    row=f.invoke(TASK,"integration.closure.evaluate",{**SCOPE,**scope})
+    expect(row.get("ok") is True,"Closure evaluation refused: "+json.dumps(row)[:600])
+    return row.get("result",row.get("output",{}))
+def closure_unmet(result):return set(result["status"]["unmet_obligations"])
+def closure_release(result,key):return [d for d in result["dependency_release"] if d["task_key"]==key]
+def publication_gateway_cases(f,module):
+    """Run the real control service in the isolated PUBLICATION_GATEWAY role against the actual receive hook."""
+    import base64,hmac,uuid as uuidlib,time
+    a=f.auth;org,runid,epoch=a.ids["organisation"],a.ids["run"],a.ids["epoch"];repo=U(3);ref="refs/heads/main"
+    H=lambda v:"sha256:"+hashlib.sha256(json.dumps(v,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()
+    new=lambda:str(uuidlib.uuid4())
+    head=lambda:run(["git","--git-dir="+str(f.receive),"rev-parse",ref]).stdout.strip()
+    def rg(*args):return run(["git","--git-dir="+str(f.receive),*args],env=f.gitenv).stdout.strip()
+    def state(table,ident):return a.sql("SELECT state FROM hyperfide."+table+" WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,runid,ident])[0]["state"]
+    def admissions(op):return int(a.sql("SELECT count(*)::int AS n FROM hyperfide.publication_gateway_admissions WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3",[org,runid,op])[0]["n"])
+    def call(action,value):return f.invoke(TASK,action,{"organisation_id":org,"run_id":runid,**value})
+    def refused(row,code):expect(row.get("ok") is False and row.get("error",{}).get("code")==code,"Expected "+code+": "+json.dumps(row)[:600])
+    def permit(op,old,next_,digest,key=None):
+        body=base64.urlsafe_b64encode(json.dumps({"version":1,"organisation_id":org,"run_id":runid,"operation_id":op,"generation":"1","repository_id":repo,"ref":ref,"old":old,"next":next_,"input_digest":digest},sort_keys=True,separators=(",",":")).encode()).decode().rstrip("=")
+        mac=hmac.new(key or f.key.read_bytes(),body.encode(),hashlib.sha256).digest()
+        return body+"."+base64.urlsafe_b64encode(mac).decode().rstrip("=")
+    def worker_push(oid,token=None):
+        return f.g(["push","--porcelain","--no-verify",*(["-o","hf-permit="+token] if token else []),"file://"+str(f.receive),oid+":"+ref],True)
+    # Gateway-only process: the receive hook reads its own private server profile bound to the service database.
+    serverenv={k:v for k,v in a.env.items() if k.startswith(("HYPERFIDE_","HF_","PG")) or k in ("PATH","DATABASE_URL","HOME")}
+    serverconfig=f.base/"gateway-server.json";serverconfig.write_text(json.dumps(serverenv));serverconfig.chmod(0o600)
+    node("import {installGatewayHook} from "+json.dumps(module)+";await installGatewayHook(process.argv[1],process.argv[2]);",[f.receive,serverconfig])
+    authorization=Path(a.env["HF_AUTHORIZATION_CONFIG_FILE"]);rules=json.loads(authorization.read_text())
+    for rule in rules["rules"]:
+        if rule["role"]=="OPERATOR":rule["repositories"]=sorted(set(rule["repositories"]+[repo]));rule["git_refs"]=sorted(set(rule["git_refs"]+[ref]))
+    authorization.write_text(json.dumps(rules));authorization.chmod(0o600)
+    a.stop()
+    a.env["HYPERFIDE_INTEGRATION_ROLE"]="PUBLICATION_GATEWAY"
+    a.env["HYPERFIDE_GATEWAY_HOOK_DIGEST"]="sha256:"+hashlib.sha256((f.receive/"hooks"/"pre-receive").read_bytes()).hexdigest()
+    a.start()
+    # Real Git objects: advanced (out-of-band) head X in the receive repository, next candidate Z after feature.
+    advanced=rg("commit-tree",f.base_oid+"^{tree}","-p",f.base_oid,"-m","advanced by another publisher")
+    f.g(["checkout","-qb","next",f.feature_oid]);(f.repository/"next.txt").write_text("next\n");f.g(["add","next.txt"]);f.g(["commit","-qm","next"]);later=f.g(["rev-parse","HEAD"]).stdout.strip();f.g(["checkout","-q","main"])
+    ids={k:new() for k in ("package","task","attempt","custody","ba1","ba2")}
+    run_row=a.sql("SELECT spec_revision_id,spec_generation::text AS g,policy_digest FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2",[org,runid])[0]
+    crit=H("publication-criteria");smd=H("publication-source");emd=H("publication-evidence")
+    seed=[("INSERT INTO hyperfide.repositories(organisation_id,id,project_id,name,url) VALUES($1,$2,$3,'publication-fixture','https://example.invalid/publication.git')",[org,repo,a.ids["project"]]),
+     ("INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id) VALUES($1,$2,$3),($1,$2,$4),($1,$2,$5),($1,$2,$6)",[org,repo,f.base_oid,f.feature_oid,advanced,later]),
+     ("INSERT INTO hyperfide.run_repositories(organisation_id,run_id,repository_id,source_object_id,integration_ref) VALUES($1,$2,$3,$4,$5)",[org,runid,repo,f.base_oid,ref]),
+     ("INSERT INTO hyperfide.feature_packages(organisation_id,run_id,id,package_key,wave) VALUES($1,$2,$3,'publication-fixture',1)",[org,runid,ids["package"]]),
+     ("INSERT INTO hyperfide.tasks(organisation_id,run_id,id,task_key,feature_package_id,spec_revision_id,spec_generation,criteria_digest,definition,wave) VALUES($1,$2,$3,'publication.1',$4,$5,$6::bigint,$7,'{}',1)",[org,runid,ids["task"],ids["package"],run_row["spec_revision_id"],run_row["g"],crit]),
+     ("INSERT INTO hyperfide.attempts(organisation_id,run_id,id,task_id,generation,authority_epoch,input_packet_digest,compute_authority,execution_state) VALUES($1,$2,$3,$4,1,$5,$6,'RELEASED','SUBMITTED')",[org,runid,ids["attempt"],ids["task"],epoch,H("publication-packet")]),
+     ("INSERT INTO hyperfide.submission_custodies(organisation_id,run_id,id,task_id,source_attempt_id,source_generation,custody_generation,authority_epoch,repository_id,source_object_id,source_manifest_digest,evidence_manifest_digest,criteria_digest,qualification_outcome) VALUES($1,$2,$3,$4,$5,1,1,$6,$7,$8,$9,$10,$11,'PASS')",[org,runid,ids["custody"],ids["task"],ids["attempt"],epoch,repo,f.feature_oid,smd,emd,crit]),
+     ("UPDATE hyperfide.tasks SET state='QUALIFIED',current_custody_id=$3,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$4",[org,runid,ids["custody"],ids["task"]]),
+     ("INSERT INTO hyperfide.branch_authorities(organisation_id,run_id,id,repository_id,branch_ref,branch_generation,authority_epoch,expected_old_head) VALUES($1,$2,$3,$4,$5,1,$6,$7)",[org,runid,ids["ba1"],repo,ref,epoch,f.base_oid])]
+    for statement,values in seed:a.sql(statement,values)
+    def candidate(old,next_,ba,generation,policy=None):
+        cid,request=new(),new()
+        manifest={"version":1,"request_id":request,"run_id":runid,"spec_revision_id":run_row["spec_revision_id"],"spec_generation":run_row["g"],"policy_digest":policy or run_row["policy_digest"],"authority_epoch":epoch,"repository_id":repo,"branch_authority_id":ba,"branch_generation":generation,"target_ref":ref,"expected_old_head":old,"candidate_head":next_,"tree":f.g(["rev-parse",next_+"^{tree}"]).stdout.strip(),"parents":[old],"git_provenance_manifest":{"fixture":"publication"},"git_provenance_manifest_digest":H({"fixture":"publication"}),
+            "contributors":[{"custody_id":ids["custody"],"custody_generation":"1","task_id":ids["task"],"source_object_id":f.feature_oid,"criteria_digest":crit,"source_manifest_digest":smd,"evidence_manifest_digest":emd,"proof_criteria_digest":crit,"qualification_receipt_digest":H("receipt"),"proof_source_manifest_digest":smd}],
+            "commit_set":[{"repository_id":repo,"candidate_head":next_,"expected_old_head":old}],"execution_session_id":new(),"execution_receipt_digest":H("execution"),"declared_context":{"environment_digest":D,"contract_digest":D,"authority":"UNVERIFIED_CALLER_LABELS"},"context_authority":"IMMUTABLE_REVIEW_INPUT_BINDINGS","required_gates":[],"review_policy_digest":D,"review_rubrics":[D],"required_graph":False,"review_sources":[next_]}
+        digest=H(manifest)
+        a.sql("INSERT INTO hyperfide.integration_candidates(organisation_id,run_id,id,task_id,custody_id,custody_generation,repository_id,branch_authority_id,branch_generation,expected_old_head,candidate_head,input_manifest_digest,request_id,state) VALUES($1,$2,$3,$4,$5,1,$6,$7,$8::bigint,$9,$10,$11,$12,'READY')",[org,runid,cid,ids["task"],ids["custody"],repo,ba,generation,old,next_,digest,request])
+        a.sql("INSERT INTO hyperfide.integration_candidate_manifests(organisation_id,run_id,candidate_id,manifest) VALUES($1,$2,$3,$4::jsonb)",[org,runid,cid,json.dumps(manifest)])
+        a.sql("INSERT INTO hyperfide.candidate_custodies(organisation_id,run_id,candidate_id,custody_id,custody_generation,task_id,repository_id) VALUES($1,$2,$3,$4,1,$5,$6)",[org,runid,cid,ids["custody"],ids["task"],repo])
+        return {"id":cid,"digest":digest,"old":old,"next":next_,"ba":ba,"generation":generation}
+    def intent(c,op_state,intent_state):
+        op,iid=new(),new()
+        a.sql("INSERT INTO hyperfide.publication_intents(organisation_id,run_id,id,candidate_id,intent_digest,state) VALUES($1,$2,$3,$4,$5,$6)",[org,runid,iid,c["id"],H({"candidate_id":c["id"]}),intent_state])
+        a.sql("INSERT INTO hyperfide.publication_operations(organisation_id,run_id,id,publication_intent_id,candidate_id,branch_authority_id,branch_generation,authority_epoch,repository_id,expected_old_head,candidate_head,request_id,state) VALUES($1,$2,$3,$4,$5,$6,$7::bigint,$8,$9,$10,$11,$12,$13)",[org,runid,op,iid,c["id"],c["ba"],c["generation"],epoch,repo,c["old"],c["next"],new(),op_state])
+        a.sql("INSERT INTO hyperfide.publication_target_locks(organisation_id,repository_id,target_ref,run_id,operation_id) VALUES($1,$2,$3,$4,$5)",[org,repo,ref,runid,op])
+        return op,iid
+    # (b) Target advanced between qualification and publish: CAS refuses, target and intent are not overwritten.
+    c1=candidate(f.base_oid,f.feature_oid,ids["ba1"],"1");op1,intent1=intent(c1,"PENDING","PENDING")
+    def head_advanced():
+        rg("update-ref",ref,advanced,f.base_oid)
+        try:
+            refused(call("integration.publication.execute",{"operation_id":op1}),"PUBLICATION_HEAD_CHANGED")
+            expect(head()==advanced,"CAS refusal changed the advanced target")
+            expect(state("publication_operations",op1)=="FAILED" and state("publication_intents",intent1)=="FAILED" and admissions(op1)==0,"Head-changed intent was admitted or left executable")
+        finally:rg("update-ref",ref,f.base_oid,advanced)
+    check(IDS[TASK][22],head_advanced)
+    # (d) A stale worker replays its retained, genuinely signed permit after its operation was fenced.
+    def stale_worker():
+        result=worker_push(f.feature_oid,permit(op1,f.base_oid,f.feature_oid,c1["digest"]))
+        expect(result.returncode!=0 and "PUBLICATION_FENCED" in result.stderr,"Stale permit was not fenced by the server hook: "+result.stderr[-400:])
+        row=call("integration.publication.execute",{"operation_id":op1})
+        expect(row.get("ok") is True and row["result"]["state"]=="FAILED" and row["result"]["replayed"] is True,"Stale operation replay was not read-only: "+json.dumps(row)[:400])
+        expect(head()==f.base_oid and admissions(op1)==0,"Stale worker changed the protected target")
+    check(IDS[TASK][23],stale_worker)
+    # (e) After its PostgreSQL fence expired a worker pushes directly: no permit, or a permit under its own key.
+    def direct_push():
+        a.sql("UPDATE hyperfide.branch_authorities SET authority='REVOKED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,runid,ids["ba1"]])
+        try:
+            bare=worker_push(f.feature_oid)
+            expect(bare.returncode!=0 and "PUBLICATION_PERMIT_REQUIRED" in bare.stderr,"Direct worker push bypassed the gateway: "+bare.stderr[-400:])
+            forged=worker_push(f.feature_oid,permit(op1,f.base_oid,f.feature_oid,c1["digest"],key=os.urandom(32)))
+            expect(forged.returncode!=0 and "PUBLICATION_PERMIT_INVALID" in forged.stderr,"Worker-signed permit accepted: "+forged.stderr[-400:])
+            expect(head()==f.base_oid,"Direct worker push changed the protected target")
+        finally:
+            a.sql("UPDATE hyperfide.branch_authorities SET authority='ACTIVE',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,runid,ids["ba1"]])
+    check(IDS[TASK][24],direct_push)
+    # (c) Lost Git response: the hook admitted the push, the response never arrived and the ref lands later.
+    c2=candidate(f.base_oid,f.feature_oid,ids["ba1"],"1");op2,intent2=intent(c2,"RUNNING","EXECUTING")
+    a.sql("INSERT INTO hyperfide.publication_gateway_admissions(organisation_id,run_id,operation_id,permit_digest) VALUES($1,$2,$3,$4)",[org,runid,op2,H("lost-response-permit")])
+    def unknown():
+        row=call("integration.publication.reconcile",{"operation_id":op2})
+        expect(row.get("ok") is True and row["result"]["state"]=="OUTCOME_UNKNOWN" and row["result"]["observed_head"]==f.base_oid and row["result"]["requires_reconciliation"] is True,"Lost response was settled without Git read-back: "+json.dumps(row)[:400])
+        expect(state("publication_operations",op2)=="OUTCOME_UNKNOWN" and state("publication_intents",intent2)=="EXECUTING","Unknown outcome was superseded")
+    check(IDS[TASK][25],unknown)
+    def not_superseded():
+        c3=candidate(f.base_oid,f.feature_oid,ids["ba1"],"1")
+        refused(call("integration.publication.authorize",{"candidate_id":c3["id"],"request_id":new()}),"PUBLICATION_RECONCILIATION_REQUIRED")
+        row=call("integration.publication.execute",{"operation_id":op2})
+        expect(row.get("ok") is True and row["result"]["state"]=="OUTCOME_UNKNOWN","Retry did not reconcile first: "+json.dumps(row)[:400])
+        expect(admissions(op2)==1 and head()==f.base_oid,"Retry republished blindly")
+        expect(a.sql("SELECT operation_id FROM hyperfide.publication_target_locks WHERE organisation_id=$1 AND repository_id=$2 AND target_ref=$3",[org,repo,ref])[0]["operation_id"]==op2,"Target fence released while uncertain")
+    check(IDS[TASK][26],not_superseded)
+    def custody_held():
+        result=sql_error("UPDATE hyperfide.submission_custodies SET authority='REVOKED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,runid,ids["custody"]])
+        expect(result,"Custody revoked while publication outcome is uncertain")
+        expect(a.sql("SELECT authority FROM hyperfide.submission_custodies WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,runid,ids["custody"]])[0]["authority"]=="ACTIVE","Custody released before reconciliation")
+    def sql_error(statement,values):
+        try:a.sql(statement,values)
+        except AssertionError as error:return "reconciled" in str(error)
+        return False
+    check(IDS[TASK][27],custody_held)
+    def reconciled():
+        rg("fetch","-q",str(f.repository),f.feature_oid);rg("update-ref",ref,f.feature_oid,f.base_oid)
+        row=call("integration.publication.reconcile",{"operation_id":op2})
+        expect(row.get("ok") is True and row["result"]["state"]=="PUBLISHED" and row["result"]["observed_head"]==f.feature_oid,"Reconcile did not identify the real ref: "+json.dumps(row)[:400])
+        expect(state("publication_operations",op2)=="PUBLISHED" and state("publication_intents",intent2)=="PUBLISHED" and admissions(op2)==1,"Actual Git outcome not durably settled")
+        replay=call("integration.publication.execute",{"operation_id":op2})
+        expect(replay.get("ok") is True and replay["result"]["replayed"] is True and head()==f.feature_oid,"Settled operation was re-sent")
+    check(IDS[TASK][28],reconciled)
+    def release_held():
+        row=call("integration.publication.reconcile",{"operation_id":op2})
+        expect(row.get("ok") is True and row["result"]["state"]=="PUBLISHED","Published receipt unavailable")
+        accepted=call("integration.publication.accept",{"operation_id":op2})
+        refused(accepted,"QUALIFICATION_NOT_FOUND")
+        custody=a.sql("SELECT c.authority,t.state FROM hyperfide.submission_custodies c JOIN hyperfide.tasks t ON t.organisation_id=c.organisation_id AND t.run_id=c.run_id AND t.id=c.task_id WHERE c.organisation_id=$1 AND c.run_id=$2 AND c.id=$3",[org,runid,ids["custody"]])[0]
+        expect(custody["authority"]=="ACTIVE" and custody["state"]!="INTEGRATED","Custody released by an external receipt alone")
+    check(IDS[TASK][29],release_held)
+    # Changed candidate inputs after qualification: run policy advances, publication is refused pending requalification.
+    def changed_inputs():
+        a.sql("INSERT INTO hyperfide.branch_authorities(organisation_id,run_id,id,repository_id,branch_ref,branch_generation,authority_epoch,expected_old_head) VALUES($1,$2,$3,$4,$5,2,$6,$7)",[org,runid,ids["ba2"],repo,ref,epoch,f.feature_oid])
+        c5=candidate(f.feature_oid,later,ids["ba2"],"2")
+        a.sql("UPDATE hyperfide.runs SET policy_digest=$3,state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[org,runid,H("changed-policy")])
+        op5,intent5=intent(c5,"PENDING","PENDING")
+        refused(call("integration.publication.execute",{"operation_id":op5}),"INTEGRATION_INPUT_STALE")
+        expect(head()==f.feature_oid and state("publication_operations",op5)=="PENDING" and admissions(op5)==0,"Stale candidate inputs reached the protected target")
+    check(IDS[TASK][30],changed_inputs)
 def closure_cases(f):
+    specified=closure_policy_file(f)
     check(IDS[TASK][0],f.wire)
     check(IDS[TASK][1],lambda:f.reject(TASK,"integration.closure.evaluate",SCOPE,"INTEGRATION_INVALID"))
     check(IDS[TASK][2],lambda:f.reject(TASK,"integration.closure.evaluate",{**SCOPE,"level":"WAVE"},"CLOSURE_INVALID"))
@@ -294,6 +689,168 @@ def closure_cases(f):
         node("import {closurePolicy} from "+json.dumps(module)+";let denied=false;try{closurePolicy(JSON.parse(process.argv[1]))}catch(e){denied=e.code==='CLOSURE_POLICY_INVALID'}if(!denied)throw Error('Unrelated registered full case claimed coverage');",[json.dumps(wrong)])
     check(IDS[TASK][8],mismatch)
     check(IDS[TASK][9],lambda:node("import {closurePolicy} from "+json.dumps(module)+";closurePolicy(JSON.parse(process.argv[1]));",[json.dumps(f.cfg)]))
+    def programme_cases_registered():
+        accepted=node("import {closurePolicy} from "+json.dumps(module)+";const p=closurePolicy(JSON.parse(process.argv[1]));console.log(JSON.stringify(p));",[json.dumps(specified)])
+        expect(json.loads(accepted.stdout)["activation_rehearsal_ids"]==["V-055"],"Specified rehearsal obligation dropped")
+        wrong=json.loads(json.dumps(specified));wrong["closure"]["activation_rehearsal_ids"]=["V-019"]
+        node("import {closurePolicy} from "+json.dumps(module)+";let denied=false;try{closurePolicy(JSON.parse(process.argv[1]))}catch(e){denied=e.code==='CLOSURE_POLICY_INVALID'}if(!denied)throw Error('Unregistered rehearsal obligation accepted');",[json.dumps(wrong)])
+    check(IDS[TASK][10],programme_cases_registered)
+    state={}
+    def qualified_only():
+        state["x"]=x=closure_seed(f)
+        result=closure_evaluate(f,level="WAVE",wave=1);state["qualified"]=result
+        expect([d["released"] for d in closure_release(result,"closure.after-qualified")]==[True],"QUALIFIED-milestone dependent not released by current qualified custody")
+        expect([(d["released"],d["code"]) for d in closure_release(result,"closure.after-integrated")]==[(False,"DEPENDENCY_NOT_INTEGRATED")],"Isolated task qualification released an INTEGRATED-milestone dependent")
+    check(IDS[TASK][11],qualified_only)
+    def lease_expiry():
+        x=state["x"];before=closure_evaluate(f,level="TASK",task_id=x["task"]);closure_expire_lease(f,x)
+        after=closure_evaluate(f,level="TASK",task_id=x["task"])
+        expect([(o["id"],o["met"],o.get("detail")) for o in before["obligations"]]==[(o["id"],o["met"],o.get("detail")) for o in after["obligations"]],"Coding lease expiry changed task qualification")
+        expect(after["task_statuses"][0]["milestone"]=="QUALIFIED" and [d["released"] for d in closure_release(after,"closure.after-qualified")]==[True],"Coding lease expiry invalidated admitted qualified work")
+    check(IDS[TASK][12],lease_expiry)
+    def competing_custody():
+        x=state["x"];a=f.auth;org,run=a.ids["organisation"],a.ids["run"];attempt=closure_uuid()
+        a.sql("INSERT INTO hyperfide.attempts(organisation_id,run_id,id,task_id,generation,authority_epoch,input_packet_digest,compute_authority,execution_state) VALUES($1,$2,$3,$4,2,$5,$6,'RELEASED','SUBMITTED')",[org,run,attempt,x["task"],a.ids["epoch"],closure_digest("closure-replacement")])
+        refused=False
+        try:a.sql("INSERT INTO hyperfide.submission_custodies(organisation_id,run_id,id,task_id,source_attempt_id,source_generation,custody_generation,authority_epoch,repository_id,source_object_id,source_manifest_digest,evidence_manifest_digest,criteria_digest,qualification_outcome) VALUES($1,$2,$3,$4,$5,2,2,$6,$7,$8,$9,$10,$11,'PASS')",[org,run,closure_uuid(),x["task"],attempt,a.ids["epoch"],x["repository"],f.feature_oid,closure_digest("other-source"),closure_digest("other-evidence"),x["criteria"]])
+        except AssertionError:refused=True
+        expect(refused,"Competing replacement custody admitted beside the admitted one")
+        result=closure_evaluate(f,level="TASK",task_id=x["task"])
+        expect([o.get("detail") for o in result["obligations"] if o["id"]=="task.current-custody:closure.alpha"]==[{"custody_id":x["custody"]}],"Task qualification not computed from the admitted current custody")
+    check(IDS[TASK][13],competing_custody)
+    def without_acceptance():
+        x=state["x"];closure_publish(f,x);result=closure_evaluate(f,level="WAVE",wave=1);state["published"]=result
+        unmet=closure_unmet(result)
+        expect(result["outcome"]=="HELD" and result["wave_closed"] is False and "wave.accepted-candidate:closure.alpha" in unmet and "wave.integration-receipt:closure.alpha" not in unmet,"Published but unaccepted candidate closed or mislabelled the wave")
+        expect([(d["released"],d["code"]) for d in closure_release(result,"closure.after-integrated")]==[(False,"DEPENDENCY_NOT_INTEGRATED")],"Unaccepted publication released an INTEGRATED-milestone dependent")
+    check(IDS[TASK][14],without_acceptance)
+    def accepted():
+        x=state["x"];closure_accept(f,x);result=closure_evaluate(f,level="WAVE",wave=1);state["accepted"]=result
+        expect([d["released"] for d in closure_release(result,"closure.after-integrated")]==[True],"Declared INTEGRATED milestone reached but dependent withheld")
+    check(IDS[TASK][15],accepted)
+    def held_despite_tasks():
+        result=state["accepted"];unmet=closure_unmet(result)
+        expect(all(t["milestone"]=="INTEGRATED" for t in result["task_statuses"]) and result["status"]["lower_levels_complete"] is True,"Fixture tasks did not all pass")
+        expect(result["outcome"]=="HELD" and result["wave_closed"] is False,"Passing tasks silently closed the wave")
+        expect({"wave.criteria-current:closure.alpha","wave.gate:actual-test"}<=unmet and any(u.startswith("wave.reviews-current:") for u in unmet) and not any(u.startswith("wave.accepted-candidate:") for u in unmet),"Wave did not list its own unmet criteria/review/gate obligations")
+    check(IDS[TASK][16],held_despite_tasks)
+    def blocking_finding():
+        x=state["x"];before=closure_unmet(state["accepted"]);closure_open_finding(f,x)
+        result=closure_evaluate(f,level="WAVE",wave=1);state["finding"]=result;key="wave.blocking-findings:"+x["repository"]
+        expect(key not in before and key in closure_unmet(result),"Open blocking finding did not hold the wave")
+        detail=[o for o in result["unmet_obligations"] if o["id"]==key][0]
+        expect(detail["reason"]=="BLOCKING_FINDING_OPEN:"+x["repository"] and x["finding"] in [b["finding_id"] for b in detail["detail"]],"Open blocking finding not listed")
+    check(IDS[TASK][17],blocking_finding)
+    def withheld():
+        for name in ("qualified","published","accepted","finding"):
+            result=state[name]
+            expect(result["downstream_release_authorized"] is False and result["external_activation_authorized"] is False and result["programme_qualified"] is False,"Held wave authorized downstream or activation release: "+name)
+    check(IDS[TASK][18],withheld)
+    def own_status():
+        x=state["x"];task=closure_evaluate(f,level="TASK",task_id=x["task"]);wave=closure_evaluate(f,level="WAVE",wave=1);programme=closure_evaluate(f,level="PROGRAMME");state["programme"]=programme
+        for level,prefix,result in (("TASK","task.",task),("WAVE","wave.",wave),("PROGRAMME","programme.",programme)):
+            expect(result["status"]["level"]==level and result["status"]["closes_higher_levels"] is False and all(o["level"]==level and o["id"].startswith(prefix) for o in result["obligations"]),"Level did not report its own obligations: "+level)
+            row=f.invoke(TASK,"integration.closure.inspect",{**SCOPE,"evaluation_id":result["evaluation_id"]});stored=row.get("result",row.get("output",{}))
+            expect(row.get("ok") is True and stored["level"]==level and stored["outcome"]==result["outcome"] and stored["manifest"]["status"]["unmet_obligations"]==result["status"]["unmet_obligations"],"Persisted evaluation lost its own level status")
+        expect([o["met"] for o in task["obligations"] if o["id"] in ("task.integration-receipt:closure.alpha","task.accepted-candidate:closure.alpha")]==[True,True],"Task-level integration receipts not reported")
+        expect(wave["outcome"]=="HELD" and programme["outcome"]=="HELD" and programme["wave_closed"] is False,"Higher level closed")
+    check(IDS[TASK][19],own_status)
+    def requires_programme_cases():
+        result=state["programme"];unmet=closure_unmet(result)
+        expect({"programme.end-to-end:V-034","programme.activation-rehearsal:V-055"}<=unmet and not {"programme.end-to-end-specified","programme.activation-rehearsal-specified"}&unmet,"Programme closure did not require specified end-to-end/rehearsal obligations")
+        expect(not any(o["id"].startswith(("programme.end-to-end","programme.activation-rehearsal")) for o in state["finding"]["obligations"]),"Wave closure claimed programme obligations")
+    check(IDS[TASK][20],requires_programme_cases)
+    def programme_cases_current():
+        x=state["x"];digest=state["programme"]["input_manifest_digest"]
+        closure_programme_receipt(f,x,"actual-test",["V-034"],"sha256:"+"e"*64)
+        stale=closure_evaluate(f,level="PROGRAMME")
+        expect(stale["input_manifest_digest"]==digest and "programme.end-to-end:V-034" in closure_unmet(stale),"Stale end-to-end receipt satisfied programme closure")
+        closure_programme_receipt(f,x,"actual-test",["V-034"],digest);closure_programme_receipt(f,x,"activation-rehearsal",["V-055"],digest)
+        result=closure_evaluate(f,level="PROGRAMME");met={o["id"] for o in result["obligations"] if o["met"]}
+        expect(result["input_manifest_digest"]==digest and {"programme.end-to-end:V-034","programme.activation-rehearsal:V-055","programme.gate:actual-test","programme.gate:activation-rehearsal"}<=met,"Current end-to-end/rehearsal receipts not recognised")
+        expect(result["outcome"]=="HELD" and result["programme_qualified"] is False and result["external_activation_authorized"] is False,"Programme closed while other obligations remain unmet")
+        state["programme"]=result
+    check(IDS[TASK][21],programme_cases_current)
+    def each_wave():
+        x=state["x"];result=state["programme"];waves={w["wave"]:w for w in result["wave_statuses"]}
+        expect(sorted(waves)==[1,2] and not any(w["closed"] for w in waves.values()) and {"programme.wave-closed:1","programme.wave-closed:2"}<=closure_unmet(result),"Programme did not require each wave's own closure")
+        a=f.auth
+        # Synthetic lower-level PASS seed: only wave 1's own current evaluation; it must not close the programme.
+        a.sql("INSERT INTO hyperfide.integration_closure_evaluations(organisation_id,run_id,id,level,wave,input_manifest_digest,outcome,manifest) VALUES($1,$2,$3,'WAVE',1,$4,'PASS','{}'::jsonb)",[a.ids["organisation"],a.ids["run"],closure_uuid(),waves[1]["input_manifest_digest"]])
+        after=closure_evaluate(f,level="PROGRAMME");unmet=closure_unmet(after)
+        expect("programme.wave-closed:1" not in unmet and "programme.wave-closed:2" in unmet and after["outcome"]=="HELD" and after["programme_qualified"] is False,"Closed lower wave silently closed the programme")
+    check(IDS[TASK][22],each_wave)
+RA,RB=U(601),U(602)
+ADVANCE,COMPENSATE="ADVANCE_COMPATIBLE_MANIFEST","EXPLICIT_COMPENSATING_REVISION"
+def release_repositories(f):
+    """Two real repositories, each with its own bare receive target."""
+    f.release={};entries=[]
+    for name,rid in (("a",RA),("b",RB)):
+        work=f.base/("release-"+name);work.mkdir()
+        g=lambda args,work=work:run(["git","-c","core.hooksPath=/dev/null","-c","gc.auto=0",*args],cwd=work,env=f.gitenv)
+        g(["init","-q","-b","main"]);(work/"base.txt").write_text(name+" base\n");g(["add","base.txt"]);g(["commit","-qm","base"])
+        receive=f.base/("release-"+name+".git");run(["git","clone","--bare","-q",work,receive],env=f.gitenv)
+        for key,value in (("maintenance.auto","false"),("receive.autogc","false")):run(["git","--git-dir="+str(receive),"config",key,value],env=f.gitenv)
+        f.release[rid]={"work":work,"receive":receive,"g":g,"base":g(["rev-parse","HEAD"]).stdout.strip()}
+        entries.append({**f.cfg["repositories"][0],"repository_id":rid,"path":str(work),"receive_path":str(receive)})
+    return entries
+def release_commit(f,rid,parent,label):
+    r=f.release[rid];r["g"](["checkout","-q","--detach",parent]);(r["work"]/"change.txt").write_text(label+"\n");r["g"](["add","change.txt"]);r["g"](["commit","-qm",label])
+    return r["g"](["rev-parse","HEAD"]).stdout.strip()
+def release_ref(f,rid):return run(["git","--git-dir="+str(f.release[rid]["receive"]),"rev-parse","refs/heads/main"]).stdout.strip()
+def q(value):return "NULL" if value is None else "'"+str(value).replace("'","''")+"'"
+def adb(f,statement,allow_error=False):return sql(statement,database=f.auth.database,allow_error=allow_error)
+def precondition(f,statements):
+    # Fixture preconditions stand in for the 19.1/19.2 qualification chain;
+    # every barrier decision below is made by the registered service.
+    adb(f,"BEGIN;SET LOCAL session_replication_role=replica;"+statements+"COMMIT;")
+def release_context(f):
+    org,run_id=f.auth.ids["organisation"],f.auth.ids["run"]
+    spec,epoch,policy=adb(f,"SELECT spec_revision_id||' '||authority_epoch||' '||policy_digest FROM hyperfide.runs WHERE organisation_id="+q(org)+" AND id="+q(run_id)).stdout.strip().split(" ")
+    expect(adb(f,"SELECT count(*) FROM hyperfide.run_repositories WHERE run_id="+q(run_id)).stdout.strip()=="0","Fixture run already pins repositories")
+    precondition(f,"INSERT INTO hyperfide.run_repositories(organisation_id,run_id,repository_id,source_object_id,integration_ref) VALUES"+",".join("("+",".join(map(q,[org,run_id,rid,f.release[rid]["base"],"refs/heads/main"]))+")" for rid in (RA,RB))+";")
+    return {"org":org,"run":run_id,"spec":spec,"epoch":epoch,"policy":policy}
+def commit_set(*entries):return sorted([{"repository_id":rid,"candidate_head":head,"expected_old_head":old} for rid,old,head in entries],key=lambda x:x["repository_id"])
+def seed_candidate(f,ctx,n,rid,old,head,pinned):
+    cid=U(n)
+    manifest={"version":1,"request_id":U(n+5000),"run_id":ctx["run"],"spec_revision_id":ctx["spec"],"spec_generation":"1","policy_digest":ctx["policy"],"authority_epoch":ctx["epoch"],"repository_id":rid,"branch_authority_id":U(n+6000),"branch_generation":"1","target_ref":"refs/heads/main","expected_old_head":old,"candidate_head":head,"commit_set":pinned}
+    digest="sha256:"+hashlib.sha256(json.dumps(manifest,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()
+    precondition(f,"INSERT INTO hyperfide.integration_candidates(organisation_id,run_id,id,task_id,custody_id,custody_generation,repository_id,branch_authority_id,branch_generation,expected_old_head,candidate_head,input_manifest_digest,request_id,state) VALUES("+",".join(map(q,[ctx["org"],ctx["run"],cid,U(n+7000),U(n+8000),1,rid,U(n+6000),1,old,head,digest,U(n+5000),"READY"]))+");"
+        "INSERT INTO hyperfide.integration_candidate_manifests(organisation_id,run_id,candidate_id,manifest) VALUES("+",".join(map(q,[ctx["org"],ctx["run"],cid,json.dumps(manifest)]))+"::jsonb);")
+    return {"id":cid,"n":n,"repository_id":rid,"old":old,"head":head}
+def seed_operation(f,ctx,n,candidate,state,observed=None,admitted=False):
+    """Gateway-authorized publication operation (integration.publication.authorize shape)."""
+    op=U(n);intent={"PENDING":"PENDING","RUNNING":"EXECUTING"}.get(state,state)
+    statements="INSERT INTO hyperfide.publication_intents(organisation_id,run_id,id,candidate_id,intent_digest,state) VALUES("+",".join(map(q,[ctx["org"],ctx["run"],U(n+1000),candidate["id"],D,intent]))+");"
+    statements+="INSERT INTO hyperfide.publication_operations(organisation_id,run_id,id,publication_intent_id,candidate_id,branch_authority_id,branch_generation,authority_epoch,repository_id,expected_old_head,candidate_head,request_id,state,observed_head) VALUES("+",".join(map(q,[ctx["org"],ctx["run"],op,U(n+1000),candidate["id"],U(candidate["n"]+6000),1,ctx["epoch"],candidate["repository_id"],candidate["old"],candidate["head"],U(n+2000),state,observed]))+");"
+    if admitted:statements+="INSERT INTO hyperfide.publication_gateway_admissions(organisation_id,run_id,operation_id,permit_digest) VALUES("+",".join(map(q,[ctx["org"],ctx["run"],op,D]))+");"
+    precondition(f,statements);return op
+def gateway_record(ctx,op,candidate,state,observed=None):
+    """SQL the gateway commits after reading the real target ref back."""
+    w=" WHERE organisation_id="+q(ctx["org"])+" AND run_id="+q(ctx["run"])
+    s="UPDATE hyperfide.publication_operations SET state="+q(state)+",observed_head="+q(observed)+",state_version=state_version+1"+w+" AND id="+q(op)+";"
+    s+="UPDATE hyperfide.publication_intents SET state="+q({"RUNNING":"EXECUTING"}.get(state,state))+",state_version=state_version+1"+w+" AND id=(SELECT publication_intent_id FROM hyperfide.publication_operations"+w+" AND id="+q(op)+");"
+    if state=="PUBLISHED":
+        s+="INSERT INTO hyperfide.publication_gateway_admissions(organisation_id,run_id,operation_id,permit_digest) VALUES("+",".join(map(q,[ctx["org"],ctx["run"],op,D]))+") ON CONFLICT DO NOTHING;"
+        s+="UPDATE hyperfide.integration_candidates SET state='PUBLISHED',state_version=state_version+1"+w+" AND id="+q(candidate["id"])+";"
+    return s
+def gateway_publish(f,ctx,op,candidate):
+    precondition(f,gateway_record(ctx,op,candidate,"RUNNING"))
+    run(["git","-c","core.hooksPath=/dev/null","push","-q",f.release[candidate["repository_id"]]["receive"],candidate["head"]+":refs/heads/main"],cwd=f.release[candidate["repository_id"]]["work"],env=f.gitenv)
+    precondition(f,gateway_record(ctx,op,candidate,"PUBLISHED",release_ref(f,candidate["repository_id"])))
+def interrupted_publisher(f,ctx,first,first_op,second,second_op=None):
+    """One publisher process: ordinary push to repository A, record it, then
+    die by SIGKILL before the ordinary push to repository B."""
+    record="BEGIN;SET LOCAL session_replication_role=replica;"+gateway_record(ctx,first_op,first,"PUBLISHED",first["head"])+(gateway_record(ctx,second_op,second,"RUNNING") if second_op else "")+"COMMIT;"
+    script='set -e\ngit -c core.hooksPath=/dev/null push -q "$1" "$2:refs/heads/main"\npsql -X -q -v ON_ERROR_STOP=1 -c "$3" >/dev/null\nkill -9 $$\ngit -c core.hooksPath=/dev/null push -q "$4" "$5:refs/heads/main"\n'
+    env={**db_env(f.auth.database),**{k:v for k,v in f.gitenv.items() if k.startswith("GIT_")}}
+    result=subprocess.run(["bash","-c",script,"publisher",str(f.release[first["repository_id"]]["receive"]),first["head"],record,str(f.release[second["repository_id"]]["receive"]),second["head"]],cwd=f.release[first["repository_id"]]["work"],env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=60)
+    expect(result.returncode==-9,"Publisher was not killed between pushes: "+result.stderr[-500:])
+    expect(release_ref(f,first["repository_id"])==first["head"] and release_ref(f,second["repository_id"])==second["old"],"Interrupted publication did not leave a real partial commit set")
+def ok(f,action,value):
+    row=f.invoke(TASK,action,value);expect(row.get("ok") is True,"Release action failed: "+json.dumps(row)[:800])
+    return row.get("result",row.get("output",{}))
+def by_repo(result):return {o["repository_id"]:o for o in result["outcomes"]}
 def release_cases(f):
     check(IDS[TASK][0],f.wire)
     check(IDS[TASK][1],lambda:f.reject(TASK,"integration.release.create",{**SCOPE,"done":True},"INTEGRATION_INVALID"))
@@ -304,6 +861,110 @@ def release_cases(f):
         expect(sql("UPDATE hyperfide.integration_release_barriers SET manifest='{\"atomic_across_repositories\":true}',state_version=state_version+1;",allow_error=True).returncode!=0,"Partial release manifest rewritten")
     check(IDS[TASK][4],immutable)
     check(IDS[TASK][5],lambda:expect(sql("SELECT state FROM hyperfide.integration_release_barriers WHERE id='"+U(501)+"';").stdout.strip()=="PARTIAL","Partial publication disappeared"))
+    state={}
+    def interrupted_unknown():
+        ctx=state["ctx"]=release_context(f);a0,b0=f.release[RA]["base"],f.release[RB]["base"]
+        a1,b1,b2=release_commit(f,RA,a0,"a1"),release_commit(f,RB,b0,"b1"),release_commit(f,RB,b0,"b2");state.update(a1=a1,b2=b2)
+        pinned=commit_set((RA,a0,a1),(RB,b0,b1))
+        ca1,cb1=seed_candidate(f,ctx,701,RA,a0,a1,pinned),seed_candidate(f,ctx,702,RB,b0,b1,pinned);state.update(ca1=ca1,cb1=cb1)
+        created=ok(f,"integration.release.create",{**SCOPE,"request_id":U(710),"candidate_ids":[ca1["id"],cb1["id"]],"recovery_policy":ADVANCE})
+        expect(created["state"]=="HELD" and created["atomic_across_repositories"] is False and created["downstream_release_allowed"] is False,"Barrier creation claimed release")
+        y=state["y"]=created["barrier_id"]
+        opa1=seed_operation(f,ctx,721,ca1,"RUNNING");state["opb1"]=opb1=seed_operation(f,ctx,722,cb1,"PENDING")
+        interrupted_publisher(f,ctx,ca1,opa1,cb1,opb1)
+        f.auth.stop();f.auth.start()
+        seen=ok(f,"integration.release.inspect",{**SCOPE,"barrier_id":y});o=by_repo(seen)
+        expect(seen["state"]=="RECONCILING" and o[RA]["outcome"]=="PUBLISHED" and o[RB]["outcome"]=="UNKNOWN" and seen["reconciliation_required"] is True,"Lost publication response did not force reconciliation: "+json.dumps(seen))
+        expect(seen["downstream_release_allowed"] is False and seen["atomic_across_repositories"] is False,"Uncertain set exposed as release")
+        judged=ok(f,"integration.release.evaluate",{**SCOPE,"barrier_id":y})
+        expect(judged["state"]!="RELEASED" and judged["downstream_release_allowed"] is False,"Release decided before read-back")
+        f.reject(TASK,"integration.release.recover",{**SCOPE,"barrier_id":y,"request_id":U(711),"candidate_ids":[U(703)]},"RELEASE_RECONCILIATION_REQUIRED")
+    check(IDS[TASK][6],interrupted_unknown)
+    def interrupted_partial():
+        ctx=state["ctx"];y=state["y"]
+        expect(release_ref(f,RB)==f.release[RB]["base"],"Repository B moved")
+        precondition(f,gateway_record(ctx,state["opb1"],state["cb1"],"FAILED",f.release[RB]["base"]))
+        seen=ok(f,"integration.release.inspect",{**SCOPE,"barrier_id":y});o=by_repo(seen)
+        expect(seen["state"]=="PARTIAL" and o[RA]["outcome"]=="PUBLISHED" and o[RA]["observed_head"]==state["a1"] and o[RB]["outcome"]=="FAILED" and o[RB]["observed_head"]==f.release[RB]["base"],"Partial commit set not explicit: "+json.dumps(seen))
+        expect(seen["all_published"] is False and seen["downstream_release_allowed"] is False and seen["atomic_across_repositories"] is False,"Partial set claimed release or atomicity")
+        judged=ok(f,"integration.release.evaluate",{**SCOPE,"barrier_id":y})
+        expect(judged["state"]=="PARTIAL" and judged["downstream_release_allowed"] is False,"Partial set approved as release")
+        expect(adb(f,"SELECT manifest->>'atomic_across_repositories' FROM hyperfide.integration_release_barriers WHERE id="+q(y)).stdout.strip()=="false","Manifest claims atomic multi-repository transaction")
+    check(IDS[TASK][7],interrupted_partial)
+    def recorded_policy():
+        y=state["y"]
+        f.reject(TASK,"integration.release.recover",{**SCOPE,"barrier_id":y,"request_id":U(711),"compensations":[{"repository_id":RA,"operation_id":U(721)}]},"RELEASE_RECOVERY_POLICY_MISMATCH")
+        f.reject(TASK,"integration.release.recover",{**SCOPE,"barrier_id":y,"request_id":U(711),"candidate_ids":[state["cb1"]["id"]]},"RELEASE_RECOVERY_INVALID")
+        f.reject(TASK,"integration.release.recover",{**SCOPE,"barrier_id":y,"request_id":U(711),"candidate_ids":[state["ca1"]["id"]]},"RELEASE_SET_INCOMPLETE")
+    check(IDS[TASK][8],recorded_policy)
+    def advance():
+        ctx,y=state["ctx"],state["y"];a0,b0=f.release[RA]["base"],f.release[RB]["base"]
+        cb2=state["cb2"]=seed_candidate(f,ctx,703,RB,b0,state["b2"],commit_set((RA,a0,state["a1"]),(RB,b0,state["b2"])))
+        recovered=ok(f,"integration.release.recover",{**SCOPE,"barrier_id":y,"request_id":U(711),"candidate_ids":[cb2["id"]]})
+        expect(recovered["recovery_policy"]==ADVANCE and recovered["downstream_release_allowed"] is False and recovered["atomic_across_repositories"] is False,"Advance recovery claimed release")
+        z=state["z"]=recovered["successor_barrier_id"]
+        manifest=json.loads(adb(f,"SELECT manifest FROM hyperfide.integration_release_barriers WHERE id="+q(z)).stdout.strip());t={x["repository_id"]:x for x in manifest["targets"]}
+        expect(manifest["supersedes"]["barrier_id"]==y and manifest["recovery_policy"]==ADVANCE and manifest["atomic_across_repositories"] is False,"Successor manifest lost predecessor")
+        expect(t[RA]["reused_published"] is True and t[RA]["candidate_head"]==state["a1"] and t[RB]["candidate_id"]==cb2["id"] and t[RB]["reused_published"] is False,"Successor did not pin compatible commit set")
+        again=ok(f,"integration.release.recover",{**SCOPE,"barrier_id":y,"request_id":U(711),"candidate_ids":[cb2["id"]]})
+        expect(again["replayed"] is True and again["recovery_id"]==recovered["recovery_id"],"Recovery replay not idempotent")
+        f.reject(TASK,"integration.release.recover",{**SCOPE,"barrier_id":y,"request_id":U(715),"candidate_ids":[cb2["id"]]},"RELEASE_RECOVERY_CONFLICT")
+        seen=ok(f,"integration.release.inspect",{**SCOPE,"barrier_id":y})
+        expect(seen["state"]=="PARTIAL" and seen["recovery"]["status"]=="SUPERSEDED" and seen["recovery"]["successor_barrier_id"]==z and seen["downstream_release_allowed"] is False,"Predecessor not retained as superseded partial")
+    check(IDS[TASK][9],advance)
+    def successor_release():
+        ctx,y,z=state["ctx"],state["y"],state["z"]
+        before=ok(f,"integration.release.inspect",{**SCOPE,"barrier_id":z})
+        expect(before["state"]=="PARTIAL" and before["downstream_release_allowed"] is False,"Successor released before repository B published")
+        gateway_publish(f,ctx,seed_operation(f,ctx,723,state["cb2"],"PENDING"),state["cb2"])
+        released=ok(f,"integration.release.evaluate",{**SCOPE,"barrier_id":z})
+        expect(released["state"]=="RELEASED" and released["downstream_release_allowed"] is True and released["atomic_across_repositories"] is False,"Complete successor set not released: "+json.dumps(released)[:600])
+        old=ok(f,"integration.release.evaluate",{**SCOPE,"barrier_id":y})
+        expect(old["state"]=="PARTIAL" and old["downstream_release_allowed"] is False,"Predecessor partial set became release")
+    check(IDS[TASK][10],successor_release)
+    def audit():
+        y=state["y"]
+        expect(adb(f,"SELECT count(*) FROM hyperfide.integration_release_outcomes WHERE barrier_id="+q(y)+" AND outcome='PENDING' AND operation_id IS NULL AND observed_head IS NULL").stdout.strip()=="2","Pinned outcome rows were rewritten")
+        history=adb(f,"SELECT string_agg(outcome,',' ORDER BY sequence) FROM hyperfide.integration_release_observations WHERE barrier_id="+q(y)+" AND repository_id="+q(RB)).stdout.strip()
+        expect(history=="UNKNOWN,FAILED","Observation history lost: "+history)
+        for statement in ["UPDATE hyperfide.integration_release_observations SET outcome='PUBLISHED' WHERE barrier_id="+q(y),"DELETE FROM hyperfide.integration_release_observations WHERE barrier_id="+q(y),"UPDATE hyperfide.integration_release_outcomes SET outcome='PUBLISHED' WHERE barrier_id="+q(y),"DELETE FROM hyperfide.integration_release_outcomes WHERE barrier_id="+q(y),"UPDATE hyperfide.integration_release_recoveries SET successor_barrier_id=NULL","DELETE FROM hyperfide.integration_release_recoveries"]:
+            expect(adb(f,statement,allow_error=True).returncode!=0,"Audit history mutable: "+statement)
+    check(IDS[TASK][11],audit)
+    def compensation_required():
+        ctx=state["ctx"];a1,b2=state["a1"],state["b2"]
+        a3,b3=release_commit(f,RA,a1,"a3"),release_commit(f,RB,b2,"b3");pinned=commit_set((RA,a1,a3),(RB,b2,b3))
+        ca3,cb3=seed_candidate(f,ctx,704,RA,a1,a3,pinned),seed_candidate(f,ctx,705,RB,b2,b3,pinned);state.update(a3=a3,ca3=ca3,cb3=cb3)
+        w=state["w"]=ok(f,"integration.release.create",{**SCOPE,"request_id":U(712),"candidate_ids":[ca3["id"],cb3["id"]],"recovery_policy":COMPENSATE})["barrier_id"]
+        interrupted_publisher(f,ctx,ca3,seed_operation(f,ctx,724,ca3,"RUNNING"),cb3)
+        f.auth.stop();f.auth.start()
+        seen=ok(f,"integration.release.inspect",{**SCOPE,"barrier_id":w});o=by_repo(seen)
+        expect(seen["state"]=="PARTIAL" and o[RA]["outcome"]=="PUBLISHED" and o[RB]["outcome"]=="PENDING" and seen["downstream_release_allowed"] is False and seen["atomic_across_repositories"] is False,"Crash before second push not explicit partial: "+json.dumps(seen))
+        f.reject(TASK,"integration.release.recover",{**SCOPE,"barrier_id":w,"request_id":U(713),"compensations":[]},"RELEASE_COMPENSATION_REQUIRED")
+        f.reject(TASK,"integration.release.recover",{**SCOPE,"barrier_id":w,"request_id":U(713),"candidate_ids":[cb3["id"]]},"RELEASE_RECOVERY_POLICY_MISMATCH")
+    check(IDS[TASK][12],compensation_required)
+    def direct_push_refused():
+        ctx,a3=state["ctx"],state["a3"];r=f.release[RA]
+        r["g"](["checkout","-q","--detach",a3]);r["g"](["revert","--no-edit",a3]);a4=r["g"](["rev-parse","HEAD"]).stdout.strip()
+        ca4=state["ca4"]=seed_candidate(f,ctx,706,RA,a3,a4,commit_set((RA,a3,a4)))
+        ungated=seed_operation(f,ctx,725,seed_candidate(f,ctx,707,RA,a3,a4,commit_set((RA,a3,a4))),"PUBLISHED",a4)
+        f.reject(TASK,"integration.release.recover",{**SCOPE,"barrier_id":state["w"],"request_id":U(713),"compensations":[{"repository_id":RA,"operation_id":ungated}]},"RELEASE_COMPENSATION_UNGATED")
+        expect(adb(f,"SELECT count(*) FROM hyperfide.integration_release_recoveries WHERE barrier_id="+q(state["w"])).stdout.strip()=="0","Ungated compensation recorded")
+    check(IDS[TASK][13],direct_push_refused)
+    def through_gateway():
+        ctx,w,ca4=state["ctx"],state["w"],state["ca4"]
+        op=seed_operation(f,ctx,726,ca4,"PENDING")
+        recorded=ok(f,"integration.release.recover",{**SCOPE,"barrier_id":w,"request_id":U(714),"compensations":[{"repository_id":RA,"operation_id":op}]})
+        expect(recorded["recovery_policy"]==COMPENSATE and recorded["compensations"][0]["compensated_head"]==state["a3"] and recorded["downstream_release_allowed"] is False,"Compensation not recorded against published head")
+        pending=ok(f,"integration.release.inspect",{**SCOPE,"barrier_id":w})
+        expect(pending["recovery"]["status"]=="COMPENSATING" and pending["state"]=="PARTIAL","Compensation claimed before gateway publication")
+        gateway_publish(f,ctx,op,ca4)
+        done=ok(f,"integration.release.inspect",{**SCOPE,"barrier_id":w})
+        expect(done["recovery"]["status"]=="COMPENSATED" and done["recovery"]["compensations"][0]["gateway_admitted"] is True and done["recovery"]["compensations"][0]["observed_head"]==ca4["head"],"Gateway compensation not observed: "+json.dumps(done)[:600])
+        expect(done["state"]=="PARTIAL" and done["downstream_release_allowed"] is False and done["atomic_across_repositories"] is False,"Compensated partial set exposed as release")
+        judged=ok(f,"integration.release.evaluate",{**SCOPE,"barrier_id":w})
+        expect(judged["downstream_release_allowed"] is False,"Compensated barrier released")
+        expect(adb(f,"SELECT count(*) FROM hyperfide.integration_release_outcomes WHERE barrier_id="+q(w)+" AND outcome='PENDING'").stdout.strip()=="2","Compensation rewrote pinned outcomes")
+    check(IDS[TASK][14],through_gateway)
 def main():
     if "--cleanup" in sys.argv:
         cleanup();return 0
@@ -314,5 +975,5 @@ def main():
             try:{"19.1":candidate_cases,"19.2":publication_cases,"19.3":closure_cases,"19.4":release_cases}[TASK](fixture)
             finally:fixture.close()
         return 1 if FAILED else 0
-    finally:cleanup()
+    finally:cleanup(emit=False)
 if __name__=="__main__":raise SystemExit(main())

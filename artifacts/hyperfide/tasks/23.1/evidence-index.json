@@ -1,0 +1,9 @@
+{
+  "task": "23.1",
+  "commit": "f1acf855bbcb91ce7a78f3589d874adff871ecda",
+  "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-010 --manifest tests/hyperfide/manifests/tasks/23.1.json && python3 tests/hyperfide/qualify.py --case V-034 --manifest tests/hyperfide/manifests/tasks/23.1.json",
+  "exit_code": 0,
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"cd18ae15-0a16-417f-8101-1d561d4dec92\", \"campaign_dir\": \"/tmp/v231/artifacts/hyperfide/tasks/23.1/campaigns/eddeb70329431e2e07001c132d2b9ed3fafe3da06c024bdd2b216a816eef6030\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"60fae96b-6ed4-4c58-9245-9b6cca7f2ee2\", \"campaign_dir\": \"/tmp/v231/artifacts/hyperfide/tasks/23.1/campaigns/eddeb70329431e2e07001c132d2b9ed3fafe3da06c024bdd2b216a816eef6030\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T09:17:44+00:00",
+  "note": "Executed in a root-owned clone (/tmp/v231) of commit above with dist rebuilt there; the in-place checkout is owned by uid hf, so the checker's neutral-config git rev-parse refused it as dubious ownership. Each case: 24/24 assertions observed, exactly one cleanup event."
+}

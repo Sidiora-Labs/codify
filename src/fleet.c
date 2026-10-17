@@ -16,6 +16,9 @@
  * pull request, and the checkpoint. The two-level orchestrator builds on
  * all of it. */
 #include "cg.h"
+/* 21.3 bounded decision assistance; defined in recap.c */
+extern int hf_decision_advice(int purpose, const char *observation, char **advice);
+extern int hf_advice_unit(const char *obj, const char *key, double *out);
 #include <ctype.h>
 #include <fcntl.h>
 #include <sys/file.h>
@@ -2511,7 +2514,22 @@ static void write_pr_body(Cg *cg, const Lifecycle *c, const char *branch,
     sb_printf(&state, ",\"commits_ahead\":%ld}", commits);
     sb_free(&tasks);
     JevReadiness rd;
-    if (jev_pr_readiness(cg, state.p, &rd) == JEV_OK)
+    /* distributed: the explicit HF_DECISION_READINESS purpose path, never
+     * Jev; no usable advice simply leaves the readiness line out, as a
+     * failed Jev call does. The score never gates the pull request. */
+    char *advice = NULL;
+    int routed = hf_decision_advice(2 /* HF_DECISION_READINESS */, state.p, &advice);
+    bool advised = false;
+    if (routed > 0) {
+        char *band = json_get_string(advice, "band");
+        advised = hf_advice_unit(advice, "value", &rd.value) && band &&
+                  (!strcmp(band, "low") || !strcmp(band, "medium") || !strcmp(band, "high"));
+        if (advised) snprintf(rd.band, sizeof rd.band, "%s", band);
+        else fprintf(stderr, "cg: readiness advice was malformed — left out\n");
+        free(band);
+    }
+    free(advice);
+    if (routed > 0 ? advised : routed < 0 && jev_pr_readiness(cg, state.p, &rd) == JEV_OK)
         sb_printf(&b, "\nJev readiness: %.2f (%s) — %d/%d tasks qualified, "
                       "%ld commit%s, gates %s\n", rd.value, rd.band, ndone,
                   ntask, commits, commits == 1 ? "" : "s", gates);

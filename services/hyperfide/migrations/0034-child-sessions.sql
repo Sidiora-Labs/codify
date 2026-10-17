@@ -105,3 +105,55 @@ CREATE TRIGGER immutable_binding BEFORE UPDATE OR DELETE ON hyperfide.hierarchy_
  FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','session_id','task_id','attempt_id','attempt_generation','authority_epoch','sandbox_id','slot_id','sandbox_boot_generation','packet_digest','parent_session_id','package_id','native_profile_id','native_profile_digest','connector','account_key','registration_receipt_digest','registered_by_credential_id','created_at');
 CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.hierarchy_worker_registrations
  FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+-- Observed descendant usage, logical release and manager-adoption history; append-only.
+CREATE TABLE hyperfide.hierarchy_child_usage (
+ organisation_id uuid NOT NULL,run_id uuid NOT NULL,child_session_id uuid NOT NULL,sample_id uuid NOT NULL,
+ cpu_millis bigint NOT NULL CHECK(cpu_millis>=0),memory_bytes bigint NOT NULL CHECK(memory_bytes>=0),disk_bytes bigint NOT NULL CHECK(disk_bytes>=0),
+ model_input_tokens bigint NOT NULL CHECK(model_input_tokens>=0),model_output_tokens bigint NOT NULL CHECK(model_output_tokens>=0),
+ within_reservation boolean NOT NULL,observed_by_credential_id uuid NOT NULL,observed_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(organisation_id,run_id,child_session_id,sample_id),
+ FOREIGN KEY(organisation_id,run_id,child_session_id) REFERENCES hyperfide.hierarchy_child_registrations(organisation_id,run_id,child_session_id),
+ FOREIGN KEY(organisation_id,run_id,observed_by_credential_id) REFERENCES hyperfide.identity_principals(organisation_id,run_id,credential_id)
+);
+CREATE TRIGGER immutable_binding BEFORE UPDATE OR DELETE ON hyperfide.hierarchy_child_usage
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','child_session_id','sample_id','cpu_millis','memory_bytes','disk_bytes','model_input_tokens','model_output_tokens','within_reservation','observed_by_credential_id','observed_at');
+CREATE TABLE hyperfide.hierarchy_child_releases (
+ organisation_id uuid NOT NULL,run_id uuid NOT NULL,child_session_id uuid NOT NULL,
+ observed_state text NOT NULL CHECK(observed_state IN ('UNBOUND','STOPPED','FAILED')),reason text NOT NULL CHECK(octet_length(reason) BETWEEN 1 AND 4096),
+ released_by_credential_id uuid NOT NULL,released_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(organisation_id,run_id,child_session_id),
+ FOREIGN KEY(organisation_id,run_id,child_session_id) REFERENCES hyperfide.hierarchy_child_registrations(organisation_id,run_id,child_session_id),
+ FOREIGN KEY(organisation_id,run_id,released_by_credential_id) REFERENCES hyperfide.identity_principals(organisation_id,run_id,credential_id)
+);
+CREATE TRIGGER immutable_binding BEFORE UPDATE OR DELETE ON hyperfide.hierarchy_child_releases
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','child_session_id','observed_state','reason','released_by_credential_id','released_at');
+CREATE TABLE hyperfide.hierarchy_adoptions (
+ organisation_id uuid NOT NULL,run_id uuid NOT NULL,handoff_id uuid NOT NULL,predecessor_id uuid NOT NULL,successor_id uuid NOT NULL,
+ package_ids jsonb NOT NULL CHECK(jsonb_typeof(package_ids)='array'),descendants jsonb NOT NULL CHECK(jsonb_typeof(descendants)='array'),
+ descendants_digest hyperfide.digest NOT NULL,proposed_by_credential_id uuid NOT NULL,created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(organisation_id,run_id,handoff_id),
+ FOREIGN KEY(organisation_id,run_id,handoff_id,successor_id) REFERENCES hyperfide.hierarchy_handoffs(organisation_id,run_id,id,successor_id),
+ FOREIGN KEY(organisation_id,run_id,predecessor_id) REFERENCES hyperfide.agent_sessions(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,run_id,successor_id) REFERENCES hyperfide.agent_sessions(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,run_id,proposed_by_credential_id) REFERENCES hyperfide.identity_principals(organisation_id,run_id,credential_id)
+);
+CREATE TRIGGER immutable_binding BEFORE UPDATE OR DELETE ON hyperfide.hierarchy_adoptions
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','handoff_id','predecessor_id','successor_id','package_ids','descendants','descendants_digest','proposed_by_credential_id','created_at');
+CREATE TABLE hyperfide.hierarchy_adoption_acknowledgements (
+ organisation_id uuid NOT NULL,run_id uuid NOT NULL,handoff_id uuid NOT NULL,successor_id uuid NOT NULL,
+ adopted jsonb NOT NULL CHECK(jsonb_typeof(adopted)='array'),not_adopted jsonb NOT NULL CHECK(jsonb_typeof(not_adopted)='array'),
+ before_digest hyperfide.digest NOT NULL,after_digest hyperfide.digest NOT NULL,workers_restarted boolean NOT NULL,
+ acknowledged_by_credential_id uuid NOT NULL,created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(organisation_id,run_id,handoff_id),
+ FOREIGN KEY(organisation_id,run_id,handoff_id) REFERENCES hyperfide.hierarchy_adoptions(organisation_id,run_id,handoff_id),
+ FOREIGN KEY(organisation_id,run_id,handoff_id) REFERENCES hyperfide.hierarchy_handoff_acknowledgements(organisation_id,run_id,handoff_id),
+ FOREIGN KEY(organisation_id,run_id,handoff_id,successor_id) REFERENCES hyperfide.hierarchy_handoffs(organisation_id,run_id,id,successor_id),
+ FOREIGN KEY(organisation_id,run_id,acknowledged_by_credential_id) REFERENCES hyperfide.identity_principals(organisation_id,run_id,credential_id)
+);
+CREATE TRIGGER immutable_binding BEFORE UPDATE OR DELETE ON hyperfide.hierarchy_adoption_acknowledgements
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','handoff_id','successor_id','adopted','not_adopted','before_digest','after_digest','workers_restarted','acknowledged_by_credential_id','created_at');
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.hierarchy_child_usage FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.hierarchy_child_releases FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.hierarchy_adoptions FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.hierarchy_adoption_acknowledgements FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();

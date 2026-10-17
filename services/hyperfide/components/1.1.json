@@ -15,10 +15,15 @@
     "placement.authorize",
     "placement.delegate",
     "placement.runner.authorize",
-    "placement.supervisor.authorize"
+    "placement.supervisor.authorize",
+    "placement.exec.request",
+    "placement.remote.claim",
+    "placement.remote.complete",
+    "placement.audit"
   ],
   "requires": [
     "4.2",
-    "6.1"
+    "6.1",
+    "14.1"
   ]
 }

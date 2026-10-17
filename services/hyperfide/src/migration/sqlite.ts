@@ -9,9 +9,10 @@ import {identityTransaction,invocationOf} from '../identity/enrollment.js';
 import type {IdentityTransaction} from '../identity/enrollment.js';
 import {createLegacyWriterAdmission} from './legacy.js';
 import {isArtifactStoreCapability} from '../artifacts/objects.js';
+import {parseKvx} from '../spec/import.js';
 
 type Json=Record<string,unknown>;
-interface Profile {id:string;source_id:string;repository_id:string;organisation_id:string;root:string;database:string;external?:{label:string;path:string;kind:string;sensitive?:boolean}[];archive_approved_digests?:string[]}
+export interface Profile {id:string;source_id:string;repository_id:string;organisation_id:string;root:string;database:string;external?:{label:string;path:string;kind:string;sensitive?:boolean}[];kvx?:{label:string;path:string}[];archive_approved_digests?:string[]}
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const digestPattern=/^sha256:[0-9a-f]{64}$/;
 const known=new Set(['meta','branches','files','symbols','refs','routes','memories','memory_superseded','git_commits','git_churn','leases','attempts','agents','runtime_events','events','fleet_runs','fleet_nodes','fleet_approvals','runtime_files','work_packets','work_files','work_evidence','imports','comments','projections','projection_findings','extraction_health','journal_applied']);
@@ -34,9 +35,9 @@ function input(value:unknown,required:string[],optional:string[]=[]):Json{
 }
 function id(value:unknown):string{if(typeof value!=='string'||!uuid.test(value))fail('MIGRATION_INPUT','Canonical UUID required');return value;}
 function hex(value:unknown):string{if(typeof value!=='string'||!digestPattern.test(value))fail('MIGRATION_INPUT','SHA256 digest required');return value;}
-async function fileHash(filename:string):Promise<string>{const h=createHash('sha256');for await(const chunk of createReadStream(filename))h.update(chunk);return 'sha256:'+h.digest('hex');}
+export async function fileHash(filename:string):Promise<string>{const h=createHash('sha256');for await(const chunk of createReadStream(filename))h.update(chunk);return 'sha256:'+h.digest('hex');}
 function quote(name:string):string{return '"'+name.replaceAll('"','""')+'"';}
-async function regular(root:string,relative:string):Promise<string>{
+export async function regular(root:string,relative:string):Promise<string>{
  if(!path.isAbsolute(root)||!relative||path.isAbsolute(relative)||relative.includes('\\')||relative.split('/').some(p=>p===''||p==='.'||p==='..'))fail('MIGRATION_PATH','Unsafe relative migration path');
  const rootInfo=await fs.lstat(root);if(!rootInfo.isDirectory()||rootInfo.isSymbolicLink())fail('MIGRATION_PATH','Trusted root must be a real directory');
  let current=root;
@@ -44,7 +45,7 @@ async function regular(root:string,relative:string):Promise<string>{
  if(!(await fs.lstat(current)).isFile())fail('MIGRATION_PATH','Source is not a regular file');
  return current;
 }
-async function profiles(env:Readonly<NodeJS.ProcessEnv>):Promise<Profile[]>{
+export async function profiles(env:Readonly<NodeJS.ProcessEnv>):Promise<Profile[]>{
  const filename=env.HF_MIGRATION_SOURCES_FILE;if(!filename)fail('MIGRATION_CONFIG','Trusted migration sources are required');
  const info=await fs.lstat(filename);if(!info.isFile()||info.isSymbolicLink()||info.size>1024*1024)fail('MIGRATION_CONFIG','Invalid migration sources');
  const raw:unknown=JSON.parse(await fs.readFile(filename,'utf8'));
@@ -54,6 +55,7 @@ async function profiles(env:Readonly<NodeJS.ProcessEnv>):Promise<Profile[]>{
  if(!object(item)||typeof item.id!=='string'||!/^[a-zA-Z0-9._-]{1,64}$/.test(item.id)||typeof item.root!=='string'||typeof item.database!=='string')fail('MIGRATION_CONFIG','Invalid source profile');
  id(item.source_id);id(item.repository_id);id(item.organisation_id);
  if(item.external!==undefined&&(!Array.isArray(item.external)||item.external.length>512))fail('MIGRATION_CONFIG','Invalid external inventory');
+ if(item.kvx!==undefined&&(!Array.isArray(item.kvx)||item.kvx.length>16||item.kvx.some(k=>!object(k)||typeof k.label!=='string'||!/^[a-zA-Z0-9._-]{1,64}$/.test(k.label)||typeof k.path!=='string'||Object.keys(k).some(n=>n!=='label'&&n!=='path'))))fail('MIGRATION_CONFIG','Invalid KVX status inventory');
  if(item.archive_approved_digests!==undefined&&(!Array.isArray(item.archive_approved_digests)||item.archive_approved_digests.length>1024||item.archive_approved_digests.some(d=>typeof d!=='string'||!digestPattern.test(d))))fail('MIGRATION_CONFIG','Invalid trusted digest-specific archive approval');
  result.push(item as unknown as Profile);
  }
@@ -63,12 +65,12 @@ async function profiles(env:Readonly<NodeJS.ProcessEnv>):Promise<Profile[]>{
 async function profile(env:Readonly<NodeJS.ProcessEnv>,name:unknown):Promise<Profile>{
  const p=(await profiles(env)).find(p=>p.id===name);if(!p)fail('MIGRATION_SCOPE','Unknown trusted source profile');return p;
 }
-async function archiveRoot(env:Readonly<NodeJS.ProcessEnv>):Promise<string>{
+export async function archiveRoot(env:Readonly<NodeJS.ProcessEnv>):Promise<string>{
  const root=env.HF_MIGRATION_ARCHIVE_ROOT;if(!root||!path.isAbsolute(root))fail('MIGRATION_CONFIG','Trusted archive root required');
  const st=await fs.lstat(root);if(!st.isDirectory()||st.isSymbolicLink()||(st.mode&0o077)!==0)fail('MIGRATION_CONFIG','Archive root must be a private real directory');
  return root;
 }
-function open(filename:string):DatabaseSync{
+export function open(filename:string):DatabaseSync{
  const db=new DatabaseSync(filename,{readOnly:true,allowExtension:false,timeout:3000,readBigInts:true});
  db.exec('PRAGMA query_only=ON; PRAGMA trusted_schema=OFF');return db;
 }
@@ -124,6 +126,39 @@ async function externalInventory(p:Profile):Promise<unknown[]>{
  for(const kind of kinds)if(!(p.external??[]).some(item=>item.kind===kind))found.push({label:kind,kind,availability:kind==='native_session'?'EXCLUDED_SENSITIVE':'UNAVAILABLE',reason:'NOT_DECLARED'});
  return found;
 }
+// Declared KVX planning status is preserved as a historical claim only. A
+// done/QUALIFIED declaration never becomes task ownership or qualification.
+async function kvxInventory(p:Profile):Promise<unknown[]>{
+ const found:unknown[]=[];
+ for(const item of p.kvx??[]){
+ let bytes:Buffer;
+ try{
+ const filename=await regular(p.root,item.path);
+ if((await fs.stat(filename)).size>4*1024*1024){found.push({label:item.label,availability:'UNAVAILABLE',reason:'SIZE_BOUND'});continue;}
+ bytes=await fs.readFile(filename);
+ }catch(error){
+ if(error instanceof FoundationError)throw error;
+ found.push({label:item.label,availability:'UNAVAILABLE',reason:'NOT_READABLE'});continue;
+ }
+ let document:ReturnType<typeof parseKvx>;
+ try{document=parseKvx(bytes.toString('utf8'));}
+ catch(error){found.push({label:item.label,availability:'UNAVAILABLE',reason:'KVX_UNSUPPORTED',diagnostic:error instanceof FoundationError?error.code:'KVX_PARSE_FAILED',digest:hash(bytes)});continue;}
+ const field=(section:{fields:Record<string,{value:unknown}>},key:string):unknown=>Object.hasOwn(section.fields,key)?section.fields[key]!.value:null;
+ const acceptances=Object.fromEntries(document.sections.filter(s=>s.name.startsWith('acceptance.')).map(s=>{
+ const declared=field(s,'qualification');
+ return [s.name.slice(11),{declared_qualification:typeof declared==='string'?declared:null,qualification:'UNQUALIFIED',source_line:s.line}];
+ }));
+ const tasks=document.sections.filter(s=>s.name.startsWith('task.')).map(s=>{
+ const declared=field(s,'status'),ids=field(s,'acceptance_ids'),acceptance=Array.isArray(ids)?ids.filter((v):v is string=>typeof v==='string'):[];
+ return {task:s.name.slice(5),declared_status:typeof declared==='string'?declared:null,source_line:s.line,
+ declared_acceptance:Object.fromEntries(acceptance.map(id=>[id,(acceptances[id] as Json|undefined)?.declared_qualification??'UNDECLARED'])),
+ claim:'HISTORICAL_DECLARATION',disposition:'HISTORY',ownership:'NONE',authority:'NONE',qualification:'UNQUALIFIED'};
+ }).sort((a,b)=>a.task<b.task?-1:a.task>b.task?1:0);
+ found.push({label:item.label,availability:'OBSERVED',digest:hash(bytes),size_bytes:String(bytes.length),tasks,acceptances,authority:'NONE',qualification:'UNQUALIFIED'});
+ }
+ if(!(p.kvx??[]).length)found.push({label:'kvx',availability:'UNAVAILABLE',reason:'NOT_DECLARED'});
+ return found;
+}
 async function ready(pool:IdentityTransaction):Promise<void>{
  const r=await pool.query("SELECT to_regclass('hyperfide_history.imports')::text AS name");
  if(!r.rows[0]?.name)fail('MIGRATION_SCHEMA_REQUIRED','Apply the trusted 0025 migration before importing');
@@ -144,7 +179,7 @@ async function snapshot(p:Profile,ctx:ComponentContext):Promise<unknown>{
  const size=(await fs.stat(destination)).size;const digest=await fileHash(destination),archive=path.join(root,digest.slice(7)+'.db');
  await fs.chmod(destination,0o400);
  try{await fs.link(destination,archive);}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;if(await fileHash(archive)!==digest)fail('MIGRATION_CONFLICT','Archive collision');}
- const ext=await externalInventory(p);
+ const ext=await externalInventory(p);inv.task_status_history=await kvxInventory(p);
  return identityTransaction(ctx,async pool=>{await ready(pool);await scoped(pool,p,ctx);
  const importId=mappedId(p.source_id,p.repository_id,'snapshot',digest);
  await pool.query("INSERT INTO hyperfide_history.imports(id,source_id,repository_id,organisation_id,snapshot_digest,archive_path,inventory,external_inventory) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(id) DO NOTHING",[importId,p.source_id,p.repository_id,p.organisation_id,digest,archive,inv,JSON.stringify(ext)]);
@@ -171,12 +206,11 @@ function cell(value:unknown):unknown {
  if(value instanceof Uint8Array)return {type:'blob',base64:Buffer.from(value).toString('base64')};
  return fail('MIGRATION_UNSUPPORTED','Unsupported SQLite value representation');
 }
-async function importBatch(p:Profile,value:Json,ctx:ComponentContext):Promise<unknown>{
- const importId=id(value.import_id),offset=value.offset,limit=value.limit,table=value.table;
- if(typeof offset!=='string'||!/^(0|[1-9][0-9]{0,14})$/.test(offset)||typeof limit!=='number'||!Number.isSafeInteger(limit)||limit<1||limit>500||typeof table!=='string')fail('MIGRATION_INPUT','Bounded table, decimal offset and batch limit required');
- const prior=await load(p,importId,ctx),db=open(String(prior.archive_path));let payloads:{key:unknown;data:unknown;mapped:string;digest:string;disposition:string}[]=[];
- let total=0n;
- try{
+export interface LogicalRow {key:unknown;data:unknown;mapped:string;digest:string;disposition:string}
+/** The one logical-row encoder. Import batches and cutover parity samples must agree
+ * byte-for-byte, so neither may re-derive keys, cells or payload digests independently. */
+export function logicalBatch(db:DatabaseSync,table:string,offset:string,limit:number,source:string,repository:string):{rows:LogicalRow[];total:bigint}{
+ const payloads:LogicalRow[]=[];let total=0n;
  const inv=inventory(db),tables=inv.tables as Json[],meta=tables.find(t=>t.name===table);
  if(!meta||meta.disposition==='ARCHIVE_ONLY')fail('MIGRATION_UNSUPPORTED','Only inventoried ordinary tables can import logical history');
  const cols=rows(db,'PRAGMA table_xinfo('+quote(table)+')').filter(c=>String(c.hidden)!=='1');
@@ -222,9 +256,17 @@ async function importBatch(p:Profile,value:Json,ctx:ComponentContext):Promise<un
  const encodedBytes=Buffer.byteLength(encoded);
  if(encodedBytes>8*1024*1024)fail('MIGRATION_ROW_SIZE_BOUND','Logical row exceeds bounded representation; original archive preserved');
  encodedBatch+=encodedBytes;if(encodedBatch>8*1024*1024)fail('MIGRATION_BATCH_SIZE_BOUND','Logical batch exceeds aggregate encoded byte budget; reduce batch limit');
- payloads.push({key,data,mapped:mappedId(p.source_id,p.repository_id,table,key),digest:hash(encoded),
+ payloads.push({key,data,mapped:mappedId(source,repository,table,key),digest:hash(encoded),
  disposition:live.has(table)?'REQUIRES_RECONCILIATION':String(meta.disposition)});
  }
+ return {rows:payloads,total};
+}
+async function importBatch(p:Profile,value:Json,ctx:ComponentContext):Promise<unknown>{
+ const importId=id(value.import_id),offset=value.offset,limit=value.limit,table=value.table;
+ if(typeof offset!=='string'||!/^(0|[1-9][0-9]{0,14})$/.test(offset)||typeof limit!=='number'||!Number.isSafeInteger(limit)||limit<1||limit>500||typeof table!=='string')fail('MIGRATION_INPUT','Bounded table, decimal offset and batch limit required');
+ const prior=await load(p,importId,ctx),db=open(String(prior.archive_path));let payloads:LogicalRow[]=[];
+ let total=0n;
+ try{({rows:payloads,total}=logicalBatch(db,table,offset,limit,p.source_id,p.repository_id));
  }finally{db.close();}
  const requestDigest=hash(canonical({importId,table,offset,limit,snapshot:prior.snapshot_digest}));
  try{return await identityTransaction(ctx,async client=>{

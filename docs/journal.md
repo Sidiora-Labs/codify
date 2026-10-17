@@ -1,11 +1,15 @@
 # The write journal
 
 An agent finishing a task should not be derailed because an editor's
-`cg lsp` happens to be re-indexing the tree. When a lifecycle write is still
-blocked after the lock wait (`CG_BUSY_TIMEOUT_MS`, 30 s by default), `cg`
-appends it to a journal under `.codegraph/journal/`. The command then exits 0
-with its own result complete and says the write is queued. The next `cg`
+`hyperfide lsp` happens to be re-indexing the tree. When a lifecycle write is still
+blocked after the lock wait (`CG_BUSY_TIMEOUT_MS`, alias
+`HYPERFIDE_BUSY_TIMEOUT_MS`, 30 s by default), `hyperfide` appends it to a journal under `.codegraph/journal/`. The command then exits 0
+with its own result complete and says the write is queued. The next `hyperfide`
 process that gets the write lock applies the queue.
+
+`hyperfide` is the command; `cg` is the deprecated compatibility alias from
+the same executable, with identical arguments, JSON and exit codes. The
+messages quoted below keep the `cg` wording this build prints.
 
 The journal is implemented in `src/journal.c` and covered by
 `tests/integration/42_journal.sh`. `tests/integration/23_dblock.sh` covers
@@ -15,14 +19,14 @@ the lock behaviour around it.
 
 | Journaled (exit 0, "queued") | Operation |
 |---|---|
-| `cg remember` (including `--supersedes`) | `memory.add` |
-| the outcome memory of `cg spec done` and of a refusal | `memory.add` |
-| the lease release and attempt finish behind `cg spec done`, `implemented`, `release` | `lease.release` |
-| `cg spec heartbeat` | `attempt.heartbeat` |
-| `cg handoff` | `handoff.add` |
-| `cg work open` / `cg work update` (the new revision row) | `work.update` |
-| `cg work close --evidence …` | `work.close` |
-| `cg event ingest` (agent hooks) | `event.ingest` |
+| `hyperfide remember` (including `--supersedes`) | `memory.add` |
+| the outcome memory of `hyperfide spec done` and of a refusal | `memory.add` |
+| the lease release and attempt finish behind `hyperfide spec done`, `implemented`, `release` | `lease.release` |
+| `hyperfide spec heartbeat` | `attempt.heartbeat` |
+| `hyperfide handoff` | `handoff.add` |
+| `hyperfide work open` / `hyperfide work update` (the new revision row) | `work.update` |
+| `hyperfide work close --evidence …` | `work.close` |
+| `hyperfide event ingest` (agent hooks) | `event.ingest` |
 | the events every command emits (`task.status`, …) | `event.emit` |
 
 Some writes are correct only against the live state, so they are never
@@ -30,13 +34,13 @@ queued. These keep the old behaviour: they wait, then exit 75 with nothing
 changed and a message saying the command is safe to retry. The message also
 says why the write is not journaled.
 
-- `cg spec claim`, `cg spec claim-next`, and fleet claims. A claim must see
+- `hyperfide spec claim`, `hyperfide spec claim-next`, and fleet claims. A claim must see
   the live leases and attempts to decide who owns the task.
-- `cg sync` / `cg index`, `cg memory import`, `cg memory compact`, and any
+- `hyperfide sync` / `hyperfide index`, `hyperfide memory import`, `hyperfide memory compact`, and any
   other maintenance write.
 
 A task status lives in `spec.kvx`, so it is always written immediately.
-`cg spec done` never exits 75 after its verification passed. The status
+`hyperfide spec done` never exits 75 after its verification passed. The status
 lands in the file and every database side effect behind it is journaled.
 
 The `runtime_files` hash cache is not journaled either. When the database is
@@ -52,8 +56,8 @@ lock:
   before its own write;
 - when the database is opened and the lock is free that instant (a zero-wait
   probe);
-- at the start of `cg sync` and `cg index`;
-- on `cg journal apply`, which waits the full lock timeout.
+- at the start of `hyperfide sync` and `hyperfide index`;
+- on `hyperfide journal apply`, which waits the full lock timeout.
 
 Each record is applied once, in its own transaction, and its file is removed
 once that transaction commits. The process's own records go first, so a
@@ -119,36 +123,57 @@ the replay goes on to the next one.
 
 ## Seeing the queue
 
-- `cg brief` and `cg state` say how many writes are pending (and refused),
+- `hyperfide brief` and `hyperfide state` say how many writes are pending (and refused),
   only when there are any. `--json` adds `"journal":{"pending":N,"failed":M}`.
-- `cg check` reports pending or refused records as a warning, never a
+- `hyperfide check` reports pending or refused records as a warning, never a
   failure. Under `--strict`, warnings fail as they always do.
-- `cg recall` lists queued memories that match the query, marked `queued`
+- `hyperfide recall` lists queued memories that match the query, marked `queued`
   and listed before the stored ones. An agent that remembered a decision a
   moment ago still finds it. In `--json` they appear under `"queued"` with
   `"id":null`.
 - Every command that queued something without saying so itself prints one
-  stderr line on exit: `the graph database is busy — N writes queued in
-  .codegraph/journal/; the next cg command that gets the lock applies them`.
+  stderr line on exit: `cg: the graph database is busy — N writes queued
+  in .codegraph/journal/; the next cg command that gets the lock applies
+  them`.
 
-## `cg journal`
+## `hyperfide journal`
 
 ```
-cg journal [list] [--json]       pending and failed records: id, when, command, op, summary
-cg journal apply [--json]        replay now, waiting the lock timeout (exit 75 if it never frees)
-cg journal drop <id> [--json]    remove one pending or failed record
-cg journal drop --failed         remove every failed record
-cg journal drop --all            remove every pending and failed record
+hyperfide journal [list] [--json]       pending and failed records: id, when, command, op, summary
+hyperfide journal apply [--json]        replay now, waiting the lock timeout (exit 75 if it never frees)
+hyperfide journal drop <id> [--json]    remove one pending or failed record
+hyperfide journal drop --failed         remove every failed record
+hyperfide journal drop --all            remove every pending and failed record
 ```
 
-`cg journal apply --json` prints `{"applied":N,"failed":M,"pending":P}`. On
+`hyperfide journal apply --json` prints `{"applied":N,"failed":M,"pending":P}`. On
 a lock that never frees it prints `{"applied":0,"busy":true,"pending":P}`
 and exits 75.
+
+## The Hyperfide control plane
+
+The journal is a local answer to a local lock: it exists because one
+checkout's SQLite database has one writer at a time. It is never a channel
+to the control service. In distributed authority mode (a
+`.hyperfide/authority.json` descriptor, or `HYPERFIDE_AUTHORITY_DESCRIPTOR`;
+`hyperfide authority mode` prints the mode) the binary selects authority
+before any SQLite open or journal replay (`src/hyperfide/client.c`), and
+`hyperfide journal` refuses with `DISTRIBUTED_COMMAND_UNSUPPORTED`, exit 78.
+
+What the journal does for one machine, the service does with PostgreSQL:
+a transactional outbox with committed delivery obligations
+(`services/hyperfide/src/events/outbox.ts`) and inbox deduplication
+(`services/hyperfide/src/events/inbox.ts`). The design keeps the same rule
+the journal keeps for claims: disconnected progress is a pending submission
+that the current primary must validate, never an offline claim, completion
+or integration ([migration.md](../spec/hyperfide/migration.md)). Tasks 6.1,
+6.2 and 25.3 are `pending` in `spec/hyperfide/spec.kvx`, so that path is not
+qualified in this revision.
 
 ## Limitations
 
 - A queued work revision is returned to the agent at once, but
-  `cg work update <revision>` cannot find it until the queue is applied. The
+  `hyperfide work update <revision>` cannot find it until the queue is applied. The
   error says so.
 - Events that database triggers emit for a journaled memory or lease carry
   the replay time, not the original. Events the command emits itself are

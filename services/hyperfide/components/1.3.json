@@ -10,7 +10,9 @@
   "api_version": 1,
   "actions": [
     "frontier.check",
-    "frontier.select"
+    "frontier.select",
+    "frontier.outcome",
+    "frontier.inspect"
   ],
   "requires": [
     "14.3"

@@ -1,0 +1,132 @@
+{
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/12_2.py"
+  ],
+  "assertion_ids": [
+    "runner.root-fixture",
+    "transport.separate-https-coordinator",
+    "transport.rejects-forged-request-proof",
+    "launch.serve-poll-spawns-agent",
+    "launch.durable-accept-before-spawn",
+    "launch.lost-handoff-redelivered-single-start",
+    "ack.lost-responses-replayed-idempotently",
+    "steer.delivered-once",
+    "steer.redelivery-not-rewritten",
+    "steer.duplicate-frame-not-replayed",
+    "supervisor.kill-leaves-broker-and-agent",
+    "controller.outage-agent-stdin-open",
+    "reconcile.live-broker-adopted",
+    "reconcile.adoption-single-owner",
+    "reconnect.backoff-bounded",
+    "reconnect.steer-after-restart-delivered",
+    "start.no-duplicate-logical-start",
+    "reconcile.accepted-without-broker-not-spawned",
+    "reconcile.unattributed-process-uncertain",
+    "reconcile.dead-broker-lost",
+    "reconcile.reused-pid-not-adopted",
+    "reconcile.orphan-reported-without-stdin",
+    "reconcile.no-blind-relaunch",
+    "cancel.orphan-stopped-without-broker",
+    "steer.before-start-not-written",
+    "cancel.before-start-fences-launch",
+    "cancel.stale-generation-not-applied",
+    "cancel.current-generation-stops",
+    "evidence.spool-digest-uploaded",
+    "broker.retires-after-delivery",
+    "spool.replayed-without-duplicates",
+    "serve.summary-bounded",
+    "dispatch.describe-not-ready",
+    "dispatch.consume-plan-reader-not-ready",
+    "dispatch.consume-rejects-invalid-claim",
+    "dispatch.consume-rejects-unknown-field"
+  ],
+  "cases": [
+    "V-006",
+    "V-041",
+    "V-043"
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/12_2.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "fixtures": [
+    "build/hyperfide-native",
+    "services/hyperfide/dist/control.js"
+  ],
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
+  "resources": [
+    {
+      "id": "runner-dispatch-database",
+      "kind": "postgresql-database",
+      "scope": "task12.2-disposable"
+    }
+  ],
+  "schema_version": 1,
+  "scope": "task-component",
+  "source_files": [
+    "Makefile",
+    "build/hyperfide-native",
+    "scripts/hyperfide-native-components.py",
+    "services/hyperfide/components/1.4.json",
+    "services/hyperfide/components/12.2.json",
+    "services/hyperfide/components/14.1.json",
+    "services/hyperfide/components/2.1.json",
+    "services/hyperfide/components/2.4.json",
+    "services/hyperfide/components/3.1.json",
+    "services/hyperfide/components/3.2.json",
+    "services/hyperfide/components/4.1.json",
+    "services/hyperfide/components/4.2.json",
+    "services/hyperfide/components/4.4.json",
+    "services/hyperfide/components/5.1.json",
+    "services/hyperfide/components/5.2.json",
+    "services/hyperfide/components/6.1.json",
+    "services/hyperfide/components/6.2.json",
+    "services/hyperfide/components/6.3.json",
+    "services/hyperfide/components/7.2.json",
+    "services/hyperfide/components/7.3.json",
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/runner/dispatch.js",
+    "services/hyperfide/src/events/instructions.ts",
+    "services/hyperfide/src/events/runner_commands.ts",
+    "services/hyperfide/src/runner/dispatch.ts",
+    "src/hyperfide/component_main.c",
+    "src/hyperfide/components.h",
+    "src/hyperfide/components/12.1.kvx",
+    "src/hyperfide/components/12.2.kvx",
+    "src/hyperfide/components/schema.kvx",
+    "src/hyperfide/launch.c",
+    "src/hyperfide/supervisor.c",
+    "src/hyperfide/supervisor.h",
+    "src/hyperfide/supervisor_daemon.c",
+    "src/hyperfide/transport.c",
+    "src/hyperfide/transport.h",
+    "src/sha256.c",
+    "tests/hyperfide/cases/tasks/12_2.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/support/identity_fixture.py"
+  ],
+  "source_roots": [
+    "src/hyperfide",
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "task": "12.2",
+  "timeout_seconds": 300,
+  "variant": "task:12.2"
+}

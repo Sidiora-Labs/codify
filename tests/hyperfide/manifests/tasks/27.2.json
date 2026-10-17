@@ -72,6 +72,32 @@
     "campaign.deterministic.approved-corpus-required",
     "campaign.deterministic.source-set-hash-mismatch",
     "campaign.deterministic.missing-real-bridges-block",
+    "campaign.deterministic.readers-required-in-profile",
+    "campaign.deterministic.simulation-report-separated",
+    "campaign.deterministic.required-fault-set",
+    "campaign.deterministic.multi-seed-reference-simulation",
+    "campaign.deterministic.hundreds-of-readers",
+    "campaign.deterministic.replica-read-not-authoritative",
+    "campaign.deterministic.stale-heartbeat-fenced",
+    "campaign.deterministic.simulated-agents-labelled",
+    "campaign.deterministic.no-fixed-start-history-limit",
+    "campaign.deterministic.sweep-dimensions",
+    "campaign.deterministic.sweep-invariants-under-saturation",
+    "campaign.deterministic.graph-batching-avoids-amplification",
+    "campaign.deterministic.sweep-latency-distribution",
+    "campaign.deterministic.simulated-metrics-not-baseline",
+    "campaign.deterministic.fault-combinations-match-single-fault",
+    "campaign.deterministic.fault-seed-reproduces",
+    "campaign.deterministic.malicious-acceptance-detected",
+    "campaign.deterministic.no-hidden-backlog",
+    "campaign.parity.inventory-matches-registry",
+    "campaign.parity.component-bridges-pass",
+    "campaign.parity.unapproved-manifest-digest-blocks",
+    "campaign.parity.absent-manifest-blocks-without-pass",
+    "campaign.parity.missing-bridge-blocks",
+    "campaign.parity.semantic-difference-fails",
+    "campaign.parity.exact-approved-difference-only",
+    "campaign.parity.input-tamper-and-cleanup-detected",
     "campaign.authority.boolean-isolation-and-wrong-operation-are-not-identity",
     "campaign.authority.current-attestation-must-match-published-head",
     "campaign.authority.current-contract-modes-are-metadata-only",
@@ -111,18 +137,18 @@
     },
     {
       "path": "tests/hyperfide/registry.json",
-      "sha256": "77d72fc82aa56142b5cd19b93b0e8ecc469c01ed6182ea3d5ae53b2955580e61",
-      "size": 8284
+      "sha256": "59c858064cf8f112221068f9b2c6b7c9a3d5480aaad0792baa0845e1e601b52e",
+      "size": 11102
     },
     {
       "path": "tests/hyperfide/campaigns/deterministic.py",
-      "sha256": "69f2b5803b785a177847c3719c0fba0515b1b494bdbdca1cedd4c8a0de5b546c",
-      "size": 45929
+      "sha256": "e43c5539201be7c4f6f28750f74bbeb6f973a6b3728bb694c957a7933454bf56",
+      "size": 65545
     },
     {
       "path": "tests/hyperfide/cases/tasks/27_2.py",
-      "sha256": "95bda9619595547ec7929a133ca0985dceb85a5d06b67e5700a387ab4134f513",
-      "size": 26278
+      "sha256": "c4fe9e9a84142f609aecd352fcac88b2347ce6c075bfeb9407c1bdb2ca1ff5b0",
+      "size": 39294
     },
     {
       "path": "tests/hyperfide/campaigns/authority.py",
@@ -133,6 +159,16 @@
       "path": "tests/hyperfide/test_authority_campaign.py",
       "sha256": "49b9414c9c25923e8f96e926c79d0829b029c80b49037c5e3129ff81d3666d1e",
       "size": 14728
+    },
+    {
+      "path": "tests/hyperfide/campaigns/parity.py",
+      "sha256": "f44b8ce87e585468ce8056ad7066bf808e7cecc70fde4492d327a0dcac289356",
+      "size": 14302
+    },
+    {
+      "path": "tests/hyperfide/cases/parity/v020.py",
+      "sha256": "9426a5425109f63252c1fc6dd6070a163a107e174e2ba597c4dc21f145868e3e",
+      "size": 322
     }
   ],
   "policy": {

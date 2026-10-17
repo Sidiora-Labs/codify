@@ -316,15 +316,16 @@ def cleanup_signed():
             {"id":"hf-task-"+TASK+"-signed-role","status":"deleted" if role_absent else "unknown","observed_absent":role_absent,"evidence_artifact":artifact},
             {"id":"hf-task-"+TASK+"-signed-files","status":"deleted" if files_absent else "unknown","observed_absent":files_absent,"evidence_artifact":artifact}]
 
-def cleanup():
+def cleanup(report=True):
+    """In-run teardown is silent; only the independent --cleanup invocation reports one observed event."""
     global DATABASE, RESOURCE
-    signed_resources=cleanup_signed()+cleanup_git()+cleanup_preparation()
+    signed_resources=cleanup_signed()+cleanup_git()+cleanup_preparation()+cleanup_submission()+cleanup_connected()
     signed_absent=all(row['observed_absent'] for row in signed_resources)
     record = directory()/("resource-"+TASK+".json")
     if DATABASE is None and record.exists():
         value=json.loads(record.read_text());DATABASE=value["database"];RESOURCE=value["resource"]
     if not DATABASE:
-        print(json.dumps({"type":"cleanup","complete":signed_absent,"resources":signed_resources}),flush=True)
+        if report:print(json.dumps({"type":"cleanup","complete":signed_absent,"resources":signed_resources}),flush=True)
         return signed_absent
     subprocess.run(["dropdb","--force","--if-exists",DATABASE],cwd=ROOT,check=True,capture_output=True,timeout=45)
     absent=sql("SELECT count(*) FROM pg_database WHERE datname='"+DATABASE+"';","postgres").stdout.strip()=="0"
@@ -332,7 +333,7 @@ def cleanup():
     (directory()/("database-absence-"+TASK+".json")).write_text(json.dumps({
         "resource":RESOURCE,"database":DATABASE,"observed_absent":absent,
         "observer":"PostgreSQL pg_database after DROP DATABASE"})+"\n")
-    print(json.dumps({"type":"cleanup","complete":absent and signed_absent,"resources":signed_resources+[{"id":RESOURCE,
+    if report:print(json.dumps({"type":"cleanup","complete":absent and signed_absent,"resources":signed_resources+[{"id":RESOURCE,
         "status":"deleted" if absent else "unknown","observed_absent":absent,"evidence_artifact":artifact}]}),flush=True)
     return absent and signed_absent
 
@@ -346,7 +347,7 @@ def git_cases():
     record.write_text(json.dumps({"path":str(location)}))
     try:
         def git(*args):
-            return subprocess.run(["git","-c","core.hooksPath=/dev/null",*args],cwd=location,
+            return subprocess.run(["git","-c","core.hooksPath=/dev/null","-c","maintenance.auto=false","-c","gc.auto=0",*args],cwd=location,
                 env=dict(os.environ,GIT_CONFIG_NOSYSTEM="1",GIT_CONFIG_GLOBAL="/dev/null"),
                 text=True,capture_output=True,check=True,timeout=15).stdout.strip()
         git("init","-q");git("config","user.name","Bounded source test");git("config","user.email","fixture@example.invalid")
@@ -429,7 +430,7 @@ def preparation_cases():
     (directory()/("preparation-resource-"+TASK+".json")).write_text(json.dumps({"path":str(location)}))
     try:
         def git(*args):
-            return subprocess.run(["git","-c","core.hooksPath=/dev/null",*args],cwd=location,
+            return subprocess.run(["git","-c","core.hooksPath=/dev/null","-c","maintenance.auto=false","-c","gc.auto=0",*args],cwd=location,
                 env=dict(os.environ,GIT_CONFIG_NOSYSTEM="1",GIT_CONFIG_GLOBAL="/dev/null"),
                 text=True,capture_output=True,check=True,timeout=15).stdout.strip()
         git("init","-q");git("config","user.name","Bounded preparation test");git("config","user.email","fixture@example.invalid")
@@ -511,6 +512,159 @@ def cleanup_git():
     return [{"id":"hf-task-16.1-git","status":"deleted" if absent else "unknown",
         "observed_absent":absent,"evidence_artifact":"assurance/git-absence-16.1.json"}]
 
+SUBMISSION_TASKS=("q1","q2","q3")
+
+def submission_record():
+    return directory()/("submission-resource-"+TASK+".json")
+
+def submission_stack_module():
+    import importlib.util
+    spec=importlib.util.spec_from_file_location("hf16_submission_stack",ROOT/"tests/hyperfide/integration/submission_stack.py")
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
+
+def submission_cases():
+    """Positive and racing worker submissions through the production signed HTTPS service.
+
+    Compute authority comes from an actual signed scheduler claim and packet; the accepted spec,
+    task definitions and proof registries are trusted fixture preconditions written before start.
+    """
+    import threading,time
+    support=submission_stack_module();code=support.code;sha=support.sha;uid=support.uid
+    stack=support.SubmissionStack(submission_record(),SUBMISSION_TASKS)
+    try:
+        f=stack.fixture;i=f.ids;org,run=i["organisation"],i["run"]
+        scalar,custodies,attempt_state,submission,submit,send,envelope,put=(stack.scalar,stack.custodies,stack.attempt_state,stack.submission,
+            stack.submit,stack.send,stack.envelope,stack.put)
+        heads,baseline,attempts=stack.heads,stack.baseline,stack.attempts
+        # V-013 refusals precede admission on the same current compute generation.
+        a=stack.claim("q1")
+        fabricated=put(json.dumps({"source_object_id":heads["q1"],"criteria_digest":f.submission_criteria["q1"],"artifact_ids":[str(uuid.uuid4())]}).encode())
+        emit("assurance.16.1.submit.fabricated-evidence-refused",code(submit("q1",submission("q1",evidence_manifest_artifact_id=fabricated))),"QUALIFICATION_ARTIFACT_INCOMPLETE")
+        empty=put(json.dumps({"source_object_id":heads["q1"],"criteria_digest":f.submission_criteria["q1"],"artifact_ids":[]}).encode())
+        emit("assurance.16.1.submit.empty-evidence-refused",code(submit("q1",submission("q1",evidence_manifest_artifact_id=empty))),"QUALIFICATION_MANIFEST_INVALID")
+        stale_source=put(json.dumps({"repository_id":i["repository"],"source_object_id":baseline,"workspace_id":a["workspace"]}).encode())
+        stale_evidence=put(json.dumps({"source_object_id":baseline,"criteria_digest":f.submission_criteria["q1"],"artifact_ids":[a["log"]]}).encode())
+        emit("assurance.16.1.submit.mismatched-revision-refused",code(submit("q1",submission("q1",source_object_id=baseline,source_manifest_artifact_id=stale_source,evidence_manifest_artifact_id=stale_evidence))),"QUALIFICATION_SOURCE_MISMATCH")
+        emit("assurance.16.1.submit.criteria-mismatch-refused",code(submit("q1",submission("q1",criteria_digest=sha(b"different-criteria")))),"QUALIFICATION_MANIFEST_INVALID")
+        emit("assurance.16.1.submit.stale-generation-refused",code(submit("q1",submission("q1",attempt_generation="2"))),"QUALIFICATION_STALE_COMPUTE")
+        emit("assurance.16.1.submit.refusals-leave-compute",{"custodies":custodies("q1"),**attempt_state("q1")},{"custodies":0,"compute_authority":"CURRENT","execution_state":"RESERVED","leases":"ACTIVE"})
+        accepted=submission("q1");first=envelope("q1",accepted);response=send("q1",first)
+        result=response.get("result",{})
+        custody=result.get("submission",{}).get("id");job=result.get("job_id")
+        emit("assurance.16.1.submit.admitted",{"ok":response.get("ok"),"authority":result.get("submission",{}).get("authority"),"outcome":result.get("submission",{}).get("qualification_outcome"),
+             "qualification":result.get("qualification"),"replayed":result.get("replayed"),"job":isinstance(job,str)},
+             {"ok":True,"authority":"ACTIVE","outcome":"PENDING","qualification":"PENDING","replayed":False,"job":True})
+        emit("assurance.16.1.submit.compute-released",{**attempt_state("q1"),**scalar("SELECT state,current_custody_id FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,run,i["task_q1"]])},
+             {"compute_authority":"RELEASED","execution_state":"SUBMITTED","leases":"RELEASED","state":"SUBMITTED","current_custody_id":custody})
+        bound=scalar("SELECT c.authority,c.qualification_outcome,c.source_object_id,c.source_manifest_digest,c.evidence_manifest_digest,c.criteria_digest,c.source_attempt_id,c.source_generation::text,"
+            "j.state AS job_state,j.custody_generation::text AS job_generation,s.request_id,s.source_artifact_id,s.evidence_artifact_id FROM hyperfide.submission_custodies c "
+            "JOIN hyperfide.qualification_jobs j ON j.organisation_id=c.organisation_id AND j.run_id=c.run_id AND j.custody_id=c.id "
+            "JOIN hyperfide.assurance_submissions s ON s.organisation_id=c.organisation_id AND s.run_id=c.run_id AND s.custody_id=c.id WHERE c.organisation_id=$1 AND c.run_id=$2 AND c.id=$3 AND j.id=$4",[org,run,custody,job])
+        emit("assurance.16.1.submit.immutable-binding",bound,{"authority":"ACTIVE","qualification_outcome":"PENDING","source_object_id":heads["q1"],"source_manifest_digest":sha(a["source_bytes"]),
+             "evidence_manifest_digest":sha(a["evidence_bytes"]),"criteria_digest":f.submission_criteria["q1"],"source_attempt_id":a["token"]["attempt_id"],"source_generation":"1",
+             "job_state":"PENDING","job_generation":"1","request_id":accepted["request_id"],"source_artifact_id":a["source"],"evidence_artifact_id":a["evidence"]})
+        lost=send("q1",first)
+        emit("assurance.16.1.submit.lost-response-replay",{"ok":lost.get("ok"),"custody":lost.get("result",{}).get("submission",{}).get("id"),"custodies":custodies("q1")},{"ok":True,"custody":custody,"custodies":1})
+        replay=send("q1",envelope("q1",accepted))
+        emit("assurance.16.1.submit.exact-replay",{"ok":replay.get("ok"),"custody":replay.get("result",{}).get("submission",{}).get("id"),"replayed":replay.get("result",{}).get("replayed"),"custodies":custodies("q1")},
+             {"ok":True,"custody":custody,"replayed":True,"custodies":1})
+        emit("assurance.16.1.submit.conflicting-replay",code(submit("q1",dict(accepted,criteria_digest=sha(b"conflicting-bytes")))),"QUALIFICATION_IDEMPOTENCY_CONFLICT")
+        emit("assurance.16.1.submit.released-compute-cannot-resubmit",code(submit("q1",submission("q1"))),"AUTH_STALE_ATTEMPT")
+        # do_2: worker completion text/exit codes and the coding sandbox cannot qualify the submission.
+        job_version=scalar("SELECT state_version::text AS v FROM hyperfide.qualification_jobs WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,run,job])["v"]
+        status,claimed=f.invoke("qualification.job.claim",{"organisation_id":org,"run_id":run,"job_id":job,"expected_state_version":job_version},component="16.2",key="worker_q1")
+        emit("assurance.16.1.independence.coding-worker-claim-refused",{"refused":claimed.get("ok") is False,"code":code(claimed)},{"refused":True,"code":"QUALIFICATION_ROLE_DENIED"})
+        status,assigned=f.invoke("qualification.job.assign",{"organisation_id":org,"run_id":run,"job_id":job,"expected_state_version":job_version,"verifier_id":a["session"],
+            "sandbox_id":a["token"]["sandbox_id"],"slot_id":a["token"]["slot_id"],"sandbox_boot_generation":"1","reservation_id":uid(),"environment_digest":sha(b"coding-sandbox")},component="16.2",key="operator")
+        emit("assurance.16.1.independence.coding-sandbox-assign-refused",{"refused":assigned.get("ok") is False,"code":code(assigned)},{"refused":True,"code":"QUALIFICATION_RESULT_PREPARATION_REQUIRED"})
+        status,revoked=f.invoke("submission.revoke",{"organisation_id":org,"run_id":run,"submission_id":custody,"custody_generation":"1","expected_state_version":"1","reason":"worker claims completion"},component="16.1",key="worker_q1")
+        emit("assurance.16.1.independence.worker-disposition-denied",code(revoked),"QUALIFICATION_ROLE_DENIED")
+        emit("assurance.16.1.independence.outcome-pending",{**scalar("SELECT c.authority,c.qualification_outcome,j.state,j.lease_owner FROM hyperfide.submission_custodies c JOIN hyperfide.qualification_jobs j ON j.organisation_id=c.organisation_id AND j.run_id=c.run_id AND j.custody_id=c.id WHERE c.organisation_id=$1 AND c.run_id=$2 AND c.id=$3",[org,run,custody]),
+             "assignments":int(scalar("SELECT count(*)::int AS n FROM hyperfide.assurance_job_assignments WHERE organisation_id=$1 AND run_id=$2 AND job_id=$3",[org,run,job])["n"])},
+             {"authority":"ACTIVE","qualification_outcome":"PENDING","state":"PENDING","lease_owner":None,"assignments":0})
+        # do_3 races: concurrent identical admission, expiry sweeper and coding cleanup.
+        stack.claim("q2");value=submission("q2");responses=[None]*4
+        def racer(index):responses[index]=send("q2",envelope("q2",value))
+        threads=[threading.Thread(target=racer,args=(index,)) for index in range(len(responses))]
+        for thread in threads:thread.start()
+        for thread in threads:thread.join(60)
+        ids={row.get("result",{}).get("submission",{}).get("id") for row in responses if row and row.get("ok")}
+        emit("assurance.16.1.race.concurrent-identical",{"custodies":custodies("q2"),"distinct_admitted":len(ids),"jobs":int(scalar("SELECT count(*)::int AS n FROM hyperfide.qualification_jobs j JOIN hyperfide.submission_custodies c ON c.organisation_id=j.organisation_id AND c.run_id=j.run_id AND c.id=j.custody_id WHERE c.organisation_id=$1 AND c.run_id=$2 AND c.task_id=$3",[org,run,i["task_q2"]])["n"])},
+             {"custodies":1,"distinct_admitted":1,"jobs":1})
+        stack.claim("q3",lease_ms=6000)
+        expires=scalar("SELECT extract(epoch FROM lease_expires_at-clock_timestamp())::float8 AS s FROM hyperfide.attempts WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,run,attempts["q3"]["token"]["attempt_id"]])["s"]
+        deadline=time.monotonic()+float(expires);race={}
+        def late_submit():
+            time.sleep(max(0,deadline-time.monotonic()-0.25));race["submit"]=submit("q3",submission("q3"))
+        def sweeper():
+            time.sleep(max(0,deadline-time.monotonic()));race["expired"]=[]
+            stop=time.monotonic()+5
+            while time.monotonic()<stop:
+                swept=f.ok("scheduler.compute.expire",{"organisation_id":org,"run_id":run,"authority_epoch":i["epoch"],"leader_generation":"1"},component="5.2",key="leader")
+                race["expired"]+=swept["expired_attempt_ids"]
+                if attempts["q3"]["token"]["attempt_id"] in race["expired"] or race.get("submit",{}).get("ok"):break
+                time.sleep(.05)
+        threads=[threading.Thread(target=late_submit),threading.Thread(target=sweeper)]
+        for thread in threads:thread.start()
+        for thread in threads:thread.join(60)
+        observed=attempt_state("q3");winner=race.get("submit",{})
+        if winner.get("ok"):
+            outcome={"admitted":True,"custodies":custodies("q3"),"compute":observed["compute_authority"],"custody":scalar("SELECT authority FROM hyperfide.submission_custodies WHERE organisation_id=$1 AND run_id=$2 AND task_id=$3",[org,run,i["task_q3"]])["authority"]}
+            consistent=outcome=={"admitted":True,"custodies":1,"compute":"RELEASED","custody":"ACTIVE"} and attempts["q3"]["token"]["attempt_id"] not in race["expired"]
+        else:
+            outcome={"admitted":False,"code":code(winner),"custodies":custodies("q3"),"compute":observed["compute_authority"]}
+            consistent=outcome["code"] in ("QUALIFICATION_STALE_COMPUTE","AUTH_STALE_ATTEMPT","AUTH_EXPIRED") and outcome["custodies"]==0 and outcome["compute"]=="EXPIRED"
+        print(json.dumps({"type":"observation","id":"assurance.16.1.race.expiry-sweeper","outcome":outcome}),flush=True)
+        emit("assurance.16.1.race.expiry-sweeper",consistent)
+        swept=f.ok("scheduler.compute.expire",{"organisation_id":org,"run_id":run,"authority_epoch":i["epoch"],"leader_generation":"1"},component="5.2",key="leader")
+        emit("assurance.16.1.race.expiry-after-admission",{"swept_admitted":attempts["q1"]["token"]["attempt_id"] in swept["expired_attempt_ids"],
+             **scalar("SELECT authority,qualification_outcome FROM hyperfide.submission_custodies WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,run,custody]),**attempt_state("q1")},
+             {"swept_admitted":False,"authority":"ACTIVE","qualification_outcome":"PENDING","compute_authority":"RELEASED","execution_state":"SUBMITTED","leases":"RELEASED"})
+        t=attempts["q1"]["token"]
+        status,cancelled=f.invoke("scheduler.compute.cancel",{"token":t,"request_id":uid(),"leader_generation":"1","package_generation":"2"},component="5.2",key="manager")
+        # Trusted provider-observation precondition: the coding slot is drained and the coding sandbox is gone.
+        f.sql("UPDATE hyperfide.agent_sessions SET state='STOPPED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,run,attempts["q1"]["session"]])
+        f.sql("UPDATE hyperfide.sandboxes SET desired_state='DESTROYED',observed_state='DESTROYED',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[org,i["sandbox"]])
+        status,inspected=f.invoke("submission.inspect",{"organisation_id":org,"run_id":run,"submission_id":custody},component="16.1",key="operator")
+        status,after_cleanup=f.invoke("submission.submit",accepted,component="16.1",key="worker_q1")
+        emit("assurance.16.1.race.coding-cleanup-preserves-custody",{"cancel_refused":cancelled.get("ok") is False,"authority":inspected.get("result",{}).get("authority"),
+             "outcome":inspected.get("result",{}).get("qualification_outcome"),"job":scalar("SELECT state FROM hyperfide.qualification_jobs WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,run,job])["state"],
+             "worker_refused":after_cleanup.get("ok") is False},{"cancel_refused":True,"authority":"ACTIVE","outcome":"PENDING","job":"PENDING","worker_refused":True})
+        print(json.dumps({"type":"observation","id":"assurance.16.1.submission.codes","cancel":code(cancelled),"after_cleanup":code(after_cleanup)}),flush=True)
+    finally:
+        stack.close()
+
+CONNECTED_STACK=ROOT/"tests/hyperfide/integration/connected-stack.py"
+
+def connected_stack_cases():
+    """Run the separately owned connected-stack variant as its own process tree and relay its events."""
+    process=subprocess.run([sys.executable,str(CONNECTED_STACK)],cwd=ROOT,env=os.environ.copy(),stdin=subprocess.DEVNULL,
+                           text=True,capture_output=True,timeout=600)
+    failed=process.returncode!=0
+    for line in process.stdout.splitlines():
+        try:event=json.loads(line)
+        except ValueError:continue
+        if event.get("type")=="assertion":
+            OBSERVATIONS.append({"id":event["id"],"actual":event["actual"],"expected":event["expected"]})
+            failed=failed or event["actual"]!=event["expected"]
+        if event.get("type") in ("assertion","observation"):print(json.dumps(event),flush=True)
+    if failed:raise AssertionError("Connected-stack variant failed: "+process.stderr[-1200:])
+
+def cleanup_connected():
+    if TASK!="16.1":return []
+    import importlib.util
+    spec=importlib.util.spec_from_file_location("hf16_connected_stack",CONNECTED_STACK)
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    return module.cleanup_resources()
+
+def cleanup_submission():
+    if TASK!="16.1":return []
+    support=submission_stack_module()
+    def absence(value):
+        (directory()/("submission-absence-"+TASK+".json")).write_text(json.dumps(value)+"\n")
+    return support.cleanup_stack(submission_record(),"hyperfide-assurance-submit-",lambda text:sql(text,"postgres").stdout,
+        "hf-task-16.1-submission-","assurance/submission-absence-"+TASK+".json",absence)
+
 def schema_cases():
     global DATABASE, RESOURCE
     DATABASE="hf_16_bounded_"+uuid.uuid4().hex[:16]
@@ -567,15 +721,17 @@ def main(task="16.1"):
             schema_cases()
             semantic_cases()
             git_cases()
+            submission_cases()
+            connected_stack_cases()
         if TASK=="16.2":preparation_cases()
         primary_cases()
         signed_cases()
         passed=True
     finally:
-        absent=cleanup()
+        absent=cleanup(report=False)
         (directory()/("observations-"+TASK+".json")).write_text(json.dumps({
             "scope":"bounded-auth-and-ledger","physical_execution_qualification":"NOT_EVALUATED",
-            "positive_submission_qualification":"NOT_EVALUATED","assertions":OBSERVATIONS},indent=2)+"\n")
+            "positive_submission_qualification":"BOUNDED_SIGNED_HTTPS_ADMISSION" if TASK=="16.1" else "NOT_EVALUATED","assertions":OBSERVATIONS},indent=2)+"\n")
     return 0 if passed and absent else 1
 
 if __name__=="__main__":

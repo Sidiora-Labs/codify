@@ -1,0 +1,9 @@
+{
+  "task": "13.4",
+  "commit": "0dbcd4aecde6cd173b1d42e142d5431b685c8789",
+  "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-007 --manifest tests/hyperfide/manifests/tasks/13.4.json && python3 tests/hyperfide/qualify.py --case V-042 --manifest tests/hyperfide/manifests/tasks/13.4.json && python3 tests/hyperfide/qualify.py --case V-044 --manifest tests/hyperfide/manifests/tasks/13.4.json",
+  "exit_code": 0,
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"c35f5dce-652e-4f84-a0ec-873bc7a6fd6c\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/13.4/campaigns/9225ffc42cffbccb1135edd86cac56e4b92f0af0c5cb2ebc8b01689f25228f3b\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"60f712db-9e17-4f27-8d8e-5e9472ce0b78\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/13.4/campaigns/9225ffc42cffbccb1135edd86cac56e4b92f0af0c5cb2ebc8b01689f25228f3b\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"2176f980-9e78-4ee0-b18c-618cab2c4f14\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/13.4/campaigns/9225ffc42cffbccb1135edd86cac56e4b92f0af0c5cb2ebc8b01689f25228f3b\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T09:40:54Z",
+  "notes": "task-component scope only; 48 registered assertions PASS per case; full_case_status INCOMPLETE (no live frontier/provider qualification). Sandbox-only: /work/hyperfide and .git chowned to the executing uid so the evidence checker's safe_git could read HEAD."
+}

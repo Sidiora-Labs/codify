@@ -1,0 +1,8 @@
+[component]
+schema_version = 1
+id = "21.4"
+source = "src/hyperfide/advisory.c"
+entry = "hf_component_21_4"
+actions = ["decision.advisory.describe", "decision.advisory.resolve"]
+requires = []
+headers = ["src/hyperfide/advisory.h"]

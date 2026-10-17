@@ -8,10 +8,22 @@
     "tests/hyperfide/cases/tasks/3_3.py"
   ],
   "assertion_ids": [
+    "views.corpus.manifest-selected",
     "views.primary.signed",
     "views.aggregate-totals",
+    "views.mandatory-intent-inline",
+    "views.current-findings-source-links",
+    "views.evidence-freshness",
+    "views.finding-blocker-totals",
+    "views.finding-only-blocker",
+    "views.dependency-exceptions",
+    "views.dependency-current-revision-only",
     "views.page-bounded",
     "views.budget-preserves-mandatory",
+    "views.budget-blockers-outrank-tasks",
+    "views.untrusted-finding-text-labelled",
+    "views.malformed-cursor-refused",
+    "views.malformed-input-isolated",
     "views.manager-scoped",
     "views.manager-unscoped-denied",
     "views.unowned-package-denied",
@@ -36,7 +48,9 @@
   "cleanup_timeout_seconds": 60,
   "fixtures": [
     "services/hyperfide/dist/control.js",
-    "services/hyperfide/dist/hierarchy/views.js"
+    "services/hyperfide/dist/hierarchy/views.js",
+    "services/hyperfide/dist/spec/import.js",
+    "spec/hyperfide/spec.kvx"
   ],
   "required_artifacts": [],
   "required_env": [

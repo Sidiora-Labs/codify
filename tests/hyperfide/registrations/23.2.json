@@ -50,7 +50,15 @@
     "observability.resources.boot-cross-run-denied",
     "observability.resources.old-boot-debt-retained",
     "observability.resources.cross-run-denied",
-    "observability.resources.untyped-capacity-not-inferred"
+    "observability.resources.untyped-capacity-not-inferred",
+    "observability.resources.density-sweep-saturation",
+    "observability.resources.declared-reservations-per-profile",
+    "observability.resources.scheduler-reservations-installed",
+    "observability.resources.provider-capacity-installed",
+    "observability.resources.parent-child-accounted",
+    "observability.resources.hidden-spawn-visible",
+    "observability.resources.build-model-stall-distinct",
+    "observability.resources.saturation-reason-per-dimension"
   ],
   "argv": [
     "python3",

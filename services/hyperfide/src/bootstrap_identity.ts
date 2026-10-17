@@ -6,7 +6,7 @@ import type {ExternalAuthorityAttestation} from './storage/authority_journal.js'
 import {assertCurrentPrincipal} from './identity/enrollment.js';
 import {assertAcceptedBootstrap} from './spec/bootstrap.js';
 import {base64,exact,fail,frozen,hash,NAME,uuid} from './transport/protocol.js';
-import type {Principal} from './transport/protocol.js';
+import type {AuthorityTransaction,Principal} from './transport/protocol.js';
 
 export interface BootstrapPolicy {deployment_id:string;max_ttl_ms:number;journal_dir:string}
 export interface OperatorBinding {
@@ -18,6 +18,14 @@ export async function assertBootstrapExternalAuthority(resources:ServiceResource
  const journal=new FileExternalAuthorityJournal(policy.journal_dir,input=>lookupAuthorityActivation(resources,input));
  const attestation=await assertExternalAuthorityCurrent(resources,journal,{deployment_id:policy.deployment_id,...(signal?{signal}:{})});
  return {journal,attestation};
+}
+// The external journal attestation must still name the current primary epoch inside this transaction.
+export async function assertFreshAttestation(tx:AuthorityTransaction,deploymentId:string,epoch:string,attestation:ExternalAuthorityAttestation):Promise<void>{
+ const row=(await tx.query("SELECT epoch::text,proof_digest,clock_timestamp() AS db_now FROM hyperfide.authority_epochs WHERE deployment_id=$1 AND state='ACTIVE' FOR SHARE",[deploymentId])).rows[0];
+ const now=row?new Date(row.db_now).getTime():NaN,observed=Date.parse(attestation.observed_at),expiry=Date.parse(attestation.expires_at);
+ if(!row||attestation.deployment_id!==deploymentId||row.epoch!==epoch||attestation.epoch!==row.epoch||row.proof_digest!==attestation.evidence_digest||
+    !/^[1-9][0-9]*$/.test(attestation.sequence)||!Number.isFinite(now)||!Number.isFinite(observed)||!Number.isFinite(expiry)||observed>now+1000||expiry<=now||expiry<=observed||expiry-observed>30000)
+  fail('EXTERNAL_JOURNAL_STALE','External authority attestation expired or differs from current primary authority');
 }
 function binding(p:Principal,digest:string,replayed:boolean):OperatorBinding{
  return frozen({credential_id:p.credential_id,organisation_id:p.organisation_id,run_id:p.run_id,
@@ -59,13 +67,7 @@ export async function issueOfflineOperator(resources:ServiceResources,value:unkn
   const accepted=await assertAcceptedBootstrap(tx,{organisation_id:scope.organisation_id,run_id:scope.run_id,authority_epoch:scope.authority_epoch,accepted_revision_digest:String(value.accepted_revision_digest)});
   if(actions.some(action=>!accepted.allowed_actions.includes(action)))fail('AUTH_SCOPE_DENIED','Operator grant cannot exceed accepted intent capabilities');
   await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',['bootstrap-operator:'+scope.organisation_id+':'+scope.run_id]);
-  const assertFreshExternal=async(attestation:ExternalAuthorityAttestation)=>{
-   const row=(await tx.query<{epoch:string;proof_digest:string;db_now:Date}>("SELECT epoch::text,proof_digest,clock_timestamp() AS db_now FROM hyperfide.authority_epochs WHERE deployment_id=$1 AND state='ACTIVE' FOR SHARE",[policy.deployment_id])).rows[0];
-   const now=row?new Date(row.db_now).getTime():NaN,observed=Date.parse(attestation.observed_at),expiry=Date.parse(attestation.expires_at);
-   if(!row||attestation.deployment_id!==policy.deployment_id||row.epoch!==scope.authority_epoch||attestation.epoch!==row.epoch||row.proof_digest!==attestation.evidence_digest||
-      !/^[1-9][0-9]*$/.test(attestation.sequence)||!Number.isFinite(now)||!Number.isFinite(observed)||!Number.isFinite(expiry)||observed>now+1000||expiry<=now||expiry<=observed||expiry-observed>30000)
-    fail('EXTERNAL_JOURNAL_STALE','External authority attestation expired or differs from current primary authority');
-  };
+  const assertFreshExternal=(attestation:ExternalAuthorityAttestation)=>assertFreshAttestation(tx,policy.deployment_id,scope.authority_epoch,attestation);
   await assertFreshExternal(attestation);
   const previous=(await tx.query<{credential_id:string;request_digest:string}>('SELECT credential_id,request_digest FROM hyperfide.identity_bootstrap_issuances WHERE organisation_id=$1 AND run_id=$2 FOR UPDATE',[scope.organisation_id,scope.run_id])).rows[0];
   if(previous&&(previous.credential_id!==value.credential_id||previous.request_digest!==requestDigest))
