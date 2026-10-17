@@ -1,9 +1,9 @@
 {
   "task": "21.4",
-  "commit": "12aa390190b3d3e360e079254378a381103fc236",
-  "requalified_on": "12aa390190b3d3e360e079254378a381103fc236",
+  "commit": "a80cd7edbb1c3021b76c18c53fdc95d634a77a09",
+  "requalified_on": "a80cd7edbb1c3021b76c18c53fdc95d634a77a09",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-045 --manifest tests/hyperfide/manifests/tasks/21.4.json && python3 tests/hyperfide/qualify.py --case V-014 --manifest tests/hyperfide/manifests/tasks/21.4.json",
-  "exit_code": 1,
-  "stdout_tail": "{\"status\": \"FAIL\", \"receipt_id\": \"2422c086-a9e4-436f-9ef5-917cb066911a\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/21.4/campaigns/2ef8e6547776867b02421667f75a15f4c2eb2312463813bf8032d61ef4942229\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": [\"executed assertion inventory differs from exact registration\", \"probe failed, was unavailable, or timed out\"]}\n",
-  "ran_at": "2026-10-17T14:09:04.189398+00:00"
+  "exit_code": 0,
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"370e5053-88e0-4c5c-b3e8-a511d0535e47\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/21.4/campaigns/a0b972299502969f17a13306340f391b34fbc27a7eca3bc2c6b9ea6e01bb519f\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"3320afd3-e83e-405a-8ab6-0c97d7437ffd\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/21.4/campaigns/a0b972299502969f17a13306340f391b34fbc27a7eca3bc2c6b9ea6e01bb519f\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T19:23:31.051044+00:00"
 }

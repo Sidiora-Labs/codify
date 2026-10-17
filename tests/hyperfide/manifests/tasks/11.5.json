@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "campaign_id": "hyperfide-task-11.5-workspace-slices-v1",
+  "campaign_id": "hyperfide-task-11.5-workspace-slices-v1-requal-ff4632c9bc89-requal-a80cd7edbb1c",
   "registered_variant": "task:11.5",
   "scope": "task-component",
   "case_ids": [
@@ -64,8 +64,8 @@
   "inputs": [
     {
       "path": "cg",
-      "sha256": "06845f2ab3d58630044ec75997e9788ca1113671e001c2b9821bd92936f05b37",
-      "size": 69276736
+      "sha256": "bcc8a52ffa7bf8c4eac06c8b728834531d1b9e97726e0bd56c1b2edcbc3a0bbe",
+      "size": 69285024
     },
     {
       "path": "services/hyperfide/components/11.5.json",
@@ -84,8 +84,8 @@
     },
     {
       "path": "services/hyperfide/dist/hierarchy/packets.js",
-      "sha256": "fd5f75b0a2b68ca45a9b961757793836a385522b7a46ba6928e241c8fffdbc08",
-      "size": 54946
+      "sha256": "22be2bacb3d61fa469ba8ae814c5e9c8d47960d8c38ec524dca6cc7855deef06",
+      "size": 54813
     },
     {
       "path": "services/hyperfide/dist/preparation/slices.js",
@@ -134,13 +134,13 @@
     },
     {
       "path": "services/hyperfide/src/hierarchy/packets.ts",
-      "sha256": "7e9cd6527682a6f46938904675b831a932d9a6481442b958292406efd4ad4177",
-      "size": 52017
+      "sha256": "dc9cb48c249d614cbabe66262a0b4deb8b525314f081e9d49a4b462109293ed2",
+      "size": 51894
     },
     {
       "path": "services/hyperfide/src/preparation/manifests.ts",
-      "sha256": "a6be34770efd0a8b639f62179e3cfcfc304e258ff9ec48df7f7b2aff02ca73d4",
-      "size": 42115
+      "sha256": "ff85beb86079f7334a9a55bab5ecfaff5197fba8da9c94dff576c0aabfc17ea3",
+      "size": 42414
     },
     {
       "path": "services/hyperfide/src/preparation/slices.ts",

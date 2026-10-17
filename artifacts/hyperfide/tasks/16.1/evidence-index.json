@@ -1,9 +1,9 @@
 {
   "task": "16.1",
-  "commit": "12aa390190b3d3e360e079254378a381103fc236",
-  "requalified_on": "12aa390190b3d3e360e079254378a381103fc236",
+  "commit": "a80cd7edbb1c3021b76c18c53fdc95d634a77a09",
+  "requalified_on": "a80cd7edbb1c3021b76c18c53fdc95d634a77a09",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-013 --manifest tests/hyperfide/manifests/tasks/16.1.json && python3 tests/hyperfide/qualify.py --case V-034 --manifest tests/hyperfide/manifests/tasks/16.1.json",
-  "exit_code": 1,
-  "stdout_tail": "{\"status\": \"FAIL\", \"receipt_id\": \"c6311b0f-b029-4c55-b499-01430876710e\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/16.1/campaigns/f3396599f63c6f2f1329c7f2f440ad716323d5cca11495ebe970ef61cca0f6f3\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": [\"executed assertion inventory differs from exact registration\", \"probe failed, was unavailable, or timed out\", \"cleanup resource inventory mismatch\", \"required artifact missing or unsafe: assurance/signed-absence-16.1.json\", \"required artifact missing or unsafe: assurance/connected-absence-16.1.json\", \"required artifact missing or unsafe: assurance/connected-observations-16.1.json\"]}\n",
-  "ran_at": "2026-10-17T14:03:13.359291+00:00"
+  "exit_code": 0,
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"61a5f7f6-255b-4e1f-9b29-5af0eef3e00e\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/16.1/campaigns/c8b3502ad5e187c26eadbdcd3ab02970687ccbf97db371eaccdbe5667bb9a5cb\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"91bc5221-27f3-4004-83e1-8c8d8ca0ab41\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/16.1/campaigns/c8b3502ad5e187c26eadbdcd3ab02970687ccbf97db371eaccdbe5667bb9a5cb\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T19:32:32.951394+00:00"
 }

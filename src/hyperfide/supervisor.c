@@ -158,7 +158,7 @@ int hf_slot_inventory(const char *root,const char *boot_id,const char *preparati
         sqlite3_stmt *row=NULL;
         valid=sqlite3_prepare_v2(db,"SELECT id,uid,gid,port,profile,credential_sensitive,storage_bytes,kernel_boot_id,state FROM slots WHERE state='READY' AND boot_id=? AND preparation=? AND kernel_boot_id=? ORDER BY id",-1,&row,NULL)==SQLITE_OK;
         if (valid) {sqlite3_bind_text(row,1,boot_id,-1,SQLITE_STATIC);sqlite3_bind_text(row,2,preparation,-1,SQLITE_STATIC);sqlite3_bind_text(row,3,kernel,-1,SQLITE_STATIC);}
-        int step,count=0;
+        int step=SQLITE_DONE,count=0; /* initialised: the loop guard may skip sqlite3_step when the statement failed to prepare */
         while (valid&&(step=sqlite3_step(row))==SQLITE_ROW) {if (count++) fputc(',',out);if (count>256) valid=0;else slot_entry(out,row);}
         if (valid&&step!=SQLITE_DONE) valid=0;
         sqlite3_finalize(row);

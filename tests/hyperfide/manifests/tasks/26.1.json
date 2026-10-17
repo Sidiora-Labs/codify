@@ -6,7 +6,7 @@
     ],
     "approved": true
   },
-  "campaign_id": "hyperfide-task-26.1-branding-identity-v1-requal-12aa390190b3",
+  "campaign_id": "hyperfide-task-26.1-branding-identity-v1-requal-12aa390190b3-requal-6a91b0130b1d-requal-ff4632c9bc89",
   "case_ids": [
     "V-026",
     "V-028"
@@ -94,8 +94,8 @@
     },
     {
       "path": "build/hyperfide-native",
-      "sha256": "e9cafa47ac941c06fde622534b92fa1fc56470ebfb80a4a7f98977e24e725171",
-      "size": 574552
+      "sha256": "34e60efc575c70a9b25886842312809dc093580da2f7b1bd45ce750c789b05ea",
+      "size": 578648
     },
     {
       "path": "build/hyperfide-native-registry.inc",

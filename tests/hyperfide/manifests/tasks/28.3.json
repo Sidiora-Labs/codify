@@ -10,7 +10,7 @@
     ],
     "approved": true
   },
-  "campaign_id": "hyperfide-task-28.3-bounded-v1-requal-98459ddc09fe",
+  "campaign_id": "hyperfide-task-28.3-bounded-v1-requal-98459ddc09fe-requal-6a91b0130b1d-requal-a80cd7edbb1c",
   "case_ids": [
     "V-034",
     "V-053",
@@ -281,13 +281,13 @@
     },
     {
       "path": "services/hyperfide/dist/identity/enrollment.js",
-      "sha256": "9abeaa4969356c069cc2cc2eb93c2e2e34bd832a7ef85697eb3ac14347aecadf",
-      "size": 44952
+      "sha256": "19d6bb9bdaaf2f7bc921b1982e2c9458c51b5c7c471f1be120c540d8ab92cc77",
+      "size": 45109
     },
     {
       "path": "services/hyperfide/dist/identity/enrollment.js.map",
-      "sha256": "d9cd049195ad20693bba1ec3a5643115d250ad05738859475e134113c2622ecc",
-      "size": 40781
+      "sha256": "9fd0b32676af66b6363df95dca7256046f95bb6df7bd3fbb0857086055b077d7",
+      "size": 40852
     },
     {
       "path": "services/hyperfide/dist/identity/native_auth.d.ts",
@@ -541,8 +541,8 @@
     },
     {
       "path": "services/hyperfide/src/identity/enrollment.ts",
-      "sha256": "250a4803207e6737f979453bb12da5b56cba70a62b89d0c1d58dd87bf00937b2",
-      "size": 43464
+      "sha256": "19ad53360ebcc6c62c9a53b80859fa09dadbda8879a609f6222a0588c778e8ef",
+      "size": 43604
     },
     {
       "path": "services/hyperfide/src/identity/native_auth.ts",
@@ -641,8 +641,8 @@
     },
     {
       "path": "spec/hyperfide/execution-contract.md",
-      "sha256": "e366364d3677e832a86a35fdee2dca920ffa4c95856ca008fd484b4e2b3de55a",
-      "size": 49666
+      "sha256": "7daa816238cadae430f0af931a23f32f654b80160471bad920231e5beeecbd60",
+      "size": 49848
     },
     {
       "path": "spec/hyperfide/identity-security.md",

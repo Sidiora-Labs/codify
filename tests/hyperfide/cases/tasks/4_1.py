@@ -76,6 +76,13 @@ def observation_dir():
     target=root/"storage";target.mkdir(parents=True,exist_ok=True)
     return target
 
+def install_schema():
+    # Task 4.4 owns production migration orchestration; this gate installs only the task 4.1 schema.
+    source=(ROOT/"services/hyperfide/migrations/0001-authority.sql").read_bytes()
+    checksum="sha256:"+hashlib.sha256(source).hexdigest()
+    sql("BEGIN;\n"+source.decode()+"\nINSERT INTO hyperfide.schema_migrations(version,name,checksum) "
+        "VALUES(1,'0001-authority','"+checksum+"');\nCOMMIT;")
+
 def cleanup():
     try:
         sql("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='"+DATABASE+"' AND pid<>pg_backend_pid();",
@@ -211,10 +218,16 @@ command_inbox event_consumers outbox_events event_deliveries""".split())
         expect(set(result["creation_kinds"])=={"source_object","attempt","compute_lease","submission_custody",
                "evidence","evidence_artifact","qualification_job","publication_operation"},"creation catalogue is not finite")
     check("storage.service.describe",describe)
+    def migration_required():
+        service.reject("authority.schema.bootstrap",{},"MIGRATION_JOB_REQUIRED")
+        expect(sql("SELECT to_regnamespace('hyperfide') IS NULL;").stdout.strip()=="t",
+               "runtime bootstrap created schema before the migration operator")
+    check("storage.migration.operator-required",migration_required)
     def bootstrap():
+        install_schema()
         result=service.ok("authority.schema.bootstrap")
-        expect(result["applied"] is True and result["schema_version"]==1 and result["checksum"]==checksum,
-               "migration did not apply the exact source bytes")
+        expect(result["applied"] is False and result["schema_version"]==1 and result["checksum"]==checksum,
+               "runtime did not verify the explicitly applied exact source bytes")
     check("storage.migration.bootstrap",bootstrap)
     def replay():
         result=service.ok("authority.schema.bootstrap")
@@ -270,12 +283,14 @@ def final_schema_negatives(service):
     check("storage.migration.checksum-conflict",checksum_conflict)
     def namespace_conflict():
         sql("DROP SCHEMA hyperfide CASCADE; CREATE SCHEMA hyperfide;")
-        service.reject("authority.schema.bootstrap",{},"SCHEMA_CONFLICT")
+        service.reject("authority.schema.bootstrap",{},"MIGRATION_JOB_REQUIRED")
         expect(sql("SELECT count(*) FROM information_schema.tables WHERE table_schema='hyperfide';").stdout.strip()=="0",
                "refused bootstrap wrote a partial schema")
         sql("DROP SCHEMA hyperfide;")
+        install_schema()
         result=service.ok("authority.schema.bootstrap")
-        expect(result["applied"] is True,"refused schema bootstrap poisoned subsequent valid bootstrap")
+        expect(result["applied"] is False and result["checksum"]==original and result["schema_version"]==1,
+               "refused runtime bootstrap poisoned subsequent explicitly migrated schema")
     check("storage.migration.unidentified-namespace",namespace_conflict)
 
 SEED = "-- Task 4.1 disposable fixture, never production authority.\nINSERT INTO hyperfide.organisations(id,name) VALUES('00000000-0000-4000-8000-000000000001','fixture');\nINSERT INTO hyperfide.projects(organisation_id,id,name) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002','fixture');\nINSERT INTO hyperfide.repositories(organisation_id,project_id,id,name,url) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000003','fixture','https://example.invalid/repo.git');\nINSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000003',repeat('a',40)),('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000003',repeat('b',40));\nINSERT INTO hyperfide.spec_revisions(organisation_id,project_id,id,source_digest,source_content,document,schema_version) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000004','sha256:'||encode(sha256(convert_to('fixture','UTF8')),'hex'),'fixture','{}',1);\nINSERT INTO hyperfide.runs(organisation_id,id,project_id,spec_revision_id,policy_digest,authority_epoch) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000005','00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000004','sha256:'||repeat('c',64),'00000000-0000-4000-8000-000000000099'),('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000015','00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000004','sha256:'||repeat('c',64),'00000000-0000-4000-8000-000000000099');\nINSERT INTO hyperfide.run_repositories(organisation_id,run_id,repository_id,source_object_id,integration_ref) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000005','00000000-0000-4000-8000-000000000003',repeat('a',40),'refs/heads/main'),('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000015','00000000-0000-4000-8000-000000000003',repeat('a',40),'refs/heads/main');\nINSERT INTO hyperfide.feature_packages(organisation_id,run_id,id,package_key,wave) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000005','00000000-0000-4000-8000-000000000006','fixture',1),('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000015','00000000-0000-4000-8000-000000000016','fixture',1);\nINSERT INTO hyperfide.tasks(organisation_id,run_id,id,task_key,feature_package_id,spec_revision_id,criteria_digest,definition,wave) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000005','00000000-0000-4000-8000-000000000007','1.1','00000000-0000-4000-8000-000000000006','00000000-0000-4000-8000-000000000004','sha256:'||repeat('c',64),'{}',1),('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000015','00000000-0000-4000-8000-000000000017','1.1','00000000-0000-4000-8000-000000000016','00000000-0000-4000-8000-000000000004','sha256:'||repeat('c',64),'{}',1);\nINSERT INTO hyperfide.provider_pools(organisation_id,id,provider,account_key,environment_key,region) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000008','railway','fixture-account','fixture-env','fixture-region');\nINSERT INTO hyperfide.sandboxes(organisation_id,id,pool_id,boot_generation,desired_state,observed_state) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000009','00000000-0000-4000-8000-000000000008',1,'RUNNING','RUNNING');\nINSERT INTO hyperfide.worker_slots(organisation_id,id,sandbox_id,slot_key,boot_generation,capacity_kind,state) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-00000000000a','00000000-0000-4000-8000-000000000009','agent-0',1,'AGENT','READY');\nINSERT INTO hyperfide.artifacts(organisation_id,run_id,id,digest,size_bytes,storage_backend,storage_key,status,retention_class) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000005','00000000-0000-4000-8000-00000000000b','sha256:'||repeat('d',64),1,'fixture','complete','COMPLETE','RUN'),('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000005','00000000-0000-4000-8000-00000000000c','sha256:'||repeat('e',64),1,'fixture','pending','PENDING','RUN');\n"

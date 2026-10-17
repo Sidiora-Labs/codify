@@ -3,7 +3,7 @@
     "allowed_actions": [],
     "approved": true
   },
-  "campaign_id": "hyperfide-task-26.3-names-migration-v1-requal-12aa390190b3",
+  "campaign_id": "hyperfide-task-26.3-names-migration-v1-requal-12aa390190b3-requal-6a91b0130b1d-requal-ff4632c9bc89",
   "case_ids": [
     "V-026",
     "V-055"
@@ -122,17 +122,17 @@
     },
     {
       "path": "src/main.c",
-      "sha256": "9c653b59bc08e14d813cd023daf36ce30afa3711da86824a85dd63fe7533b3d1",
-      "size": 36052
+      "sha256": "3d2f50ec82d830c66bffe25ea98795fa1720ecb87497393855adc57ba46911cf",
+      "size": 36036
     },
     {
       "path": "hyperfide",
-      "sha256": "08127e8ff517a8f67819f0538a592c2f5a362d1131092cab83a340860332f87e",
+      "sha256": "bcc8a52ffa7bf8c4eac06c8b728834531d1b9e97726e0bd56c1b2edcbc3a0bbe",
       "size": 69285024
     },
     {
       "path": "cg",
-      "sha256": "08127e8ff517a8f67819f0538a592c2f5a362d1131092cab83a340860332f87e",
+      "sha256": "bcc8a52ffa7bf8c4eac06c8b728834531d1b9e97726e0bd56c1b2edcbc3a0bbe",
       "size": 69285024
     },
     {

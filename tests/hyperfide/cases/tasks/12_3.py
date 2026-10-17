@@ -477,7 +477,8 @@ def build(work):
             ("process_tree.c", "launch.c", "job.c", "supervisor.c", "supervisor_daemon.c", "transport.c")] + ["-lsqlite3", "-lcurl", "-lcrypto"])):
         path = work / (name + ".c")
         path.write_text(source)
-        compiled = subprocess.run(["cc", "-std=gnu11", "-O1", "-Wall", "-Wextra", "-Werror", "-Wno-unused-parameter", "-I", str(ROOT / "src/hyperfide"), str(path), *extra, "-o", str(work / name)],
+        # Keep the cancellation probe independent of unused job-launch integrations.
+        compiled = subprocess.run(["cc", "-std=gnu11", "-O1", "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections", "-Wall", "-Wextra", "-Werror", "-Wno-unused-parameter", "-I", str(ROOT / "src/hyperfide"), str(path), *extra, "-o", str(work / name)],
                                   capture_output=True, text=True)
         if compiled.returncode:
             raise RuntimeError(compiled.stderr)

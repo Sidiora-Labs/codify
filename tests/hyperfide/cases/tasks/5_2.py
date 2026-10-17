@@ -240,7 +240,8 @@ def races():
    if outcomes.count("EXPIRED")>=MAX_EXPIRIES:offset=-600
    offsets.append(offset)
    time.sleep(max(0,remaining+offset-latency)/1000)
-   renewed,expired=concurrently(lambda:renew(f,key,token,1000),lambda:expire(f))
+   # Keep a winning renewal live through validation; the next iteration rearms the short deadline.
+   renewed,expired=concurrently(lambda:renew(f,key,token,60000),lambda:expire(f))
    expect(expired.get("ok") is True,"Expiry sweep failed: "+json.dumps(expired))
    fenced=expired["result"]["expired_attempt_ids"]
    if renewed.get("ok") is True:

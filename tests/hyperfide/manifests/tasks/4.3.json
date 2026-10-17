@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "campaign_id": "hyperfide-task-4.3-integrated-4fc39f31-v1-requal-6a1c18309430-requal-12aa390190b3",
+  "campaign_id": "hyperfide-task-4.3-integrated-4fc39f31-v1-requal-6a1c18309430-requal-12aa390190b3-requal-6a91b0130b1d-requal-ff4632c9bc89-requal-a80cd7edbb1c",
   "registered_variant": "task:4.3",
   "scope": "task-component",
   "case_ids": [
@@ -54,7 +54,7 @@
   "inputs": [
     {
       "path": "cg",
-      "sha256": "08127e8ff517a8f67819f0538a592c2f5a362d1131092cab83a340860332f87e",
+      "sha256": "bcc8a52ffa7bf8c4eac06c8b728834531d1b9e97726e0bd56c1b2edcbc3a0bbe",
       "size": 69285024
     },
     {
@@ -69,13 +69,13 @@
     },
     {
       "path": "services/hyperfide/dist/hierarchy/packets.js",
-      "sha256": "fd5f75b0a2b68ca45a9b961757793836a385522b7a46ba6928e241c8fffdbc08",
-      "size": 54946
+      "sha256": "22be2bacb3d61fa469ba8ae814c5e9c8d47960d8c38ec524dca6cc7855deef06",
+      "size": 54813
     },
     {
       "path": "services/hyperfide/dist/identity/enrollment.js",
-      "sha256": "9abeaa4969356c069cc2cc2eb93c2e2e34bd832a7ef85697eb3ac14347aecadf",
-      "size": 44952
+      "sha256": "19d6bb9bdaaf2f7bc921b1982e2c9458c51b5c7c471f1be120c540d8ab92cc77",
+      "size": 45109
     },
     {
       "path": "services/hyperfide/dist/storage/dispositions.js",

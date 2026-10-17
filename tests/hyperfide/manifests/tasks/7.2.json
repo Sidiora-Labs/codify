@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "campaign_id": "hyperfide-task-7.2-authenticated-graph-v4-requal-12aa390190b3",
+  "campaign_id": "hyperfide-task-7.2-authenticated-graph-v4-requal-12aa390190b3-requal-6a91b0130b1d-requal-ff4632c9bc89-requal-a80cd7edbb1c",
   "registered_variant": "task:7.2",
   "scope": "task-component",
   "case_ids": [
@@ -8,6 +8,7 @@
     "V-022"
   ],
   "expected_assertion_ids": [
+    "graph.ingestion.retry-yields-primary-capacity",
     "graph.ingestion.real-copy-describe",
     "graph.ingestion.persist-build",
     "graph.ingestion.replay-build",
@@ -46,7 +47,7 @@
   "inputs": [
     {
       "path": "cg",
-      "sha256": "08127e8ff517a8f67819f0538a592c2f5a362d1131092cab83a340860332f87e",
+      "sha256": "bcc8a52ffa7bf8c4eac06c8b728834531d1b9e97726e0bd56c1b2edcbc3a0bbe",
       "size": 69285024
     },
     {
@@ -291,13 +292,13 @@
     },
     {
       "path": "services/hyperfide/dist/identity/enrollment.js",
-      "sha256": "9abeaa4969356c069cc2cc2eb93c2e2e34bd832a7ef85697eb3ac14347aecadf",
-      "size": 44952
+      "sha256": "19d6bb9bdaaf2f7bc921b1982e2c9458c51b5c7c471f1be120c540d8ab92cc77",
+      "size": 45109
     },
     {
       "path": "services/hyperfide/dist/identity/enrollment.js.map",
-      "sha256": "d9cd049195ad20693bba1ec3a5643115d250ad05738859475e134113c2622ecc",
-      "size": 40781
+      "sha256": "9fd0b32676af66b6363df95dca7256046f95bb6df7bd3fbb0857086055b077d7",
+      "size": 40852
     },
     {
       "path": "services/hyperfide/dist/identity/native_auth.d.ts",
@@ -411,13 +412,13 @@
     },
     {
       "path": "services/hyperfide/dist/storage/transactions.js",
-      "sha256": "d4cbdeab9a6d8077f556e22070405dfc44086ae9353bd91abf95f577a955aff3",
-      "size": 12575
+      "sha256": "f8eaeed2010d6e2296a20e4996f1f36986f3fadad185bd3f00ac28dbc75b9e18",
+      "size": 13209
     },
     {
       "path": "services/hyperfide/dist/storage/transactions.js.map",
-      "sha256": "f787a336cc279432b5f14630a3e1a0bf37c816f712cb2e526f07fe9af48d851e",
-      "size": 11108
+      "sha256": "caa013988935fa1f26cd16cee8841cd7556a3a5fef6baa0b652a75c7efcb1ae1",
+      "size": 11610
     },
     {
       "path": "services/hyperfide/dist/transport/http.d.ts",
@@ -531,8 +532,8 @@
     },
     {
       "path": "services/hyperfide/src/identity/enrollment.ts",
-      "sha256": "250a4803207e6737f979453bb12da5b56cba70a62b89d0c1d58dd87bf00937b2",
-      "size": 43464
+      "sha256": "19ad53360ebcc6c62c9a53b80859fa09dadbda8879a609f6222a0588c778e8ef",
+      "size": 43604
     },
     {
       "path": "services/hyperfide/src/identity/native_auth.ts",
@@ -571,8 +572,8 @@
     },
     {
       "path": "services/hyperfide/src/storage/transactions.ts",
-      "sha256": "fb138c8436eee05d43548db204d385efc93e071b82f3e8f567e9abf825303b7b",
-      "size": 10980
+      "sha256": "1b2b969b2f0fccc4cb1490dbb74c876ca53653e7bf3104ff432d892f622cad21",
+      "size": 11470
     },
     {
       "path": "services/hyperfide/src/transport/http.ts",
@@ -601,8 +602,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/7_2.py",
-      "sha256": "8639772b8f7ba54c15cc93ce413bbd876e0e4e1e13cd1a2e75b7acf88478933b",
-      "size": 50122
+      "sha256": "ed7673a05156bfc24b127484932078c6390cd02257bdc35bf9f7d1dc2da4cdbf",
+      "size": 51941
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
@@ -621,8 +622,8 @@
     },
     {
       "path": "tests/hyperfide/registrations/7.2.json",
-      "sha256": "544fd4712c35d13223074a2871601e946f17553f2a19a6c4d53194a85a573a2f",
-      "size": 2883
+      "sha256": "2a2d5563a8f56f618f1bb340b95f207c3cc5c30a24933df63e3404cc3a43bc8a",
+      "size": 2936
     },
     {
       "path": "tests/hyperfide/support/identity_fixture.py",

@@ -1,9 +1,13 @@
 {
   "task": "11.3",
-  "commit": "12aa390190b3d3e360e079254378a381103fc236",
-  "requalified_on": "12aa390190b3d3e360e079254378a381103fc236",
+  "commit": "ff4632c9bc896057147975b600323af8f8b21f89",
+  "requalified_on": "ff4632c9bc896057147975b600323af8f8b21f89",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-036 --manifest tests/hyperfide/manifests/tasks/11.3.json && python3 tests/hyperfide/qualify.py --case V-038 --manifest tests/hyperfide/manifests/tasks/11.3.json && python3 tests/hyperfide/qualify.py --case V-039 --manifest tests/hyperfide/manifests/tasks/11.3.json",
   "exit_code": 0,
-  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"60f1ae14-5787-4ce8-bd55-a0c292bc7dcb\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/11.3/campaigns/1dde9e1bd588c1e37df9b8e4108d359e8a0def4db4ba9f403439ac3bcb4c00db\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"d805ff33-6c49-4725-83bf-b7e733b78785\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/11.3/campaigns/1dde9e1bd588c1e37df9b8e4108d359e8a0def4db4ba9f403439ac3bcb4c00db\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"c70a6bc3-b44d-44f7-97a5-c930abe0fe12\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/11.3/campaigns/1dde9e1bd588c1e37df9b8e4108d359e8a0def4db4ba9f403439ac3bcb4c00db\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
-  "ran_at": "2026-10-17T14:15:40.172Z"
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"b8bbd9e3-23f9-4870-82d7-220081943d03\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/11.3/campaigns/236e942b33012b3ef2fd86eb3b0a07f7e563848b4c4c441753b39514169d6454\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"33d7a68d-282c-4d88-a64e-93b9bad8f5d3\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/11.3/campaigns/236e942b33012b3ef2fd86eb3b0a07f7e563848b4c4c441753b39514169d6454\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"00735b14-bee6-4dea-b39f-d96c7387c3f1\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/11.3/campaigns/236e942b33012b3ef2fd86eb3b0a07f7e563848b4c4c441753b39514169d6454\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T18:59:41.889544+00:00",
+  "environment": {
+    "HF_TEST_NPM": "/tmp/hf-requal-11-3-bin/npm"
+  },
+  "environment_note": "HF_TEST_NPM is a temporary symlink to /root/.local/share/mise/installs/node/24.22.0/lib/node_modules/npm/bin/npm-cli.js; bypasses mise Bash wrapper. Two prior V-036 attempts failed npm fixture setup; final exact three-case chain passed."
 }
