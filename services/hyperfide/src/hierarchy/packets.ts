@@ -103,7 +103,7 @@ async function preparationManifest(tx:QuerySession,organisationId:string,profile
  const manifest=manifestMetadata(row.manifest),profile=validateProfile(manifest.profile);
  const clock=await tx.query('SELECT clock_timestamp() AS now');
  if(Date.parse(profile.policy.expires_at)<=new Date(clock.rows[0]!.now).getTime())return refuse('ENVIRONMENT_PROFILE_EXPIRED','Preparation profile expired before planning');
- if(manifest.schema_version!==1||!Array.isArray(manifest.files)||!Array.isArray(manifest.directories)||!object(manifest.scan)||manifest.digest!==row.content_digest)return refuse('ENVIRONMENT_PROFILE_INVALID','Stored preparation manifest identity is invalid');
+ if(manifest.digest!==row.content_digest)return refuse('ENVIRONMENT_PROFILE_INVALID','Stored preparation manifest identity is invalid');
  const {digest:manifestDigest,...body}=manifest;
  if(hash(body)!==manifestDigest)return refuse('ENVIRONMENT_PROFILE_INVALID','Stored preparation manifest bytes do not match its identity');
  return {preparation_digest:digest(row.content_digest),preparation_manifest:freeze(manifest),declared_profile:profile};
