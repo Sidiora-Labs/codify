@@ -12,7 +12,8 @@
     "graph.publish.describe",
     "graph.publish.commit",
     "graph.publish.inspect",
-    "graph.publish.snapshot"
+    "graph.publish.snapshot",
+    "graph.publish.debt"
   ],
   "requires": [
     "4.2",

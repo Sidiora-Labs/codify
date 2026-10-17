@@ -33,7 +33,8 @@
     "graph.publication.reject-wrong-source-snapshot",
     "graph.publication.reject-overlay-relabel",
     "graph.publication.concurrent-cas",
-    "graph.publication.reject-unavailable-history-and-replay"
+    "graph.publication.reject-unavailable-history-and-replay",
+    "graph.publication.failed-build-exposes-debt"
   ],
   "argv": [
     "python3",
