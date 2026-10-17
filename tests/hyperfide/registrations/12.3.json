@@ -1,0 +1,77 @@
+{
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/12_3.py"
+  ],
+  "assertion_ids": [
+    "process_tree.root-fixture",
+    "process_tree.unknown-field-refused",
+    "process_tree.identity-mismatch-refused",
+    "process_tree.stale-slot-owner-refused",
+    "process_tree.idle-alive-not-progress",
+    "process_tree.ipc-absent-distinct-from-liveness",
+    "process_tree.reachability-assurance-unobserved",
+    "process_tree.ipc-health-observed",
+    "process_tree.noop-output-not-progress",
+    "process_tree.useful-progress-advanced",
+    "process_tree.repeated-progress-not-advanced",
+    "process_tree.waiting-and-errors-distinct",
+    "process_tree.invalid-progress-not-counted",
+    "process_tree.stalled-distinct-from-idle",
+    "process_tree.descendants-tracked",
+    "process_tree.setsid-orphan-accounted",
+    "process_tree.foreign-spawn-accounted",
+    "process_tree.native-child-flagged",
+    "process_tree.child-usage-accounted",
+    "process_tree.foreign-outside-job-limits-flagged",
+    "process_tree.cgroup-limits-reported",
+    "process_tree.memory-saturation-reported",
+    "process_tree.killed-pid-reuse-detected",
+    "process_tree.stale-identity-exited",
+    "process_tree.nproc-saturation-reported",
+    "process_tree.agent-pid-reuse-not-adopted",
+    "process_tree.tree-cancellation-complete",
+    "process_tree.exited-tree-quiescent",
+    "process_tree.inventory-overflow-refused"
+  ],
+  "cases": [
+    "V-007",
+    "V-044"
+  ],
+  "fixtures": [
+    "build/hyperfide-native"
+  ],
+  "required_env": [],
+  "resources": [],
+  "schema_version": 1,
+  "scope": "task-component",
+  "source_files": [
+    "Makefile",
+    "build/hyperfide-native",
+    "scripts/hyperfide-native-components.py",
+    "src/hyperfide/component_main.c",
+    "src/hyperfide/components.h",
+    "src/hyperfide/components/12.1.kvx",
+    "src/hyperfide/components/12.2.kvx",
+    "src/hyperfide/components/12.3.kvx",
+    "src/hyperfide/components/schema.kvx",
+    "src/hyperfide/job.c",
+    "src/hyperfide/launch.c",
+    "src/hyperfide/process_tree.c",
+    "src/hyperfide/supervisor.c",
+    "src/hyperfide/supervisor.h",
+    "src/hyperfide/supervisor_daemon.c",
+    "src/hyperfide/transport.c",
+    "src/hyperfide/transport.h",
+    "tests/hyperfide/cases/tasks/12_3.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py"
+  ],
+  "source_roots": [
+    "src/hyperfide"
+  ],
+  "task": "12.3",
+  "timeout_seconds": 300,
+  "variant": "task:12.3"
+}
