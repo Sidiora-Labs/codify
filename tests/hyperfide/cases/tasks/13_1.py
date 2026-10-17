@@ -180,6 +180,223 @@ def main():
         claude={"connector":"claude","request_id":"user-1","native_session_id":"session-exact","operation":"input","text":"bounded instruction"}
         check("connectors.claude-user-frame",lambda:expect(success("connector.encode",claude,env)["frame"]["message"]["content"]=="bounded instruction","Claude frame lost input"))
         check("connectors.claude-steer-unsupported",lambda:refuse("connector.encode",dict(claude,operation="steer",turn_id="turn-1"),env))
+        # Alias resolution from the CLI's own configuration, native observation, child refusal and signed server receipts.
+        def private_dir(label):
+            d=base/label;d.mkdir(mode=0o700,exist_ok=True);return d
+        def dirs_for(label):
+            return [private_dir(label+x)for x in ["-workspace","-home","-tmp"]]
+        codex_ws,codex_home,codex_tmp=dirs_for("codex-alias")
+        (codex_home/"config.toml").write_text('model = "fixture-model"\nmodel_provider = "openai"\n')
+        (codex_home/"fixture-frontier.config.toml").write_text('model = "fixture-model"\n')
+        def codex_profile(**changes):
+            p=configure("codex");p["configured_provider_id"]="openai";p.update(changes);config.write_text(json.dumps(p));return p
+        def codex_launch_request(p,home=codex_home):
+            return {"connector":"codex","expected_version":p["binary"]["version"],"alias":p["configured_model_alias"],"auth_profile":p["profile_id"],"workspace":str(codex_ws),"home":str(home),"temp":str(codex_tmp),"permission_mode":"workspace-write"}
+        def resolve_codex():
+            codex_profile()
+            r=success("connector.resolve",{"connector":"codex","alias":"fixture-frontier","home":str(codex_home)},env)["resolution"]
+            expect(r["source"]=="cli-config"and r["resolved_model_id"]=="fixture-model"and r["resolved_provider_id"]=="openai"and r["config_path"]==str(codex_home/"fixture-frontier.config.toml"),"Codex profile layer not resolved from actual CLI configuration")
+            expect(r["config_digest"]==digest((codex_home/"fixture-frontier.config.toml").read_bytes()),"resolution lost configuration provenance")
+        check("connectors.alias-resolution.codex",resolve_codex)
+        def unresolved():
+            codex_profile()
+            refuse("connector.resolve",{"connector":"codex","alias":"undeclared-alias","home":str(codex_home)},env)
+            bad=private_dir("codex-bad-home");(bad/"fixture-frontier.config.toml").write_text('model = "escaped\\"model"\n')
+            refuse("connector.resolve",{"connector":"codex","alias":"fixture-frontier","home":str(bad)},env)
+            refuse("connector.launch",codex_launch_request(codex_profile(),bad),env)
+            (bad/"fixture-frontier.config.toml").write_text('model = "fixture-model"\n');os.chmod(bad/"fixture-frontier.config.toml",0o666)
+            refuse("connector.resolve",{"connector":"codex","alias":"fixture-frontier","home":str(bad)},env)
+        check("connectors.alias-unresolved-refusal",unresolved)
+        def drift():
+            drifted=private_dir("codex-drift-home");(drifted/"fixture-frontier.config.toml").write_text('model = "another-model"\n')
+            p=codex_profile();ok=success("connector.launch",codex_launch_request(p),env)
+            expect(ok["alias_resolution"]["source"]=="cli-config"and ok["alias_resolution"]["resolved_model_id"]=="fixture-model","launch omitted alias provenance")
+            refuse("connector.launch",codex_launch_request(p,drifted),env)
+            plain=success("connector.launch",codex_launch_request(p,private_dir("codex-unconfigured-home")),env)
+            expect(plain["alias_resolution"]["source"]=="auth-profile"and plain["alias_resolution"]["config_path"]is None,"absent CLI alias invented a configuration source")
+        check("connectors.alias-drift-refusal",drift)
+        observed={}
+        def codex_observed():
+            p=codex_profile();native_env=os.environ.copy();native_env["CODEX_HOME"]=str(codex_home)
+            argv=success("connector.launch",codex_launch_request(p),env)["argv"]
+            proc=subprocess.Popen(argv,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,env=native_env,start_new_session=True,cwd=codex_ws)
+            pending=b""
+            def rpc(frame,reply=True):
+                nonlocal pending
+                proc.stdin.write(json.dumps(frame).encode()+b"\n");proc.stdin.flush()
+                if not reply:return None
+                selector=selectors.DefaultSelector();selector.register(proc.stdout,selectors.EVENT_READ);deadline=time.monotonic()+15
+                try:
+                    while time.monotonic()<deadline:
+                        if b"\n"not in pending:
+                            if not selector.select(.25):continue
+                            data=os.read(proc.stdout.fileno(),65536);expect(data,"actual native transport closed");pending+=data
+                        while b"\n"in pending:
+                            line,pending=pending.split(b"\n",1)
+                            if line.strip()and json.loads(line).get("id")==frame["id"]:
+                                row=json.loads(line);expect("error"not in row,"actual protocol rejected: "+json.dumps(row.get("error",{})));return row
+                    raise AssertionError("actual protocol timed out")
+                finally:selector.close()
+            try:
+                steps=success("connector.initialize",{"connector":"codex","request_id":"alias-init","workspace":str(codex_ws)},env)["steps"]
+                for step in steps[:2]:rpc(step["frame"],step["await_response"])
+                own=rpc({"id":"cli-own-config","method":"thread/start","params":{"cwd":str(codex_ws),"approvalPolicy":"never","sandbox":"read-only"}})["result"]
+                expect(own["model"]=="fixture-model"and own["modelProvider"]=="openai","installed CLI read its configuration differently from the resolver")
+                row=rpc(steps[2]["frame"])
+                o=success("connector.observe",{"connector":"codex","alias":"fixture-frontier","home":str(codex_home),"frame":json.dumps(row)},env)
+                expect(o["native_session_id"]==row["result"]["thread"]["id"]and o["observed_model_id"]=="fixture-model"and o["observed_provider_id"]=="openai"and o["matches_configuration"]is True and o["live_qualified"]is False,"native-reported model/provider/identity not recorded")
+                expect(o["observation_digest"]==digest(json.dumps(row).encode()),"observation lost exact frame provenance")
+                forged=copy.deepcopy(row);forged["result"]["model"]="substituted-model"
+                expect(success("connector.observe",{"connector":"codex","alias":"fixture-frontier","home":str(codex_home),"frame":json.dumps(forged)},env)["matches_configuration"]is False,"substituted model accepted as configured")
+                refuse("connector.observe",{"connector":"codex","alias":"fixture-frontier","home":str(codex_home),"frame":json.dumps({"id":"x","result":{"model":"fixture-model"}})},env)
+                observed["codex"]=o
+            finally:
+                if proc.poll()is None:os.killpg(proc.pid,signal.SIGTERM)
+                try:proc.communicate(timeout=5)
+                except subprocess.TimeoutExpired:os.killpg(proc.pid,signal.SIGKILL);proc.communicate(timeout=5)
+        check("connectors.actual-codex-alias-observed",codex_observed)
+        def codex_children():
+            codex_profile();v=success("connector.children",{"connector":"codex","home":str(codex_home)},env)
+            expect(v["child_registration"]=="REFUSED"and v["features"]=={"multi_agent":False,"multi_agent_v2":False,"multi_agent_v2_dynamic_tools":False}and v["evidence_digest"].startswith("sha256:"),"pinned Codex did not prove delegation disabled")
+            observed["codex-children"]=v
+        check("connectors.child-registration-refused.codex",codex_children)
+        claude_ws,claude_home,claude_tmp=dirs_for("claude-alias")
+        (claude_home/".claude").mkdir(mode=0o700,exist_ok=True)
+        (claude_home/".claude"/"settings.json").write_text(json.dumps({"env":{"ANTHROPIC_DEFAULT_OPUS_MODEL":"fixture-claude-model"}}))
+        def claude_profile(**changes):
+            p=configure("claude");p.update({"configured_model_alias":"opus","requested_model_id":"fixture-claude-model"});p.update(changes);config.write_text(json.dumps(p));return p
+        def claude_observed():
+            p=claude_profile()
+            r=success("connector.resolve",{"connector":"claude","alias":"opus","home":str(claude_home)},env)["resolution"]
+            expect(r["source"]=="cli-config"and r["resolved_model_id"]=="fixture-claude-model"and r["resolved_provider_id"]is None,"Claude alias not resolved from settings or provider invented")
+            plan=success("connector.launch",{"connector":"claude","expected_version":p["binary"]["version"],"alias":"opus","auth_profile":p["profile_id"],"workspace":str(claude_ws),"home":str(claude_home),"temp":str(claude_tmp),"permission_mode":"workspace-write"},env)
+            args=plan["argv"];expect(args[args.index("--model")+1]=="fixture-claude-model"and args[args.index("--disallowedTools")+1]=="Agent,Task,Workflow","launch did not pin resolved model and delegation refusal")
+            frame=success("connector.encode",{"connector":"claude","request_id":"init-1","native_session_id":"pending-native-init","operation":"input","text":"reply with nothing"},env)["frame"]
+            native_env={k:v for k,v in os.environ.items()if not k.startswith(("ANTHROPIC_","CLAUDE"))};native_env.update(HOME=str(claude_home),TMPDIR=str(claude_tmp),CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1")
+            proc=subprocess.Popen(args,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,env=native_env,start_new_session=True,cwd=claude_ws)
+            try:
+                proc.stdin.write((json.dumps(frame)+"\n").encode());proc.stdin.flush()
+                selector=selectors.DefaultSelector();selector.register(proc.stdout,selectors.EVENT_READ);deadline=time.monotonic()+30;init=None;pending=b""
+                try:
+                    while init is None and time.monotonic()<deadline:
+                        if not selector.select(.25):continue
+                        data=os.read(proc.stdout.fileno(),65536)
+                        if not data:break
+                        pending+=data
+                        while b"\n"in pending and init is None:
+                            line,pending=pending.split(b"\n",1)
+                            if line.strip().startswith(b"{")and json.loads(line).get("type")=="system"and json.loads(line).get("subtype")=="init":init=line.decode()
+                finally:selector.close()
+                expect(init is not None,"actual Claude Code session emitted no native identity")
+                o=success("connector.observe",{"connector":"claude","alias":"opus","home":str(claude_home),"frame":init},env)
+                row=json.loads(init)
+                expect(o["native_session_id"]==row["session_id"]and o["observed_model_id"]=="fixture-claude-model"and o["observed_provider_id"]is None and o["matches_configuration"]is True,"Claude native identity/model not recorded from actual init")
+                expect(o["child_registration"]=="REFUSED"and not {"Agent","Task","Workflow"}&set(row["tools"]),"pinned Claude Code still offers native delegation")
+                escaped=dict(row,tools=row["tools"]+["Workflow"])
+                expect(success("connector.observe",{"connector":"claude","alias":"opus","home":str(claude_home),"frame":json.dumps(escaped)},env)["child_registration"]=="AVAILABLE","delegation tool presence not detected")
+                refuse("connector.observe",{"connector":"claude","alias":"opus","home":str(claude_home),"frame":json.dumps(dict(row,claude_code_version="0.0.0"))},env)
+                observed["claude"]=o
+            finally:
+                if proc.poll()is None:os.killpg(proc.pid,signal.SIGTERM)
+                try:proc.communicate(timeout=5)
+                except subprocess.TimeoutExpired:os.killpg(proc.pid,signal.SIGKILL);proc.communicate(timeout=5)
+        check("connectors.actual-claude-alias-observed",claude_observed)
+        # Server-side capability qualification (agents/qualification.ts) consumed by the native plan.
+        receipts={}
+        def qualification_registry():
+            expect("codex"in observed and "codex-children"in observed,"native observations unavailable")
+            p=codex_profile();o=observed["codex"]
+            cli=subprocess.run([p["binary"]["path"],"--version"],text=True,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=15).stdout
+            resolution=success("connector.resolve",{"connector":"codex","alias":"fixture-frontier","home":str(codex_home)},env)["resolution"]
+            # Inference turns need provider credentials this sandbox does not hold: these turn-level probe digests are
+            # fixture evidence for the registry derivation only, never a live qualification claim.
+            fixture=lambda label:digest(("fixture-turn-evidence:"+label).encode())
+            probe=lambda result,evidence,restored=False:{"result":result,"evidence_digest":evidence,"context_restored":restored}
+            obs={"profile_id":p["profile_id"],"cli_version_output":cli,"binary_digest":p["binary"]["digest"],
+              "resolution":{"configured_model_alias":"fixture-frontier","resolved_model_id":resolution["resolved_model_id"],"resolved_provider_id":resolution["resolved_provider_id"],"source":resolution["source"],"config_digest":resolution["config_digest"]},
+              "observation":{"native_session_id":o["native_session_id"],"observed_model_id":o["observed_model_id"],"observed_provider_id":o["observed_provider_id"],"observation_digest":o["observation_digest"]},
+              "probes":{"launch":probe("ACCEPTED",o["observation_digest"]),"input":probe("ACCEPTED",fixture("input")),"output":probe("ACCEPTED",fixture("output")),"steer":probe("ACCEPTED",fixture("steer")),
+                "cancel":probe("ACCEPTED",fixture("cancel")),"child_registration":probe("REFUSED",observed["codex-children"]["evidence_digest"]),"resume":probe("NOT_OFFERED",fixture("resume"))}}
+            resumable=copy.deepcopy(p);resumable["capabilities"]["explicit_resume"]=True
+            resume_obs=copy.deepcopy(obs);resume_obs["probes"]["resume"]=probe("ACCEPTED",fixture("resume-restored"),True)
+            forged=copy.deepcopy(obs);forged["state"]="QUALIFIED"
+            forged_probe=copy.deepcopy(obs);forged_probe["probes"]["launch"]["qualified"]=True
+            escaped=copy.deepcopy(obs);escaped["probes"]["child_registration"]=probe("ACCEPTED",fixture("child"))
+            substituted=copy.deepcopy(obs);substituted["observation"]["observed_model_id"]="substituted-model"
+            stale_version=copy.deepcopy(obs);stale_version["cli_version_output"]="codex-cli 0.0.0\n"
+            cases={"good":{"snapshot":p,"observation":obs},"resume":{"snapshot":resumable,"observation":resume_obs},"forged_state":{"snapshot":p,"observation":forged},
+              "forged_probe":{"snapshot":p,"observation":forged_probe},"child_escaped":{"snapshot":p,"observation":escaped},"substituted_model":{"snapshot":p,"observation":substituted},
+              "version_drift":{"snapshot":p,"observation":stale_version},"unauthenticated":{"snapshot":p,"observation":obs,"auth":False},"worker_role":{"snapshot":p,"observation":obs,"role":"WORKER"},
+              "expired":{"snapshot":p,"observation":obs,"now":int(time.time())-7200,"ttl":3600}}
+            script=r"""
+import fs from 'node:fs';import {generateKeyPairSync} from 'node:crypto';
+import {createConnectorQualificationRegistry,rawPublicKey} from './services/hyperfide/dist/agents/qualification.js';
+const cases=JSON.parse(fs.readFileSync(0,'utf8')),{privateKey}=generateKeyPairSync('ed25519'),out={public_key:rawPublicKey(privateKey),results:{}};
+for(const [name,c] of Object.entries(cases)){
+ const options={signingKey:privateKey,ttlSeconds:c.ttl??3600,resolve:id=>{if(id!==c.snapshot.profile_id)throw new Error('unknown profile');return c.snapshot;},
+  authenticate:async()=>c.auth===false?{native_authentication:'AUTH_BLOCKED',runtime_version_verified:true}:{native_authentication:'AUTHENTICATED',runtime_version_verified:true,live_qualified:false}};
+ if(c.now!==undefined){let calls=0;options.now=()=>calls++?Math.floor(Date.now()/1000):c.now;}
+ const registry=createConnectorQualificationRegistry(options);
+ try{const r=await registry.record({principal:{role:c.role??'RUNNER'}},c.observation);out.results[name]={ok:true,state:r.state,reasons:r.reasons,capabilities:r.payload.capabilities,receipt:r.receipt,receipt_digest:r.receipt_digest,view:registry.qualification(c.snapshot.profile_id)};}
+ catch(e){out.results[name]={ok:false,code:e.code??'ERROR'};}
+}
+console.log(JSON.stringify(out));
+"""
+            r=subprocess.run(["node","--input-type=module","-e",script],input=json.dumps(cases),text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,cwd=ROOT,timeout=60)
+            expect(r.returncode==0,"qualification registry failed: "+r.stderr[-500:])
+            v=json.loads(r.stdout);res=v["results"];receipts.update(public_key=v["public_key"],results=res,profile=p,resumable=resumable)
+            good=res["good"];expect(good["ok"]and good["state"]=="QUALIFIED"and good["receipt"]is not None and good["view"]=={"state":"QUALIFIED","live_qualified":True,"receipt_digest":good["receipt_digest"]},"observed capabilities not qualified server-side")
+            expect(good["capabilities"]=={"launch":"QUALIFIED","input":"QUALIFIED","output":"QUALIFIED","steer":"QUALIFIED","cancel":"QUALIFIED","child_registration":"REFUSED","resume":"UNSUPPORTED"},"capability outcomes not derived per observation")
+            expect(good["receipt_digest"]==digest(good["receipt"]["payload"].encode()),"receipt digest not bound to signed payload")
+            expect(res["resume"]["ok"]and res["resume"]["capabilities"]["resume"]=="QUALIFIED","observed restored context not qualified for explicit-resume profile")
+            for name,code in [("forged_state","INVALID_REQUEST"),("forged_probe","INVALID_REQUEST"),("child_escaped","CONNECTOR_DELEGATION_ESCAPED"),("substituted_model","CONNECTOR_MODEL_MISMATCH"),("version_drift","NATIVE_VERSION_DRIFT"),("worker_role","CONNECTOR_QUALIFICATION_SCOPE")]:
+                expect(res[name]=={"ok":False,"code":code},"registry accepted "+name+": "+json.dumps(res[name]))
+            expect(res["unauthenticated"]["state"]=="UNQUALIFIED"and res["unauthenticated"]["receipt"]is None and "AUTH_MODE_NOT_AUTHENTICATED"in res["unauthenticated"]["reasons"],"14.3 auth-mode probe bypassed")
+            expect(res["expired"]["view"]["state"]=="STALE","expired qualification remained current")
+        check("connectors.qualification-registry-derivation",qualification_registry)
+        def receipt_env(name,payload=None,key=None):
+            res=receipts["results"][name];receipt=dict(res["receipt"])
+            if payload is not None:receipt["payload"]=payload
+            kf=base/"qualification-public.key";kf.write_text((key or receipts["public_key"])+"\n");os.chmod(kf,0o600)
+            rf=base/"qualification-receipt.json";rf.write_text(json.dumps(receipt));os.chmod(rf,0o600)
+            return dict(env,HF_CONNECTOR_QUALIFICATION_PUBLIC_KEY_FILE=str(kf),HF_CONNECTOR_QUALIFICATION_RECEIPT_FILE=str(rf))
+        def receipt_dispatch():
+            expect(receipts,"server receipts unavailable")
+            p=codex_profile();good=receipts["results"]["good"];request=codex_launch_request(p)
+            plan=success("connector.launch",request,receipt_env("good"))
+            expect(plan["dispatch_eligible"]is True and plan["live_qualified"]is True and plan["qualification_receipt_digest"]==good["receipt_digest"]and plan["observed_model_id"]=="fixture-model"and plan["observed_provider_id"]=="openai","verified server receipt did not make the plan dispatch-eligible")
+            expect(not success("connector.launch",request,env)["dispatch_eligible"],"plan eligible without receipt")
+            payload=good["receipt"]["payload"].replace('"issued_at":','"issued_at":1',1)
+            expect(not success("connector.launch",request,receipt_env("good",payload=payload))["dispatch_eligible"],"tampered receipt payload accepted")
+            other=("0"if receipts["public_key"][0]!="0"else"1")+receipts["public_key"][1:]
+            expect(not success("connector.launch",request,receipt_env("good",key=other))["dispatch_eligible"],"receipt accepted under another key")
+            expect(not success("connector.launch",request,receipt_env("expired"))["dispatch_eligible"],"expired receipt accepted")
+            codex_profile(profile_digest="sha256:"+"c"*64)
+            expect(not success("connector.launch",request,receipt_env("good"))["dispatch_eligible"],"receipt crossed to a drifted profile")
+            codex_profile()
+        check("connectors.qualification-receipt-dispatch",receipt_dispatch)
+        def receipt_resume():
+            expect(receipts,"server receipts unavailable")
+            resumable=receipts["resumable"];config.write_text(json.dumps(resumable))
+            frame=dict(connector="codex",request_id="resume-1",native_session_id="thread-exact",operation="resume")
+            refuse("connector.encode",frame,receipt_env("good"))
+            refuse("connector.launch",dict(codex_launch_request(resumable),native_session_id="thread-exact"),receipt_env("good"))
+            renv=receipt_env("resume")
+            expect(success("connector.encode",frame,renv)["frame"]["method"]=="thread/resume","qualified native resume refused")
+            plan=success("connector.launch",dict(codex_launch_request(resumable),native_session_id="thread-exact"),renv)
+            expect(plan["dispatch_eligible"]and plan["native_session_id"]=="thread-exact","qualified resume plan not dispatch-eligible")
+            boot=Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+            recover={"connector":"codex","native_session_id":"thread-exact","source_manifest_digest":"sha256:"+"a"*64,"configuration_digest":"sha256:"+"b"*64,"auth_state":"VALID","transport_state":"LOST",
+              "process_state":"EXITED_VERIFIED","process_boot_id":boot,"observed_boot_id":boot,"process_start_time":"1","observed_process_start_time":"1","protocol_delivery":"ACKNOWLEDGED",
+              "saved_native_session_id":"thread-exact","checkpoint_reference":"sha256:"+"d"*64,"checkpoint_source_manifest_digest":"sha256:"+"a"*64,"checkpoint_configuration_digest":"sha256:"+"b"*64}
+            def recover_with(e):
+                r=subprocess.run([ROOT/"build/hyperfide-native","--component","13.3","--action","connector.recover"],input=json.dumps(recover),text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=e,cwd=ROOT,timeout=20)
+                row=json.loads(r.stdout);expect(r.returncode==0 and row["ok"],"recovery refused");return row["result"]
+            q=recover_with(renv);expect(q["decision"]=="RESUME_EXACT_SAVED"and q["native_qualification_digest"]==receipts["results"]["resume"]["receipt_digest"]and q["context_restored"]is False,"qualified receipt not consumed by 13.3 recovery")
+            expect(recover_with(receipt_env("good"))["decision"]=="BLOCKED_CONTEXT","resume-unsupported receipt simulated preserved context")
+            expect(recover_with(env)["decision"]=="BLOCKED_CONTEXT","offline explicit_resume flag simulated preserved context")
+            codex_profile()
+        check("connectors.qualification-receipt-resume",receipt_resume)
     check("connectors.supervisory-host-probe-complete",actual_supervisory_host)
     absent=drain_owned_children()
     print(json.dumps({"type":"cleanup","resources":[],"complete":absent,"descendant_processes_observed_absent":absent}),flush=True)
