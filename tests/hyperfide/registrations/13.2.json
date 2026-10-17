@@ -40,7 +40,21 @@
     "sessions.unqualified-native-resume-refused",
     "sessions.exact-checkpoint-session-only",
     "sessions.source-tree-crossover-refused",
-    "sessions.restart-persists-lineage"
+    "sessions.resume-decision-persisted",
+    "sessions.resume-decision-replay",
+    "sessions.native-crossover-refused",
+    "sessions.resume-source-tree-refused",
+    "sessions.resume-unqualified-native-reuse-refused",
+    "sessions.resume-unnamed-predecessor-refused",
+    "sessions.resume-unresumable-decision-refused",
+    "sessions.resume-links-predecessor",
+    "sessions.resume-bind-replay",
+    "sessions.resume-lineage-immutable",
+    "sessions.resumed-predecessor-superseded",
+    "sessions.second-successor-refused",
+    "sessions.resume-lineage-not-retroactive",
+    "sessions.restart-persists-lineage",
+    "sessions.restart-persists-resume-lineage"
   ],
   "cases": [
     "V-042",
