@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "campaign_id": "hyperfide-task-4.3-integrated-4fc39f31-v1",
+  "campaign_id": "hyperfide-task-4.3-integrated-4fc39f31-v1-requal-6a1c18309430",
   "registered_variant": "task:4.3",
   "scope": "task-component",
   "case_ids": [
@@ -54,8 +54,8 @@
   "inputs": [
     {
       "path": "cg",
-      "sha256": "3c5bbd4de53f4462f0dd5c7111d82e216a07dd2621bd39fe4ed336958d1198c6",
-      "size": 69146080
+      "sha256": "56b805f522e23e0b61fe7a17e9fc8ca8e3fce19b6eeb6f2cc6015305cda54d32",
+      "size": 69200608
     },
     {
       "path": "services/hyperfide/components/4.3.json",
@@ -69,8 +69,8 @@
     },
     {
       "path": "services/hyperfide/dist/hierarchy/packets.js",
-      "sha256": "a010c462bf34c1c3b94a5100d5f247975e59c8db3cab37a41b9d2a965284b5cc",
-      "size": 47685
+      "sha256": "fd5f75b0a2b68ca45a9b961757793836a385522b7a46ba6928e241c8fffdbc08",
+      "size": 54946
     },
     {
       "path": "services/hyperfide/dist/identity/enrollment.js",
@@ -124,18 +124,18 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/3_1.py",
-      "sha256": "22b1a340de54a04dff4cc4624eb458f28efa54b28c9d881669331472b9801c36",
-      "size": 16972
+      "sha256": "16359a464606e238a5bcfe16fce54d096ed48ae5182c18499d2b0613c21b3d08",
+      "size": 35448
     },
     {
       "path": "tests/hyperfide/cases/tasks/3_2.py",
-      "sha256": "675fd19acd8e8b8a640bef9d5d3c02827b2fe7abb6569b598a493c3954f09b1e",
-      "size": 21727
+      "sha256": "f718d35df3c5c6fd7149cd27e756027fbf638577e3862db291c51fb30d2ff6d4",
+      "size": 35541
     },
     {
       "path": "tests/hyperfide/cases/tasks/4_3.py",
-      "sha256": "baf4b35077e7899602730066e934fe493ba6f0f0270ea009d2ddc77b77e43afc",
-      "size": 19655
+      "sha256": "749b7308fdcddd4398df9a21ee3a5264814a5cfaa2016b21774c898dc4c44aa3",
+      "size": 19106
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
