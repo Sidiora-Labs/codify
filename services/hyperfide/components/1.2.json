@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "id": "1.2",
+  "task": "1.2",
+  "roles": [
+    "control"
+  ],
+  "module": "policy/human_interface.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "human.submit",
+    "human.escalate",
+    "human.autonomous",
+    "human.status",
+    "human.describe",
+    "human.adopt",
+    "human.bootstrap",
+    "human.intent.read",
+    "human.intent.complete"
+  ],
+  "requires": [
+    "4.2",
+    "3.1",
+    "6.1",
+    "6.2"
+  ]
+}
