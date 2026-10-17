@@ -13,10 +13,12 @@ spec=importlib.util.spec_from_file_location('finding_scheduler_fixture',Path(__f
 check=c.check;expect=c.expect;uid=c.uid
 SOURCE='''[meta]
 slug = "fixture"
-[req.3.2]
+[req.5]
 ac_1 = "Ordinary scoped work receives complete accepted execution intent"
-[acceptance.packet-intent]
-req = "3.2.1"
+[acceptance.V-002]
+reqs = ["5.1"]
+[acceptance.V-007]
+reqs = ["5.1"]
 [req.18]
 ac_4 = "Issue closure requires the recorded resolution condition to pass on the intended revision"
 [acceptance.V-032]
@@ -24,8 +26,8 @@ reqs = ["18.4"]
 checks = ["finding-repaired"]
 [task.alpha.claim-a]
 wave = 1
-reqs = ["3.2.1"]
-acceptance_ids = ["packet-intent"]
+reqs = ["5.1"]
+acceptance_ids = ["V-002", "V-007"]
 requires = []
 touches = ["src/claim-a.ts"]
 [task.alpha.finding-origin]
@@ -36,17 +38,13 @@ requires = []
 touches = ["src/claim-a.ts"]
 [proof]
 rubric_digest = RUBRIC
-[proof.review.3.2.1]
+[proof.review.5.1]
 reviewers = REVIEWERS
 rubric_digest = RUBRIC
 [proof.check.finding-repaired]
 '''
 def accepted_intent(f,criteria):
-    # Trusted upstream acceptance fact: the base fixture's accepted document is
-    # an empty envelope, which the 2.x proof loader correctly refuses. Advance
-    # the run to an explicit accepted generation carrying exact task sections
-    # for the ordinary repair task and the historical origin task. This grants
-    # no compute, execution, custody or qualification authority.
+    f.spec_generation=scheduler.next_spec_generation(f)
     i=f.ids;executable=Path(subprocess.check_output(['node','-p','process.execPath'],text=True).strip()).resolve(strict=True)
     repair=f.sql('SELECT definition,criteria_digest FROM hyperfide.tasks WHERE id=$1',[i['task_a']])[0]
     prior=f.sql('SELECT policy FROM hyperfide.proof_registries WHERE task_id=$1',[i['task_a']])[0]['policy']
@@ -57,15 +55,15 @@ def accepted_intent(f,criteria):
     spec=uid();document={'schema_version':1,'revision_digest':c.sha(b'finding-repair-accepted-envelope'),'source_digest':c.sha(source.encode()),'repositories':[{'repository_id':i['repository'],'source_object_id':c.OID,'integration_ref':'refs/heads/main'}],'allowed_actions':[],'closure_policy':{'required_evidence':['finding-repaired'],'required_review_roles':[],'publication':'AFTER_QUALIFICATION'},'provenance':None,'parsed':parsed,'runtime_wave_offset':0}
     sections={item['name']:item for item in parsed['sections']}
     f.sql('INSERT INTO hyperfide.spec_revisions(organisation_id,project_id,id,source_digest,source_content,document,schema_version,revision_digest) VALUES($1,$2,$3,$4,$5,$6,1,$7)',[i['organisation'],i['project'],spec,c.sha(source.encode()),source,json.dumps(document),document['revision_digest']])
-    f.sql('INSERT INTO hyperfide.run_spec_revisions(organisation_id,run_id,spec_generation,spec_revision_id) VALUES($1,$2,2,$3)',[i['organisation'],i['run'],spec])
+    f.sql('INSERT INTO hyperfide.run_spec_revisions(organisation_id,run_id,spec_generation,spec_revision_id) VALUES($1,$2,$4,$3)',[i['organisation'],i['run'],spec,f.spec_generation])
     state=f.sql('SELECT state FROM hyperfide.runs WHERE id=$1',[i['run']])[0]['state']
-    f.sql("UPDATE hyperfide.runs SET spec_generation=2,spec_revision_id=$2,state='PENDING_VALIDATION',state_version=state_version+1 WHERE id=$1",[i['run'],spec])
+    f.sql("UPDATE hyperfide.runs SET spec_generation=$3,spec_revision_id=$2,state='PENDING_VALIDATION',state_version=state_version+1 WHERE id=$1",[i['run'],spec,f.spec_generation])
     claim=dict(repair['definition'],section=sections['task.alpha.claim-a']);f.definitions['a']=claim
-    f.sql('UPDATE hyperfide.tasks SET spec_generation=2,spec_revision_id=$2,definition=$3,state_version=state_version+1 WHERE id=$1',[i['task_a'],spec,json.dumps(claim)])
-    revalidated=dict(prior,spec_revision_id=spec,spec_generation='2')
-    c.insert(f,'proof_registries',c.scoped(f,task_id=i['task_a'],spec_generation='2',spec_revision_id=spec,criteria_digest=repair['criteria_digest'],registry_digest=scheduler.identity(revalidated),policy=revalidated))
+    f.sql('UPDATE hyperfide.tasks SET spec_generation=$4,spec_revision_id=$2,definition=$3,state_version=state_version+1 WHERE id=$1',[i['task_a'],spec,json.dumps(claim),f.spec_generation])
+    revalidated=dict(prior,spec_revision_id=spec,spec_generation=f.spec_generation)
+    c.insert(f,'proof_registries',c.scoped(f,task_id=i['task_a'],spec_generation=f.spec_generation,spec_revision_id=spec,criteria_digest=repair['criteria_digest'],registry_digest=scheduler.identity(revalidated),policy=revalidated))
     definition={'schema_version':1,'section':sections['task.alpha.finding-origin'],'feature_key':'alpha','declared_wave':1,'runtime_wave_offset':0,'declared_status':None,'history_only':True}
-    policy={'schema_version':1,'criteria_digest':criteria,'spec_revision_id':spec,'spec_generation':'2','repository_id':i['repository'],'source_object_id':c.OID,'rubric_digest':rubric,'checks':[check],'clauses':[{'id':'18.4','mode':'EXECUTABLE','acceptance_ids':['V-032'],'checks':['finding-repaired']}],'inputs':{name:c.sha(('fixture-'+name).encode()) for name in ('source','dependency','toolchain','configuration','graph','contract')},'contract_digests':[]}
+    policy={'schema_version':1,'criteria_digest':criteria,'spec_revision_id':spec,'spec_generation':f.spec_generation,'repository_id':i['repository'],'source_object_id':c.OID,'rubric_digest':rubric,'checks':[check],'clauses':[{'id':'18.4','mode':'EXECUTABLE','acceptance_ids':['V-032'],'checks':['finding-repaired']}],'inputs':{name:c.sha(('fixture-'+name).encode()) for name in ('source','dependency','toolchain','configuration','graph','contract')},'contract_digests':[]}
     return spec,definition,policy,state
 def setup(f):
     c.record_database('18.4',f.database,str(f.path))
@@ -81,8 +79,8 @@ def setup(f):
     x.update(repository=i['repository'],package=i['package'],manager=i['manager'],watcher=i['watcher']);f.x=x
     # Historical review input never grants compute; it shares the ordinary
     # repair task's exact criterion under its own accepted executable clause.
-    c.insert(f,'tasks',c.scoped(f,id=x['task'],task_key='alpha.finding-origin',feature_package_id=x['package'],spec_generation='2',spec_revision_id=spec,criteria_digest=criteria,definition=definition,wave=1))
-    c.insert(f,'proof_registries',c.scoped(f,task_id=x['task'],spec_generation='2',spec_revision_id=spec,criteria_digest=criteria,registry_digest=scheduler.identity(policy),policy=policy))
+    c.insert(f,'tasks',c.scoped(f,id=x['task'],task_key='alpha.finding-origin',feature_package_id=x['package'],spec_generation=f.spec_generation,spec_revision_id=spec,criteria_digest=criteria,definition=definition,wave=1))
+    c.insert(f,'proof_registries',c.scoped(f,task_id=x['task'],spec_generation=f.spec_generation,spec_revision_id=spec,criteria_digest=criteria,registry_digest=scheduler.identity(policy),policy=policy))
     c.insert(f,'attempts',c.scoped(f,id=x['attempt'],task_id=x['task'],generation='1',authority_epoch=i['epoch'],input_packet_digest=c.sha(b'historical-review-input'),execution_state='FAILED',compute_authority='RELEASED'))
     f.sql("UPDATE hyperfide.tasks SET state='FAILED',generation=1,current_attempt_id=$1,state_version=state_version+1 WHERE id=$2",[x['attempt'],x['task']])
     c.insert(f,'artifacts',c.scoped(f,id=x['artifact'],digest=c.sha(b'historical-review-input'),size_bytes='1',storage_backend='fixture',storage_key='historical-review-input',status='COMPLETE',retention_class='RUN'))
@@ -112,7 +110,7 @@ def restart(f,limit):
     f.start()
 def claim(f,name='a'):
     # Ordinary production packet + signed claim, pinned to the accepted generation.
-    request=f.prepare_claim(name);return f.claim(name,request=dict(request,run_spec_generation='2',spec_generation='2',spec_revision_id=f.accepted_spec))
+    request=f.prepare_claim(name);return f.claim(name,request=dict(request,run_spec_generation=f.spec_generation,spec_generation=f.spec_generation,spec_revision_id=f.accepted_spec))
 def reopen_after_change(f,call,fid):
     # Only a genuinely restored assurance can be withdrawn by a relevant change.
     resolved=call('finding.repair.inspect',{'finding_id':fid})

@@ -75,42 +75,28 @@ class PrewarmFixture(scheduler.SchedulerFixture):
   store=self.recipes/(value["recipe"]["digest"][7:]+".json");store.write_bytes(policy);store.chmod(0o600)
   return manifest
  def sql(self,sql,values=None,admin=False,serial=True):
-  # The shared 3.x/5.x fixtures predate accepted proof intent and schema-1 manifest checks (5_4.py fails the same
-  # way at base). Their immutable rows are adapted at insert time here, without editing another task's fixture.
-  if sql.startswith("INSERT INTO hyperfide.spec_revisions(organisation_id,id,project_id,source_digest,source_content,document,schema_version) VALUES($1,$2,$3,$4,'fixture','{}',1)"):
-   self.accept_spec()
-   sql=sql.replace("VALUES($1,$2,$3,$4,'fixture','{}',1)","VALUES($1,$2,$3,$4,$5,$6,1)");values=[values[0],values[1],values[2],sha(self.spec_source.encode()),self.spec_source,json.dumps(self.spec_document)]
-  if sql.startswith("INSERT INTO hyperfide.tasks(") and isinstance(values[-1],str) and "environment_profile_id" in values[-1]:
-   definition=json.loads(values[-1]);definition["section"]=self.task_section;values=list(values);values[-1]=json.dumps(definition)
-  if sql.startswith("INSERT INTO hyperfide.proof_registries("):
-   values=list(values);policy=json.loads(values[-1]);policy.update(self.review_policy,criteria_digest=values[-3] if "VALUES($1,$2,$3,1,$4,$5,$6,$7)" in sql else policy["criteria_digest"])
-   values[-2]=sha(canonical(policy));values[-1]=json.dumps(policy)
+  # prepared_slot derives later bindings from its original manifest, before this substitution.
+  if self.swapped and values:
+   values=[v.replace(self.original_preparation,self.accepted["digest"]) if isinstance(v,str) else v for v in values]
   if not self.swapped and sql.startswith("INSERT INTO hyperfide.environment_profiles(organisation_id,id,content_digest,provider,runtime_platform,manifest)"):
+   self.original_preparation=values[2]
    profile=json.loads(values[3])["profile"];self.profile_body=profile
    self.accepted=self.manifest(profile,"printf installed > dependency.bin","accepted")
    values=[values[0],values[1],self.accepted["digest"],json.dumps(self.accepted)];self.preparation=self.accepted["digest"];self.swapped=True
-  if "VALUES($1,$2,'fixture','fixture','packet-fixture','fixture',$3)" in sql:
-   sql=sql.replace("'fixture','fixture','packet-fixture','fixture'","'railway','fixture-account','fixture-env','fixture-region'")
+  if sql.startswith("INSERT INTO hyperfide.provider_pools(") and len(values)>2 and values[2]=="packet-fixture":
+   sql=sql.replace("'fixture','fixture',$3,'fixture'","'railway','fixture-account',$3,'fixture-region'")
+   values=list(values);values[2]="fixture-env"
   return super().sql(sql,values,admin,serial)
- def accept_spec(f):
-  """Accepted REVIEW-mode intent so eligibility reaches real proof obligations (shared fixtures predate them)."""
-  rubric=sha(b"explicit-review-rubric");f.reviewer=str(uuid.uuid4())
-  f.spec_source="\n".join(['[req.1]','title = "Prepared environments"','ac_1 = "Preparation runs remotely and publishes only complete verified bases."','',
-   '[acceptance.prewarm-intent]','reqs = ["1.1"]','','[proof]','rubric_digest = '+json.dumps(rubric),'','[proof.review.1.1]','reviewers = '+json.dumps([f.reviewer]),'rubric_digest = '+json.dumps(rubric),'',
-   '[task.1.1]','title = "Eligible prepared work"','reqs = ["1.1"]','acceptance_ids = ["prewarm-intent"]',''])
-  parse="import{parseKvx}from'./services/hyperfide/dist/spec/import.js';let s='';for await(const c of process.stdin)s+=c;process.stdout.write(JSON.stringify(parseKvx(s)));"
-  parsed=json.loads(subprocess.check_output(["node","--input-type=module","-e",parse],input=f.spec_source.encode(),cwd=ROOT))
-  f.task_section=next(s for s in parsed["sections"] if s["name"]=="task.1.1")
-  f.spec_document={"schema_version":1,"source_digest":sha(f.spec_source.encode()),"parsed":parsed,"runtime_wave_offset":0}
-  f.review_policy={"rubric_digest":rubric,"checks":[],"clauses":[{"id":"1.1","mode":"REVIEW","acceptance_ids":["prewarm-intent"],"reviewers":[f.reviewer],"rubric_digest":rubric}]}
  def setup(f):
+  f.preparation=f.accepted["digest"]
   i=f.ids;limits={"SANDBOX":"100","PROVISIONING":"10","CPU_MILLIS":"400000","MEMORY_BYTES":"858993459200","DISK_BYTES":"2147483648000"}
   f.deployment={"schema_version":1,"organisation_id":i["organisation"],"revision":"COMPONENT_FIXTURE_NOT_LIVE-1","accounts":[{"provider":"railway","account_key":"fixture-account","approved_limits":limits,"planning_limits":limits}],
    "pools":[{"id":i["pool"],"provider":"railway","account_key":"fixture-account","environment_key":"fixture-env","region":"fixture-region","profile_id":i["profile"],"preparation_digest":f.preparation,
    "approved_limits":limits,"planning_limits":limits,"create_policy":{"seed_reference":"fixture-approved-seed","network":"ISOLATED","stdin_required":False}}],"maximum_operation_ms":600000}
   f.pool_config=f.work/"pool-policy.json";f.write_pool_config()
+  # Keep the refusal window open through the intervening diagnostics queries.
   f.env.update(HYPERFIDE_POOL_CONFIG=str(f.pool_config),HYPERFIDE_PREPARATION_RECIPE_DIR=str(f.recipes),HYPERFIDE_PREPARATION_MAX_ATTEMPTS="4",
-   HYPERFIDE_PREPARATION_BACKOFF_BASE_MS="400",HYPERFIDE_PREPARATION_BACKOFF_MAX_MS="1600")
+   HYPERFIDE_PREPARATION_BACKOFF_BASE_MS="4000",HYPERFIDE_PREPARATION_BACKOFF_MAX_MS="16000")
   f.warm_account=str(uuid.uuid4())
   f.sql("INSERT INTO hyperfide.capacity_accounts(organisation_id,id,pool_id,dimension,capacity_class,configured_limit,provenance_digest,qualification_state) VALUES($1,$2,$3,'WARM_SPARE','EXECUTION',1,$4,'QUALIFIED')",[i["organisation"],f.warm_account,i["pool"],sha(b"operator-warm-spare-budget")])
   f.sql("UPDATE hyperfide.capacity_accounts SET configured_limit=3,state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[i["organisation"],f.accounts["PREPARATION"]])

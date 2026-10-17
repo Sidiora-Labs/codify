@@ -31,26 +31,27 @@ reqs = ["5.4"]
 acceptance_ids = ["V-007"]
 '''
 
-def accept_generation_two(f):
- """The 5.1 fixture tasks predate executable proof mapping; re-accept them once as generation 2."""
+def accept_resource_spec(f):
+ """Re-accept scheduler tasks with the resource review proof mapping at the next generation."""
+ f.spec_generation=m.next_spec_generation(f)
  i=f.ids
  source=SPEC2.replace("RUBRIC",json.dumps(RUBRIC)).replace("REVIEWERS",json.dumps([i["watcher"]]))
  parsed=json.loads(subprocess.check_output(["node","--input-type=module","-e","import{parseKvx}from'./services/hyperfide/dist/spec/import.js';let s='';for await(const c of process.stdin)s+=c;process.stdout.write(JSON.stringify(parseKvx(s)));"],input=source.encode(),cwd=ROOT))
  revision=uid();i["spec2"]=revision
  document={"schema_version":1,"revision_digest":sha(b"task5.4-generation-two"),"source_digest":sha(source.encode()),"repositories":[{"repository_id":i["repository"],"source_object_id":"a"*40,"integration_ref":"refs/heads/main"}],"allowed_actions":f.actions,"closure_policy":{"required_evidence":[],"required_review_roles":[],"publication":"AFTER_QUALIFICATION"},"provenance":None,"parsed":parsed,"runtime_wave_offset":0}
  f.sql("INSERT INTO hyperfide.spec_revisions(organisation_id,project_id,id,source_digest,source_content,document,schema_version,revision_digest) VALUES($1,$2,$3,$4,$5,$6,1,$7)",[i["organisation"],i["project"],revision,sha(source.encode()),source,json.dumps(document),document["revision_digest"]])
- f.sql("INSERT INTO hyperfide.run_spec_revisions(organisation_id,run_id,spec_generation,spec_revision_id) VALUES($1,$2,2,$3)",[i["organisation"],i["run"],revision])
- f.sql("UPDATE hyperfide.runs SET spec_revision_id=$3,spec_generation=2,state='PENDING_VALIDATION',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[i["organisation"],i["run"],revision])
+ f.sql("INSERT INTO hyperfide.run_spec_revisions(organisation_id,run_id,spec_generation,spec_revision_id) VALUES($1,$2,$4,$3)",[i["organisation"],i["run"],revision,f.spec_generation])
+ f.sql("UPDATE hyperfide.runs SET spec_revision_id=$3,spec_generation=$4,state='PENDING_VALIDATION',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[i["organisation"],i["run"],revision,f.spec_generation])
  section=next(x for x in parsed["sections"] if x["name"]=="task.5.4")
  for name in ("a","b","overlap"):
   row=f.sql("SELECT criteria_digest,definition FROM hyperfide.tasks WHERE id=$1",[i["task_"+name]])[0]
-  f.sql("UPDATE hyperfide.tasks SET spec_revision_id=$3,spec_generation=2,definition=$4,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$5",[i["organisation"],i["run"],revision,json.dumps(dict(row["definition"],schema_version=1,section=section)),i["task_"+name]])
-  policy=copy.deepcopy(f.packet_proof);policy.update(criteria_digest=row["criteria_digest"],spec_revision_id=revision,spec_generation="2",rubric_digest=RUBRIC,clauses=[{"id":"5.4","mode":"REVIEW","acceptance_ids":["V-007"],"reviewers":[i["watcher"]],"rubric_digest":RUBRIC}])
-  f.sql("INSERT INTO hyperfide.proof_registries(organisation_id,run_id,task_id,spec_generation,spec_revision_id,criteria_digest,registry_digest,policy) VALUES($1,$2,$3,2,$4,$5,$6,$7)",[i["organisation"],i["run"],i["task_"+name],revision,row["criteria_digest"],identity(policy),json.dumps(policy)])
+  f.sql("UPDATE hyperfide.tasks SET spec_revision_id=$3,spec_generation=$6,definition=$4,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$5",[i["organisation"],i["run"],revision,json.dumps(dict(row["definition"],schema_version=1,section=section)),i["task_"+name],f.spec_generation])
+  policy=copy.deepcopy(f.packet_proof);policy.update(criteria_digest=row["criteria_digest"],spec_revision_id=revision,spec_generation=f.spec_generation,rubric_digest=RUBRIC,clauses=[{"id":"5.4","mode":"REVIEW","acceptance_ids":["V-007"],"reviewers":[i["watcher"]],"rubric_digest":RUBRIC}])
+  f.sql("INSERT INTO hyperfide.proof_registries(organisation_id,run_id,task_id,spec_generation,spec_revision_id,criteria_digest,registry_digest,policy) VALUES($1,$2,$3,$8,$4,$5,$6,$7)",[i["organisation"],i["run"],i["task_"+name],revision,row["criteria_digest"],identity(policy),json.dumps(policy),f.spec_generation])
  f.sql("UPDATE hyperfide.runs SET state='RUNNING',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[i["organisation"],i["run"]])
 
 def setup(f):
- accept_generation_two(f)
+ accept_resource_spec(f)
  i=f.ids
  # Declared execution envelope large enough that job-kind dimensions, not CPU, are the binding limits.
  for dimension,limit in (("CPU_MILLIS","64000"),("MEMORY_BYTES","137438953472"),("DISK_BYTES","274877906944")):
@@ -74,7 +75,7 @@ class ResourceFixture(m.SchedulerFixture):
  def __init__(self):
   super().__init__(extra_setup=setup)
  def prepare_claim(self,name="a",lease_ms=300000):
-  return dict(super().prepare_claim(name,lease_ms),run_spec_generation="2",spec_generation="2",spec_revision_id=self.ids["spec2"])
+  return dict(super().prepare_claim(name,lease_ms),run_spec_generation=self.spec_generation,spec_generation=self.spec_generation,spec_revision_id=self.ids["spec2"])
  def set_policy(self,**values):
   sets=",".join(k+"="+str(int(v)) for k,v in values.items())
   self.sql("UPDATE hyperfide.scheduling_policies SET "+sets+",revision=revision+1,state_version=state_version+1 WHERE organisation_id=$1 AND pool_id=$2",[self.ids["organisation"],self.ids["pool"]])
