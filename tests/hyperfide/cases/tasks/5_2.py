@@ -267,7 +267,8 @@ def races():
     expect(f.sql("SELECT $1::timestamptz>$2::timestamptz AS later",[renewed["result"]["lease_expires_at"],deadline])[0]["later"],"Renewal did not extend from the primary clock")
     outcomes.append("RENEWED")
    else:
-    expect(code(renewed) in ("COMPUTE_LEASE_EXPIRED","STALE_COMPUTE","COMPUTE_ALLOCATION_INVALID","AUTH_STALE_ATTEMPT"),"Renewal refused for an unrelated reason: "+json.dumps(renewed))
+    # AUTH_EXPIRED: the 14.1 guard re-reads the attempt lease on the primary clock after waiting for the sweep's locks.
+    expect(code(renewed) in ("COMPUTE_LEASE_EXPIRED","AUTH_EXPIRED","STALE_COMPUTE","COMPUTE_ALLOCATION_INVALID","AUTH_STALE_ATTEMPT"),"Renewal refused for an unrelated reason: "+json.dumps(renewed))
     if fenced==[]:fenced=expire(f)["result"]["expired_attempt_ids"]
     expect(fenced==[token["attempt_id"]] and attempt_state(f,token["attempt_id"])=={**attempt_state(f,token["attempt_id"]),"compute_authority":"EXPIRED","leases":"EXPIRED"},"Refused renewal left neither outcome at offset "+str(offset))
     outcomes.append("EXPIRED")
