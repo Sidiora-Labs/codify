@@ -13,7 +13,17 @@
     "decision.audit.record",
     "decision.audit.inspect",
     "decision.audit.outcome",
-    "decision.audit.capture"
+    "decision.audit.capture",
+    "decision.legacy.guard.submit",
+    "decision.legacy.guard.result",
+    "decision.legacy.readiness.submit",
+    "decision.legacy.readiness.result",
+    "decision.legacy.triage.submit",
+    "decision.legacy.triage.result",
+    "decision.legacy.memory.submit",
+    "decision.legacy.memory.result",
+    "decision.legacy.recap.submit",
+    "decision.legacy.recap.result"
   ],
   "requires": [
     "4.2",

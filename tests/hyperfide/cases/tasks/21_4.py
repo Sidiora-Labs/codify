@@ -10,6 +10,47 @@ def storage_helper():
  module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
  module.DATABASE="hf_task_21_4_qualification";module.RESOURCE="hf-task-21.4-database"
  return module
+PROBE_RESOURCE="hf-task-21.4-probe-fixtures"
+def probe_inventory_file():
+ return storage_helper().observation_dir()/"probe-fixtures.json"
+def track_probe_fixtures(identity_module):
+ # Each real HTTPS+PG probe owns a random hf_identity_ database and hf_ir_ role; record them before any test step.
+ original=identity_module._record_fixture
+ def record(fixture):
+  original(fixture)
+  file=probe_inventory_file();rows=json.loads(file.read_text()) if file.exists() else []
+  if not any(row["database"]==fixture.database for row in rows):
+   rows.append({"database":fixture.database,"runtime_role":fixture.runtime_role,"path":str(fixture.path)});file.write_text(json.dumps(rows,sort_keys=True)+"\n")
+ identity_module._record_fixture=record
+def cleanup_probe_fixtures(helper):
+ import re
+ file=probe_inventory_file();rows=json.loads(file.read_text()) if file.exists() else [];observed=[]
+ for row in rows:
+  database,role,path=row["database"],row["runtime_role"],Path(row["path"])
+  if not re.fullmatch(r"hf_identity_[0-9a-f]{32}",database) or not re.fullmatch(r"hf_ir_[0-9a-f]{32}",role) or path.parent!=Path(tempfile.gettempdir()) or not path.name.startswith("hyperfide-identity-"):
+   raise RuntimeError("Probe inventory is not an owned domain21 fixture")
+  helper.sql('DROP DATABASE IF EXISTS "'+database+'" WITH (FORCE);',database="postgres")
+  helper.sql('DROP ROLE IF EXISTS "'+role+'";',database="postgres")
+  if path.exists():shutil.rmtree(path)
+  present=helper.sql("SELECT (SELECT count(*) FROM pg_database WHERE datname='"+database+"')+(SELECT count(*) FROM pg_roles WHERE rolname='"+role+"');",database="postgres").stdout.strip()
+  observed.append({"database":database,"runtime_role":role,"database_and_role_absent":present=="0","private_path_absent":not path.exists()})
+ complete=all(item["database_and_role_absent"] and item["private_path_absent"] for item in observed)
+ (helper.observation_dir()/"probe-fixture-absence.json").write_text(json.dumps({"resource":PROBE_RESOURCE,"complete":complete,"observations":observed,"observer":"PostgreSQL pg_database/pg_roles query after DROP"},sort_keys=True)+"\n")
+ if complete:file.write_text("[]\n")
+ return {"id":PROBE_RESOURCE,"status":"deleted" if complete else "unknown","observed_absent":complete,"evidence_artifact":"storage/probe-fixture-absence.json"}
+def cleanup_task():
+ # Exactly one cleanup event covers the disposable database and every probe-owned fixture.
+ import contextlib,io
+ helper=storage_helper();captured=io.StringIO()
+ with contextlib.redirect_stdout(captured):status=helper.cleanup()
+ events=[json.loads(line) for line in captured.getvalue().splitlines() if line.strip().startswith("{")]
+ resources=[r for event in events if event.get("type")=="cleanup" for r in event.get("resources",[])]
+ try:probe=cleanup_probe_fixtures(helper)
+ except Exception:probe={"id":PROBE_RESOURCE,"status":"unknown"}
+ resources.append(probe)
+ complete=status==0 and len(resources)==2 and all(r.get("observed_absent") is True for r in resources)
+ print(json.dumps({"type":"cleanup","complete":complete,"resources":resources}),flush=True)
+ return 0 if complete else 1
 def environment():
  env=os.environ.copy()
  reference=Path(env.get("HYPERFIDE_TEST_PG_ENV","/tmp/hyperfide/postgres/fixture.env"))
@@ -58,7 +99,7 @@ def service_probe(task,env,directory):
 def run_task(task):
  env=environment();os.environ.update({k:v for k,v in env.items() if k.startswith("PG") or k=="DATABASE_URL"})
  if "--cleanup" in sys.argv:
-  if task=="21.4":return storage_helper().cleanup()
+  if task=="21.4":return cleanup_task()
   print(json.dumps({"type":"cleanup","complete":True,"resources":[]}));return 0
  helper=storage_helper() if task=="21.4" else None
  try:
@@ -82,10 +123,15 @@ def run_task(task):
    print(result.stdout,end="",flush=True)
    if result.returncode and result.stderr:print(result.stderr[-2000:],file=sys.stderr)
    status=result.returncode if linked else 1
+  if task=="21.4":
+   # do_3 gate: real signed HTTPS service and a real 20.4 job flow, beyond the direct component object.
+   signed=signed_authority_probe(include_legacy=True)
+   durable=durable_job_probe()
+   status=status or signed or durable
   return status
  finally:
   if helper:
-   if "HYPERFIDE_RECEIPT_ID" not in os.environ and helper.cleanup()!=0:raise RuntimeError("Disposable database cleanup failed")
+   if "HYPERFIDE_RECEIPT_ID" not in os.environ and cleanup_task()!=0:raise RuntimeError("Disposable database cleanup failed")
   else:print(json.dumps({"type":"cleanup","complete":True,"resources":[]}),flush=True)
 
 def ensure_semantic_fence_schema(f,service=None):
@@ -149,12 +195,13 @@ def seed_advisory_amendment_source(f,service):
   f.sql("INSERT INTO hyperfide.tasks(organisation_id,run_id,id,task_key,feature_package_id,spec_revision_id,spec_generation,criteria_digest,definition,wave,state) VALUES($1,$2,$3,$4,$5,$6,2,$7,$8,$9,'PENDING')",[f.ids["organisation"],f.ids["run"],f.ids["task"+task["key"]],task["key"],packages[task["package_key"]],revision,criteria,definition,task["wave"]])
 
 
-def signed_authority_probe(include_findings=False,include_amendment=False):
+def signed_authority_probe(include_findings=False,include_amendment=False,include_legacy=False):
  """Real14 HTTPS+PG boundary;20 dependency intentionally unavailable, not model/job proof."""
  import hashlib,uuid
  identity_path=ROOT/"tests/hyperfide/support/identity_fixture.py"
  spec=importlib.util.spec_from_file_location("domain21_real_identity_fixture",identity_path)
  identity=importlib.util.module_from_spec(spec);spec.loader.exec_module(identity)
+ track_probe_fixtures(identity)
  original_environment=os.environ.copy()
  os.environ.update(environment())
  try:
@@ -262,6 +309,50 @@ def signed_authority_probe(include_findings=False,include_amendment=False):
     identity.check("signed21.missing-producer-abstains",lambda:identity.expect(call("decision.audit.capture",{"decision_id":str(uuid.uuid4()),"packet_id":packet["id"]}).get("error",{}).get("code")=="DECISION_RESULT_UNAVAILABLE","missing producer generated advice"))
     secret={**record,"id":str(uuid.uuid4()),"raw_output":{"text":"api_key=planted-private-value"}}
     identity.check("signed21.secret-not-persisted",lambda:identity.expect(call("decision.audit.record",{"record":secret}).get("error",{}).get("code")=="DECISION_SECRET" and not f.sql("SELECT id FROM hyperfide.decision_audits WHERE id=$1",[secret["id"]]),"credential-shaped output reached audit history"))
+    if include_legacy:
+     # 20.4 fixture exposes no submit capability: legacy client actions must abstain deterministically with authority NONE.
+     expected_legacy=[f"decision.legacy.{p}.{phase}" for p in ("guard","readiness","triage","memory","recap") for phase in ("submit","result")]
+     def legacy_declared():
+      fragment=json.loads((service/"components/21.4.json").read_text())
+      described=call("decision.audit.describe",{}).get("result",{})
+      identity.expect(all(a in fragment["actions"] for a in expected_legacy) and described.get("legacy",{}).get("actions")==expected_legacy and described["legacy"]["authority"]=="NONE","legacy client actions are not declared/served")
+      for action in expected_legacy:
+       body=f.invoke(action,{},component="21.4")[1]
+       identity.expect(body.get("ok") is False and body.get("error",{}).get("code")=="DECISION_INVALID","legacy action is not served by 21.4: "+action+" "+str(body.get("error")))
+     identity.check("audit.legacy-actions-declared",legacy_declared)
+     legacy_state={}
+     def legacy_abstains():
+      r=f.invoke("decision.legacy.guard.submit",{"observation":{"guard":"fixture-check","changed_paths":["src/a.c"]}},component="21.4")[1]
+      identity.expect(r.get("ok") is True,"legacy submit failed: "+str(r.get("error")))
+      result=r["result"];legacy_state.update(result)
+      identity.expect(result["status"]=="unavailable" and result["reason"]=="decision-jobs-unavailable" and result["decision_id"] is None and result["authority"]=="NONE" and result["applied"] is False and result["recommendation"] is None,"missing jobs producer did not abstain: "+str(result))
+      stored=f.sql("SELECT status,payload FROM hyperfide.decision_audits WHERE packet_id=$1",[result["packet_id"]])
+      identity.expect(len(stored)==1 and stored[0]["status"]=="unavailable" and stored[0]["payload"]["action"]=={"authority":"NONE","applied":False,"recommendation":None} and stored[0]["payload"]["rubric_version"]=="hyperfide.legacy.guard.v1" and isinstance(stored[0]["payload"]["latency_ms"],(int,float)),"abstention audit record incomplete")
+      identity.expect(not f.sql("SELECT 1 FROM hyperfide.decision_audits WHERE status='accepted_advice'"),"abstention produced accepted advice")
+     identity.check("audit.legacy-submit-abstains-without-provider",legacy_abstains)
+     def legacy_result():
+      r=f.invoke("decision.legacy.guard.result",{"decision_id":str(uuid.uuid4()),"packet_id":legacy_state["packet_id"]},component="21.4")[1]
+      identity.expect(r.get("ok") is True,"legacy result failed: "+str(r.get("error")))
+      result=r["result"]
+      identity.expect(result["status"]=="unavailable" and result["authority"]=="NONE" and result["applied"] is False and result["recommendation"] is None and result["leases"]==[] and result["waived_evidence"]==[] and result["publication"] is None and result["audit"] is None,"legacy result implied authority: "+str(result))
+      wrong=f.invoke("decision.legacy.triage.result",{"decision_id":str(uuid.uuid4()),"packet_id":legacy_state["packet_id"]},component="21.4")[1]
+      identity.expect(wrong.get("ok") is False and wrong["error"]["code"]=="DECISION_PURPOSE_MISMATCH","legacy result crossed purposes")
+     identity.check("audit.legacy-result-no-authority",legacy_result)
+     def legacy_input():
+      before=f.sql("SELECT count(*)::int n FROM hyperfide.decision_packets")[0]["n"]
+      r=f.invoke("decision.legacy.memory.submit",{"observation":{"note":"password=planted-private-value"}},component="21.4")[1]
+      identity.expect(r.get("ok") is False and r["error"]["code"]=="DECISION_SECRET" and f.sql("SELECT count(*)::int n FROM hyperfide.decision_packets")[0]["n"]==before,"legacy observation secret reached a packet")
+      r=f.invoke("decision.legacy.memory.submit",{"observation":{"note":"fine"},"authority":{"lease":"x"}},component="21.4")[1]
+      identity.expect(r.get("ok") is False and r["error"]["code"]=="DECISION_INVALID","legacy wire authority field accepted")
+     identity.check("audit.legacy-input-bounded",legacy_input)
+     def no_grants():
+      lease={**record,"id":str(uuid.uuid4()),"action":{"authority":"NONE","applied":False,"recommendation":{"lease_id":str(uuid.uuid4())}}}
+      publish={**record,"id":str(uuid.uuid4()),"action":{"authority":"NONE","applied":False,"recommendation":None,"publish":"refs/heads/main"}}
+      waive={**record,"id":str(uuid.uuid4()),"action":{"authority":"NONE","applied":False,"recommendation":{"nested":[{"waived_evidence":["actual-check"]}]}}}
+      for row in (lease,publish,waive):
+       r=call("decision.audit.record",{"record":row})
+       identity.expect(r.get("ok") is False and r["error"]["code"]=="DECISION_AUTHORITY_DENIED" and not f.sql("SELECT 1 FROM hyperfide.decision_audits WHERE id=$1",[row["id"]]),"advisory record supplied a lease, waiver or publication: "+str(r.get("error")))
+     identity.check("audit.advice-cannot-grant",no_grants)
     f.stop();f.start()
     identity.check("signed21.restart-history",lambda:identity.expect(call("decision.audit.inspect",{"id":audit_id}).get("result",{}).get("payload",{}).get("id")==audit_id,"actual service restart lost audit history"))
     identity.check("signed21.accepted-intent-preserved",lambda:identity.expect(f.sql("SELECT source_content FROM hyperfide.spec_revisions WHERE id=$1",[f.ids["accepted_spec"]])[0]["source_content"]==(f.source if include_amendment else "Approved source-linked clause"),"advice changed accepted intent"))
@@ -277,6 +368,7 @@ def durable_job_probe():
  original_environment=os.environ.copy();os.environ.update(environment())
  spec=importlib.util.spec_from_file_location("domain21_actual_jobs_fixture",ROOT/"tests/hyperfide/cases/tasks/20_4.py")
  jobs=importlib.util.module_from_spec(spec);spec.loader.exec_module(jobs)
+ track_probe_fixtures(jobs.identity)
  failed=[]
  def check(name,fn):
   try:fn();actual="observed"
@@ -307,7 +399,7 @@ def durable_job_probe():
    super().start()
  fixture=None
  try:
-  fixture=AdvisoryFixture(settings={"allowed_purposes":{"fixture-review":["span-native"],"spec_critique":["span-native"]}})
+  fixture=AdvisoryFixture(settings={"allowed_purposes":{"fixture-review":["span-native"],"spec_critique":["span-native"],"legacy.guard":["span-native"]}})
   f=fixture;scope={"organisation_id":f.ids["organisation"],"run_id":f.ids["run"]}
   packet=f.call("decision.spec.packet",{"scope":scope,"clauses":[{"section":"req.1","field":"ac_1"}]},component="21.1")
   check("jobs21.common-revision-packet",lambda:jobs.expect(packet["revision"]["spec_revision"]==f.ids["accepted_spec"] and packet["state"]["primary_revision"]["spec_generation"]=="2","canonical packet lost accepted pins"))
@@ -328,6 +420,36 @@ def durable_job_probe():
   check("jobs21.raw-provenance-preserved",lambda:jobs.expect(inspected["payload"]["returned_model"]=="span-02" and inspected["payload"]["cost"]["invoice_reconciled"]is False and inspected["payload"]["action"]["applied"]is False,"raw model/cost/action provenance was invented"))
   forged=copy.deepcopy(audit);forged.pop("authority",None);forged["id"]=jobs.uid();forged["status"]="accepted_advice"
   check("jobs21.wire-trust-refused",lambda:f.reject("decision.audit.record",{"scope":scope,"record":forged},"DECISION_RESULT_REQUIRED",component="21.4"))
+  def legacy_real():
+   r=f.call("decision.legacy.guard.submit",{"observation":{"guard":"fixture-check","changed_paths":["src/a.c"]}},component="21.4")
+   jobs.expect(r["status"]=="QUEUED" and r["decision_id"] and r["authority"]=="NONE" and r["applied"] is False and r["audit"] is None,"legacy submit did not admit a durable 20.4 job: "+str(r))
+   job=f.sql("SELECT purpose,packet_hash,route_ids,mode FROM hyperfide.decision_jobs WHERE id=$1",[r["decision_id"]])
+   jobs.expect(len(job)==1 and job[0]["purpose"]=="legacy.guard" and job[0]["packet_hash"]==r["packet_hash"] and job[0]["route_ids"]==["span-native"] and job[0]["mode"]=="online","legacy job lost packet/route/deadline binding")
+   pending=f.call("decision.legacy.guard.result",{"decision_id":r["decision_id"],"packet_id":r["packet_id"]},component="21.4")
+   jobs.expect(pending["status"]=="pending" and pending["audit"] is None and pending["authority"]=="NONE","queued legacy job reported a result")
+   f.process(r["decision_id"])
+   done=f.call("decision.legacy.guard.result",{"decision_id":r["decision_id"],"packet_id":r["packet_id"]},component="21.4")
+   audit=done["audit"]
+   jobs.expect(done["status"]=="abstained" and audit["id"]==r["decision_id"] and audit["packet_hash"]==r["packet_hash"] and audit["returned_model"]=="span-02" and audit["action"]=={"authority":"NONE","applied":False,"recommendation":None} and done["recommendation"] is None and done["leases"]==[] and done["publication"] is None,"legacy result did not capture the server-owned audit: "+str(done))
+   again=f.call("decision.legacy.guard.result",{"decision_id":r["decision_id"],"packet_id":r["packet_id"]},component="21.4")
+   jobs.expect(again["audit"]==audit and len(f.sql("SELECT id FROM hyperfide.decision_audits WHERE id=$1",[r["decision_id"]]))==1,"legacy result replay changed history")
+  check("jobs21.legacy-submit-real-job",legacy_real)
+  def legacy_egress():
+   before=f.sql("SELECT count(*)::int n FROM hyperfide.decision_jobs")[0]["n"]
+   r=f.call("decision.legacy.recap.submit",{"observation":{"recap":"fixture"}},component="21.4")
+   jobs.expect(r["status"]=="unsupported" and r["reason"]=="egress-denied" and r["decision_id"] is None and r["authority"]=="NONE","egress-denied legacy purpose was submitted: "+str(r))
+   jobs.expect(f.sql("SELECT count(*)::int n FROM hyperfide.decision_jobs")[0]["n"]==before,"egress-denied purpose created a durable job")
+  check("jobs21.legacy-egress-denied-abstains",legacy_egress)
+  def egress_never_accepted():
+   sent=len(f.provider.received)
+   denied=f.call("decision.spec.packet",{"scope":scope,"clauses":[{"section":"req.1","field":"ac_1"}]},component="21.1")
+   f.reject("decision.jobs.submit",{"purpose":"spec_critique","input":{"packet_id":denied["id"]},"route_ids":["jev-native"],"deadline_ms":10000,"mode":"background"},"DECISION_EGRESS_DENIED")
+   jobs.expect(not f.sql("SELECT id FROM hyperfide.decision_jobs WHERE packet_hash=$1",[denied["packet_hash"]]) and len(f.provider.received)==sent,"egress-denied job was admitted or sent")
+   f.reject("decision.audit.capture",{"scope":scope,"decision_id":jobs.uid(),"packet_id":denied["id"]},"DECISION_RESULT_UNAVAILABLE",component="21.4")
+   forged={"id":jobs.uid(),"packet_id":denied["id"],"packet_hash":denied["packet_hash"],"rubric_version":"hyperfide.spec_critique.v1","calibration_version":"forged","adapter_version":"forged","requested_model":"jev-1.14.0","returned_model":"jev-1.14.0","route":"jev-native","status":"accepted_advice","raw_output":{},"interpretation":{},"attempts":[],"latency_ms":1,"usage":{},"cost":{},"action":{"authority":"NONE","applied":False,"recommendation":{}},"rejection_reason":None}
+   f.reject("decision.audit.record",{"scope":scope,"record":forged},"DECISION_RESULT_REQUIRED",component="21.4")
+   jobs.expect(not f.sql("SELECT id FROM hyperfide.decision_audits WHERE packet_id=$1 OR status='accepted_advice'",[denied["id"]]),"egress-denied route produced accepted advice")
+  check("jobs21.egress-denied-never-accepted",egress_never_accepted)
   f.advance()
   check("jobs21.stale-real-job-capture",lambda:f.reject("decision.audit.capture",{"scope":scope,"decision_id":decision,"packet_id":packet["id"]},"DECISION_STALE",component="21.4"))
   check("jobs21.accepted-source-preserved",lambda:jobs.expect(f.sql("SELECT source_content FROM hyperfide.spec_revisions WHERE id=$1",[f.ids["accepted_spec"]])[0]["source_content"]=="Approved exact advisory source","job advice changed accepted source"))
