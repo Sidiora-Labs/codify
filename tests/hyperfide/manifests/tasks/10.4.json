@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "campaign_id": "hyperfide-task-10.4-blaxel-guarded-v4-requal-12aa390190b3",
+  "campaign_id": "hyperfide-task-10.4-blaxel-guarded-v4-requal-12aa390190b3-requal-6a91b0130b1d",
   "registered_variant": "task:10.4",
   "scope": "task-component",
   "case_ids": [
@@ -404,13 +404,13 @@
     },
     {
       "path": "services/hyperfide/dist/providers/pools.js",
-      "sha256": "7004cd719ed01176af0f9deef0055213b6383705b09e12b8fd6155acae09a018",
-      "size": 67572
+      "sha256": "f9ca7d9859a054a74528f06b9216c686f42c8c292fdf236bd3e169e2a9852780",
+      "size": 67651
     },
     {
       "path": "services/hyperfide/dist/providers/pools.js.map",
-      "sha256": "333bac4fd0555117e857d2d2601f557af2de3949043fdeee0f234d8cd97e6378",
-      "size": 58836
+      "sha256": "b22fc016efc6827ed411bc2ec7c7ebc4b5b5b4a2e92aa0c8f8948d8ad58ea6a6",
+      "size": 58927
     },
     {
       "path": "services/hyperfide/dist/providers/reconcile.d.ts",
@@ -494,13 +494,13 @@
     },
     {
       "path": "services/hyperfide/dist/storage/transactions.js",
-      "sha256": "d4cbdeab9a6d8077f556e22070405dfc44086ae9353bd91abf95f577a955aff3",
-      "size": 12575
+      "sha256": "f8eaeed2010d6e2296a20e4996f1f36986f3fadad185bd3f00ac28dbc75b9e18",
+      "size": 13209
     },
     {
       "path": "services/hyperfide/dist/storage/transactions.js.map",
-      "sha256": "f787a336cc279432b5f14630a3e1a0bf37c816f712cb2e526f07fe9af48d851e",
-      "size": 11108
+      "sha256": "caa013988935fa1f26cd16cee8841cd7556a3a5fef6baa0b652a75c7efcb1ae1",
+      "size": 11610
     },
     {
       "path": "services/hyperfide/dist/transport/http.d.ts",
@@ -649,8 +649,8 @@
     },
     {
       "path": "services/hyperfide/src/providers/pools.ts",
-      "sha256": "a4398d75e1aeba3d4f0eb1f07c9ddaac98d415ddc5c603eabad231d843086c50",
-      "size": 74142
+      "sha256": "8b60147c224c29bc7b59e8d92e6a1eec7893fde7e9ef69ffe93f74cf868ece98",
+      "size": 74209
     },
     {
       "path": "services/hyperfide/src/providers/reconcile.ts",
@@ -679,8 +679,8 @@
     },
     {
       "path": "services/hyperfide/src/storage/transactions.ts",
-      "sha256": "fb138c8436eee05d43548db204d385efc93e071b82f3e8f567e9abf825303b7b",
-      "size": 10980
+      "sha256": "1b2b969b2f0fccc4cb1490dbb74c876ca53653e7bf3104ff432d892f622cad21",
+      "size": 11470
     },
     {
       "path": "services/hyperfide/src/transport/http.ts",
