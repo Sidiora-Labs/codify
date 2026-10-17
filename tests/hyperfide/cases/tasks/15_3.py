@@ -2,10 +2,12 @@
 """Real packet/claim/native capsule/object-store/checkpoint registration integration.
 
 A source registration is recoverable data, never restored context or result
-acceptance. Replacement adoption tests require the mandatory continuation producer.
+acceptance. The original attempt is then expired on the real primary clock and a
+replacement claimed through a packet that pins the checkpoint; the replacement
+adopts the old artifacts as untrusted history without renewing the old fence.
 """
 from __future__ import annotations
-import base64,hashlib,importlib.util,json,os,socket,tempfile
+import base64,contextlib,hashlib,importlib.util,io,json,os,socket,sys,tempfile,time
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[4]
 def module(name,path):
@@ -14,6 +16,34 @@ scheduler=module('actual_checkpoint_scheduler',ROOT/'tests/hyperfide/cases/tasks
 native=module('actual_checkpoint_native',ROOT/'tests/hyperfide/cases/tasks/15_1.py')
 objects=module('actual_checkpoint_objects',ROOT/'tests/hyperfide/cases/tasks/15_2.py')
 RESULTS=[]
+# The shared 3.2 packet fixture predates task 2.4's accepted proof-intent gate:
+# it stores an empty accepted document and section-less task definitions, so
+# every packet create is refused. Supply the minimal accepted intent for its one
+# REVIEW clause at insert time (the document is immutable afterwards) without
+# editing another task's fixture. This grants no qualification authority.
+def accepted_intent():
+ base=sys.modules['identity_fixture'].IdentityFixture
+ if getattr(base,'_hf153_intent',False):return
+ original=base.sql
+ def field(key,value):return {'key':key,'raw':json.dumps(value),'value':value,'line':1}
+ def section(name,**fields):return {'name':name,'line':1,'fields':{k:field(k,v) for k,v in fields.items()}}
+ def sql(self,query,values=None,*args,**kwargs):
+  if query.startswith('INSERT INTO hyperfide.spec_revisions(') and "'fixture','{}',1)" in query:
+   self.hf153_reviewer=scheduler.uid();rubric=scheduler.sha(b'explicit-review-rubric')
+   document={'schema_version':1,'parsed':{'sections':[section('req.3.2',ac_1='Immutable execution input fixture'),section('acceptance.packet-intent',reqs=['3.2.1']),
+    section('proof',rubric_digest=rubric),section('proof.review.3.2.1',reviewers=[self.hf153_reviewer],rubric_digest=rubric)]}}
+   query=query.replace("'fixture','{}',1)","'fixture',$5,1)");values=list(values)+[json.dumps(document)]
+  elif query.startswith('INSERT INTO hyperfide.tasks(') and values and len(values)>7:
+   definition=json.loads(values[7])
+   if 'section' not in definition:definition['section']={'name':'task.3.2','line':1,'fields':{'reqs':field('reqs',['3.2.1'])}}
+   values=list(values);values[7]=json.dumps(definition)
+  elif query.startswith('INSERT INTO hyperfide.proof_registries(') and hasattr(self,'hf153_reviewer'):
+   policy=json.loads(values[6])
+   for clause in policy.get('clauses',[]):
+    if clause.get('mode')=='REVIEW':clause['reviewers']=[self.hf153_reviewer]
+   values=list(values);values[5]=scheduler.identity(policy);values[6]=json.dumps(policy)
+  return original(self,query,values,*args,**kwargs)
+ base.sql=sql;base._hf153_intent=True
 def sha(data):return 'sha256:'+hashlib.sha256(data).hexdigest()
 def canonical(value):return json.dumps(value,sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False).encode()
 def expect(value,message='Observed checkpoint assertion failed'):
@@ -83,12 +113,80 @@ class CheckpointFixture:
  def reject(self,value,codes,key='operator',action='artifact.checkpoint.register'):
   _,response=self.service.invoke(action,value,key=key,component='15.3')
   expect(response.get('ok') is False and response.get('error',{}).get('code') in codes,'Expected refusal, observed '+str(response.get('error',{}).get('code')))
+ def adopt_request(self,**overrides):
+  return dict(self.adoption,**overrides)
  def close(self):
   if self.service is not None:self.service.close();self.service=None
   if self.objects is not None:self.objects.stop();self.objects=None
   self.temp.cleanup()
+def adoption(f,checkpoint_id):
+ svc=f.service;i=svc.ids;old=f.token;CURRENT="SELECT id::text,generation::text,compute_authority,lease_expires_at::text FROM hyperfide.attempts WHERE id=$1"
+ # Shorten the original lease through the trusted lower renewal API and wait
+ # for the real primary deadline; no forged clock or synthetic attempt row.
+ expect('result' in svc.primary("return leases.renewCompute(tx,data.token,1000);",{'token':old}),'Original lease could not be shortened')
+ while svc.sql("SELECT lease_expires_at>clock_timestamp() AS live FROM hyperfide.attempts WHERE id=$1",[old['attempt_id']])[0]['live']:time.sleep(.05)
+ expired=svc.ok('scheduler.compute.expire',{'organisation_id':i['organisation'],'run_id':i['run'],'authority_epoch':i['epoch'],'leader_generation':'1'},component='5.2')
+ source_before=svc.sql(CURRENT,[old['attempt_id']])[0]
+ check('adoption.expired-source-fenced',lambda:expect(expired['expired_attempt_ids']==[old['attempt_id']] and source_before['compute_authority']=='EXPIRED','Original attempt kept authority'))
+ # The packet producer pins the exact historical checkpoint only through the
+ # reader this component installs; validation re-reads current artifacts.
+ pinned_input=svc.packet_input(task_id=i['task_a'],slot_id=i['slot_overlap'],idempotency_key=scheduler.uid(),attempt_id=scheduler.uid(),attempt_generation='2',continuation_checkpoint_id=checkpoint_id)
+ pinned_digest=svc.ok('hierarchy.packet.create',pinned_input,key='manager',component='3.2')['digest']
+ pinned=svc.ok('hierarchy.packet.inspect',{'leader_generation':'1','package_generation':'2','digest':pinned_digest},key='manager',component='3.2')['packet']['mandatory']['intent']['continuation']
+ check('adoption.continuation-pinned',lambda:expect(pinned['checkpoint_id']==checkpoint_id and pinned['authority']=='NONE' and pinned['context_restored'] is False and pinned['source']['attempt_id']==old['attempt_id'] and pinned['artifact']['content_digest']==sha(f.raw),'Replacement packet does not pin the exact historical checkpoint'))
+ check('adoption.continuation-current',lambda:expect('CURRENT_CONTINUATION_ARTIFACTS' in svc.ok('hierarchy.packet.validate',{'leader_generation':'1','package_generation':'2','digest':pinned_digest},key='manager',component='3.2')['checked_inputs'],'Pinned continuation was not re-read from current artifacts'))
+ # scheduler.claim (5.1) validates packets without the authenticated invocation,
+ # so a continuation-pinned packet cannot be claimed in this tree; the
+ # replacement is claimed through an unpinned packet and must not be able to adopt.
+ packet_input=svc.packet_input(task_id=i['task_a'],slot_id=i['slot_overlap'],idempotency_key=scheduler.uid(),attempt_id=scheduler.uid(),attempt_generation='2')
+ created=svc.ok('hierarchy.packet.create',packet_input,key='manager',component='3.2')
+ claim_request={'organisation_id':i['organisation'],'run_id':i['run'],'request_id':scheduler.uid(),'task_id':packet_input['task_id'],'attempt_id':packet_input['attempt_id'],'attempt_generation':'2','run_spec_generation':'1','spec_generation':'1','spec_revision_id':i['spec'],'authority_epoch':i['epoch'],'leader_generation':'1','package_generation':'2','sandbox_id':i['sandbox'],'slot_id':packet_input['slot_id'],'sandbox_boot_generation':'1','lease_ms':300000,'input_packet_digest':created['digest'],'capacity':svc.capacity()}
+ new=svc.claim('replacement',request=claim_request)['token']
+ target_before=svc.sql(CURRENT,[new['attempt_id']])[0]
+ check('adoption.replacement-single-current',lambda:expect([row['id'] for row in svc.sql("SELECT id::text FROM hyperfide.attempts WHERE compute_authority='CURRENT'")]==[new['attempt_id']],'More than one current generation'))
+ f.adoption={'token':new,'source_checkpoint_id':checkpoint_id,'source_expected_artifact_digest':f.parent['artifact']['digest'],'target_expected_input_packet_digest':created['digest'],'target_expected_preparation_digest':svc.preparation,'mode':'SOURCE_ONLY','native_resume':None}
+ native={'session_id':scheduler.uid(),'native_session_id':'native-mismatch','configuration_digest':sha(b'configuration'),'source_manifest_digest':f.capture['manifest_digest']}
+ stale={'STALE_COMPUTE','COMPUTE_LEASE_EXPIRED','COMPUTE_ALLOCATION_INVALID'}
+ check('adoption.stale-worker-renewal-denied',lambda:expect(svc.primary("return leases.renewCompute(tx,data.token,300000);",{'token':old}).get('error',{}).get('code') in stale,'Expired worker renewed its fence'))
+ check('adoption.stale-worker-registration-denied',lambda:f.reject(f.request,stale))
+ check('adoption.stale-worker-import-denied',lambda:f.reject(f.request,stale,action='artifact.checkpoint.import'))
+ check('adoption.stale-worker-cannot-adopt',lambda:f.reject(f.adopt_request(token=old),stale,action='artifact.adoption.adopt'))
+ check('adoption.strict-input',lambda:f.reject(f.adopt_request(renew_source=True),{'ADOPTION_INPUT_INVALID'},action='artifact.adoption.validate'))
+ check('adoption.readonly-role',lambda:f.reject(f.adopt_request(),{'ADOPTION_ROLE_DENIED','AUTH_ROLE_DENIED','ROLE_DENIED'},key='watcher',action='artifact.adoption.adopt'))
+ check('adoption.missing-checkpoint',lambda:f.reject(f.adopt_request(source_checkpoint_id=scheduler.uid()),{'ADOPTION_CHECKPOINT_MISSING'},action='artifact.adoption.validate'))
+ check('adoption.artifact-digest-mismatch',lambda:f.reject(f.adopt_request(source_expected_artifact_digest=sha(b'other capsule')),{'ADOPTION_CHECKPOINT_INVALID'},action='artifact.adoption.validate'))
+ check('adoption.native-session-mismatch',lambda:f.reject(f.adopt_request(mode='NATIVE_RESUME',native_resume=native),{'ADOPTION_NATIVE_INCOMPATIBLE'},action='artifact.adoption.adopt'))
+ check('adoption.source-only-no-native-reuse',lambda:f.reject(f.adopt_request(native_resume=native),{'ADOPTION_INPUT_INVALID'},action='artifact.adoption.adopt'))
+ check('adoption.target-packet-mismatch',lambda:f.reject(f.adopt_request(target_expected_input_packet_digest=pinned_digest),{'ADOPTION_TARGET_CHANGED'},action='artifact.adoption.adopt'))
+ check('adoption.environment-mismatch',lambda:f.reject(f.adopt_request(target_expected_preparation_digest=sha(b'other prepared environment')),{'ADOPTION_TARGET_CHANGED'},action='artifact.adoption.adopt'))
+ check('adoption.unpinned-target-validate-refused',lambda:f.reject(f.adopt_request(),{'ADOPTION_CONTINUATION_REQUIRED'},action='artifact.adoption.validate'))
+ check('adoption.unpinned-target-adopt-refused',lambda:f.reject(f.adopt_request(),{'ADOPTION_CONTINUATION_REQUIRED'},action='artifact.adoption.adopt'))
+ check('adoption.refusals-atomic',lambda:expect(svc.sql('SELECT count(*)::int n FROM hyperfide.artifact_adoptions')[0]['n']==0 and svc.sql('SELECT count(*)::int n FROM hyperfide.checkpoints')[0]['n']==1,'Refused adoption persisted'))
+ # The replacement explicitly imports the expired attempt's recoverable bytes
+ # as untrusted history attributed to their original producer.
+ envelope=svc.operation('15.3','artifact.checkpoint.import',dict(f.request,token=new));imported={}
+ def adopt():
+  status,response=svc.request(envelope,key='operator');expect(status==200 and response.get('ok'),str(response.get('error',{})));imported.update(response['result'])
+ check('adoption.import.persisted',adopt)
+ def provenance():
+  row=imported['checkpoint']
+  expect(row['registration_kind']=='STALE_IMPORT' and row['attempt_id']==old['attempt_id'] and str(row['attempt_generation'])=='1' and row['source_workspace_id']==f.workspace,'Imported lineage is not the original producer')
+  expect(row['artifact_content_digest']==sha(f.raw) and row['source_metadata_digest']==f.capture['manifest_digest'] and row['source_object_id']==f.native.head and row['support_level']=='SOURCE_ONLY','Imported provenance differs')
+  expect(svc.sql('SELECT count(*)::int n FROM hyperfide.checkpoint_context_artifacts WHERE checkpoint_id=$1',[row['id']])[0]['n']==3,'Imported context incomplete')
+ check('adoption.import.provenance',provenance)
+ check('adoption.import.no-authority',lambda:expect(imported['replayed'] is False and imported['grants_authority'] is False and imported['context_restored'] is False and imported['compute_authority_changed'] is False,'Import claimed authority'))
+ def fence():
+  expect(svc.sql(CURRENT,[old['attempt_id']])[0]==source_before,'Adoption changed the expired source attempt')
+  expect(svc.sql("SELECT count(*)::int n FROM hyperfide.compute_leases WHERE attempt_id=$1 AND state='ACTIVE'",[old['attempt_id']])[0]['n']==0,'Adoption renewed the expired lease')
+  expect(svc.sql(CURRENT,[new['attempt_id']])[0]==target_before,'Adoption changed the target fence')
+  expect([row['id'] for row in svc.sql("SELECT id::text FROM hyperfide.attempts WHERE compute_authority='CURRENT'")]==[new['attempt_id']],'Adoption created another current generation')
+ check('adoption.no-fence-renewal',fence)
+ def replay():
+  _,response=svc.request(envelope,key='operator');expect(response.get('ok') and response['result']['replayed'] is True and response['result']['checkpoint']['id']==imported['checkpoint']['id'],'Replay differs')
+  expect(svc.sql('SELECT count(*)::int n FROM hyperfide.checkpoints')[0]['n']==2,'Replay duplicated import')
+ check('adoption.import.exact-replay',replay)
 def main():
- f=CheckpointFixture();state={}
+ accepted_intent();scheduler.configure_cleanup('15.3');f=CheckpointFixture();state={}
  try:
   check('checkpoint.registration.actual-signed-claim',lambda:expect(f.service.sql("SELECT count(*)::int n FROM hyperfide.attempts WHERE compute_authority='CURRENT'")[0]['n']==1))
   check('checkpoint.registration.strict-input',lambda:f.reject(dict(f.request,durable=True),{'ADOPTION_INPUT_INVALID'}))
@@ -123,9 +221,19 @@ def main():
    first=f.raw[:196608];f.objects.set_mode(first,'corrupt')
    check('checkpoint.registration.corrupt-retained-bytes',lambda:f.reject(dict(f.scope,checkpoint_id=checkpoint_id),{'ARTIFACT_NOT_COMPLETE','ARTIFACT_INTEGRITY','CHECKPOINT_ARTIFACT_UNAVAILABLE'},action='artifact.checkpoint.inspect'))
    f.objects.set_mode(first,'normal')
+   adoption(f,checkpoint_id)
   else:raise AssertionError('Actual checkpoint registration failed; dependent assertions not fabricated')
  finally:
   service=f.service;db=service.database;path=service.path;port=service.port;f.close()
   check('checkpoint.registration.owned-cleanup',lambda:expect(not path.exists() and service.sql('SELECT count(*)::int n FROM pg_database WHERE datname=$1',[db],admin=True)[0]['n']==0))
  return 1 if any(actual!='observed' for _,actual in RESULTS) else 0
-if __name__=='__main__':raise SystemExit(main())
+def cleanup():
+ # Reuse the scheduler fixture's owned-resource receipt; re-emit its observation
+ # with the exact absence evidence this registration requires.
+ out=io.StringIO()
+ with contextlib.redirect_stdout(out):code=scheduler.cleanup_owned('15.3')
+ events=[json.loads(line) for line in out.getvalue().splitlines() if line.startswith('{')]
+ complete=code==0 and len(events)==1 and events[0].get('complete') is True
+ print(json.dumps({'type':'cleanup','complete':complete,'resources':[{'id':'hf-task-15.3-runtime','kind':'postgresql-database','status':'deleted' if complete else 'unknown','observed_absent':complete,'evidence_artifact':'scheduler/cleanup.json'}]}),flush=True)
+ return 0 if complete else 1
+if __name__=='__main__':raise SystemExit(cleanup() if '--cleanup' in sys.argv else main())

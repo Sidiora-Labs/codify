@@ -4,10 +4,13 @@ import type {PrimaryTransaction} from '../storage/transactions.js';
 import {readSemanticDisposition,writeSemanticDisposition} from '../storage/dispositions.js';
 import {assertInvocation,strictJSON} from '../transport/protocol.js';
 import type {InvocationContext} from '../transport/protocol.js';
-import {loadExecutionPacket,deriveQualificationInputs} from '../hierarchy/packets.js';
+import {loadExecutionPacket,deriveQualificationInputs,isPacketAuthority} from '../hierarchy/packets.js';
+import type {ContinuationBinding} from '../hierarchy/packets.js';
 import {leadership,requireAuthority} from '../hierarchy/packages.js';
 import {assertCompleteArtifactReferences} from './objects.js';
 import {readCheckpointContinuation} from './continuation.js';
+import {environmentRecipe,sessionPrecheck,sessionRecipe,sourceRecipe,sourceUnchanged} from './checkpoint-recipes.js';
+import type {CheckpointLineage,NativeResumeRequest} from './checkpoint-recipes.js';
 import {FoundationError} from '../policy/programme.js';
 import {assertCurrentCompute,parseComputeToken} from '../scheduler/leases.js';
 import type {ComputeToken} from '../scheduler/leases.js';
@@ -44,7 +47,7 @@ function parse(input:unknown):Request{
  }else if(row.native_resume!==null)fail('ADOPTION_INPUT_INVALID','Source-only adoption has no native session resume');
  return {token,source_checkpoint_id:uuid(row.source_checkpoint_id),source_expected_artifact_digest:digest(row.source_expected_artifact_digest),target_expected_input_packet_digest:digest(row.target_expected_input_packet_digest),target_expected_preparation_digest:digest(row.target_expected_preparation_digest),mode:row.mode,native_resume:native};
 }
-type Checkpoint={registration_operation_id:string|null;preparation_digest:string|null;artifact_content_digest:string|null;source_metadata_digest:string|null;id:string;artifact_id:string;attempt_id:string;attempt_generation:string;repository_id:string;source_object_id:string;input_packet_digest:string;support_level:string;agent_session_id:string|null;digest:string;status:string;source_compute_authority:string;source_packet_digest:string;source_task_id:string;source_expired:boolean};
+type Checkpoint=CheckpointLineage;
 const checkpointSQL="SELECT c.id,c.artifact_id,c.attempt_id,c.attempt_generation::text,c.repository_id,c.source_object_id,c.input_packet_digest,c.support_level,c.agent_session_id,c.registration_operation_id,c.preparation_digest,c.artifact_content_digest,c.source_metadata_digest,a.digest,a.status,s.compute_authority AS source_compute_authority,s.input_packet_digest AS source_packet_digest,s.task_id AS source_task_id,(s.lease_expires_at IS NULL OR s.lease_expires_at<=clock_timestamp()) AS source_expired FROM hyperfide.checkpoints c JOIN hyperfide.artifacts a ON a.organisation_id=c.organisation_id AND a.run_id=c.run_id AND a.id=c.artifact_id JOIN hyperfide.attempts s ON s.organisation_id=c.organisation_id AND s.run_id=c.run_id AND s.id=c.attempt_id AND s.generation=c.attempt_generation WHERE c.organisation_id=$1 AND c.run_id=$2 AND c.id=$3";
 export class ArtifactAdoption{
  constructor(private readonly context:Context){}
@@ -81,12 +84,7 @@ export class ArtifactAdoption{
  const token=request.token as unknown as Record<string,unknown>;
  const result=await tx.query<Checkpoint>(checkpointSQL,[token.organisation_id,token.run_id,request.source_checkpoint_id]);
  const row=result.rows[0];if(!row)fail('ADOPTION_CHECKPOINT_MISSING','Source checkpoint is unavailable');
- if(!row.registration_operation_id||!row.preparation_digest||!row.artifact_content_digest||!row.source_metadata_digest)fail('ADOPTION_CHECKPOINT_UNBOUND','Legacy checkpoint lacks verified registration provenance');
- if(row.status!=='COMPLETE'||row.digest!==request.source_expected_artifact_digest)fail('ADOPTION_CHECKPOINT_INVALID','Source checkpoint artifact differs or is incomplete');
- if(row.input_packet_digest!==row.source_packet_digest)fail('ADOPTION_CHECKPOINT_INVALID','Source packet lineage differs');
- if(row.source_task_id!==token.task_id)fail('ADOPTION_SCOPE_DENIED','Source checkpoint belongs to another task');
- if(row.attempt_id===token.attempt_id)fail('ADOPTION_CHECKPOINT_INVALID','Current target cannot adopt itself');
- if(row.source_compute_authority==='CURRENT'&&!row.source_expired)fail('ADOPTION_SOURCE_ACTIVE','Source still holds current compute authority');
+ sourceRecipe(row,{task_id:String(token.task_id),attempt_id:String(token.attempt_id),attempt_generation:String(token.attempt_generation)},request.source_expected_artifact_digest);
  return row;
  }
  private async prior(tx:PrimaryTransaction,actor:Invocation,payload:string):Promise<Record<string,unknown>|undefined>{
@@ -106,30 +104,31 @@ export class ArtifactAdoption{
  });
  if(initial.prior)return {adoption:initial.prior,replayed:true,compute_authority_changed:false,context_restored:false,grants_authority:false};
  const source=initial.checkpoint!;
+ sessionPrecheck(source,request.mode,request.native_resume as NativeResumeRequest|null,request.target_expected_input_packet_digest);
  const artifacts=this.context.dependencies.require('15.2','artifact.store.v1',capability);
  const verified=record(await artifacts.invoke('artifact.object.inspect',{organisation_id:token.organisation_id,run_id:token.run_id,artifact_id:source.artifact_id},this.context));
  if(verified.outcome!=='SUCCEEDED'||verified.availability!=='VERIFIED'||verified.receipt===null)fail('ADOPTION_ARTIFACT_UNAVAILABLE','Source bytes are not verified available');
  let resume:Record<string,unknown>|null=null;
  if(request.mode==='NATIVE_RESUME'){
- if(source.support_level!=='NATIVE_RESUME'||source.agent_session_id!==request.native_resume!.session_id||source.input_packet_digest!==request.target_expected_input_packet_digest)fail('ADOPTION_NATIVE_INCOMPATIBLE','Native checkpoint session or execution packet differs');
  const sessions=this.context.dependencies.require('13.2','agent.sessions.v1',sessionCapability);
  resume=record(await sessions.resumeCheck({scope:{organisation_id:token.organisation_id,run_id:token.run_id,session_id:request.native_resume!.session_id},checkpoint_id:source.id,native_session_id:request.native_resume!.native_session_id,configuration_digest:request.native_resume!.configuration_digest,source_manifest_digest:request.native_resume!.source_manifest_digest},actor));
- if(resume.decision!=='ELIGIBLE_NATIVE_CONTEXT'||resume.context_restored!==false||resume.grants_authority!==false)fail('ADOPTION_NATIVE_INCOMPATIBLE','Native session does not have qualified resume eligibility');
  }
+ const session=sessionRecipe(source,request.mode,resume);
  return this.transaction(actor,async tx=>{
  const existing=await this.prior(tx,actor,payload);if(existing)return {adoption:existing,replayed:true,compute_authority_changed:false,context_restored:false,grants_authority:false};
  await this.targetActor(tx,request.token,actor);
  const target=record(await assertCurrentCompute(tx,request.token,{operation:'CHECKPOINT'}));
- if(target.input_packet_digest!==request.target_expected_input_packet_digest||target.preparation_digest!==request.target_expected_preparation_digest)fail('ADOPTION_TARGET_CHANGED','Target execution packet or preparation differs');
+ const environment=environmentRecipe(source,request.mode,{input_packet_digest:String(target.input_packet_digest),preparation_digest:String(target.preparation_digest)},{input_packet_digest:request.target_expected_input_packet_digest,preparation_digest:request.target_expected_preparation_digest});
  const packet=await loadExecutionPacket(tx,{organisation_id:String(token.organisation_id),run_id:String(token.run_id),digest:String(target.input_packet_digest)});
  const continuation=record(record(record(packet.packet).mandatory).intent).continuation;
  const expectedContinuation=await readCheckpointContinuation(tx,{organisation_id:String(token.organisation_id),run_id:String(token.run_id),checkpoint_id:source.id},actor);
  if(!continuation||canonical(continuation)!==canonical(expectedContinuation))fail('ADOPTION_CONTINUATION_REQUIRED','Target packet must pin the exact immutable checkpoint and context before claim');
  const current=await this.checkpoint(tx,request);
- if(current.artifact_id!==source.artifact_id||current.digest!==source.digest||current.source_object_id!==source.source_object_id)fail('ADOPTION_CHECKPOINT_INVALID','Source checkpoint changed');
+ const sourceOutcome=sourceRecipe(current,{task_id:String(token.task_id),attempt_id:String(token.attempt_id),attempt_generation:String(token.attempt_generation)},request.source_expected_artifact_digest);
+ sourceUnchanged(source,current);
  if((await tx.query('SELECT id FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND status=\'COMPLETE\' FOR SHARE',[token.organisation_id,token.run_id,current.artifact_id])).rowCount!==1)fail('ADOPTION_ARTIFACT_UNAVAILABLE','Checkpoint artifact ceased to be complete');
- const compatibility={source_packet_digest:source.input_packet_digest,target_packet_digest:target.input_packet_digest,target_preparation_digest:target.preparation_digest,source_context_preserved:false,native_resume_eligible:request.mode==='NATIVE_RESUME',requires_rebuild:request.mode==='SOURCE_ONLY',resume_check:resume};
- const provenance={authority_actor_id:actor.principal.actor_id,source_checkpoint_id:source.id,source_attempt_id:source.attempt_id,source_generation:source.attempt_generation,source_artifact_id:source.artifact_id,source_artifact_digest:source.digest,source_content_digest:source.artifact_content_digest,source_metadata_digest:source.source_metadata_digest,source_preparation_digest:source.preparation_digest,source_repository_id:source.repository_id,source_object_id:source.source_object_id,source_agent_session_id:source.agent_session_id,source_support_level:source.support_level};
+ const compatibility={recipes:[sourceOutcome,session,environment],source_packet_digest:source.input_packet_digest,target_packet_digest:target.input_packet_digest,source_preparation_digest:source.preparation_digest,target_preparation_digest:target.preparation_digest,source_context_preserved:false,native_resume_eligible:request.mode==='NATIVE_RESUME',native_session_reused:session.verdict==='COMPATIBLE',requires_rebuild:environment.verdict==='REBUILD_REQUIRED',resume_check:resume};
+ const provenance={authority_actor_id:actor.principal.actor_id,source_checkpoint_id:source.id,source_attempt_id:source.attempt_id,source_generation:source.attempt_generation,source_artifact_id:source.artifact_id,source_artifact_digest:source.digest,source_content_digest:source.artifact_content_digest,source_metadata_digest:source.source_metadata_digest,source_preparation_digest:source.preparation_digest,source_repository_id:source.repository_id,source_object_id:source.source_object_id,source_agent_session_id:source.agent_session_id,source_support_level:source.support_level,source_compute_authority:source.source_compute_authority,source_authority_restored:false,trust:'UNTRUSTED_HISTORY'};
  if(!commit)return {valid:true,compatibility,provenance,compute_authority_changed:false,context_restored:false,grants_authority:false};
  const result=await tx.query("INSERT INTO hyperfide.artifact_adoptions(organisation_id,run_id,operation_id,payload_digest,source_checkpoint_id,source_artifact_id,source_attempt_id,source_generation,target_attempt_id,target_generation,repository_id,source_object_id,input_packet_digest,preparation_digest,mode,compatibility,provenance) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *",[token.organisation_id,token.run_id,actor.operation.operation_id,payload,source.id,source.artifact_id,source.attempt_id,source.attempt_generation,token.attempt_id,token.attempt_generation,source.repository_id,source.source_object_id,target.input_packet_digest,target.preparation_digest,request.mode,JSON.stringify(compatibility),JSON.stringify(provenance)]);
  return {adoption:result.rows[0],replayed:false,compute_authority_changed:false,context_restored:false,grants_authority:false};
@@ -263,6 +262,9 @@ export function isArtifactAdoptionCapability(value:unknown):value is ArtifactAdo
  return ['adopt','validate','registerCheckpoint','importCheckpoint','inspectCheckpoint'].every(name=>typeof row[name]==='function');
 }
 export function createComponent(context:ComponentContext):Component{
+ // The packet producer refuses continuation pins until the checkpoint service
+ // installs its historical reader; without it no replacement can adopt.
+ context.dependencies.require('3.2','hierarchy.packets.v1',isPacketAuthority).installContinuationReader(async(tx,scope,invocation)=>await readCheckpointContinuation(tx,scope,invocation) as unknown as ContinuationBinding);
  const bind=(request:ComponentContext|InvocationContext):ArtifactAdoption=>{
  const actor='principal' in request?request:request.invocation;assertInvocation(actor);
  return new ArtifactAdoption({...context,invocation:actor});
