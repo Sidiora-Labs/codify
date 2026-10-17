@@ -143,7 +143,7 @@ C
 
 make -C "$repo" -j2 build/libcg.a >/dev/null
 cc -std=gnu11 -Wall -Wextra -pthread -I"$repo/src" "$tmp/check.c" \
-  "$repo/build/libcg.a" -lsqlite3 -lpthread -lm -o "$tmp/check"
+  "$repo/build/libcg.a" -lsqlite3 -lpthread -lm -lcurl -lcrypto -o "$tmp/check"
 "$tmp/check"
 
 # A storage failure after legacy rows have been rewritten must roll the
@@ -179,9 +179,9 @@ int __wrap_sem_search_file_replace(Cg *cg, long file_id) {
 C
 mapfile -d '' -t vendor_objects < <(find "$repo/build/vendor" -name '*.o' -print0)
 cc -std=gnu11 -Wall -Wextra -pthread -I"$repo/src" "$tmp/failhook.c" \
-  "$repo"/build/*.o "${vendor_objects[@]}" \
+  "$repo"/build/*.o "$repo"/build/hyperfide/*.o "${vendor_objects[@]}" \
   -Wl,--wrap=sem_search_schema_init,--wrap=sem_search_file_replace \
-  -lsqlite3 -lpthread -lm -o "$tmp/cg-fail"
+  -lsqlite3 -lpthread -lm -lcurl -lcrypto -o "$tmp/cg-fail"
 printf 'function bravo() { return 2; }\n' > case.ts
 if "$tmp/cg-fail" index --full >/dev/null 2>&1; then
     echo 'semantic write fault unexpectedly indexed successfully' >&2

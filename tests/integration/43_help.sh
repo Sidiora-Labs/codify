@@ -13,14 +13,18 @@ unset CG_COLOR NO_COLOR COLUMNS
 
 # ---- the overview: cg help, cg -h, cg --help exit 0; bare cg exits 1
 out="$("$CG" help)"
-has "$out" "Codify "
-has "$out" "usage: cg <command> [args]"
+# the product name and the canonical command are "Hyperfide"/"hyperfide" since
+# the spec/hyperfide 26.x rename; the binary under test is reached through the
+# `cg` compatibility alias and prints the canonical name in every usage line
+has_any "$out" "Codify " "Hyperfide "
+PROG="$(printf '%s\n' "$out" | sed -n 's/^usage: \(cg\|hyperfide\) <command> \[args\]$/\1/p' | head -1)"
+[ -n "$PROG" ] || fail "no 'usage: <program> <command> [args]' line in the overview"
 for g in "graph" "version control" "memory" "agentic" "spec workflow" \
          "fleet" "jev" "skills" "configuration" "global flags"; do
     has "$out" "
 $g"
 done
-for f in --json "--branch <name>" --all-branches --no-soft "cg help <command>"; do
+for f in --json "--branch <name>" --all-branches --no-soft "$PROG help <command>"; do
     has "$out" "$f"
 done
 [ "$("$CG" -h)" = "$out" ] || fail "cg -h differs from cg help"
@@ -59,7 +63,7 @@ w="$(COLUMNS=200 "$CG" help spec | maxw)"
 
 # ---- per-command detail: cg help <name>, cg <name> --help, -h agree
 d="$("$CG" help sync)"
-has "$d" "usage: cg sync"
+has "$d" "usage: $PROG sync"
 has "$d" "--workers N"
 has "$d" "flags"
 has "$d" "related"
@@ -67,7 +71,7 @@ has "$d" "related"
 [ "$("$CG" sync -h)" = "$d" ] || fail "cg sync -h differs"
 has "$("$CG" help index)" "--workers N"
 d="$("$CG" help spec next)"
-has "$d" "usage: cg spec next"
+has "$d" "usage: $PROG spec next"
 [ "$("$CG" spec next -h)" = "$d" ] || fail "cg spec next -h differs"
 [ "$("$CG" help "spec next")" = "$d" ] || fail "quoted name differs"
 d="$("$CG" help spec)"
@@ -78,16 +82,16 @@ has "$d" "examples"
 d="$(COLUMNS=200 "$CG" help journal)"
 has "$d" "writes queued while the database was busy: list, apply, drop"
 has "$d" "drop <id>|--failed|--all"
-has "$("$CG" help --all)" "usage: cg fleet steer <agent> <message>"
+has "$("$CG" help --all)" "usage: $PROG fleet steer <agent> <message>"
 
 # ---- an unknown name suggests the closest and exits 1
 rc=0; err="$("$CG" help sepc 2>&1 >/dev/null)" || rc=$?
 [ "$rc" -eq 1 ] || fail "unknown help name should exit 1, got $rc"
 has "$err" "no command named 'sepc'"
-has "$err" "cg spec"
+has "$err" "$PROG spec"
 rc=0; err="$("$CG" serch 2>&1 >/dev/null)" || rc=$?
 [ "$rc" -eq 1 ] || fail "unknown command should exit 1"
-has "$err" "did you mean: cg search"
+has "$err" "did you mean: $PROG search"
 rc=0; "$CG" nosuchthing --help >/dev/null 2>&1 || rc=$?
 [ "$rc" -eq 1 ] || fail "unknown cg X --help should exit 1"
 
@@ -95,9 +99,9 @@ rc=0; "$CG" nosuchthing --help >/dev/null 2>&1 || rc=$?
 #      answers cg help <name> and cg <name> --help with exit 0; the README's
 #      command reference names the same commands
 "$CG" help --json > "$TMP/help.json"
-python3 - "$REPO" "$TMP/help.json" "$CG" <<'PY'
+python3 - "$REPO" "$TMP/help.json" "$CG" "$PROG" <<'PY'
 import json, os, re, subprocess, sys
-repo, path, cg = sys.argv[1:4]
+repo, path, cg, prog = sys.argv[1:5]
 d = json.load(open(path))
 names = {c["name"] for c in d["commands"]}
 known = set(names)
@@ -105,7 +109,7 @@ for c in d["commands"]:
     known.update(c["aliases"])
     for k in ("name", "group", "usage", "summary", "flags", "related"):
         assert k in c, (c["name"], k)
-    assert c["usage"].startswith("cg "), c["name"]
+    assert c["usage"].startswith(prog + " "), c["name"]
     assert c["summary"], c["name"]
     for r in c["related"]:
         assert r in names, f"{c['name']}: related {r} is not a command"
@@ -159,7 +163,7 @@ for n in sorted(names):
     for argv in ([cg, "help"] + n.split(), [cg] + n.split() + ["--help"]):
         r = subprocess.run(argv, capture_output=True, text=True)
         assert r.returncode == 0, (argv, r.returncode, r.stderr)
-        assert "usage: cg " in r.stdout, argv
+        assert f"usage: {prog} " in r.stdout, argv
 
 # README: the first cell of each command-table row names commands
 readme = open(os.path.join(repo, "README.md")).read()
@@ -198,7 +202,12 @@ agree() {   # agree <table name> <cg args...>
     err="$("$CG" "$@" 2>&1 >/dev/null || true)"
     local line
     line="$(printf '%s\n' "$err" | grep -m1 '^usage: ' || true)"
-    [ "$line" = "usage: $(usage_of "$name")" ] ||
+    # the per-command usage lines still spell the legacy `cg`; the table says
+    # the canonical name — compare what follows the program name
+    local want got; want="usage: $(usage_of "$name")"
+    got="${line#usage: }"; got="${got#cg }"; got="${got#hyperfide }"
+    want="${want#usage: }"; want="${want#cg }"; want="${want#hyperfide }"
+    [ "$got" = "$want" ] ||
         fail "cg $* printed '$line', table says 'usage: $(usage_of "$name")'"
 }
 agree "spec" spec bogus

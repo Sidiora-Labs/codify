@@ -44,7 +44,7 @@ lines = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
 by_id = {l["id"]: l for l in lines}
 
 init = by_id[1]["result"]
-assert init["serverInfo"]["name"] == "codify", init
+assert init["serverInfo"]["name"] in ("codify", "hyperfide"), init
 assert init["protocolVersion"] == "2025-06-18", init
 
 tools = [t["name"] for t in by_id[2]["result"]["tools"]]
@@ -232,7 +232,7 @@ out="$(req '{"jsonrpc":"2.0","id":6,"method":"resources/list"}')"
 python3 -c "
 import json
 res = json.loads(r'''$out''')['result']['resources']
-assert any(x['uri'].startswith('codify://spec/') for x in res), res
+assert any(x['uri'].startswith(('codify://spec/', 'hyperfide://spec/')) for x in res), res
 "
 
 echo "04_mcp modern ok"

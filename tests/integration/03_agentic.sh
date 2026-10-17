@@ -35,7 +35,7 @@ out="$(cat .codify/agent-context.md)"
 has "$out" "typescript"
 has "$out" "/users"          # route table
 has "$out" "cg context"      # agent cheat sheet
-has "$out" 'owned by `cg agentmd`'
+has_any "$out" 'owned by `cg agentmd`' 'owned by `hyperfide agentmd`'
 
 # mcp-install: project + user configs, sandboxed HOME
 export HOME="$TMP/home"
@@ -45,13 +45,14 @@ mkdir -p "$HOME"
 python3 -c "
 import json
 d = json.load(open('.mcp.json'))
-assert 'codify' in d['mcpServers'], d
-assert d['mcpServers']['codify']['args'] == ['mcp'], d
+srv = d['mcpServers'].get('hyperfide') or d['mcpServers'].get('codify')
+assert srv, d
+assert srv['args'] == ['mcp'], d
 "
 python3 -m json.tool .vscode/mcp.json >/dev/null || fail "vscode config invalid"
 python3 -m json.tool "$HOME/.codeium/windsurf/mcp_config.json" >/dev/null \
     || fail "windsurf config invalid"
-grep -q "mcp_servers.codify" "$HOME/.codex/config.toml" \
+grep -qE "mcp_servers\.(codify|hyperfide)" "$HOME/.codex/config.toml" \
     || fail "codex config missing"
 
 # merging into an existing config keeps the other server
@@ -68,7 +69,7 @@ python3 -c "
 import json
 d = json.load(open('.mcp.json'))
 assert 'other' in d['mcpServers'], d
-assert 'codify' in d['mcpServers'], d
+assert 'codify' in d['mcpServers'] or 'hyperfide' in d['mcpServers'], d
 "
 
 # second run is idempotent

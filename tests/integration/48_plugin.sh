@@ -15,7 +15,7 @@ echo 'int main(void){return 0;}' > src/main.c
 ROOT="$HOME/.codify/plugins/claude-code"
 P="$ROOT/plugins/codify"
 CGPATH="$(readlink -f "$CG")"
-VERSION="$("$CG" --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+VERSION="$("$CG" --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?' | head -1)"
 [ -n "$VERSION" ] || fail "no version from cg --version"
 
 # ---- --no-plugin writes nothing of the plugin or the Codex hooks

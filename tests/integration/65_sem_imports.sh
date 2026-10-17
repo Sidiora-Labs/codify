@@ -26,7 +26,7 @@ int main(int argc,char **argv) {
 }
 C
 make -s build/libcg.a
-cc -std=gnu11 -Isrc -o "$work/runner" "$work/runner.c" build/libcg.a -lsqlite3 -lpthread -lm
+cc -std=gnu11 -Isrc -o "$work/runner" "$work/runner.c" build/libcg.a -lsqlite3 -lpthread -lm -lcurl -lcrypto
 python3 - "$work" <<'PY'
 import json, pathlib, sqlite3, sys
 w=pathlib.Path(sys.argv[1]); root=w/'tree'
@@ -139,7 +139,7 @@ int main(int argc,char **argv) {
  sqlite3_close(cg.db);return rc;
 }
 C
-cc -std=gnu11 -Isrc -o "$work/scoped" "$work/scoped.c" build/libcg.a -lsqlite3 -lpthread -lm
+cc -std=gnu11 -Isrc -o "$work/scoped" "$work/scoped.c" build/libcg.a -lsqlite3 -lpthread -lm -lcurl -lcrypto
 "$work/scoped" "$work/graph.db" "$work/tree" 1
 python3 - "$work" <<'PY'
 import pathlib,sqlite3,sys
@@ -186,7 +186,7 @@ int main(int argc,char **argv) {
  sqlite3_close(cg.db);return rc;
 }
 C
-cc -std=gnu11 -Isrc -o "$work/changed" "$work/changed.c" build/libcg.a -lsqlite3 -lpthread -lm
+cc -std=gnu11 -Isrc -o "$work/changed" "$work/changed.c" build/libcg.a -lsqlite3 -lpthread -lm -lcurl -lcrypto
 "$work/changed" "$work/graph.db" "$work/tree"
 python3 - "$work" <<'PY'
 import pathlib,sqlite3,sys

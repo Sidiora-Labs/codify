@@ -227,8 +227,8 @@ No build step and no dependencies — the extension is plain JavaScript, includi
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # produces codify-workflow-1.6.0.vsix
-code --install-extension codify-workflow-1.6.0.vsix --force
+npx @vscode/vsce package        # produces codify-workflow-2.0.0-dev.vsix
+code --install-extension codify-workflow-2.0.0-dev.vsix --force
 ```
 
 The Marketplace identity is `SidioraLabs.codify-workflow`. In a Remote SSH,

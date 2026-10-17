@@ -41,6 +41,19 @@ $(printf '%s\n' "$1" | head -8)" ;;
     esac
 }
 
+# has_any "<haystack>" "<needle>"... — assert at least one substring. Used
+# where the Hyperfide rename (spec/hyperfide 26.x) changed branded output and
+# the legacy Codify spelling is still accepted.
+has_any() {
+    local hay="$1"; shift
+    local n
+    for n in "$@"; do
+        case "$hay" in *"$n"*) return 0 ;; esac
+    done
+    fail "expected one of [$*] in output:
+$(printf '%s\n' "$hay" | head -8)"
+}
+
 # hasnt "<haystack>" "<needle>"
 hasnt() {
     case "$1" in

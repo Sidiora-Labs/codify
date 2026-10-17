@@ -33,14 +33,21 @@ hasnt "$("$CG" brief --json)" "auto_sync"
 mkdir -p "$TMP/cfg"
 cd "$TMP/cfg"
 out="$("$CG" config init)"
-has "$out" "wrote $TMP/cfg/codify.kvx"
-has "$(cat codify.kvx)" "# codify.kvx — project configuration for Codify. Every key is optional."
-has "$(cat codify.kvx)" 'codemap = "CODEMAP.md"      # written by cg codemap'
-has "$(cat codify.kvx)" '# workers = auto'            # commented, with its default
-has "$(cat codify.kvx)" '# walk = auto'               # codify-v15 1.3
-cp codify.kvx "$TMP/template.kvx"
+# the file a command creates is hyperfide.kvx since the spec/hyperfide 26.3
+# rename (codify.kvx before it); a hand-written codify.kvx is still read and
+# updated in place, which the sections below keep exercising
+KVX="$(basename "${out#wrote }")"
+case "$KVX" in codify.kvx|hyperfide.kvx) ;; *) fail "config init wrote '$out'" ;; esac
+has "$out" "wrote $TMP/cfg/$KVX"
+has_any "$(cat "$KVX")" "# codify.kvx — project configuration for Codify. Every key is optional." \
+                        "# hyperfide.kvx — project configuration for Hyperfide. Every key is optional."
+has_any "$(cat "$KVX")" 'codemap = "CODEMAP.md"      # written by cg codemap' \
+                        'codemap = "CODEMAP.md"      # written by hyperfide codemap'
+has "$(cat "$KVX")" '# workers = auto'            # commented, with its default
+has "$(cat "$KVX")" '# walk = auto'               # codify-v15 1.3
+cp "$KVX" "$TMP/template.kvx"
 expect_rc 1 "$CG" config init
-cmp -s codify.kvx "$TMP/template.kvx" || fail "config init overwrote the file"
+cmp -s "$KVX" "$TMP/template.kvx" || fail "config init overwrote the file"
 [ ! -d .codegraph ] || fail "cg config created a graph"
 
 [ "$("$CG" config get sync.auto)" = true ] || fail "get sync.auto"
@@ -51,36 +58,38 @@ has "$out" "paths.context = .agents/ctx"
 [ "$("$CG" config get paths.context)" = .agents/ctx ] || fail "set did not stick"
 "$CG" config set sync.auto off >/dev/null
 [ "$("$CG" config get sync.auto)" = false ] || fail "bool set"
-grep -q '^auto = false' codify.kvx || fail "bool written quoted: $(grep auto codify.kvx)"
-grep -q 'agent-context.md, recap.md' codify.kvx || fail "set lost a comment"
-cp codify.kvx "$TMP/before-bad.kvx"
+grep -q '^auto = false' "$KVX" || fail "bool written quoted: $(grep auto "$KVX")"
+grep -q 'agent-context.md, recap.md' "$KVX" || fail "set lost a comment"
+cp "$KVX" "$TMP/before-bad.kvx"
 expect_rc 1 "$CG" config set paths.spec /etc
 expect_rc 1 "$CG" config set paths.spec ../out
 expect_rc 1 "$CG" config set paths.spec ""
 expect_rc 1 "$CG" config set sync.auto maybe
 expect_rc 1 "$CG" config set bogus.key 1
-cmp -s codify.kvx "$TMP/before-bad.kvx" || fail "a rejected set wrote the file"
+cmp -s "$KVX" "$TMP/before-bad.kvx" || fail "a rejected set wrote the file"
 
 d="$("$CG" config --json)"
 [ "$(json_get "$d" 'd["present"]')" = True ] || fail "config --json present"
-[ "$(json_get "$d" '[s["origin"] for s in d["settings"] if s["key"]=="paths.context"][0]')" = codify.kvx ] \
+[ "$(json_get "$d" '[s["origin"] for s in d["settings"] if s["key"]=="paths.context"][0]')" = "$KVX" ] \
     || fail "origin of a set key: $d"
 [ "$(json_get "$d" '[s["value"] for s in d["settings"] if s["key"]=="sync.auto"][0]')" = False ] \
     || fail "sync.auto value in JSON: $d"
 [ "$(json_get "$d" 'len(d["settings"])')" = 16 ] || fail "every setting listed: $d"
 out="$("$CG" config)"
 has "$out" "paths.context  .agents/ctx"
-has "$out" "codify.kvx"
+has "$out" "$KVX"
 d="$("$CG" config get paths.context --json)"
 [ "$(json_get "$d" 'd["value"]')" = .agents/ctx ] || fail "get --json: $d"
 
 # set creates the file when absent
 mkdir -p "$TMP/cfg2" && cd "$TMP/cfg2"
 "$CG" config set paths.codemap docs/MAP.md >/dev/null
-head -1 codify.kvx | grep -q '^# codify.kvx' || fail "set did not start the file"
+head -1 "$KVX" | grep -q "^# $KVX" || fail "set did not start the file"
 [ "$("$CG" config get paths.codemap)" = docs/MAP.md ] || fail "codemap path"
 
-# check: unknown sections and keys, bad values — listed, exit 1
+# check: unknown sections and keys, bad values — listed, exit 1 (a legacy
+# codify.kvx next to a hyperfide.kvx is a conflict, so the set file goes first)
+rm -f "$KVX"
 cat > codify.kvx <<'EOF'
 [sync]
 auto = maybe
@@ -363,12 +372,13 @@ unset CG_SLOT_DIR CG_INDEX_SLOTS
 rm -f codify.kvx
 [ "$("$CG" config get fleet.discover)" = true ] || fail "fleet.discover default"
 "$CG" config init >/dev/null
-has "$(cat codify.kvx)" '[fleet]'
-has "$(cat codify.kvx)" '# discover = true'
+has "$(cat "$KVX")" '[fleet]'
+has "$(cat "$KVX")" '# discover = true'
 "$CG" config set fleet.discover false >/dev/null
 [ "$("$CG" config get fleet.discover)" = false ] || fail "fleet.discover set"
-grep -q '^discover = false' codify.kvx || fail "fleet.discover written: $(grep discover codify.kvx)"
+grep -q '^discover = false' "$KVX" || fail "fleet.discover written: $(grep discover "$KVX")"
 expect_rc 1 "$CG" config set fleet.discover sometimes
+rm -f "$KVX"
 printf '[fleet]\ndiscover = maybe\n' > codify.kvx
 has "$("$CG" config check 2>&1 || true)" "[fleet] discover = maybe is not true or false"
 rm -f codify.kvx

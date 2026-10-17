@@ -237,13 +237,17 @@ assert all(a['path'].startswith(r'$TMP/integrate/') for a in d['assets'])
 [ ! -e .cursor/mcp.json ] || fail "integrate plan wrote a config"
 
 "$CG" integrate apply >/dev/null
-[ -f .mcp.json.codify.bak ] || fail "existing MCP config was not backed up"
-cmp "$TMP/original-mcp.json" .mcp.json.codify.bak \
+# the backup is .mcp.json.codify.bak before the Hyperfide rename and a
+# content-addressed copy under .hyperfide-backups/ after it (26.3/26.4)
+mcp_bak="$({ ls .mcp.json.codify.bak .hyperfide-backups/.mcp.json.* 2>/dev/null || true; } | head -1)"
+[ -n "$mcp_bak" ] && [ -f "$mcp_bak" ] || fail "existing MCP config was not backed up"
+cmp "$TMP/original-mcp.json" "$mcp_bak" \
     || fail "MCP backup does not contain the original"
 python3 -c "
 import json
 d=json.load(open('.mcp.json'))
-assert 'other' in d['mcpServers'] and 'codify' in d['mcpServers'], d
+assert 'other' in d['mcpServers'], d
+assert 'codify' in d['mcpServers'] or 'hyperfide' in d['mcpServers'], d
 "
 [ -x .codify/hooks/event.sh ] || fail "portable event shim missing"
 for host in codex claude copilot cursor gemini; do
@@ -252,8 +256,8 @@ done
 [ -s .agents/skills/codify-workflow/SKILL.md ] \
     || fail "portable Agent Skill missing"
 [ -s .codify/agent-context.md ] || fail "graph agent context missing"
-has "$(cat .codify/agent-context.md)" "codify-owned: graph-agent-context"
-has "$(cat .agents/skills/codify-workflow/SKILL.md)" "cg spec trace"
+has_any "$(cat .codify/agent-context.md)" "codify-owned: graph-agent-context" "hyperfide-owned: graph-agent-context"
+has_any "$(cat .agents/skills/codify-workflow/SKILL.md)" "cg spec trace" "hyperfide spec trace"
 out="$("$CG" integrate apply)"
 has "$out" "already configured"
 out="$("$CG" integrate doctor --json)"

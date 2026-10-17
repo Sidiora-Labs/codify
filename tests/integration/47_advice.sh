@@ -136,8 +136,8 @@ rm codify.kvx
 out="$(pre s5 'rg foo')"
 has "$out" "cg grep foo"
 "$CG" config init >/dev/null
-has "$(cat codify.kvx)" "shell_advice"
-rm codify.kvx
+has "$(cat hyperfide.kvx 2>/dev/null || cat codify.kvx)" "shell_advice"   # hyperfide.kvx since 26.3
+rm -f hyperfide.kvx codify.kvx
 
 # outside any project: silent and exit 0
 mkdir -p "$TMP/elsewhere"
@@ -156,14 +156,20 @@ assert d["hooks"]["PostToolUse"], d' < .claude/settings.json \
 
 # the guidance: skill, agent context, MCP tool descriptions and prompts
 skill="$(cat .agents/skills/codify/SKILL.md 2>/dev/null || find . -name SKILL.md -path '*codify*' -exec cat {} +)"
-for w in grep_code find_files search_code get_context "cg grep" "cg files"; do
+# the generated guidance spells the canonical `hyperfide grep` since the
+# spec/hyperfide 26.x rename; the legacy `cg grep` is still accepted
+for w in grep_code find_files search_code get_context; do
     has "$skill" "$w"
 done
+has_any "$skill" "cg grep" "hyperfide grep"
+has_any "$skill" "cg files" "hyperfide files"
 "$CG" agentmd >/dev/null
 ctx="$(cat .codify/agent-context.md)"
-for w in grep_code find_files search_code get_context "cg grep" "cg files"; do
+for w in grep_code find_files search_code get_context; do
     has "$ctx" "$w"
 done
+has_any "$ctx" "cg grep" "hyperfide grep"
+has_any "$ctx" "cg files" "hyperfide files"
 mcp="$(printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
@@ -184,8 +190,9 @@ for n in ("search_code", "get_context", "grep_code", "find_files"):
 for pid in (3, 4):
     txt = json.dumps(by[pid])
     for w in ("grep_code", "find_files", "search_code", "get_context",
-              "cg grep", "cg files"):
-        assert w in txt, (pid, w)
+              ("cg grep", "hyperfide grep"), ("cg files", "hyperfide files")):
+        alts = (w,) if isinstance(w, str) else w
+        assert any(a in txt for a in alts), (pid, w)
 ' || fail "MCP tool descriptions or prompts lack the graph-first guidance"
 
 echo "ok 47_advice"

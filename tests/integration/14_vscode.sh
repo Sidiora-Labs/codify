@@ -506,7 +506,7 @@ const rootReadme = fs.readFileSync(path.join(dir, '..', '..', 'README.md'), 'utf
 if (!rootReadme.includes(example)) {
     throw new Error(`root README does not show packaged version ${pkg.version}`);
 }
-if (!/^\d+\.\d+\.\d+$/.test(pkg.version)) {
+if (!/^\d+\.\d+\.\d+(-dev)?$/.test(pkg.version)) {   // 2.0.0-dev: the Hyperfide development line
     throw new Error(`invalid installed extension version: ${pkg.version}`);
 }
 const { AcpClient } = require(path.join(dir, 'acp.js'));
