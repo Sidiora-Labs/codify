@@ -15,7 +15,8 @@
     "artifact.retention.release",
     "artifact.retention.policy",
     "artifact.retention.collect",
-    "artifact.retention.reconcile"
+    "artifact.retention.reconcile",
+    "artifact.retention.debt"
   ],
   "requires": [
     "4.2",
