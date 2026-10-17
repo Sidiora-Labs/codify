@@ -123,7 +123,7 @@ def parity_checks():
         root=Path(temporary)
         candidate=root/"candidate";candidate.mkdir()
         (candidate/"README").write_text("component candidate checkout")
-        git=["git","-C",str(candidate),"-c","user.name=component","-c","user.email=component@example.invalid"]
+        git=["git","-C",str(candidate),"-c","user.name=component","-c","user.email=component@example.invalid","-c","maintenance.auto=false","-c","gc.auto=0"]
         subprocess.run(["git","init","-q",str(candidate)],check=True);subprocess.run(git+["add","README"],check=True);subprocess.run(git+["commit","-qm","component"],check=True)
         revision=subprocess.run(["git","-C",str(candidate),"rev-parse","HEAD"],capture_output=True,text=True,check=True).stdout.strip()
         files={name:root/(name+".bin") for name in ("corpus","snapshot","configuration","legacy_toolchain")}

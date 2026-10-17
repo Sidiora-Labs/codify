@@ -147,8 +147,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/27_2.py",
-      "sha256": "a7b8a37ea07dd3d2c9e4a2bfe6d29f8ae767dd75ae6c8e907ee39d81c5e0444f",
-      "size": 39247
+      "sha256": "c4fe9e9a84142f609aecd352fcac88b2347ce6c075bfeb9407c1bdb2ca1ff5b0",
+      "size": 39294
     },
     {
       "path": "tests/hyperfide/campaigns/authority.py",
