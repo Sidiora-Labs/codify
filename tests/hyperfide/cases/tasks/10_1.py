@@ -27,7 +27,7 @@ class Fixture(up.Fixture):
   self.profile["toolchains"]=[{"name":"node","version":"24.22.0"},{"name":"cc","version":"15.2.0"}]
   self.profile["native_agents"]=[{"name":"codex","version":"0.162.1"}]
   self.profile["supervisor"]={"name":"node","version":"24.22.0"}
-  self.profile["hyperfide"]={"version":"1.6.0"}
+  self.profile["hyperfide"]={"version":"2.0.0-dev"}
   self.profile["resources"]["persistent_volume_bytes"]="1073741824"
   policy=copy.deepcopy(up.POLICY);policy["allowed_actions"]+=["blaxel.image."+x for x in ["describe","plan","publish","inspect"]]
   self.policy_file.write_text(json.dumps(policy))

@@ -101,7 +101,7 @@ function rendered(i:ImageRecipe):{dockerfile:string;blaxel_toml:string}{
 }
 export async function planBlaxelImage(value:unknown,ctx:ComponentContext):Promise<BlaxelImagePlan>{
  const o=shape(value,['candidate_path','manifest','scan_policy','image','storage','probe_requirements']),manifest=o.manifest as PreparationManifest;
- if(!manifest||manifest.schema_version!==1)fail('BLAXEL_IMAGE_INVALID','Preparation manifest required');validateProfile(manifest.profile);
+ if(!manifest||(manifest.schema_version!==1&&manifest.schema_version!==2))fail('BLAXEL_IMAGE_INVALID','Preparation manifest required');validateProfile(manifest.profile);
  const candidate=relative(o.candidate_path);await validateCandidate(candidate,manifest,o.scan_policy,ctx);const image=recipe(o.image);
  if(manifest.profile.image.provider!=='blaxel'||manifest.profile.image.reference!==image.base_image||manifest.profile.recipe.path!==image.install_script||!manifest.files.some(f=>f.path===image.install_script&&f.digest===manifest.profile.recipe.digest))fail('PREPARATION_MISMATCH','Image differs from preparation profile');
  const result={schema_version:1 as const,preparation_digest:manifest.digest,manifest,image,storage:storage(o.storage,manifest),probe_requirements:probes(o.probe_requirements),recipe:rendered(image)};
