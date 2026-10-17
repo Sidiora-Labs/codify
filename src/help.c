@@ -1,9 +1,9 @@
 /*
- * cg help — the command table and the four views drawn from it.
+ * hyperfide help — the command table and the four views drawn from it.
  *
- * HELP is the single source for what cg can do: the grouped overview
- * (`cg`, `cg help`, -h, --help), one command's detail (`cg help <name>`,
- * `cg <name> --help`), every detail at once (--all), the JSON an editor or
+ * HELP is the single source for what hyperfide can do: the grouped overview
+ * (`hyperfide`, `hyperfide help`, -h, --help), one command's detail
+ * (`hyperfide help <name>`, `hyperfide <name> --help`), every detail at once (--all), the JSON an editor or
  * agent builds menus from (--json), and the `usage:` line main prints on a
  * bad argument (help_usage). Adding a command means adding a row here;
  * tests/integration/43_help.sh fails when main or a subcommand dispatcher
@@ -62,7 +62,7 @@ static const HelpCmd HELP[] = {
   .flags = "--nested\tmake this directory its own project even inside "
     "another one, or in a linked worktree\n"
     "--force\tinitialize in your home directory anyway\n",
-  .examples = "hyperfide init\ncg init --nested",
+  .examples = "hyperfide init\nhyperfide init --nested",
   .related = "index,sync,root,branches" },
 { .group = "graph", .name = "index", .args = "[--full]",
   .usage = "index [--full] [--workers N]",
@@ -72,8 +72,8 @@ static const HelpCmd HELP[] = {
     "when the database stays busy past the lock wait.",
   .flags = "--full\treparse every file, not only the changed ones\n"
     "--workers N\tparse workers for this pass; beats CG_INDEX_WORKERS and "
-    "[index] workers in codify.kvx (1 to 64, 0 = auto)\n",
-  .examples = "hyperfide index\ncg index --full --workers 8",
+    "[index] workers in hyperfide.kvx (1 to 64, 0 = auto)\n",
+  .examples = "hyperfide index\nhyperfide index --full --workers 8",
   .related = "sync,watch,info,config" },
 { .group = "graph", .name = "sync", .args = "[paths] [--wait MS]",
   .usage = "sync [paths] [--max-age MS] [--background] [--wait MS] [--auto] "
@@ -91,7 +91,7 @@ static const HelpCmd HELP[] = {
     "[sync] auto = false\n"
     "--workers N\tparse workers for this pass; beats CG_INDEX_WORKERS and "
     "[index] workers (1 to 64, 0 = auto)\n",
-  .examples = "hyperfide sync\ncg sync src/main.c --json\ncg sync --auto --background",
+  .examples = "hyperfide sync\nhyperfide sync src/main.c --json\nhyperfide sync --auto --background",
   .related = "index,watch,hook" },
 { .group = "graph", .name = "search", .args = "<query> [-n N]",
   .usage = "search <query> [-n N] [--path GLOB] [--lang L] [--kind K] "
@@ -109,7 +109,7 @@ static const HelpCmd HELP[] = {
     "--kind K\tonly symbols of kind K\n"
     "--name N\tonly symbols whose name contains N\n"
     "--no-tests\tleave test files out\n",
-  .examples = "hyperfide search \"export memory\"\ncg search index_pass -n 5 --json",
+  .examples = "hyperfide search \"export memory\"\nhyperfide search index_pass -n 5 --json",
   .related = "symbol,context,show" },
 { .group = "graph", .name = "grep", .args = "<pattern> [-E] [-i]",
   .usage = "grep <pattern> [-E|--regex] [-i] [--path GLOB]... [--lang L] "
@@ -137,8 +137,8 @@ static const HelpCmd HELP[] = {
     "--count\tthe total only\n"
     "-n N\tmost hits shown (default 50)\n"
     "--budget TOKENS\ttoken budget (default 4000)\n",
-  .examples = "hyperfide grep cg_index_ex\ncg grep -E 'TODO|FIXME' --no-tests --files"
-    "\ncg grep -i 'busy timeout' --path 'src/*.c' -C 2",
+  .examples = "hyperfide grep cg_index_ex\nhyperfide grep -E 'TODO|FIXME' --no-tests --files"
+    "\nhyperfide grep -i 'busy timeout' --path 'src/*.c' -C 2",
   .related = "search,context,show" },
 { .group = "graph", .name = "symbol", .args = "<name>",
   .usage = "symbol <name>",
@@ -207,7 +207,7 @@ static const HelpCmd HELP[] = {
     "--kind K\tonly symbols of kind K\n"
     "--name N\tonly symbols whose name contains N\n"
     "--no-tests\tleave test files out\n",
-  .examples = "hyperfide context \"journal replay\"\ncg context src/help.c",
+  .examples = "hyperfide context \"journal replay\"\nhyperfide context src/help.c",
   .related = "survey,search,show" },
 { .group = "graph", .name = "survey", .args = "[scope]",
   .usage = "survey [path|query] [--budget N] [--path GLOB] [--lang L] "
@@ -221,7 +221,7 @@ static const HelpCmd HELP[] = {
     "--path GLOB\tonly paths under GLOB or a directory (repeatable)\n"
     "--lang L\tonly files of language L (c, python, go, ts...)\n"
     "--no-tests\tleave test files out\n",
-  .examples = "hyperfide survey src/\ncg survey \"spec workflow\"",
+  .examples = "hyperfide survey src/\nhyperfide survey \"spec workflow\"",
   .related = "context,anchors" },
 { .group = "graph", .name = "files", .args = "[pattern]",
   .usage = "files [pattern] [--dirs] [--depth N] [-n N] [--path GLOB] "
@@ -240,7 +240,7 @@ static const HelpCmd HELP[] = {
     "--path GLOB\tonly paths under GLOB or a directory (repeatable)\n"
     "--lang L\tonly files of language L (c, python, go, ts...)\n"
     "--no-tests\tleave test files out\n",
-  .examples = "hyperfide files 'src/**/*.c'\ncg files sync gate\ncg files --dirs\n"
+  .examples = "hyperfide files 'src/**/*.c'\nhyperfide files sync gate\nhyperfide files --dirs\n"
     "hyperfide files --lang python -n 10",
   .related = "search,survey,context" },
 { .group = "graph", .name = "show", .args = "<symbol|path:line>",
@@ -306,7 +306,7 @@ static const HelpCmd HELP[] = {
     "--task <id>\ttag with this in-progress task\n"
     "--amend\treplace the last snapshot\n"
     "--git\talso make a real git commit with the same tag\n",
-  .examples = "hyperfide commit -m \"help: one table\"\ncg commit -m fix --git",
+  .examples = "hyperfide commit -m \"help: one table\"\nhyperfide commit -m fix --git",
   .related = "log,status,diff,spec done" },
 { .group = "vc", .name = "log", .args = "[-n N]",
   .usage = "log [-n N]",
@@ -338,9 +338,12 @@ static const HelpCmd HELP[] = {
   .related = "status,review,test-impact" },
 { .group = "vc", .name = "git-sync", .args = "[-n N]",
   .usage = "git-sync [-n N]",
-  .summary = "ingest git history for provenance and ranking",
-  .detail = "Commits, authors, and per-file churn, which then rank search "
-    "and context and answer hyperfide why.",
+  .summary = "ingest git history as task evidence",
+  .detail = "Imports commits, authors, and the paths each commit touched. "
+    "A commit whose subject carries [spec:<feature>/<task>] counts as "
+    "evidence of the paths that task touched when hyperfide spec done or "
+    "spec implemented verifies it, and appears in fleet packets. Search and "
+    "context ranking do not use it.",
   .flags = "-n N\thow many commits (default 2000)\n",
   .related = "why,changelog" },
 { .group = "vc", .name = "state", .args = "",
@@ -363,7 +366,7 @@ static const HelpCmd HELP[] = {
     "--follow, -f\tkeep streaming new events\n"
     "--for SECONDS\tstop following after this long\n"
     "--head\tprint the newest sequence number\n",
-  .examples = "hyperfide events --kind fleet. -n 20\ncg events --follow --json",
+  .examples = "hyperfide events --kind fleet. -n 20\nhyperfide events --follow --json",
   .related = "event,serve" },
 { .group = "vc", .name = "event", .args = "ingest|history|progress",
   .usage = "event [ingest [--source HOST] | history [-n N] | progress]",
@@ -640,7 +643,7 @@ static const HelpCmd HELP[] = {
   .summary = "what apply would change, read-only", .hide = true },
 { .group = "agentic", .name = "integrate apply", .args = "",
   .usage = "integrate apply",
-  .summary = "write the host configs, with .codify.bak copies",
+  .summary = "write the host configs, old copies in .hyperfide-backups/",
   .hide = true },
 { .group = "agentic", .name = "integrate doctor", .args = "",
   .usage = "integrate doctor",
@@ -648,8 +651,9 @@ static const HelpCmd HELP[] = {
 { .group = "agentic", .name = "mcp-install", .args = "",
   .usage = "mcp-install",
   .summary = "connect Claude Code, Cursor, VS Code, and more",
-  .detail = "Compatibility alias for hyperfide integrate apply: Claude Code, "
-    "Cursor, VS Code, Windsurf, Gemini CLI, Codex CLI.",
+  .detail = "Compatibility alias for hyperfide integrate apply: Codex, Claude "
+    "Code, Copilot/VS Code, Cursor, Gemini CLI, OpenCode, Zed, Windsurf, "
+    "Cline, and Continue.",
   .related = "integrate" },
 { .group = "agentic", .name = "agentmd", .args = "[--write]",
   .usage = "agentmd [--write]",
@@ -668,7 +672,7 @@ static const HelpCmd HELP[] = {
     "--budget N\ttoken budget (default 8000)\n"
     "--force\toverwrite a file Hyperfide did not generate\n"
     "--check\texit 1 when CODEMAP.md is missing or stale; write nothing\n",
-  .examples = "hyperfide codemap\ncg codemap --check",
+  .examples = "hyperfide codemap\nhyperfide codemap --check",
   .related = "agentmd,brief" },
 { .group = "agentic", .name = "changelog", .args = "[-n N] [-o F]",
   .usage = "changelog [-n N] [-o FILE] [--unreleased] [--tag V] "
@@ -684,7 +688,7 @@ static const HelpCmd HELP[] = {
     "--snapshots\tthe snapshot-chain form, with symbol-level diffs\n"
     "--summarize\tinsist on Highlights\n"
     "--no-summarize\tkeep the model out\n",
-  .examples = "hyperfide changelog -o CHANGELOG.md\ncg changelog --unreleased",
+  .examples = "hyperfide changelog -o CHANGELOG.md\nhyperfide changelog --unreleased",
   .related = "git-sync,recap" },
 { .group = "agentic", .name = "recap", .args = "[--sessions N]",
   .usage = "recap [--sessions N] [--since DAYS] [--budget CHARS] [-o FILE] "
@@ -704,6 +708,7 @@ static const HelpCmd HELP[] = {
   .usage = "docs [status|plan|packet|generate|check|trace|close] "
     "[-f feature]",
   .summary = "grounded documentation closure evidence",
+  .flags = "-f feature\tthe feature to document (default: the active one)\n",
   .related = "spec docs" },
 { .group = "agentic", .name = "docs status", .args = "",
   .usage = "docs status [-f feature]",
@@ -713,7 +718,8 @@ static const HelpCmd HELP[] = {
   .summary = "read-only plan, audiences, target scope", .hide = true },
 { .group = "agentic", .name = "docs packet", .args = "",
   .usage = "docs packet [-f feature]", .aliases = "docs generate",
-  .summary = "write the evidence packet under .codegraph/docs/",
+  .summary = "write the evidence packet under .codegraph/docs/; generate "
+    "is the same command",
   .hide = true },
 { .group = "agentic", .name = "docs check", .args = "",
   .usage = "docs check [-f feature]",
@@ -743,7 +749,7 @@ static const HelpCmd HELP[] = {
     "The loop: spec next, spec start <id>, implement, hyperfide commit, spec done "
     "<id>. Every subcommand takes -f <feature> to name a feature other "
     "than the active one, and --root DIR for another tree.",
-  .examples = "hyperfide spec\ncg spec next\ncg spec done 4.1",
+  .examples = "hyperfide spec\nhyperfide spec next\nhyperfide spec done 4.1",
   .related = "brief,commit,fleet" },
 { .group = "spec", .name = "spec status", .args = "",
   .usage = "spec status",
@@ -834,9 +840,13 @@ static const HelpCmd HELP[] = {
 { .group = "spec", .name = "spec lint", .args = "",
   .usage = "spec lint",
   .summary = "validate the plan (cycles, dead globs); exits 2" },
-{ .group = "spec", .name = "spec mode", .args = "<prod|standard>",
-  .usage = "spec mode <prod|standard>",
+{ .group = "spec", .name = "spec mode", .args = "<prod|standard|parallel>",
+  .usage = "spec mode <prod|standard|parallel>",
   .summary = "configure implementation dependency semantics",
+  .detail = "Writes [mode] name in spec/workflow.kvx and re-renders. "
+    "standard: a prerequisite counts once done. prod: implemented counts "
+    "too. parallel: prod's rule with several tasks in flight at once, each "
+    "agent's current task taken from its own lease.",
   .hide = true },
 { .group = "spec", .name = "spec docs", .args = "<action>",
   .usage = "spec docs [status|auto|manual|off|start|block|reset|done]",
@@ -875,7 +885,7 @@ static const HelpCmd HELP[] = {
     "--wait MS\twait this long for a build already running (default 5000)\n"
     "--quiet\tbackground use: print nothing; a build already running is "
     "left to it\n",
-  .examples = "hyperfide projection build\ncg projection build --index --json\n"
+  .examples = "hyperfide projection build\nhyperfide projection build --index --json\n"
     "hyperfide search Handler --branch codify/projection",
   .related = "projection status,projection diff,projection show,branches" },
 { .group = "fleet", .name = "projection status", .args = "",
@@ -905,7 +915,7 @@ static const HelpCmd HELP[] = {
     "their agents, the lines, and one line of advice. The agents on both "
     "branches are steered once per new finding unless [projection] steer = "
     "false. See docs/projection.md.",
-  .examples = "hyperfide projection findings\ncg projection findings --json",
+  .examples = "hyperfide projection findings\nhyperfide projection findings --json",
   .related = "projection build,fleet steer" },
 { .group = "fleet", .name = "fleet", .args = "<subcommand>",
   .usage = "fleet roles | status | plan [-f F] | "
@@ -922,11 +932,15 @@ static const HelpCmd HELP[] = {
   .detail = "Main, managers, and workers at once, supervised until every "
     "task is qualified and merged. --resume continues an unfinished run, "
     "adopting agents still alive." },
-{ .group = "fleet", .name = "fleet down", .args = "[--drain] [RUN]",
+{ .group = "fleet", .name = "fleet down",
+  .args = "[--drain] [--wait SECONDS] [RUN]",
   .usage = "fleet down [--drain] [--wait SECONDS] [RUN]",
   .summary = "stop a run: claims released, branches kept",
+  .detail = "Without --drain it exits 1 when the supervisor has not "
+    "confirmed the stop within the wait.",
   .flags = "--drain\tlet live work finish first\n--wait SECONDS\thow long "
-    "to wait (default 30)\n" },
+    "to wait for the supervisor to confirm (default 30; --drain alone "
+    "returns at once)\n" },
 { .group = "fleet", .name = "fleet pause", .args = "[RUN]",
   .usage = "fleet pause [RUN]",
   .summary = "freeze spawning" },
@@ -1052,8 +1066,10 @@ static const HelpCmd HELP[] = {
 { .group = "config", .name = "config", .args = "[init|get|set|check]",
   .usage = "config [init | get <section.key> | "
     "set <section.key> <value> | check] [--json]",
-  .summary = "every codify.kvx setting with its origin",
-  .detail = "Works before hyperfide init and in a spec-only repository.",
+  .summary = "every hyperfide.kvx setting with its origin",
+  .detail = "Reads and writes hyperfide.kvx at the project root; a legacy "
+    "codify.kvx is still read where no hyperfide.kvx exists. Works before "
+    "hyperfide init and in a spec-only repository.",
   .related = "info", .aliases = "config list,config show" },
 { .group = "config", .name = "config init", .args = "",
   .usage = "config init",
@@ -1078,6 +1094,35 @@ static const HelpCmd HELP[] = {
     "failed,unchecked], f=[verified,stale,unchecked], x=pending/degraded "
     "bits (1/2), and o=1 for omitted parser and file details.",
   .related = "config,root" },
+{ .group = "config", .name = "authority", .args = "mode|invoke",
+  .usage = "authority mode | authority invoke --payload-file FILE|- "
+    "--operation-id ID --idempotency-key KEY --correlation-id ID "
+    "[--causation-id ID]",
+  .summary = "which authority this checkout answers to",
+  .detail = "The mode comes from HYPERFIDE_AUTHORITY_DESCRIPTOR, else the "
+    "nearest .hyperfide/authority.json, narrowed by HYPERFIDE_MODE "
+    "(local, distributed, offline). Output is JSON; exit 78 on an invalid "
+    "configuration.",
+  .related = "fleet" },
+{ .group = "config", .name = "authority mode", .args = "",
+  .usage = "authority mode",
+  .summary = "local, distributed, or offline, with the local cache state",
+  .detail = "Read-only, and answers in every mode. remote_ownership and "
+    "local_fallback are always false here.",
+  .hide = true },
+{ .group = "config", .name = "authority invoke",
+  .args = "--payload-file FILE|- --operation-id ID ...",
+  .usage = "authority invoke --payload-file FILE|- --operation-id ID "
+    "--idempotency-key KEY --correlation-id ID [--causation-id ID]",
+  .summary = "send one immutable operation to the distributed authority",
+  .detail = "Distributed mode only; offline mode refuses it. The payload "
+    "is a JSON object sent as the operation body.",
+  .flags = "--payload-file FILE|-\tthe JSON payload, - for stdin\n"
+    "--operation-id ID\tthe operation's stable identity\n"
+    "--idempotency-key KEY\tretries with the same key apply once\n"
+    "--correlation-id ID\tties the operation to its request chain\n"
+    "--causation-id ID\tthe operation that caused this one\n",
+  .hide = true },
 { .group = "config", .name = "version", .args = "",
   .usage = "version", .aliases = "--version",
   .summary = "print the version" },
@@ -1349,7 +1394,7 @@ static void detail(Out *o, const HelpCmd *c) {
         for (const char *p = c->related; *p; ) {
             size_t n = strcspn(p, ",");
             char word[128];
-            snprintf(word, sizeof word, "%scg %.*s", first ? "" : ", ",
+            snprintf(word, sizeof word, "%shyperfide %.*s", first ? "" : ", ",
                      (int)n, p);
             /* keep "hyperfide spec trace" on one line: wrap per name, not word */
             if (o->col + dwidth(word, strlen(word)) > o->width) {
