@@ -7,7 +7,7 @@
     ],
     "approved": true
   },
-  "campaign_id": "hyperfide-task-23.3-external-authority-sandbox-budget-v5-requal-12aa390190b3-requal-6a91b0130b1d-requal-6a91b0130b1d",
+  "campaign_id": "hyperfide-task-23.3-external-authority-sandbox-budget-v5-requal-12aa390190b3-requal-6a91b0130b1d-requal-6a91b0130b1d-requal-6a91b0130b1d",
   "case_ids": [
     "V-011",
     "V-048"
@@ -766,8 +766,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/23_3.py",
-      "sha256": "51e626b77ecc8df4ccfd34da1c910bd9b73281dc9b94610c2a3d82099ee46a76",
-      "size": 17620
+      "sha256": "e9182b0f575ae713cd0a787294b846a09f47681ace120e2784a3aff37acda86b",
+      "size": 18858
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
