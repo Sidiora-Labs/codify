@@ -13,6 +13,8 @@
     "client.local.help",
     "client.offline.local-version",
     "client.offline.local-spec",
+    "client.local.mode-cache-freshness",
+    "client.offline.stale-cache-not-authoritative",
     "client.distributed.init",
     "client.distributed.spec-claim",
     "client.distributed.spec-done",

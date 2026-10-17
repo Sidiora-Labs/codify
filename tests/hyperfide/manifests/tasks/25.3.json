@@ -19,6 +19,8 @@
     "client.local.help",
     "client.offline.local-version",
     "client.offline.local-spec",
+    "client.local.mode-cache-freshness",
+    "client.offline.stale-cache-not-authoritative",
     "client.distributed.init",
     "client.distributed.spec-claim",
     "client.distributed.spec-done",
@@ -134,8 +136,8 @@
     },
     {
       "path": "cg",
-      "sha256": "528dc352fa30b2a1b0acfb7922d7d69af045b6cd3a69042465c8a2613ddf2800",
-      "size": 69086576
+      "sha256": "cbb0409b99b512fcb372d99dc3d463cab82e4b154998478d5ef91575535ce261",
+      "size": 69090704
     },
     {
       "path": "services/hyperfide/components/1.4.json",
@@ -769,8 +771,8 @@
     },
     {
       "path": "src/hyperfide/client.c",
-      "sha256": "34aba109379401d64b33cfb3c439cac8e817365b35511b7539e99120789cb011",
-      "size": 37692
+      "sha256": "4139bb31ec872cc87182071bef2f0009a34340f98be4d35cd61751843e2df632",
+      "size": 38778
     },
     {
       "path": "src/hyperfide/component_main.c",
@@ -849,8 +851,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/25_3.py",
-      "sha256": "9d522382300e48def0fb1b73a5b9aa8464ab2e606ae881488568bb30db2c055c",
-      "size": 38971
+      "sha256": "3c98c905666f738d148d21f6cc05c9692330b862e5468cbe10da7c9656746350",
+      "size": 40320
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
@@ -869,8 +871,8 @@
     },
     {
       "path": "tests/hyperfide/registrations/25.3.json",
-      "sha256": "1cd56121d778492f59748affade1c63e52dcbe600461e9b66ae63094c60965d7",
-      "size": 7726
+      "sha256": "bdfa31b7802eaa64fd8af16bf5f6404801657a8db90774122902654cd776688c",
+      "size": 7819
     },
     {
       "path": "tests/hyperfide/registry.json",

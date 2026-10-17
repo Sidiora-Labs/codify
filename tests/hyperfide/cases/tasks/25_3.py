@@ -44,6 +44,14 @@ def main():
   check("client.local.help",lambda:expect(run(["help"]).returncode==0,"local help requires remote credentials"))
   check("client.offline.local-version",lambda:expect(run(["version"],mode="offline").returncode==0,"offline local version unavailable"))
   check("client.offline.local-spec",lambda:expect(run(["spec","status"],mode="offline").returncode!=78,"explicit offline local scope blocked"))
+  cached=base/"cached";(cached/".codegraph").mkdir(parents=True);(cached/".codegraph/graph.db").write_bytes(b"synthetic");os.utime(cached/".codegraph/graph.db",(1,1))
+  def mode_cache(root,mode,expected_mode,freshness):
+   p=run(["authority","mode"],root,mode);expect(p.returncode==0,"authority mode unavailable without network/PG/model credentials")
+   r=json.loads(p.stdout);c=r["cache"];expect(r["mode"]==expected_mode and r["remote_ownership"] is False and r["local_fallback"] is False,"mode not identified or ownership claimed")
+   expect(c["freshness"]==freshness and c["authoritative"] is False and c["overwrite_remote"] is False and c["present"] is True and c["age_seconds"]>0,"cache freshness absent or local store claimed authority")
+  check("client.local.mode-cache-freshness",lambda:mode_cache(cached,None,"local","LOCAL_ONLY"))
+  stale=base/"stale";(stale/".hyperfide").mkdir(parents=True);(stale/".codegraph").mkdir();(stale/".codegraph/graph.db").write_bytes(b"synthetic");os.utime(stale/".codegraph/graph.db",(1,1));(stale/".hyperfide/authority.json").write_text(json.dumps(descriptor));(stale/".hyperfide/authority.json").chmod(0o600)
+  check("client.offline.stale-cache-not-authoritative",lambda:(mode_cache(stale,"offline","offline","STALE_UNSYNCHRONISED"),blocked(["projection"],"OFFLINE_AUTHORITY_UNAVAILABLE",mode="offline")))
   for command in [["init"],["spec","claim","1"],["spec","done","1","--force"],["spec","run"],["mcp"],["hook","post-edit"],["work","legacy-update"],["docs","legacy-close"],["projection"],["serve"],["fleet","up"]]:
    check("client.distributed."+command[0]+("-"+command[1] if len(command)>1 else ""),lambda command=command:blocked(command,"TRANSPORT_CONFIG_REQUIRED" if command[0]=="mcp" else "DISTRIBUTED_COMMAND_UNSUPPORTED"))
   check("client.offline.remote-denied",lambda:blocked(["spec","claim","1"],"OFFLINE_AUTHORITY_UNAVAILABLE",mode="offline"))
