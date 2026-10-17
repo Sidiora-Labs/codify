@@ -146,13 +146,39 @@ def main():
         # A read-only identity description may use current identity; mutation requires strict compute authority.
         check("identity.delegate.released-worker-mutation-denied",lambda:expect(f.invoke("identity.runner.register",{"preparation_digest":f.preparation,"inventory":[]},key="worker")[1].get("error",{}).get("code")=="AUTH_STALE_ATTEMPT","released worker reached a mutation"))
         def expiry_crossing_lock():
-            f.sql("UPDATE hyperfide.identity_principals SET expires_at=clock_timestamp()+interval '1 second' WHERE credential_id=$1",[f.ids["reviewer"]])
-            js="const pg=require('./services/hyperfide/node_modules/pg');(async()=>{const c=new pg.Client({connectionString:process.env.DATABASE_URL});await c.connect();await c.query('BEGIN');await c.query('SELECT id FROM hyperfide.agent_sessions WHERE id=$1 FOR UPDATE',[process.argv[1]]);process.stdout.write('locked\\n');await new Promise(r=>setTimeout(r,2200));await c.query('ROLLBACK');await c.end();})().catch(e=>{console.error(e);process.exit(1)});"
-            held=subprocess.Popen(["node","-e",js,session],cwd=ROOT,env=f.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
-            expect(held.stdout.readline().strip()=="locked","test did not acquire real row lock")
-            response=f.invoke("identity.describe",{},key="reviewer")[1]
-            held.communicate(timeout=5)
-            expect(response.get("error",{}).get("code")=="AUTH_EXPIRED","identity expired during lock wait was admitted: "+json.dumps(response))
+            js="""
+const pg=require('./services/hyperfide/node_modules/pg');
+(async()=>{
+ const c=new pg.Client({connectionString:process.env.DATABASE_URL});await c.connect();
+ try{
+  await c.query("UPDATE hyperfide.identity_principals SET expires_at=clock_timestamp()+interval '2 seconds' WHERE credential_id=$1",[process.argv[2]]);
+  await c.query('BEGIN');
+  await c.query('SELECT id FROM hyperfide.agent_sessions WHERE id=$1 FOR UPDATE',[process.argv[1]]);
+  process.stdout.write('locked\\n');
+  const deadline=Date.now()+3000;let blocked=false;
+  while(Date.now()<deadline){
+   const r=await c.query('SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE pg_backend_pid()=ANY(pg_blocking_pids(pid))) AS blocked');
+   if(r.rows[0].blocked){blocked=true;break;}
+   await new Promise(r=>setTimeout(r,10));
+  }
+  if(!blocked)throw Error('Request never waited on the session row lock');
+  await c.query("SELECT pg_sleep(GREATEST(0,EXTRACT(EPOCH FROM expires_at-clock_timestamp()))::double precision) FROM hyperfide.identity_principals WHERE credential_id=$1",[process.argv[2]]);
+  await c.query('ROLLBACK');
+ }finally{await c.end();}
+})().catch(e=>{console.error(e);process.exitCode=1});
+"""
+            held=subprocess.Popen(["node","-e",js,session,f.ids["reviewer"]],cwd=ROOT,env=f.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+            try:
+                expect(held.stdout.readline().strip()=="locked","test did not acquire real row lock")
+                response=f.invoke("identity.describe",{},key="reviewer")[1]
+                _,error=held.communicate(timeout=5)
+                expect(held.returncode==0,"Expiry lock process failed: "+error)
+                expect(response.get("error",{}).get("code")=="AUTH_EXPIRED","identity expired during lock wait was admitted: "+json.dumps(response))
+                check("identity.expiry.before-row-lock",lambda:expect(f.invoke("identity.describe",{},key="reviewer")[1].get("error",{}).get("code")=="AUTH_EXPIRED","already expired credential returned a different refusal"))
+                f.sql("UPDATE hyperfide.identity_principals SET state='REVOKED' WHERE credential_id=$1",[f.ids["reviewer"]])
+                check("identity.expiry.revoked-credential",lambda:expect(f.invoke("identity.describe",{},key="reviewer")[1].get("error",{}).get("code")=="AUTH_EXPIRED","revocation changed expired credential refusal"))
+            finally:
+                if held.poll() is None:held.kill();held.communicate()
         check("identity.expiry.after-row-lock",expiry_crossing_lock)
         def global_expiry_lock():
             f.add_principal('globalexpiring','OPERATOR')
