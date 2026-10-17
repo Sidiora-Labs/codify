@@ -958,7 +958,7 @@ static int fleet_status(Cg *cg, bool json) {
             sb_printf(&b, " — %s", role_title(&h, id.role));
             if (id.parent) sb_printf(&b, ", reports to %s", id.parent);
         } else {
-            sb_puts(&b, " — no role (set CG_ROLE=main|feature|worker and "
+            sb_puts(&b, " — no role (set HYPERFIDE_ROLE=main|feature|worker and "
                         "CG_PARENT to join the fleet)");
         }
         sb_printf(&b, "\nhierarchy: %s — main %s, remote %s, PRs %s\n",
@@ -1709,8 +1709,8 @@ int fleet_worker_begin_ex(Cg *cg, const char *id, const char *feature_ov,
                   wt_created ? "created" : "reused");
         sb_printf(&b, "  claim:    attempt %.12s, fence %ld, %ld min\n",
                   at.attempt_id, at.fence, ttl);
-        sb_printf(&b, "next: cd %s && CG_AGENT=%s CG_ROLE=worker CG_PARENT=%s "
-                  "CG_FEATURE=%s CG_WAVE=%ld hyperfide spec start %s%s\n", path, agent,
+        sb_printf(&b, "next: cd %s && HYPERFIDE_AGENT=%s HYPERFIDE_ROLE=worker HYPERFIDE_PARENT=%s "
+                  "HYPERFIDE_FEATURE=%s HYPERFIDE_WAVE=%ld hyperfide spec start %s%s\n", path, agent,
                   parent, c.feature, wave, id, ahead ? " --ahead" : "");
     }
     fputs(b.p, stdout);

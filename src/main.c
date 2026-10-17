@@ -67,13 +67,17 @@ static int query_budget_arg(int argc, char **argv) {
     return 0;
 }
 
-static int cmd_info(const SysInfo *si, Cg *cg, bool json, int flag_workers) {
+static int cmd_info(const SysInfo *si, Cg *cg, bool json, int flag_workers,
+                    bool canonical_workers) {
     /* the count an unbounded foreground pass would ask for, and who chose
      * it; background passes, the file count, and the slot gate bound it
      * per pass (cg sync --json reports what one actually used) */
     const char *worigin;
     int wanted = syncgate_worker_request(cg ? cg->root : NULL, si,
                                          flag_workers, &worigin);
+    /* Environment aliasing copies the canonical value into the legacy slot. */
+    if (!strcmp(worigin, "CG_INDEX_WORKERS") && canonical_workers)
+        worigin = "HYPERFIDE_INDEX_WORKERS";
     char key[64];
     char *ms = NULL, *nf = NULL, *nb = NULL;
     if (cg) {
@@ -170,12 +174,17 @@ static void index_fresh(Cg *cg, const SysInfo *si) {
 }
 
 int main(int argc, char **argv) {
-    if (hyperfide_environment_aliases() != 0) return 78;
+    const char *cmd = argc > 1 ? argv[1] : "";
+    bool canonical_workers = getenv("HYPERFIDE_INDEX_WORKERS") &&
+                             getenv("HYPERFIDE_INDEX_WORKERS")[0];
+    bool host_hook = argc >= 3 && !strcmp(cmd, "hook") &&
+        (!strcmp(argv[2], "post-edit") || !strcmp(argv[2], "event") ||
+         !strcmp(argv[2], "pre-bash"));
+    if (hyperfide_environment_aliases() != 0) return host_hook ? 0 : 78;
     if (argc < 2) { usage(); return 1; }
     int hrc = help_route(argc, argv);
     if (hrc >= 0) return hrc;
     kvx_status_hook = events_kvx_status;
-    const char *cmd = argv[1];
     journal_set_command(cmd, argc > 2 ? argv[2] : NULL);
     bool json = flag(&argc, argv, "--json");
     native_no_discover = flag(&argc, argv, "--no-discover"); /* codify-v15 2.4 */
@@ -188,8 +197,8 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    { int launcher_rc = hf_entrypoint_dispatch(argc,argv); if (launcher_rc >= 0) return launcher_rc; }
-    { int remote_rc = hf_client_dispatch(argc,argv,stdout,stderr); if (remote_rc >= 0) return remote_rc; }
+    { int launcher_rc = hf_entrypoint_dispatch(argc,argv); if (launcher_rc >= 0) return host_hook ? 0 : launcher_rc; }
+    { int remote_rc = hf_client_dispatch(argc,argv,stdout,stderr); if (remote_rc >= 0) return host_hook ? 0 : remote_rc; }
 
     /* spec works without .codegraph — dispatch before opening the graph */
     if (strcmp(cmd, "spec") == 0) {
@@ -219,7 +228,7 @@ int main(int argc, char **argv) {
             if (pcg) cg_close(pcg);
             return 1;
         }
-        int rc = cmd_info(&si, pcg, json, fw);
+        int rc = cmd_info(&si, pcg, json, fw, canonical_workers);
         if (pcg) cg_close(pcg);
         return rc;
     }

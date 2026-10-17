@@ -190,6 +190,7 @@ static char *marketplace_body(void) {
 }
 
 static char *plugin_json_body(void) {
+    /* The installed package name is pinned by existing plugin registrations. */
     return xstrdup(
         "{\n"
         "  \"name\": \"codify\",\n"
@@ -204,6 +205,7 @@ static char *plugin_json_body(void) {
 /* The marker rides in the server's env: .mcp.json's top level is a map of
  * servers, so a stray key there would read as one. */
 static char *mcp_json_body(const char *bin) {
+    /* Keep the server key aligned with the pinned codify plugin package identity. */
     StrBuf b; sb_init(&b);
     sb_puts(&b, "{\n  \"mcpServers\": {\n    \"codify\": {\n"
                 "      \"command\": ");
