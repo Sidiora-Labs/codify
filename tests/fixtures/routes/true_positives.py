@@ -14,3 +14,6 @@ def health(): pass
 
 @router.patch("/orders/{id}")
 def patch_order(): pass
+
+@custom.get('/')
+def custom_root(): pass

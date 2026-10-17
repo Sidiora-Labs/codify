@@ -7,3 +7,9 @@ def summarize(r, recorded, item, number, author, committer):
     cached = self.cache.get('/tmp/cache', fallback)
     app_settings = settings.get("app", default)
     return leader, category, cached, app_settings
+
+app.get('key', fallback)
+router.post('relative', handler)
+
+@custom.get('not-a-path')
+def not_a_route(): pass

@@ -44,7 +44,7 @@ static void dump(const ParseResult *pr) {
 
 int main(void) {
     lang_global_init();
-    ParseResult pr;
+    ParseResult pr = {0};
 
     ok(parse_fixture("python", "false_positives.py", &pr), "python fixture readable");
     ok(pr.nroutes == 0, "dict.get(key, default) is not a FastAPI route");
@@ -64,7 +64,8 @@ int main(void) {
     ok(route(&pr, "PUT", "/") != NULL, "api receiver with root path");
     ok(route(&pr, "GET", "/health") != NULL, "decorated app.get");
     ok(route(&pr, "PATCH", "/orders/{id}") != NULL, "decorated router.patch");
-    ok(pr.nroutes == 6, "exactly the six python routes (got %d)", pr.nroutes);
+    ok(route(&pr, "GET", "/") != NULL, "arbitrary decorator receiver with root path");
+    ok(pr.nroutes == 7, "exactly the seven python routes (got %d)", pr.nroutes);
     parse_result_free(&pr);
 
     ok(parse_fixture("javascript", "true_positives.js", &pr), "js routes readable");

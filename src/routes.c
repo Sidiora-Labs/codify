@@ -53,7 +53,6 @@ static RoutePat RP[] = {
     { "fastify", "js", NULL,
       "fastify\\.(get|post|put|delete|patch)[ \t]*\\([ \t]*['\"`]([^'\"`]+)",
       1, 2, 0, NULL, {0} },
-    /* recipe_path: '/bin/sh' is an object key that merely ends in "path". */
     { "hapi", "js", NULL,
       "(^|[^A-Za-z0-9_$])path:[ \t]*['\"`](/[^'\"`]*)['\"`]",
       0, 2, 0, "*", {0} },
@@ -64,7 +63,7 @@ static RoutePat RP[] = {
       "@[A-Za-z_][A-Za-z0-9_]*\\.route\\([ \t]*['\"]([^'\"]+)",
       0, 1, 0, "*", {0} },
     { "fastapi", "python", NULL,
-      "@[A-Za-z_][A-Za-z0-9_]*\\.(get|post|put|delete|patch)\\([ \t]*['\"]([^'\"]+)",
+      "@[A-Za-z_][A-Za-z0-9_]*\\.(get|post|put|delete|patch)\\([ \t]*['\"](/[^'\"]*)",
       1, 2, 0, NULL, {0} },
     /* Undecorated calls share their shape with dict.get(key, default), so
      * the receiver must be named as an app/router and the path rooted. */
