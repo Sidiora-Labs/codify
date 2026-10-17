@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "campaign_id": "hyperfide-task-1.4-foundation-v3-requal-ff4632c9bc89",
+  "campaign_id": "hyperfide-task-1.4-foundation-v4-requal-ff4632c9bc89",
   "scope": "task-component",
   "registered_variant": "task:1.4",
   "case_ids": [
@@ -459,8 +459,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/1_4.py",
-      "sha256": "e6fc9076e57a9a3587f58038e75a2cbfc96e72c9c7b95b1302d43a21cc6ae591",
-      "size": 40026
+      "sha256": "d2f3726101ec8196dcef8a7969cb77dfe7400c97e1957a7a291b8d05a206e3c4",
+      "size": 40672
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
