@@ -24,6 +24,7 @@ interface Outbox {
  lookupConsumerBinding(tx:Tx,input:Record<string,unknown>):Promise<Binding|null>;
 }
 interface Inbox {
+ receive(tx:Tx,input:Record<string,unknown>,apply:(tx:Tx,event:EventInput)=>Promise<unknown>):Promise<{status:string;event_id:string;inbox_id:string;result:unknown}>;
  bootstrapConsumer(tx:Tx,input:Record<string,unknown>,build:(tx:Tx)=>Promise<unknown>):Promise<unknown>;
  supersedeDelivery(tx:Tx,input:Record<string,unknown>,proof:(tx:Tx,events:{original:EventInput;replacement:EventInput})=>Promise<Record<string,unknown>>):Promise<Record<string,unknown>>;
 }
@@ -32,6 +33,23 @@ type RuntimeContext = ComponentContext & {
   invocation?:{principal:Principal;guard(tx:Tx):Promise<void>};
 }
 const routineOperations=['schedule','provision','repair','retry','review','qualification'] as const;
+type RoutineOperation=typeof routineOperations[number];
+// Approved run policy names the agent-owned executor path for each routine operation. Admission requires that
+// executor action to be approved in the programme policy, so no per-task human approval or worker prompt exists.
+const routineExecutors:Readonly<Record<RoutineOperation,{component:string;action:string}>>=Object.freeze({
+  schedule:{component:'5.1',action:'scheduler.claim'},
+  provision:{component:'1.4',action:'programme.provision'},
+  repair:{component:'finding-remediation',action:'finding.repair.request'},
+  retry:{component:'1.4',action:'programme.dispatch'},
+  review:{component:'17.3',action:'review.obligation.claim'},
+  qualification:{component:'16.2',action:'qualification.job.claim'}});
+const autonomousRoles=['LEADER','FEATURE_MANAGER','COORDINATOR','PROVISIONER','DISPATCH'];
+const routineConsumerRoles=['COORDINATOR','PROVISIONER','DISPATCH','LEADER'];
+// Leader intent deliberately uses the 6.1 outbox and 6.2 inbox rather than the 6.3 instruction protocol: 6.3 instructions
+// are bound to an implementation attempt, sandbox boot generation and runner consumer, while the primary leader is an
+// agent session. Generation binding is preserved here by leader_generation/authority_epoch in each immutable payload,
+// the private session-bound human_intent consumer, and explicit supersession (human.adopt) on leader replacement.
+// Routine executors hand worker work to runners through 6.3 themselves; this interface never prompts a worker.
 function refuse(message:string):never{throw new FoundationError('HUMAN_INTERFACE_DENIED',message);}
 function exact(input:unknown,keys:string[]):Record<string,unknown>{
   if(!object(input)||Object.keys(input).length!==keys.length||keys.some(key=>!Object.hasOwn(input,key)))refuse('Human interface fields are invalid');
@@ -72,10 +90,20 @@ async function leaderConsumer(tx:Tx,outbox:Outbox,actor:Principal,session:string
  if(!binding||binding.session_role!=='LEADER'||!['ACTIVE','BUFFERING'].includes(binding.consumer_state))refuse('Current leader has no registered private human-intent consumer');
  return binding;
 }
-function autonomousConsumers(context:RuntimeContext):string[] {
- let value:unknown;try{value=JSON.parse(context.env.HF_HUMAN_AUTONOMOUS_CONSUMERS??'');}catch{refuse('Trusted autonomous recipient routing is unavailable');}
- if(!Array.isArray(value)||value.length===0||value.length>64||new Set(value).size!==value.length)refuse('Autonomous recipient registry is invalid');
- return value.map(uuid);
+function routineConsumerKey(operation:string):string{return 'autonomous:routine.'+operation;}
+// Routine recipients are durable run-scoped consumers registered through 6.1, never caller- or environment-supplied.
+async function autonomousConsumer(tx:Tx,actor:Principal,operation:string):Promise<string> {
+ const found=await tx.query<{id:string}>("SELECT id FROM hyperfide.event_consumers WHERE organisation_id=$1 AND run_id=$2 AND consumer_key=$3 AND state IN ('ACTIVE','BUFFERING')",
+   [actor.organisation_id,actor.run_id,routineConsumerKey(operation)]);
+ if(found.rowCount!==1)refuse('Approved autonomous executor has no registered durable consumer');
+ return uuid(found.rows[0]!.id);
+}
+function policyApproval(context:RuntimeContext,operation:RoutineOperation):Record<string,unknown> {
+ const executor=routineExecutors[operation],policy=context.policy;
+ if(!policy.allowed_actions.includes('routine.'+operation)||!policy.allowed_actions.includes(executor.action))
+   refuse('Routine operation is outside the approved autonomous policy');
+ return {source:'APPROVED_RUN_POLICY',policy_revision:policy.policy_revision,approval_record_id:policy.approval.record_id,
+   spec_revision:policy.spec_revision,executor_component:executor.component,executor_action:executor.action};
 }
 async function route(context:RuntimeContext,action:string,input:IntentInput,autonomousOperation:string|null):Promise<Record<string,unknown>>{
   const actor=principal(context,action);
@@ -95,20 +123,22 @@ async function route(context:RuntimeContext,action:string,input:IntentInput,auto
     if(action==='human.submit'&&input.kind==='ROUTINE')refuse('Routine work must use the autonomous interface');
     if(action==='human.submit'&&actor.role!=='OPERATOR'&&(actor.role!=='LEADER'||actor.actor_id!==leader.leader_session_id))
       refuse('Programme interaction must pass through the registered primary leader');
-    if(autonomousOperation!==null&&(!['LEADER','FEATURE_MANAGER','COORDINATOR','PROVISIONER','DISPATCH'].includes(actor.role)||
-        !actor.allowed_actions.includes('routine.'+autonomousOperation)||!context.policy.allowed_actions.includes('routine.'+autonomousOperation)))
+    if(autonomousOperation!==null&&(!autonomousRoles.includes(actor.role)||!actor.allowed_actions.includes('routine.'+autonomousOperation)))
       refuse('Routine operation is outside the approved autonomous policy');
+    const approval=autonomousOperation===null?null:policyApproval(context,autonomousOperation as RoutineOperation);
     if(action==='human.escalate'&&input.kind!=='UNRESOLVED_INTENT')refuse('Agent escalation cannot silently change programme intent');
     if(!['OPERATOR','COORDINATOR','PROVISIONER','DISPATCH'].includes(actor.role))await hierarchy.requireAuthority(tx,{organisation_id:actor.organisation_id,run_id:actor.run_id,authority_epoch:actor.deployment_epoch,
       session_id:actor.actor_id,leader_generation:leader.leader_generation,
       roles:action==='human.submit'?['LEADER']:['LEADER','FEATURE_MANAGER','WORKER','COMMIT_WATCHER','ISSUE_WATCHER','VERIFIER','INTEGRATOR','INDEXER'],
       ...(input.package_id===null?{}:{package_id:input.package_id,package_generation:input.package_generation})});
-    const consumerIds=autonomousOperation===null?[(await leaderConsumer(tx,outbox,actor,leader.leader_session_id)).consumer_id]:autonomousConsumers(context);
+    const consumerIds=[autonomousOperation===null?(await leaderConsumer(tx,outbox,actor,leader.leader_session_id)).consumer_id:await autonomousConsumer(tx,actor,autonomousOperation)];
     const payload={schema_version:1,request_id:input.request_id,kind:input.kind,payload:input.payload,
       source_actor_id:actor.actor_id,source_role:actor.role,target:autonomousOperation===null?'PRIMARY_LEADER':'AUTONOMOUS_CONTROL',
       target_session_id:autonomousOperation===null?leader.leader_session_id:null,target_consumer_id:autonomousOperation===null?consumerIds[0]:null,observed_leader_session_id:leader.leader_session_id,
       leader_generation:leader.leader_generation,authority_epoch:actor.deployment_epoch,package_id:input.package_id,
-      package_generation:input.package_generation,autonomous_operation:autonomousOperation,requires_human_prompt:false};
+      package_generation:input.package_generation,autonomous_operation:autonomousOperation,approval,
+      // Intent is resolved by the primary leader; routine work is admitted only by the approved run policy.
+      requires_human_prompt:autonomousOperation===null?false:approval?.source!=='APPROVED_RUN_POLICY'};
     const requestDigest='sha256:'+createHash('sha256').update(canonical({action,input,actor_id:actor.actor_id})).digest('hex');
     const scope='actor:'+actor.actor_id;
     await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[canonical({organisation_id:actor.organisation_id,run_id:actor.run_id,scope,action,idempotency_key:input.idempotency_key})]);
@@ -130,8 +160,8 @@ async function route(context:RuntimeContext,action:string,input:IntentInput,auto
       VALUES($1,$2,$3,'human_intent','human.intent.state',$4,$5,'COMPLETED',$6::jsonb)`,
       [actor.organisation_id,actor.run_id,randomUUID(),eventId,requestDigest,canonical({state:'PENDING',root_event_id:eventId,current_event_id:eventId,target_session_id:leader.leader_session_id,target_consumer_id:consumerIds[0],leader_generation:leader.leader_generation,authority_epoch:actor.deployment_epoch})]);
     const result={status:'ENQUEUED',command_id:command,event_id:eventId,leader_session_id:leader.leader_session_id,
-      leader_generation:leader.leader_generation,delivery_obligations:queued.obligations,requires_human_prompt:false,
-      intent_authorized:false,replayed:false};
+      leader_generation:leader.leader_generation,delivery_obligations:queued.obligations,requires_human_prompt:payload.requires_human_prompt,
+      approval,intent_authorized:false,replayed:false};
     await tx.query("UPDATE hyperfide.command_inbox SET state='COMPLETED',result=$4::jsonb,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",
       [actor.organisation_id,actor.run_id,command,JSON.stringify(result)]);
     return result;
@@ -229,12 +259,38 @@ async function processing(context:RuntimeContext,action:string,input:unknown):Pr
   return result;
  }));
 }
+// The autonomous control consumer admits a routed routine request exactly once through the 6.2 inbox. Programme intent
+// can never be consumed here: it is only ever delivered to the leader's session-bound human_intent consumer.
+async function routineReceive(context:RuntimeContext,input:unknown):Promise<unknown>{
+ const actor=principal(context,'human.routine.receive'),invocation=invocationOf(context);
+ if(!routineConsumerRoles.includes(actor.role))refuse('Only autonomous control services consume routine work');
+ const v=exact(input,['event_id','operation']);
+ if(typeof v.operation!=='string'||!routineOperations.includes(v.operation as RoutineOperation))refuse('Routine operation is unknown');
+ const operation=v.operation as RoutineOperation,eventId=uuid(v.event_id);
+ const gateway=capability<Gateway>(context,'4.2','storage.transactions.v1',['withPrimaryTransaction']);
+ const inbox=capability<Inbox>(context,'6.2','events.inbox.v1',['receive']);
+ return gateway.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal:context.signal,guard:tx=>invocation.guard(tx)},async tx=>{
+  const consumer=await autonomousConsumer(tx,actor,operation);
+  const received=await inbox.receive(tx,{...scope(actor),event_id:eventId,consumer_id:consumer},async(_tx,event)=>{
+   const p=event.payload;
+   if(event.aggregate_type!=='autonomous_command'||event.event_type!=='routine.operation.requested'||p.target!=='AUTONOMOUS_CONTROL'||
+       p.autonomous_operation!==operation||p.target_session_id!==null||p.kind!=='ROUTINE')refuse('Only approved routine work reaches autonomous control');
+   const approval=policyApproval(context,operation);
+   if(!object(p.approval)||canonical(p.approval)!==canonical(approval))refuse('Approved run policy changed since admission; re-route through the primary leader');
+   return {admitted:true,operation,executor_component:approval.executor_component,executor_action:approval.executor_action,
+     approval_source:approval.source,policy_revision:approval.policy_revision,request_id:p.request_id,package_id:p.package_id,
+     consumed_by_actor_id:actor.actor_id,consumed_by_role:actor.role,human_prompts:0,requires_human_prompt:false};
+  });
+  return {status:received.status,event_id:received.event_id,inbox_id:received.inbox_id,admission:received.result};
+ });
+}
 export function createComponent(_context:ComponentContext):Component{
   return {apiVersion:1,actions:{
     'human.adopt':(input,context)=>processing(context as RuntimeContext,'human.adopt',input),
     'human.bootstrap':(input,context)=>processing(context as RuntimeContext,'human.bootstrap',input),
     'human.intent.read':(input,context)=>processing(context as RuntimeContext,'human.intent.read',input),
     'human.intent.complete':(input,context)=>processing(context as RuntimeContext,'human.intent.complete',input),
+    'human.routine.receive':(input,context)=>routineReceive(context as RuntimeContext,input),
     'human.describe':async(input,context)=>{
       exact(input,[]);
       const runtime=context as RuntimeContext,actor=principal(runtime,'human.describe'),invocation=invocationOf(runtime);
@@ -266,7 +322,7 @@ export function createComponent(_context:ComponentContext):Component{
     'human.escalate':(input,context)=>route(context as RuntimeContext,'human.escalate',validateIntent(input),null),
     'human.autonomous':(input,context)=>{
       const value=exact(input,['operation','intent']);
-      if(typeof value.operation!=='string'||!routineOperations.includes(value.operation as typeof routineOperations[number]))
+      if(typeof value.operation!=='string'||!routineOperations.includes(value.operation as RoutineOperation))
         refuse('This operation requires leader intent resolution');
       const intent=validateIntent(value.intent);
       if(intent.kind!=='ROUTINE')refuse('Routine operations cannot amend programme criteria');
