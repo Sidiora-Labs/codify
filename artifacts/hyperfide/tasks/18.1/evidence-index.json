@@ -1,8 +1,9 @@
 {
   "task": "18.1",
-  "commit": "ced40068e50f25e17316c999eaa26806836aa6b9",
+  "commit": "12aa390190b3d3e360e079254378a381103fc236",
+  "requalified_on": "12aa390190b3d3e360e079254378a381103fc236",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-032 --manifest tests/hyperfide/manifests/tasks/18.1.json",
   "exit_code": 0,
-  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"4a12d74f-dc31-401c-9edf-2fafa794b869\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/18.1/campaigns/ecd2fe551c2c407706c4238c64bc5a23b14395b8f509265053c2714de670f6be\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}",
-  "ran_at": "2026-10-17T09:21:23+00:00"
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"0eb6da59-bf56-475c-a990-6713eca67590\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/18.1/campaigns/866a5e79824aff3c694d707311eeea635c2219f4838a2886e44be6e0df093d67\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T14:09:46.313810+00:00"
 }
