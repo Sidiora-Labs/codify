@@ -1,9 +1,9 @@
 {
   "task": "22.3",
-  "commit": "8096e01166742313d1f05a3d3edb6c28020382f0",
+  "commit": "12aa390190b3d3e360e079254378a381103fc236",
+  "requalified_on": "12aa390190b3d3e360e079254378a381103fc236",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-046 --manifest tests/hyperfide/manifests/tasks/22.3.json",
   "exit_code": 0,
-  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"42eaa0c9-d2d5-47f8-93bb-6cb9a6b9f59b\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/22.3/campaigns/540e56a5184368bce58780637b249856fa145abbcc539df2fe54e41e43dea96c\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}",
-  "ran_at": "2026-10-17T09:15:00Z",
-  "run_as": "uid 1500 (hf, repository owner) with node 24.22.0 and python 3.14.8; check-evidence.py ignores system safe.directory so the root user cannot pass its git revision check"
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"f7f1739a-d1c9-4b41-a1e2-2bc034da7085\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/22.3/campaigns/37af9527a6c4855c63efee5e2cd581d5b061c73ad9972ce1b848c8cbc44462f1\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T14:20:12.251Z"
 }
