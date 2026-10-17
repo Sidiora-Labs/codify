@@ -89,21 +89,28 @@ def check(name,callback):
     try:callback();actual="observed"
     except Exception as error:FAILED.append(name);actual=type(error).__name__+": "+str(error)
     print(json.dumps({"type":"assertion","id":name,"expected":"observed","actual":actual}),flush=True)
-def closure_factory(f):
-    # This component variant tests the real closure-persistence factory only.
-    # Production createComponent additionally requires actual5/12 remote execution.
-    fragment=f.components/"28.2.json"
-    if fragment.exists():
+def component_files(*ids):
+    """Real registered fragments for ids plus their transitive requires, keyed by declared id."""
+    by_id={}
+    for fragment in sorted((ROOT/"services/hyperfide/components").glob("*.json")):
+        if fragment.name=="schema.json":continue
         declaration=json.loads(fragment.read_text())
-        declaration["entry"]="createClosureComponent"
-        declaration["actions"]=[a for a in declaration["actions"]if a!="docs.check"]
-        declaration["requires"]=["4.2","14.1"]
-        fragment.write_text(json.dumps(declaration))
+        if "id"in declaration:by_id[declaration["id"]]=(fragment.stem,declaration)
+    ordered=[]
+    def add(component):
+        name,declaration=by_id[component]
+        if name in ordered:return
+        for dependency in declaration["requires"]:add(dependency)
+        ordered.append(name)
+    for component in ids:add(component)
+    return tuple(ordered)
 def setup(f):
-    closure_factory(f)
-    sql=(ROOT/"services/hyperfide/migrations/0028-documentation.sql").read_text()
-    f.sql("BEGIN;\n"+sql+"\nINSERT INTO hyperfide.schema_migrations(version,name,checksum)VALUES(28,\'0028-documentation\',\'sha256:"+hashlib.sha256(sql.encode()).hexdigest()+"\');\nCOMMIT;")
-def fixture(extra=("28.2",),migrate=True):return IdentityFixture(extra_components=extra,extra_setup=setup if migrate else closure_factory)
+    # The actual migration coordinator already applied the complete release; only its exact pin is checked here.
+    f.apply_migration("0028-documentation")
+def drop_documentation_schema(f):
+    """Clearly labelled negative: the operator-owned 0028 relations are absent at service start."""
+    f.sql("DROP TABLE hyperfide.documentation_closures")
+def fixture(extra=("28.2",),migrate=True):return IdentityFixture(extra_components=component_files(*extra),extra_setup=setup if migrate else drop_documentation_schema)
 def call(f,action,payload,component="28.2",ok=True,**kwargs):
     status,value=f.invoke(action,payload,component=component,**kwargs)
     if ok:require(status==200 and value.get("ok")is True,"unexpected actual service response: "+str((status,value)));return value["result"]
@@ -120,15 +127,15 @@ def positive_fixture_setup(f):
         return subprocess.check_output(["git","-c","core.hooksPath=/dev/null","-c","core.fsmonitor=false","-c","maintenance.auto=false","-c","gc.auto=0","-c","commit.gpgSign=false","-C",str(repo),*args],env=f.env,stderr=subprocess.PIPE).decode().strip()
     git("init","-q")
     git("config","user.name","Hyperfide fixture");git("config","user.email","fixture@example.invalid")
-    (repo/"README.md").write_text("Fixture documentation baseline.\n")
-    git("add","README.md");git("commit","-qm","Fixture baseline");base=git("rev-parse","HEAD")
+    (repo/"README.md").write_text("Fixture documentation baseline.\n");(repo/"docs").mkdir();(repo/"docs/guide.md").write_text("Unchanged operator guide.\n")
+    git("add","README.md","docs/guide.md");git("commit","-qm","Fixture baseline");base=git("rev-parse","HEAD")
     (repo/"README.md").write_text("Fixture documentation for an exact integrated revision.\n")
     git("add","README.md");git("commit","-qm","Fixture documented revision");head=git("rev-parse","HEAD")
     ids={k:str(uuid.uuid4())for k in["repository","package","task","attempt","custody","branch","candidate","intent","publication","verifier"]}
-    ids.update(f.ids);f.docs_ids=ids;f.docs_head=head
+    ids.update(f.ids);f.docs_ids=ids;f.docs_head=head;f.docs_git=git;f.docs_repo=repo
     org,run=f.ids["organisation"],f.ids["run"]
     new_spec=str(uuid.uuid4());f.ids["spec"]=new_spec;f.docs_generation="2"
-    document={"parsed":{"sections":[{"name":"documentation","line":1,"fields":{k:{"key":k,"raw":json.dumps(v),"value":v,"line":n+2}for n,(k,v)in enumerate({"mode":"manual","targets":["README.md"],"check_cmd":"./cg docs check --json"}.items())}}]}}
+    document={"parsed":{"sections":[{"name":"documentation","line":1,"fields":{k:{"key":k,"raw":json.dumps(v),"value":v,"line":n+2}for n,(k,v)in enumerate({"mode":"manual","targets":["README.md","docs/*.md"],"check_cmd":"./cg docs check --json"}.items())}}]}}
     source="fixture accepted documentation policy"
     f.sql("INSERT INTO hyperfide.spec_revisions(organisation_id,id,project_id,source_digest,source_content,document,schema_version)VALUES($1,$2,$3,$4,$5,$6::jsonb,1)",[org,new_spec,f.ids["project"],"sha256:"+hashlib.sha256(source.encode()).hexdigest(),source,json.dumps(document)])
     f.sql("INSERT INTO hyperfide.run_spec_revisions(organisation_id,run_id,spec_generation,spec_revision_id)VALUES($1,$2,2,$3)",[org,run,new_spec])
@@ -159,34 +166,134 @@ def seed_checker(f,packet_id,failed=False,cleanup='CONFIRMED'):
     f.sql("INSERT INTO hyperfide.documentation_jobs(organisation_id,run_id,id,request_id,packet_id,packet_digest,state,verifier_session_id,policy_digest,remote_operation_id)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",[org,run,job,request,packet_id,selected["packet_digest"],"FAILED"if failed else"SUCCEEDED",f.docs_ids["verifier"],policy,str(uuid.uuid4())])
     f.sql("INSERT INTO hyperfide.documentation_checks(organisation_id,run_id,id,packet_id,job_id,generation,outcome,checker_receipt_digest,canonical_content,payload)VALUES($1,$2,$3,$4,$5,1,$6,$7,$8::text,$8::text::jsonb)",[org,run,check_id,packet_id,job,"FAIL"if failed else"PASS",digest(receipt),canonical(receipt).decode()])
     return check_id
+def publish_relevant_change(f):
+    """Integrate a new exact candidate that changes one documentation target and leaves another unchanged."""
+    org,run,ids=f.ids["organisation"],f.ids["run"],f.docs_ids;git=f.docs_git;old=f.docs_head
+    (f.docs_repo/"README.md").write_text("Fixture documentation for the changed contract.\n")
+    git("add","README.md");git("commit","-qm","Fixture changed contract");head=git("rev-parse","HEAD")
+    candidate,intent,publication,branch=[str(uuid.uuid4())for _ in range(4)];candidate_digest=digest("fixture-candidate-2")
+    f.sql("INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id)VALUES($1,$2,$3)",[org,ids["repository"],head])
+    f.sql("INSERT INTO hyperfide.branch_authorities(organisation_id,run_id,id,repository_id,branch_ref,branch_generation,authority_epoch,expected_old_head)VALUES($1,$2,$3,$4,'refs/heads/docs-next',1,$5,$6)",[org,run,branch,ids["repository"],f.ids["epoch"],old])
+    f.sql("INSERT INTO hyperfide.integration_candidates(organisation_id,run_id,id,task_id,custody_id,custody_generation,repository_id,branch_authority_id,branch_generation,expected_old_head,candidate_head,input_manifest_digest,request_id)VALUES($1,$2,$3,$4,$5,1,$6,$7,1,$8,$9,$10,$11)",[org,run,candidate,ids["task"],ids["custody"],ids["repository"],branch,old,head,candidate_digest,str(uuid.uuid4())])
+    f.sql("INSERT INTO hyperfide.publication_intents(organisation_id,run_id,id,candidate_id,intent_digest)VALUES($1,$2,$3,$4,$5)",[org,run,intent,candidate,digest("fixture-intent-2")])
+    f.sql("INSERT INTO hyperfide.publication_operations(organisation_id,run_id,id,publication_intent_id,candidate_id,branch_authority_id,branch_generation,authority_epoch,repository_id,expected_old_head,candidate_head,request_id,state,observed_head)VALUES($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10,$11,'PUBLISHED',$10)",[org,run,publication,intent,candidate,branch,f.ids["epoch"],ids["repository"],old,head,str(uuid.uuid4())])
+    f.docs_head=head;ids["publication"]=publication
+    pinned=dict(f.docs_pins);pinned["source_manifest_digest"]=digest([{"repository_id":ids["repository"],"candidate_head":head,"input_manifest_digest":candidate_digest}])
+    return pinned
+def counts(f):
+    """Rows that any recursive dispatch or connector-driven run would have to create."""
+    return f.sql("SELECT (SELECT count(*) FROM hyperfide.runs)::int AS runs,(SELECT count(*) FROM hyperfide.tasks)::int AS tasks,(SELECT count(*) FROM hyperfide.attempts)::int AS attempts,(SELECT count(*) FROM hyperfide.documentation_jobs WHERE state='RUNNING')::int AS running_docs_jobs")[0]
+def closures(f):return f.sql("SELECT count(*)::int AS n FROM hyperfide.documentation_closures")[0]["n"]
 def positive_persistence_probes():
-    f=IdentityFixture(extra_components=("28.2",),extra_setup=positive_fixture_setup)
+    f=IdentityFixture(extra_components=component_files("28.2"),extra_setup=positive_fixture_setup)
     try:
+        def real_fragment():
+            declared=(ROOT/"services/hyperfide/components/28.2.json").read_bytes()
+            require((f.components/"28.2.json").read_bytes()==declared,"service loaded a rewritten 28.2 fragment")
+            for name in component_files("28.2"):require((f.components/(name+".json")).read_bytes()==(ROOT/"services/hyperfide/components"/(name+".json")).read_bytes(),"dependency fragment missing or rewritten: "+name)
+            require(json.loads(declared)["entry"]=="createComponent"and"docs.check"in json.loads(declared)["actions"],"registered entry does not expose docs.check")
+        check("docs.component.real-fragment-closure",real_fragment)
+        before=counts(f)
         packet=call(f,"docs.packet",{"pins":f.docs_pins})
-        check("docs.persistence.actual-manual-packet",lambda:require(packet["closed"]is False and packet["virtual_role"]=="@docs","manual explicit packet was waived or refused"))
+        check("docs.persistence.actual-manual-packet",lambda:require(packet["closed"]is False and packet["virtual_role"]=="@docs"and packet["previous_baseline_digest"]is None and len(packet["incremental"]["changed"])==2,"manual explicit packet was waived or refused"))
+        def check_requires_verifier():
+            error=call(f,"docs.check",{"packet_id":packet["packet_id"],"repository_id":f.docs_ids["repository"],"runner_session_id":str(uuid.uuid4()),"reservation_id":str(uuid.uuid4())},ok=False)
+            require(error.get("code")=="DOCS_VERIFIER_REQUIRED","operator connector obtained a documentation check: "+str(error))
+        check("docs.check.verifier-required",check_requires_verifier)
+        verifier=f.add_principal("docsverifier","VERIFIER")
+        def check_requires_bound_runner():
+            error=call(f,"docs.check",{"packet_id":packet["packet_id"],"repository_id":f.docs_ids["repository"],"runner_session_id":str(uuid.uuid4()),"reservation_id":str(uuid.uuid4())},key="docsverifier",ok=False)
+            require(error.get("code")=="CLOSURE_INVALID","verifier check ran without a trusted execution profile: "+str(error))
+            f.stop();f.env["HYPERFIDE_DOCUMENTATION_EXECUTION_PROFILE"]=json.dumps({"python_executable":"/usr/bin/python3","executable_digest":digest("fixture-python"),"environment":{},"timeout_ms":60000});f.start()
+            error=call(f,"docs.check",{"packet_id":packet["packet_id"],"repository_id":f.docs_ids["repository"],"runner_session_id":str(uuid.uuid4()),"reservation_id":str(uuid.uuid4())},key="docsverifier",ok=False)
+            require(error.get("code")=="CLOSURE_INVALID"and"exact packet Git commit/tree"in error.get("message",""),"unexpected docs.check refusal: "+str(error))
+            jobs=f.sql("SELECT count(*)::int AS n FROM hyperfide.documentation_jobs")[0]["n"]
+            require(jobs==0 and closures(f)==0,"refused verifier check created a job or closure")
+        check("docs.check.unbound-runner-refused",check_requires_bound_runner)
         check_id=seed_checker(f,packet["packet_id"])
+        def connector_exit():
+            call(f,"docs.close",{"packet_id":packet["packet_id"],"check_id":check_id,"exit_code":0},ok=False)
+            org,run=f.ids["organisation"],f.ids["run"];job=str(uuid.uuid4())
+            f.sql("INSERT INTO hyperfide.documentation_jobs(organisation_id,run_id,id,request_id,packet_id,packet_digest,state,verifier_session_id,policy_digest,remote_operation_id)VALUES($1,$2,$3,$4,$5,$6,'SUCCEEDED',$7,$8,$9)",[org,run,job,str(uuid.uuid4()),packet["packet_id"],packet["packet_digest"],f.docs_ids["verifier"],digest("fixture-command-policy"),str(uuid.uuid4())])
+            call(f,"docs.close",{"packet_id":packet["packet_id"],"check_id":job},ok=False)
+            require(closures(f)==0,"connector exit or bare successful job established closure")
+        check("docs.persistence.connector-exit-job-not-closure",connector_exit)
         unknown_cleanup_id=seed_checker(f,packet["packet_id"],cleanup="UNKNOWN")
         check("docs.persistence.unknown-cleanup-not-closure",lambda:call(f,"docs.close",{"packet_id":packet["packet_id"],"check_id":unknown_cleanup_id},ok=False))
         failed_id=seed_checker(f,packet["packet_id"],failed=True)
         check("docs.persistence.failed-check-refused",lambda:call(f,"docs.close",{"packet_id":packet["packet_id"],"check_id":failed_id},ok=False))
         def baseline_failure():
-            f.sql("CREATE FUNCTION hyperfide.fixture_fail_baseline()RETURNS trigger LANGUAGE plpgsql AS $fixture$BEGIN RAISE EXCEPTION 'fixture baseline storage failure';END$fixture$;CREATE TRIGGER fixture_fail_baseline BEFORE INSERT ON hyperfide.documentation_baselines FOR EACH ROW EXECUTE FUNCTION hyperfide.fixture_fail_baseline()")
+            f.sql("CREATE FUNCTION hyperfide.fixture_fail_baseline()RETURNS trigger LANGUAGE plpgsql AS $fixture$BEGIN RAISE WARNING 'fixture baseline storage warning';RAISE EXCEPTION 'fixture baseline storage failure';END$fixture$;CREATE TRIGGER fixture_fail_baseline BEFORE INSERT ON hyperfide.documentation_baselines FOR EACH ROW EXECUTE FUNCTION hyperfide.fixture_fail_baseline()")
             try:
                 call(f,"docs.close",{"packet_id":packet["packet_id"],"check_id":check_id},ok=False)
-                count=f.sql("SELECT count(*)::int AS n FROM hyperfide.documentation_closures")[0]["n"]
-                require(count==0,"warning-only baseline failure established closure")
+                require(closures(f)==0,"warning-only baseline failure established closure")
+                require(call(f,"docs.inspect",{"pins":f.docs_pins})["closed"]is False,"baseline failure reported closure")
             finally:f.sql("DROP TRIGGER fixture_fail_baseline ON hyperfide.documentation_baselines;DROP FUNCTION hyperfide.fixture_fail_baseline()")
+            f.sql("CREATE FUNCTION hyperfide.fixture_skip_baseline()RETURNS trigger LANGUAGE plpgsql AS $fixture$BEGIN RAISE WARNING 'fixture baseline silently skipped';RETURN NULL;END$fixture$;CREATE TRIGGER fixture_skip_baseline BEFORE INSERT ON hyperfide.documentation_baselines FOR EACH ROW EXECUTE FUNCTION hyperfide.fixture_skip_baseline()")
+            try:
+                call(f,"docs.close",{"packet_id":packet["packet_id"],"check_id":check_id},ok=False)
+                require(closures(f)==0,"warning-only skipped baseline write established closure")
+            finally:f.sql("DROP TRIGGER fixture_skip_baseline ON hyperfide.documentation_baselines;DROP FUNCTION hyperfide.fixture_skip_baseline()")
         check("docs.persistence.baseline-failure-not-closure",baseline_failure)
         closed=call(f,"docs.close",{"packet_id":packet["packet_id"],"check_ids":[check_id]})
         check("docs.persistence.atomic-baseline-roundtrip",lambda:require(closed["closed"]and closed["status"]=="CURRENT"and closed["baseline_digest"]and closed["dispatches_new_run"]is False,"exact durable seeded-result closure did not persist"))
         def durable():
             f.stop();f.start()
             result=call(f,"docs.inspect",{"pins":f.docs_pins})
-            require(result["closed"]and result["receipt_id"]==closed["receipt_id"],"exact durable closure disappeared across restart")
+            require(result["closed"]and result["receipt_id"]==closed["receipt_id"]and result["baseline_digest"]==closed["baseline_digest"],"exact durable closure disappeared across restart")
+            row=f.sql("SELECT b.canonical_content,b.baseline_digest FROM hyperfide.documentation_baselines b JOIN hyperfide.documentation_closures c ON c.organisation_id=b.organisation_id AND c.run_id=b.run_id AND c.baseline_id=b.id WHERE c.id=$1",[closed["receipt_id"]])
+            require(len(row)==1 and "sha256:"+hashlib.sha256(row[0]["canonical_content"].encode()).hexdigest()==closed["baseline_digest"],"baseline receipt is not independently retrievable")
+            require(json.loads(row[0]["canonical_content"])["snapshot"]["repositories"][0]["commit"]==f.docs_head,"baseline is not linked to the implementation revision")
         check("docs.persistence.closed-baseline-survives-restart",durable)
+        new_pins=publish_relevant_change(f)
+        def stale_inputs():
+            result=call(f,"docs.inspect",{"pins":f.docs_pins})
+            require(not result["closed"]and result["status"]in["STALE","HELD"],"relevant input change retained current closure")
+            stale_check=seed_checker(f,packet["packet_id"])
+            before_closures=closures(f)
+            error=call(f,"docs.close",{"packet_id":packet["packet_id"],"check_id":stale_check},ok=False)
+            require(error.get("code")=="DOCS_STALE"and closures(f)==before_closures,"stale packet closed after relevant input changed: "+str(error))
+        check("docs.persistence.stale-input-close-refused",stale_inputs)
+        reload={}
+        def incremental():
+            second=call(f,"docs.packet",{"pins":new_pins});reload.update(second)
+            inc=second["incremental"]
+            require(second["previous_baseline_digest"]==closed["baseline_digest"]and inc["previous_baseline_digest"]==closed["baseline_digest"],"reload is not anchored on the durable baseline")
+            require([c["path"]for c in inc["changed"]]==["README.md"]and inc["unchanged"]==1 and inc["removed"]==[],"incremental reload misreported changed inputs: "+json.dumps(inc))
+            second_check=seed_checker(f,second["packet_id"])
+            result=call(f,"docs.close",{"packet_id":second["packet_id"],"check_id":second_check})
+            require(result["closed"]and result["status"]=="CURRENT"and result["baseline_digest"]!=closed["baseline_digest"],"reloaded packet did not close with a new baseline")
+            require(call(f,"docs.inspect",{"pins":new_pins})["closed"],"reloaded closure not current")
+        check("docs.persistence.incremental-reload",incremental)
+        def no_dispatch():
+            after=counts(f)
+            require(after==before,"documentation operations dispatched new runs/tasks/attempts: "+json.dumps([before,after]))
+        check("docs.persistence.no-recursive-dispatch",no_dispatch)
+        def lost_fence():
+            require(reload.get("packet_id"),"reloaded packet absent")
+            org,run=f.ids["organisation"],f.ids["run"]
+            # A packet minted under a previous (lost) authority fence cannot close even with a passing checker receipt.
+            source=f.sql("SELECT payload FROM hyperfide.documentation_packets WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,run,reload["packet_id"]])[0]["payload"]
+            fenced=copy.deepcopy(source);fenced["authority_epoch"]=str(uuid.uuid4());fenced_id=str(uuid.uuid4());fenced_bytes=canonical(fenced).decode()
+            f.sql("INSERT INTO hyperfide.documentation_packets(organisation_id,run_id,id,request_id,spec_revision_id,spec_generation,authority_epoch,source_manifest_digest,programme_manifest_digest,packet_digest,canonical_content,payload)VALUES($1,$2,$3,$4,$5,2,$6,$7,$8,$9,$10::text,$10::text::jsonb)",[org,run,fenced_id,str(uuid.uuid4()),new_pins["spec_revision_id"],fenced["authority_epoch"],new_pins["source_manifest_digest"],new_pins["programme_manifest_digest"],digest(fenced),fenced_bytes])
+            fenced_check=seed_checker(f,fenced_id)
+            before_closures=closures(f)
+            error=call(f,"docs.close",{"packet_id":fenced_id,"check_id":fenced_check},ok=False)
+            require(error.get("code")=="DOCS_STALE"and closures(f)==before_closures,"previous-fence packet closed documentation: "+str(error))
+            # Losing the run fence itself: the service refuses closure and inspection, and no closure row appears.
+            pending=seed_checker(f,reload["packet_id"])
+            f.sql("UPDATE hyperfide.runs SET authority_epoch=$3,state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[org,run,str(uuid.uuid4())])
+            try:
+                error=call(f,"docs.close",{"packet_id":reload["packet_id"],"check_id":pending},ok=False)
+                require(error.get("code")in("AUTH_REVOKED","DOCS_STALE")and closures(f)==before_closures,"lost fence still closed documentation: "+str(error))
+                status,value=f.invoke("docs.inspect",{"pins":new_pins},component="28.2")
+                require(not(value.get("ok")and value["result"]["closed"]),"closure reported current after the fence was lost")
+            finally:f.sql("UPDATE hyperfide.runs SET authority_epoch=$3,state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[org,run,f.ids["epoch"]])
+            require(call(f,"docs.inspect",{"pins":new_pins})["closed"],"restored fence lost the durable closure")
+        check("docs.persistence.lost-fence-refused",lost_fence)
         def mismatch():
             f.sql("UPDATE hyperfide.publication_operations SET observed_head=expected_old_head,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[f.ids["organisation"],f.ids["run"],f.docs_ids["publication"]])
-            result=call(f,"docs.inspect",{"pins":f.docs_pins})
+            result=call(f,"docs.inspect",{"pins":new_pins})
             require(not result["closed"]and result["status"]in["STALE","HELD"],"publication mismatch retained current closure")
         check("docs.persistence.changed-publication-held",mismatch)
     finally:f.close()
