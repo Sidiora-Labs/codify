@@ -4,8 +4,8 @@ Jev is TypeSafe AI's **System One** decision model, reached over OpenRouter
 as `typesafe/jev-1.13`. It does not generate text. It answers a fixed set
 of typed questions about a state, and that is the whole interface.
 
-Codify's core loop — graph, memory, spec, snapshots — still runs with no
-network. Jev is the one remote call, and the principle changed name to say
+Hyperfide's local core loop — graph, memory, spec, snapshots — still runs
+with no network. Jev is the one remote call, and the principle changed name to say
 so:
 
 > **Local first.** The graph, memory, and workflow run with no network and
@@ -20,6 +20,9 @@ degrading to a worse heuristic — a silent fallback makes the feature a lie.
 ranks, and flags; the deterministic checks stay the only authority.
 
 Implemented in `src/jev.c`; covered by `tests/integration/28_jev.sh`.
+Examples use `hyperfide`; `cg` is the deprecated compatibility alias of the
+same executable, and the messages below still begin with `cg:` because
+that is what this build prints.
 
 ## Question types
 
@@ -70,14 +73,20 @@ response body.
 | `CG_JEV_MODEL` | `typesafe/jev-1.13` | model id |
 | `CG_JEV_ENDPOINT` | `https://openrouter.ai/api/alpha/decisions` | decisions endpoint |
 | `CG_JEV_CURL` | `curl` | a path, or a name looked up on `PATH` |
-| `CG_JEV_TIMEOUT` | `30` | seconds per attempt |
+| `CG_JEV_TIMEOUT` | `30` | seconds per attempt (a many-question request through `jev_ask_at`, which `hyperfide recap` uses, gets `180` when unset) |
 | `CG_JEV_ATTEMPTS` | `4` | attempts including the first |
 | `CG_JEV_BACKOFF_MS` | `500` | first backoff; doubles per retry |
+
+Each `CG_JEV_*` variable is also read as `HYPERFIDE_JEV_*`
+(`HYPERFIDE_JEV_MODEL`, …). Set one name, or both to the same value: two
+different values make every command print `hyperfide: conflicting variable
+aliases for HYPERFIDE_JEV_MODEL (values redacted)` and exit 78.
+`OPENROUTER_API_KEY` has no alias.
 
 A missing key is spelled out rather than worked around:
 
 ```
-$ cg jev ask --state hello --noul greeting "Is it a greeting?"
+$ hyperfide jev ask --state hello --noul greeting "Is it a greeting?"
 cg: OPENROUTER_API_KEY is not set. Jev is mandatory for this command —
 export the key in the agent's environment (cg jev doctor checks it)
 ```
@@ -86,13 +95,13 @@ A refused call is not logged: nothing was sent.
 
 ## Commands
 
-### `cg jev doctor`
+### `hyperfide jev doctor`
 
 Key, curl, endpoint, model, and log health in one call. Exits non-zero when
 Jev could not be used.
 
 ```
-$ cg jev doctor
+$ hyperfide jev doctor
 jev: typesafe/jev-1.13 via https://openrouter.ai/api/alpha/decisions
 key: OPENROUTER_API_KEY set (sk-or-…ca41)
 curl: /usr/bin/curl (8.5.0)
@@ -101,15 +110,18 @@ log: /path/proj/.codegraph/jev.log — 1 call, last 2026-09-25 12:05
 
 The key is only ever shown as a prefix and its last four characters.
 `--probe` sends one tiny decision to prove the endpoint answers.
-`--json` reports `ok`, `key`, `model`, `endpoint`, `probe`, `calls`.
+`--json` reports `ok`, `model`, `endpoint`, `key` (a boolean), `key_hint`,
+`curl`, `curl_version`, `timeout_s`, `attempts`, `log`, `calls`,
+`last_call` and `probe`. `hyperfide jev doctor` answers outside a project too;
+there is no log line then.
 
-### `cg jev ask`
+### `hyperfide jev ask`
 
 Ask directly — the operator's way to see what Jev does with a state, and
 how the tests drive it.
 
 ```
-$ cg jev ask --state "the build failed: undefined reference to alpha" \
+$ hyperfide jev ask --state "the build failed: undefined reference to alpha" \
     --noul flaky "Is this failure flaky rather than a real defect?" \
     --choice category "Classify the failure" \
       --option compile="a compile or link error" \
@@ -123,7 +135,7 @@ model typesafe/jev-1.13-20260917 · 427 in, 73 out · $0.000018 · 116 ms
 ```
 
 A complete request body can be passed instead, as a file or on stdin:
-`cg jev ask request.json`, `cg jev ask -`. A missing `model` in the body is
+`hyperfide jev ask request.json`, `hyperfide jev ask -`. A missing `model` in the body is
 filled in from the configuration.
 
 `--json` returns the answers structurally:
@@ -135,10 +147,10 @@ filled in from the configuration.
  "answers":{"q":{"type":"noul","value":0.95,"confidence":0.95}}}
 ```
 
-### `cg jev log`
+### `hyperfide jev log`
 
 Every call, successful or not, appends one JSON line to
-`.codegraph/jev.log`. `cg jev log [-n N]` renders the tail:
+`.codegraph/jev.log`. `hyperfide jev log [-n N]` renders the tail:
 
 ```
 2026-09-25 12:43:17  ok    3q  typesafe/jev-1.13-20260917  427/73 tok  $0.000018  116 ms  gen-dec-…1
@@ -159,9 +171,9 @@ and nothing else changes.
 
 | Command | Question | What it adds |
 |---|---|---|
-| `cg spec done` on a red `verify_cmd` | why it failed, what to do next | a `jev triage:` line, and the same verdict |
-| `cg guard` | a severity score per finding | `[jev <score> <level>]` and severity order |
-| `cg fleet pr` | how ready the feature is | a `Jev readiness:` line in the PR body |
+| `hyperfide spec done` on a red `verify_cmd` | why it failed, what to do next | a `jev triage:` line, and the same verdict |
+| `hyperfide guard` | a severity score per finding | `[jev <score> <level>]` and severity order |
+| `hyperfide fleet pr` | how ready the feature is | a `Jev readiness:` line in the PR body |
 
 ### Failure triage
 
@@ -173,7 +185,7 @@ action (`fix_code`, `fix_test`, `rerun`, `install_dependency`,
 `revise_spec`, `ask_human`).
 
 ```
-$ cg spec done 2.1
+$ hyperfide spec done 2.1
 …
 FAIL: expected 3, got 4
 cg spec: verify_cmd failed (exit 1) — task 2.1 NOT marked done (--force to override)
@@ -185,7 +197,7 @@ appended to the outcome memory the failure records, so the next session
 reads it without asking again:
 
 ```
-$ cg recall --task adv/2.1 --type outcome -n 1
+$ hyperfide recall --task adv/2.1 --type outcome -n 1
 #3  [outcome]  2026-09-25  (task adv/2.1)  auto
     blocked: Advisory work — verify_cmd failed (exit 1) [jev: test_failure → fix_test]
 ```
@@ -204,11 +216,11 @@ memory.
 
 ### Guard ranking
 
-`cg guard` scores every finding in **one** call, whatever the count (capped
+`hyperfide guard` scores every finding in **one** call, whatever the count (capped
 at 50), and prints them most severe first:
 
 ```
-$ cg guard src/typo.ts
+$ hyperfide guard src/typo.ts
 guard: every change is inside task 2.1's declared scope
   warn  src/typo.ts:3: function 'doWork' has no inbound reference  [jev 3.80 Blocking]
   warn  src/typo.ts:5: helpr() is not defined and nothing external accounts for it  [jev 0.20 Noise]
@@ -225,13 +237,13 @@ guard: 2 finding(s) (advisory, most severe first)
 ```
 
 Without a key the summary line loses "most severe first", the findings keep
-their original order, and the exit code is untouched: `cg guard --strict`
+their original order, and the exit code is untouched: `hyperfide guard --strict`
 still fails on out-of-scope edits and still passes on in-scope ones, in
 Jev's order or not.
 
 ### Pull request readiness
 
-`cg fleet pr` asks one `noul` question about the state it can prove —
+`hyperfide fleet pr` asks one `noul` question about the state it can prove —
 feature, branch, base, commits ahead, and the task list with what is
 qualified — and writes the answer into the PR body:
 
@@ -245,54 +257,54 @@ always was.
 
 ## Memory classification and skills
 
-`cg memory classify` asks Jev what a memory actually is. This one is
+`hyperfide memory classify` asks Jev what a memory actually is. This one is
 **mandatory**, not advisory: classification is the whole command, so with no
 key it fails rather than guessing.
 
 ```
-$ cg memory classify --all
+$ hyperfide memory classify --all
 classified 2 memories:
   #1    decision     skill      0.82  reusable 0.95  Use the trigram index for symbol search
   #2    constraint   skill      0.82  reusable 0.95  Never store secrets in memory
-skill candidates: 1,2 — promote with `cg skills promote <id>`
+skill candidates: 1,2 — promote with `hyperfide skills promote <id>`
 ```
 
 Each memory is one call, carrying two questions: a `choice` between `skill`,
 `decision`, `constraint`, `fact` and `noise`, and a `noul` on whether the
 note is reusable beyond its own task. The class and its confidence are
 stored on the memory (`memories.class`, `memories.confidence`, schema v16),
-so nothing is asked twice — `cg memory classify` with no argument does the
+so nothing is asked twice — `hyperfide memory classify` with no argument does the
 unclassified ones and says `no memories to classify` when there are none.
 `--all` re-asks everything; `<id>` does one; `-n N` caps the batch.
 
-The class then travels with the memory, in `cg recall`:
+The class then travels with the memory, in `hyperfide recall`:
 
 ```
 #1  [decision]  2026-09-25  class skill 0.82
     Use the trigram index for symbol search
 ```
 
-and in `cg brief`, as `[decision/skill]`. Both carry `class` and
+and in `hyperfide brief`, as `[decision/skill]`. Both carry `class` and
 `confidence` in `--json`.
 
-### `cg skills`
+### `hyperfide skills`
 
 A memory classed `skill` is a candidate for promotion into an **Agent
 Skill** — the portable `SKILL.md` format every agent host reads.
 
 | Command | Does |
 |---|---|
-| `cg skills list` | the candidates, which are promoted, and which have drifted from their memory |
-| `cg skills promote <id>` | write `.agents/skills/<slug>/SKILL.md` from that memory |
-| `cg skills render` | refresh every generated file from its memory; name the orphans |
+| `hyperfide skills list` | the candidates, which are promoted, and which have drifted from their memory |
+| `hyperfide skills promote <id>` | write `.agents/skills/<slug>/SKILL.md` from that memory |
+| `hyperfide skills render` | refresh every generated file from its memory; name the orphans |
 
 ```
-$ cg skills list
+$ hyperfide skills list
 skills — 2 candidate(s), 0 promoted under .agents/skills:
   #1    candidate 0.82  Use the trigram index for symbol search
         cg skills promote 1
 
-$ cg skills promote 1
+$ hyperfide skills promote 1
 promoted #1 -> .agents/skills/use-the-trigram-index-for-symbol-search/SKILL.md
 ```
 
@@ -306,8 +318,7 @@ generated_by: codify
 source_memory: 1
 ---
 
-<!-- codify-owned: memory-skill v1 — generated by Codify from memory #1. Edit the
-     memory and run `cg skills render`; edits made here are overwritten. -->
+<!-- codify-owned: memory-skill v1 — generated by Codify from memory #1. Edit the memory and run `cg skills render`; edits made here are overwritten. -->
 
 # Use the trigram index for symbol search
 
@@ -319,15 +330,15 @@ source_memory: 1
 ```
 
 Two rules keep that honest. A file **without** the `codify-owned:` marker is
-never overwritten — `cg skills promote` refuses with *was not generated by
-Codify*, and `cg skills render` leaves it alone. And promotion lives in the
+never overwritten — `hyperfide skills promote` refuses with *was not generated by
+Codify*, and `hyperfide skills render` leaves it alone. And promotion lives in the
 file, not the database, so re-classifying a memory never silently
 un-promotes a skill somebody is using; it only makes the rendered copy
-`stale`, which `cg skills list` says and `cg skills render` fixes.
+`stale`, which `hyperfide skills list` says and `hyperfide skills render` fixes.
 
 Forget the memory behind a promoted file and it becomes an orphan:
-`cg skills render` reports `orphaned: … memory #1 no longer exists`, and
-`cg integrate doctor` names it too.
+`hyperfide skills render` reports `orphaned: … memory #1 no longer exists`, and
+`hyperfide integrate doctor` names it too.
 
 All three are exposed over MCP as `memory_classify`, `skills_list`, and
 `skills_promote`, and a Jev failure there is an `isError` result rather than
@@ -345,21 +356,31 @@ or a network.
 
 ## Limitations
 
-- Jev needs the network and a key. Everything else in Codify does not, and
+- Jev needs the network and a key. Everything else in the local core loop
+  does not, and
   no core-loop command has been made to depend on it.
 - Answers are advice. No Jev output changes an exit code: qualification is
-  `verify_cmd` plus the graph checks, and `cg guard --strict` fails on its
+  `verify_cmd` plus the graph checks, and `hyperfide guard --strict` fails on its
   own deterministic findings, in Jev's order.
 - The transport is `curl`. There is no built-in HTTP client, and there will
   not be one — libsqlite3 and libc remain the only link-time dependencies.
-- `jev.log` grows without bound and is never read back by Codify. It is
+- `jev.log` grows without bound and is read back only by `hyperfide jev log`
+  and `hyperfide jev doctor`. It is
   evidence for an operator, not state.
-- Classification is one call per memory, so `cg memory classify --all` over
-  a large memory store is that many calls. `cg memory classify` on its own
+- Classification is one call per memory, so `hyperfide memory classify --all` over
+  a large memory store is that many calls. `hyperfide memory classify` on its own
   only does the unclassified ones, which is the cheap path.
-- A promoted `SKILL.md` is a generated copy. Codify writes it from the
+- A promoted `SKILL.md` is a generated copy. Hyperfide writes it from the
   memory and never reads edits back: change the note, then
-  `cg skills render`.
+  `hyperfide skills render`.
+- Jev is a local-mode feature. For a distributed authority descriptor the
+  source routes guard ranking, PR readiness, memory classification and recap
+  statement selection to the control plane's `decision.legacy.<purpose>`
+  path (a 2 second budget; anything unusable is dropped and the
+  deterministic outcome stands) instead of calling Jev, while the top-level
+  CLI refuses most local commands in that mode with exit 78. Tasks 21.3 and
+  21.4 are pending in `spec/hyperfide/spec.kvx`, so that path is not
+  qualified in this revision.
 - Triage reads the tail of the output, not the whole log. A failure whose
   only explanation is in the first line of a 10,000-line run is one Jev
   cannot see.
