@@ -116,7 +116,7 @@ hasnt "$out" 'halfway through'
 out="$("$CG" resume --task 2.1 --prompt)"
 has "$out" "2.1"
 has "$out" "step two"
-has "$out" "cg handoff"
+has_any "$out" "cg handoff" "hyperfide handoff"
 
 echo "17_session handoff ok"
 

@@ -9,8 +9,9 @@ out="$("$CG" init)"
 has "$out" "initialized"
 [ -f .codegraph/graph.db ] || fail ".codegraph/graph.db not created"
 
-# double init refuses
-expect_rc 1 "$CG" init
+# double init is a no-op that succeeds, so init && index chains
+out="$("$CG" init 2>&1)"
+has_any "$out" "hyperfide: already initialized" "cg: already initialized"
 
 # info reports a sane machine profile and measured cost
 out="$("$CG" info --json)"

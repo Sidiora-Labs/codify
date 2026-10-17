@@ -66,8 +66,8 @@ static void journal_dir(const Cg *cg, char *out, size_t cap) {
 static void journal_atexit(void) {
     if (!g_queued || g_announced) return;
     fprintf(stderr,
-        "cg: the graph database is busy — %d write%s queued in "
-        "%s/; the next cg command that gets the lock applies %s\n",
+        "hyperfide: the graph database is busy — %d write%s queued in "
+        "%s/; the next hyperfide command that gets the lock applies %s\n",
         g_queued, g_queued == 1 ? "" : "s", JOURNAL_SUBDIR,
         g_queued == 1 ? "it" : "them");
 }
@@ -242,7 +242,7 @@ static int apply_record(Cg *cg, const char *rec, char *err, size_t cap) {
         set_err(err, cap, "not a journal record (missing v, op, or args)");
     } else if (v > JOURNAL_VERSION) {
         char m[160];
-        snprintf(m, sizeof m, "record format v%ld is newer than this cg "
+        snprintf(m, sizeof m, "record format v%ld is newer than this hyperfide "
                  "(v%d)", v, JOURNAL_VERSION);
         set_err(err, cap, m);
     } else if (strcmp(op, "memory.add") == 0) {
@@ -342,8 +342,8 @@ static void fail_record(const char *dir, const char *name, const char *err) {
              (int)(strlen(name) - 5), name);
     write_entire_file(errp, err, strlen(err));
     if (rename(from, to) != 0) unlink(from);
-    fprintf(stderr, "cg: journal record %.*s was refused: %s — moved to "
-            "%s/failed/ (cg journal lists it)\n", (int)(strlen(name) - 5),
+    fprintf(stderr, "hyperfide: journal record %.*s was refused: %s — moved to "
+            "%s/failed/ (hyperfide journal lists it)\n", (int)(strlen(name) - 5),
             name, err, JOURNAL_SUBDIR);
 }
 
@@ -620,12 +620,12 @@ static int journal_list(Cg *cg, bool json) {
     StrBuf b; sb_init(&b);
     if (json) sb_puts(&b, "{\"pending\":[");
     else if (!np && !nf) sb_puts(&b, "journal: empty — nothing queued\n");
-    else if (np) sb_printf(&b, "pending: %d (applied by the next cg command "
+    else if (np) sb_printf(&b, "pending: %d (applied by the next hyperfide command "
                            "that gets the write lock)\n", np);
     for (int i = 0; i < np; i++) list_one(dir, pv[i], NULL, json, &b, i);
     if (json) sb_puts(&b, "],\"failed\":[");
     else if (nf) sb_printf(&b, "failed: %d (refused by the database; "
-                           "cg journal drop --failed clears them)\n", nf);
+                           "hyperfide journal drop --failed clears them)\n", nf);
     for (int i = 0; i < nf; i++) {
         char errp[5000];
         snprintf(errp, sizeof errp, "%s/%.*s.err", fdir,
@@ -690,7 +690,7 @@ int cmd_journal(Cg *cg, int argc, char **argv, bool json) {
                    nf > 0 ? nf : 0, left);
         else
             printf("journal: applied %d record(s)%s, %d pending\n", n,
-                   nf > 0 ? ", some refused (cg journal)" : "", left);
+                   nf > 0 ? ", some refused (hyperfide journal)" : "", left);
         return 0;
     }
     if (strcmp(sub, "drop") == 0) {
@@ -702,7 +702,7 @@ int cmd_journal(Cg *cg, int argc, char **argv, bool json) {
             else if (argv[i][0] != '-') id = argv[i];
         }
         if (!all && !failed && !id) {
-            fprintf(stderr, "usage: cg journal drop <id> | --failed | --all\n");
+            fprintf(stderr, "usage: hyperfide journal drop <id> | --failed | --all\n");
             return 1;
         }
         char dir[4700], fdir[4800];
@@ -713,14 +713,14 @@ int cmd_journal(Cg *cg, int argc, char **argv, bool json) {
         if (all || failed || id) n += drop_in(fdir, (all || failed) ? NULL : id,
                                              true);
         if (id && !n) {
-            fprintf(stderr, "cg journal: no record '%s'\n", id);
+            fprintf(stderr, "hyperfide journal: no record '%s'\n", id);
             return 1;
         }
         if (json) printf("{\"dropped\":%d}\n", n);
         else printf("journal: dropped %d record(s)\n", n);
         return 0;
     }
-    fprintf(stderr, "usage: cg journal [list | apply | drop <id> | "
+    fprintf(stderr, "usage: hyperfide journal [list | apply | drop <id> | "
                     "drop --failed | drop --all]\n");
     return 1;
 }

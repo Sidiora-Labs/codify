@@ -630,12 +630,12 @@ int fleet_gate(Cg *cg, const char *gate, const char *subject) {
         sqlite3_bind_int64(u, 1, id);
         sqlite3_step(u);
         sqlite3_finalize(u);
-        fprintf(stderr, "cg fleet: %s of %s approved%s%s (#%ld)\n", gate,
+        fprintf(stderr, "hyperfide fleet: %s of %s approved%s%s (#%ld)\n", gate,
                 subject, by[0] ? " by " : "", by, id);
         return 0;
     }
     if (!strcmp(state, "rejected")) {
-        fprintf(stderr, "cg fleet: %s of %s was rejected%s%s (#%ld)%s%s — stop "
+        fprintf(stderr, "hyperfide fleet: %s of %s was rejected%s%s (#%ld)%s%s — stop "
                 "and report to your parent\n", gate, subject, by[0] ? " by " : "",
                 by, id, note[0] ? ": " : "", note);
         return 1;
@@ -659,8 +659,8 @@ int fleet_gate(Cg *cg, const char *gate, const char *subject) {
         approval_event(cg, "approval.request", id, gate, subject, "pending",
                        agent, NULL);
     }
-    fprintf(stderr, "cg fleet: %s of %s waits for approval #%ld — a person runs "
-            "`cg fleet approve %ld` (or --reject); exit now and it is retried "
+    fprintf(stderr, "hyperfide fleet: %s of %s waits for approval #%ld — a person runs "
+            "`hyperfide fleet approve %ld` (or --reject); exit now and it is retried "
             "on your next wake\n", gate, subject, id, id);
     return CG_EXIT_APPROVAL;
 }
@@ -676,7 +676,7 @@ int cmd_fleet_approvals(Cg *cg, int argc, char **argv, bool json) {
             else if (strcmp(argv[i], "-m") == 0 && i + 1 < argc) note = argv[++i];
         }
         if (id <= 0) {
-            fprintf(stderr, "usage: cg fleet approve <id> [--reject] [-m note]\n");
+            fprintf(stderr, "usage: hyperfide fleet approve <id> [--reject] [-m note]\n");
             return 1;
         }
         sqlite3_stmt *q = cg_prep(cg, "SELECT gate,subject,state FROM "
@@ -690,11 +690,11 @@ int cmd_fleet_approvals(Cg *cg, int argc, char **argv, bool json) {
         }
         sqlite3_finalize(q);
         if (!gate[0]) {
-            fprintf(stderr, "cg fleet: no approval #%ld\n", id);
+            fprintf(stderr, "hyperfide fleet: no approval #%ld\n", id);
             return 1;
         }
         if (!strcmp(state, "used")) {
-            fprintf(stderr, "cg fleet: approval #%ld was already used\n", id);
+            fprintf(stderr, "hyperfide fleet: approval #%ld was already used\n", id);
             return 1;
         }
         const char *by = getenv("CG_AGENT");
@@ -958,7 +958,7 @@ static int fleet_status(Cg *cg, bool json) {
             sb_printf(&b, " — %s", role_title(&h, id.role));
             if (id.parent) sb_printf(&b, ", reports to %s", id.parent);
         } else {
-            sb_puts(&b, " — no role (set CG_ROLE=main|feature|worker and "
+            sb_puts(&b, " — no role (set HYPERFIDE_ROLE=main|feature|worker and "
                         "CG_PARENT to join the fleet)");
         }
         sb_printf(&b, "\nhierarchy: %s — main %s, remote %s, PRs %s\n",
@@ -1089,7 +1089,7 @@ static int fleet_plan(Cg *cg, const char *feature_ov, bool json) {
     char path[4700];
     Kvx *wf = fleet_workflow(cg, path, sizeof path);
     if (!wf) {
-        fprintf(stderr, "cg fleet: no spec/workflow.kvx at %s\n", cg->root);
+        fprintf(stderr, "hyperfide fleet: no spec/workflow.kvx at %s\n", cg->root);
         return 1;
     }
     Hierarchy h;
@@ -1097,7 +1097,7 @@ static int fleet_plan(Cg *cg, const char *feature_ov, bool json) {
     char *feature = feature_ov ? xstrdup(feature_ov)
                                : kvx_str(wf, "meta", "active_feature");
     if (!feature || !feature[0]) {
-        fprintf(stderr, "cg fleet: no active_feature in %s (use -f)\n", path);
+        fprintf(stderr, "hyperfide fleet: no active_feature in %s (use -f)\n", path);
         free(feature); hier_free(&h); kvx_free(wf);
         return 1;
     }
@@ -1105,7 +1105,7 @@ static int fleet_plan(Cg *cg, const char *feature_ov, bool json) {
     config_feature_path(cg->root, feature, fpath, sizeof fpath);
     Kvx *f = kvx_parse(fpath);
     if (!f) {
-        fprintf(stderr, "cg fleet: cannot parse %s\n", fpath);
+        fprintf(stderr, "hyperfide fleet: cannot parse %s\n", fpath);
         free(feature); hier_free(&h); kvx_free(wf);
         return 1;
     }
@@ -1385,7 +1385,7 @@ static int lifecycle_merge_lock(Lifecycle *c) {
     long wait = env && env[0] ? atol(env) : 120000;
     c->merge_fd = fleet_merge_lock(c->tree, c->feature, wait);
     if (c->merge_fd >= 0) return 0;
-    fprintf(stderr, "cg fleet: another merge into %s's branch held the lock "
+    fprintf(stderr, "hyperfide fleet: another merge into %s's branch held the lock "
             "for %lds — retry when it is done\n", c->feature, wait / 1000);
     return 1;
 }
@@ -1399,7 +1399,7 @@ static int lifecycle_open(Cg *cg, const char *feature_ov, Lifecycle *c) {
     config_workflow_path(c->tree, c->wfpath, sizeof c->wfpath);
     c->wf = kvx_parse(c->wfpath);
     if (!c->wf) {
-        fprintf(stderr, "cg fleet: no spec/workflow.kvx at %s\n", c->tree);
+        fprintf(stderr, "hyperfide fleet: no spec/workflow.kvx at %s\n", c->tree);
         return 1;
     }
     hier_load(c->wf, &c->h);
@@ -1415,14 +1415,14 @@ static int lifecycle_open(Cg *cg, const char *feature_ov, Lifecycle *c) {
     c->feature = feature_ov ? xstrdup(feature_ov)
                             : kvx_str(c->wf, "meta", "active_feature");
     if (!c->feature || !c->feature[0]) {
-        fprintf(stderr, "cg fleet: no active_feature in %s (use -f)\n",
+        fprintf(stderr, "hyperfide fleet: no active_feature in %s (use -f)\n",
                 c->wfpath);
         lifecycle_close(c);
         return 1;
     }
     config_feature_path(c->tree, c->feature, c->specpath, sizeof c->specpath);
     if (!git_available(cg)) {
-        fprintf(stderr, "cg fleet: %s has no git repository — the branch "
+        fprintf(stderr, "hyperfide fleet: %s has no git repository — the branch "
                         "lifecycle needs git\n", c->tree);
         lifecycle_close(c);
         return 1;
@@ -1601,13 +1601,13 @@ int fleet_worker_begin_ex(Cg *cg, const char *id, const char *feature_ov,
     long wave = 0;
     char status[64];
     if (!task_wave_status(c.specpath, id, &wave, status, sizeof status)) {
-        fprintf(stderr, "cg fleet: no [task.%s] with a wave in %s\n", id,
+        fprintf(stderr, "hyperfide fleet: no [task.%s] with a wave in %s\n", id,
                 c.specpath);
         lifecycle_close(&c);
         return 1;
     }
     if (strcmp(status, "done") == 0) {
-        fprintf(stderr, "cg fleet: %s is done — nothing to begin\n", id);
+        fprintf(stderr, "hyperfide fleet: %s is done — nothing to begin\n", id);
         lifecycle_close(&c);
         return 1;
     }
@@ -1626,7 +1626,7 @@ int fleet_worker_begin_ex(Cg *cg, const char *id, const char *feature_ov,
     if (!ensure_branch(c.tree, base, c.h.main_branch, &base_created, &err)) {
         char ex[300];
         excerpt(&err, ex, sizeof ex);
-        fprintf(stderr, "cg fleet: cannot create %s from %s: %s\n", base,
+        fprintf(stderr, "hyperfide fleet: cannot create %s from %s: %s\n", base,
                 c.h.main_branch, ex);
         sb_free(&err); lifecycle_close(&c);
         return 1;
@@ -1641,7 +1641,7 @@ int fleet_worker_begin_ex(Cg *cg, const char *id, const char *feature_ov,
                          &err) != 0) {
         char ex[300];
         excerpt(&err, ex, sizeof ex);
-        fprintf(stderr, "cg fleet: cannot add worktree %s for %s: %s\n", path,
+        fprintf(stderr, "hyperfide fleet: cannot add worktree %s for %s: %s\n", path,
                 branch, ex);
         sb_free(&err); lifecycle_close(&c);
         return 1;
@@ -1664,7 +1664,7 @@ int fleet_worker_begin_ex(Cg *cg, const char *id, const char *feature_ov,
     SpecAttempt at;
     long ttl = 30;
     if (spec_claim_ex(cg, c.tree, c.feature, id, agent, ttl, ahead, &at) != 0) {
-        fprintf(stderr, "cg fleet: %s was not claimed — %s and %s stay for "
+        fprintf(stderr, "hyperfide fleet: %s was not claimed — %s and %s stay for "
                         "a retry\n", id, branch, path);
         lifecycle_close(&c);
         return 1;
@@ -1709,8 +1709,8 @@ int fleet_worker_begin_ex(Cg *cg, const char *id, const char *feature_ov,
                   wt_created ? "created" : "reused");
         sb_printf(&b, "  claim:    attempt %.12s, fence %ld, %ld min\n",
                   at.attempt_id, at.fence, ttl);
-        sb_printf(&b, "next: cd %s && CG_AGENT=%s CG_ROLE=worker CG_PARENT=%s "
-                  "CG_FEATURE=%s CG_WAVE=%ld cg spec start %s%s\n", path, agent,
+        sb_printf(&b, "next: cd %s && HYPERFIDE_AGENT=%s HYPERFIDE_ROLE=worker HYPERFIDE_PARENT=%s "
+                  "HYPERFIDE_FEATURE=%s HYPERFIDE_WAVE=%ld hyperfide spec start %s%s\n", path, agent,
                   parent, c.feature, wave, id, ahead ? " --ahead" : "");
     }
     fputs(b.p, stdout);
@@ -1770,7 +1770,7 @@ int fleet_merge_up(Cg *cg, const char *id, const char *feature_ov, bool force,
     long wave = 0;
     char status[64];
     if (!task_wave_status(c.specpath, id, &wave, status, sizeof status)) {
-        fprintf(stderr, "cg fleet: no [task.%s] with a wave in %s\n", id,
+        fprintf(stderr, "hyperfide fleet: no [task.%s] with a wave in %s\n", id,
                 c.specpath);
         lifecycle_close(&c);
         return 1;
@@ -1780,7 +1780,7 @@ int fleet_merge_up(Cg *cg, const char *id, const char *feature_ov, bool force,
     hier_expand_task(&c.h, rw->branch, c.feature, wave, id, branch, sizeof branch);
     hier_expand_task(&c.h, rw->base, c.feature, wave, id, base, sizeof base);
     if (!git_branch_exists(c.tree, branch)) {
-        fprintf(stderr, "cg fleet: no branch %s for %s — run cg fleet begin "
+        fprintf(stderr, "hyperfide fleet: no branch %s for %s — run hyperfide fleet begin "
                         "%s first\n", branch, id, id);
         lifecycle_close(&c);
         return 1;
@@ -1789,8 +1789,8 @@ int fleet_merge_up(Cg *cg, const char *id, const char *feature_ov, bool force,
     if (!task_status_on_branch(&c, branch, id, tip, sizeof tip))
         snprintf(tip, sizeof tip, "%s", status);
     if (strcmp(tip, "done") != 0 && !force) {
-        fprintf(stderr, "cg fleet: %s is %s on %s, not done — qualify it "
-                        "(cg spec done %s) and commit, or --force\n", id, tip,
+        fprintf(stderr, "hyperfide fleet: %s is %s on %s, not done — qualify it "
+                        "(hyperfide spec done %s) and commit, or --force\n", id, tip,
                 branch, id);
         lifecycle_close(&c);
         return 1;
@@ -1809,7 +1809,7 @@ int fleet_merge_up(Cg *cg, const char *id, const char *feature_ov, bool force,
     if (!ensure_branch(c.tree, base, c.h.main_branch, &base_created, &err)) {
         char ex[300];
         excerpt(&err, ex, sizeof ex);
-        fprintf(stderr, "cg fleet: cannot create %s: %s\n", base, ex);
+        fprintf(stderr, "hyperfide fleet: cannot create %s: %s\n", base, ex);
         sb_free(&err); lifecycle_close(&c);
         return 1;
     }
@@ -1823,7 +1823,7 @@ int fleet_merge_up(Cg *cg, const char *id, const char *feature_ov, bool force,
                          &br_created, &err) != 0) {
         char ex[300];
         excerpt(&err, ex, sizeof ex);
-        fprintf(stderr, "cg fleet: cannot add worktree %s for %s: %s\n", fpath,
+        fprintf(stderr, "hyperfide fleet: cannot add worktree %s for %s: %s\n", fpath,
                 base, ex);
         sb_free(&err); lifecycle_close(&c);
         return 1;
@@ -1832,13 +1832,13 @@ int fleet_merge_up(Cg *cg, const char *id, const char *feature_ov, bool force,
     char on[256], head[65];
     if (!git_head(fpath, on, sizeof on, head, sizeof head) ||
         strcmp(on, base) != 0) {
-        fprintf(stderr, "cg fleet: %s is on %s, not %s — check it out there "
+        fprintf(stderr, "hyperfide fleet: %s is on %s, not %s — check it out there "
                         "first\n", fpath, on, base);
         lifecycle_close(&c);
         return 1;
     }
     if (!tree_clean(fpath)) {
-        fprintf(stderr, "cg fleet: %s has uncommitted changes on %s — commit "
+        fprintf(stderr, "hyperfide fleet: %s has uncommitted changes on %s — commit "
                         "or stash them first\n", fpath, base);
         lifecycle_close(&c);
         return 1;
@@ -1909,7 +1909,7 @@ int fleet_merge_up(Cg *cg, const char *id, const char *feature_ov, bool force,
             }
             sb_puts(&b, "}\n");
         } else {
-            sb_printf(&b, "cg fleet: %s does not merge into %s\n", branch, base);
+            sb_printf(&b, "hyperfide fleet: %s does not merge into %s\n", branch, base);
             if (np) put_conflicts(&b, paths, np, false);
             else {
                 char ex[400];
@@ -1918,7 +1918,7 @@ int fleet_merge_up(Cg *cg, const char *id, const char *feature_ov, bool force,
             }
             if (keep)
                 sb_printf(&b, "merge left in place at %s — resolve, commit, "
-                              "then cg fleet merge-up %s again\n", fpath, id);
+                              "then hyperfide fleet merge-up %s again\n", fpath, id);
             else
                 sb_puts(&b, "merge aborted\n");
         }
@@ -2131,8 +2131,8 @@ static int lifecycle_target(Lifecycle *c, const char *what, const char *verb) {
             for (int k = i + 1; k < ns; k++)
                 if (seen[k] < seen[i]) { long t = seen[i]; seen[i] = seen[k]; seen[k] = t; }
         for (int i = 0; i < ns; i++) sb_printf(&w, "%s%ld", i ? ", " : "", seen[i]);
-        fprintf(stderr, "cg fleet: %s takes a wave of %s — every wave has its "
-                        "own manager and branch (waves: %s); cg fleet %s "
+        fprintf(stderr, "hyperfide fleet: %s takes a wave of %s — every wave has its "
+                        "own manager and branch (waves: %s); hyperfide fleet %s "
                         "<wave> or <task-id>\n", verb, c->feature,
                 w.len ? w.p : "none", verb);
         sb_free(&w);
@@ -2144,7 +2144,7 @@ static int lifecycle_target(Lifecycle *c, const char *what, const char *verb) {
     char status[64];
     long wave = -1;
     if (!task_wave_status(c->specpath, what, &wave, status, sizeof status)) {
-        fprintf(stderr, "cg fleet: %s is neither a wave nor a task with a wave "
+        fprintf(stderr, "hyperfide fleet: %s is neither a wave nor a task with a wave "
                         "in %s\n", what, c->specpath);
         return 1;
     }
@@ -2192,7 +2192,7 @@ int fleet_land(Cg *cg, const char *what, const char *feature_ov, bool no_pr,
     lifecycle_branch(&c, branch, sizeof branch);
     lifecycle_subject(&c, subject, sizeof subject);
     if (!git_branch_exists(c.tree, branch)) {
-        fprintf(stderr, "cg fleet: no branch %s — nothing has been merged up "
+        fprintf(stderr, "hyperfide fleet: no branch %s — nothing has been merged up "
                         "for %s yet\n", branch, subject);
         lifecycle_close(&c);
         return 1;
@@ -2211,7 +2211,7 @@ int fleet_land(Cg *cg, const char *what, const char *feature_ov, bool no_pr,
         StrBuf open; sb_init(&open);
         int n = wave_open_tasks(&c, c.wave, branch, &open);
         if (n) {
-            fprintf(stderr, "cg fleet: wave %ld of %s is not done — %d task%s "
+            fprintf(stderr, "hyperfide fleet: wave %ld of %s is not done — %d task%s "
                             "open: %s\n", c.wave, c.feature, n,
                     n == 1 ? "" : "s", open.p);
             sb_free(&open);
@@ -2240,14 +2240,14 @@ int fleet_land(Cg *cg, const char *what, const char *feature_ov, bool no_pr,
     char on[256], pre[65];
     if (!git_head(c.tree, on, sizeof on, pre, sizeof pre) ||
         strcmp(on, c.h.main_branch) != 0) {
-        fprintf(stderr, "cg fleet: %s is on %s, not %s — land runs on the "
+        fprintf(stderr, "hyperfide fleet: %s is on %s, not %s — land runs on the "
                         "main worktree checked out at %s\n", c.tree, on,
                 c.h.main_branch, c.h.main_branch);
         lifecycle_close(&c);
         return 1;
     }
     if (!tree_clean(c.tree)) {
-        fprintf(stderr, "cg fleet: %s has uncommitted changes on %s — commit "
+        fprintf(stderr, "hyperfide fleet: %s has uncommitted changes on %s — commit "
                         "or stash them before landing\n", c.tree, c.h.main_branch);
         lifecycle_close(&c);
         return 1;
@@ -2295,7 +2295,7 @@ int fleet_land(Cg *cg, const char *what, const char *feature_ov, bool no_pr,
             put_conflicts(&b, paths, np, true);
             sb_puts(&b, "}\n");
         } else {
-            sb_printf(&b, "cg fleet: %s does not merge into %s\n", branch,
+            sb_printf(&b, "hyperfide fleet: %s does not merge into %s\n", branch,
                       c.h.main_branch);
             if (np) put_conflicts(&b, paths, np, false);
             else {
@@ -2525,7 +2525,7 @@ static void write_pr_body(Cg *cg, const Lifecycle *c, const char *branch,
         advised = hf_advice_unit(advice, "value", &rd.value) && band &&
                   (!strcmp(band, "low") || !strcmp(band, "medium") || !strcmp(band, "high"));
         if (advised) snprintf(rd.band, sizeof rd.band, "%s", band);
-        else fprintf(stderr, "cg: readiness advice was malformed — left out\n");
+        else fprintf(stderr, "hyperfide: readiness advice was malformed — left out\n");
         free(band);
     }
     free(advice);
@@ -2633,7 +2633,7 @@ static int pr_open_core(Cg *cg, Lifecycle *c, bool dry_run, StrBuf *jb,
             if (prc != 0) {
                 char ex[400];
                 excerpt(&out, ex, sizeof ex);
-                fprintf(stderr, "cg fleet: push of %s to %s failed: %s\n",
+                fprintf(stderr, "hyperfide fleet: push of %s to %s failed: %s\n",
                         branch, c->h.remote, ex);
                 pr_event(cg, c, "push_failed", branch, NULL, 0, ex);
                 rc = 1;
@@ -2651,7 +2651,7 @@ static int pr_open_core(Cg *cg, Lifecycle *c, bool dry_run, StrBuf *jb,
                 if (crc != 0) {
                     char ex[400];
                     excerpt(&out, ex, sizeof ex);
-                    fprintf(stderr, "cg fleet: gh pr create failed: %s\n", ex);
+                    fprintf(stderr, "hyperfide fleet: gh pr create failed: %s\n", ex);
                     pr_event(cg, c, "create_failed", branch, NULL, 0, ex);
                     rc = 1;
                     if (json) {
@@ -2712,7 +2712,7 @@ int fleet_pr_open(Cg *cg, const char *feature_ov, bool dry_run, bool json) {
     char branch[512];
     lifecycle_branch(&c, branch, sizeof branch);
     if (!git_branch_exists(c.tree, branch)) {
-        fprintf(stderr, "cg fleet: no branch %s to open a pull request "
+        fprintf(stderr, "hyperfide fleet: no branch %s to open a pull request "
                         "from\n", branch);
         lifecycle_close(&c);
         return 1;
@@ -2779,7 +2779,7 @@ int fleet_checkpoint(Cg *cg, bool dry_run, bool json) {
     if (lrc != 0) {
         char ex[400];
         excerpt(&out, ex, sizeof ex);
-        fprintf(stderr, "cg fleet: gh pr list failed: %s\n", ex);
+        fprintf(stderr, "hyperfide fleet: gh pr list failed: %s\n", ex);
         sb_free(&out); sb_free(&b);
         lifecycle_close(&c);
         return 1;
@@ -2997,13 +2997,13 @@ int fleet_sync(Cg *cg, int argc, char **argv, bool json) {
         else if (!strcmp(argv[i], "--json")) json = true;
         else if (strcmp(argv[i], "-f") == 0 && i + 1 < argc) i++;
         else {
-            fprintf(stderr, "usage: cg fleet sync [--base <branch>] [--json]\n");
+            fprintf(stderr, "usage: hyperfide fleet sync [--base <branch>] [--json]\n");
             return 1;
         }
     }
     StrBuf top; sb_init(&top);
     if (git_run(".", "rev-parse --show-toplevel", &top) != 0 || !top.p) {
-        fprintf(stderr, "cg fleet sync: not in a git worktree\n");
+        fprintf(stderr, "hyperfide fleet sync: not in a git worktree\n");
         sb_free(&top);
         return 1;
     }
@@ -3014,13 +3014,13 @@ int fleet_sync(Cg *cg, int argc, char **argv, bool json) {
     char branch[512] = "", head[65] = "";
     if (!git_head(tree, branch, sizeof branch, head, sizeof head) ||
         !branch[0]) {
-        fprintf(stderr, "cg fleet sync: %s is not on a branch\n", tree);
+        fprintf(stderr, "hyperfide fleet sync: %s is not on a branch\n", tree);
         return 1;
     }
     char base[512];
     sync_base(cg, branch, base_flag, base, sizeof base);
     if (!base[0]) {
-        fprintf(stderr, "cg fleet sync: no base known for %s — pass --base "
+        fprintf(stderr, "hyperfide fleet sync: no base known for %s — pass --base "
                 "<branch>\n", branch);
         return 1;
     }
@@ -3031,7 +3031,7 @@ int fleet_sync(Cg *cg, int argc, char **argv, bool json) {
         int rc = git_run(tree, a.p, &o);
         sb_free(&a); sb_free(&o);
         if (rc != 0) {
-            fprintf(stderr, "cg fleet sync: base %s does not exist\n", base);
+            fprintf(stderr, "hyperfide fleet sync: base %s does not exist\n", base);
             return 1;
         }
     }
@@ -3044,7 +3044,7 @@ int fleet_sync(Cg *cg, int argc, char **argv, bool json) {
     long incoming = git_run(tree, a.p, &o) == 0 && o.p ? atol(o.p) : -1;
     sb_free(&a); sb_free(&o);
     if (incoming < 0) {
-        fprintf(stderr, "cg fleet sync: cannot compare %s with %s\n", branch,
+        fprintf(stderr, "hyperfide fleet sync: cannot compare %s with %s\n", branch,
                 base);
         sb_free(&range);
         return 1;
@@ -3082,7 +3082,7 @@ int fleet_sync(Cg *cg, int argc, char **argv, bool json) {
                 break;
             }
     if (nhit > 0) {
-        fprintf(stderr, "cg fleet sync: %d uncommitted file(s) here are also "
+        fprintf(stderr, "hyperfide fleet sync: %d uncommitted file(s) here are also "
                 "changed on %s — commit or stash them, then sync:\n", nhit,
                 base);
         for (int i = 0; i < nhit; i++) fprintf(stderr, "  %s\n", hit[i]);
@@ -3214,7 +3214,7 @@ int cmd_fleet(Cg *cg, int argc, char **argv, bool json) {
                     : orch_tree_status(cg, feature, json);
     if (strcmp(sub, "begin") == 0 || strcmp(sub, "merge-up") == 0) {
         if (!pos) {
-            fprintf(stderr, "usage: cg fleet %s <task-id> [-f <feature>]%s\n",
+            fprintf(stderr, "usage: hyperfide fleet %s <task-id> [-f <feature>]%s\n",
                     sub, strcmp(sub, "begin") == 0 ? " [--agent A]"
                                                    : " [--force] [--keep]");
             return 1;
@@ -3242,7 +3242,7 @@ int cmd_fleet(Cg *cg, int argc, char **argv, bool json) {
         char *active = wf ? kvx_str(wf, "meta", "active_feature") : NULL;
         const char *f = pos ? pos : feature ? feature : active;
         if (!f || !f[0]) {
-            fprintf(stderr, "usage: cg fleet brief [feature]\n");
+            fprintf(stderr, "usage: hyperfide fleet brief [feature]\n");
             free(active); kvx_free(wf);
             return 1;
         }
@@ -3265,7 +3265,7 @@ int cmd_fleet(Cg *cg, int argc, char **argv, bool json) {
             sb_puts(&m, argv[i]);
         }
         if (!agent || !m.len) {
-            fprintf(stderr, "usage: cg fleet steer <agent> <message>\n");
+            fprintf(stderr, "usage: hyperfide fleet steer <agent> <message>\n");
             sb_free(&m);
             return 1;
         }
@@ -3281,11 +3281,11 @@ int cmd_fleet(Cg *cg, int argc, char **argv, bool json) {
             printf("queued for %s (#%ld): delivered at its next edit (Claude "
                    "Code, through the post-edit hook) or its next prompt\n",
                    agent, seq);
-        else fprintf(stderr, "cg fleet: could not queue the message\n");
+        else fprintf(stderr, "hyperfide fleet: could not queue the message\n");
         sb_free(&m);
         return seq > 0 ? 0 : 1;
     }
-    fprintf(stderr, "usage: cg fleet roles | status | plan [-f F] | "
+    fprintf(stderr, "usage: hyperfide fleet roles | status | plan [-f F] | "
                     "tree [-f F] | discover [--since DUR] | begin <id> [-f F] [--agent A] | "
                     "merge-up <id> [--force] [--keep] | land <wave|id> "
                     "[-f F] [--no-pr] | pr <wave|id> [--dry-run] | checkpoint "

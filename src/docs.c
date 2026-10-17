@@ -88,21 +88,21 @@ static int docs_project_open(Cg *cg, DocsProject *p) {
     config_workflow_path(p->root, wfpath, sizeof wfpath);
     p->wf = kvx_parse(wfpath);
     if (!p->wf) {
-        fprintf(stderr, "cg docs: no %s/workflow.kvx in %s\n",
+        fprintf(stderr, "hyperfide docs: no %s/workflow.kvx in %s\n",
                 config_spec_rel(p->root), p->root);
         return -1;
     }
     char *feature = docs_feature_override ? xstrdup(docs_feature_override)
                                          : kvx_str(p->wf, "meta", "active_feature");
     if (!feature || !feature[0]) {
-        fprintf(stderr, "cg docs: active feature is not configured\n");
+        fprintf(stderr, "hyperfide docs: active feature is not configured\n");
         free(feature);
         docs_project_close(p);
         return -1;
     }
     if (strlen(feature) >= sizeof p->feature || strchr(feature, '/') ||
         strchr(feature, '\\') || strcmp(feature, ".") == 0 || strcmp(feature, "..") == 0) {
-        fprintf(stderr, "cg docs: invalid feature name\n");
+        fprintf(stderr, "hyperfide docs: invalid feature name\n");
         free(feature); docs_project_close(p); return -1;
     }
     snprintf(p->feature, sizeof p->feature, "%s", feature);
@@ -110,7 +110,7 @@ static int docs_project_open(Cg *cg, DocsProject *p) {
     config_feature_path(p->root, p->feature, p->spec_path, sizeof p->spec_path);
     p->spec = kvx_parse(p->spec_path);
     if (!p->spec) {
-        fprintf(stderr, "cg docs: cannot parse %s\n", p->spec_path);
+        fprintf(stderr, "hyperfide docs: cannot parse %s\n", p->spec_path);
         docs_project_close(p);
         return -1;
     }
@@ -507,17 +507,17 @@ static int docs_packet(Cg *cg, bool json) {
     DocsProject p;
     if (docs_project_open(cg, &p) != 0) return 1;
     if (strcmp(p.mode, "legacy") == 0 || strcmp(p.mode, "off") == 0) {
-        fprintf(stderr, "cg docs: documentation is %s — enable it with "
-                        "`cg spec docs auto` or `manual`\n", p.mode);
+        fprintf(stderr, "hyperfide docs: documentation is %s — enable it with "
+                        "`hyperfide spec docs auto` or `manual`\n", p.mode);
         docs_project_close(&p); return 1;
     }
     if (strcmp(p.status, "waiting") == 0) {
-        fprintf(stderr, "cg docs: documentation is waiting for all ordinary "
+        fprintf(stderr, "hyperfide docs: documentation is waiting for all ordinary "
                         "tasks to qualify\n");
         docs_project_close(&p); return 1;
     }
     if (mkdirs(p.dir) != 0) {
-        fprintf(stderr, "cg docs: cannot create %s\n", p.dir);
+        fprintf(stderr, "hyperfide docs: cannot create %s\n", p.dir);
         docs_project_close(&p); return 1;
     }
     StrBuf packet, ledger, invt, invj;
@@ -557,23 +557,23 @@ static int docs_packet(Cg *cg, bool json) {
 
     char *tracev[] = { "trace" };
     DocsSpecCall trace = { 1, tracev, false };
-    docs_append_capture(&packet, &ledger, "Task-to-code trace", "cg spec trace",
+    docs_append_capture(&packet, &ledger, "Task-to-code trace", "hyperfide spec trace",
                         docs_call_spec, &trace);
     char *statusv[] = { "status" };
     DocsSpecCall status = { 1, statusv, false };
-    docs_append_capture(&packet, &ledger, "Qualification state", "cg spec status",
+    docs_append_capture(&packet, &ledger, "Qualification state", "hyperfide spec status",
                         docs_call_spec, &status);
     const char *titles[] = { "Snapshot changelog", "Changed public surface",
         "Framework routes", "Anchor coverage", "Decisions and outcomes",
         "Snapshot history", "Focused graph context" };
-    const char *sources[] = { "cg changelog", "cg changes", "cg routes",
-        "cg anchors", "cg recall", "cg log", "cg context <feature>" };
+    const char *sources[] = { "hyperfide changelog", "hyperfide changes", "hyperfide routes",
+        "hyperfide anchors", "hyperfide recall", "hyperfide log", "hyperfide context <feature>" };
     for (int i = 0; i < 7; i++) {
         DocsCall call = { cg, i, p.feature };
         docs_append_capture(&packet, &ledger, titles[i], sources[i],
                             docs_call_evidence, &call);
     }
-    sb_puts(&packet, "\n## Required closure\n\nAfter editing, run `cg docs check`. "
+    sb_puts(&packet, "\n## Required closure\n\nAfter editing, run `hyperfide docs check`. "
                      "Unsupported claims must remain explicitly unresolved; a "
                      "successful check is required before documentation can close. "
                      "Fill the coverage and document fields in the private claim "
@@ -602,7 +602,7 @@ static int docs_packet(Cg *cg, bool json) {
     sb_puts(&manifest, ledger.p);
     sb_puts(&manifest, "],\"claims\":[],\"unresolved\":[]}\n");
     if (rc == 0) rc = write_entire_file(ledger_path, manifest.p, manifest.len);
-    if (rc != 0) fprintf(stderr, "cg docs: could not write evidence packet\n");
+    if (rc != 0) fprintf(stderr, "hyperfide docs: could not write evidence packet\n");
     else if (json) {
         StrBuf b; sb_init(&b);
         sb_puts(&b, "{\"feature\":"); sb_json_str(&b, p.feature);
@@ -951,7 +951,7 @@ static int docs_close(Cg *cg, bool json) {
     DocsProject p;
     if (docs_project_open(cg, &p) != 0) return 1;
     if (strcmp(p.status, "in_progress") != 0) {
-        fprintf(stderr, "cg docs: documentation is %s — run `cg spec docs "
+        fprintf(stderr, "hyperfide docs: documentation is %s — run `hyperfide spec docs "
                         "start` first\n", p.status);
         docs_project_close(&p); return 1;
     }
@@ -978,7 +978,7 @@ static int docs_close(Cg *cg, bool json) {
     snprintf(baseline_path, sizeof baseline_path, "%s/%s/baseline.json",
              p.cg->shared, CG_DOCS_DIR);
     if (write_entire_file(baseline_path, baseline.p, baseline.len) != 0 || baseline_rc != 0)
-        fprintf(stderr, "cg docs: warning: snapshot closed, but incremental "
+        fprintf(stderr, "hyperfide docs: warning: snapshot closed, but incremental "
                         "baseline could not be persisted\n");
     if (json) {
         printf("{\"closed\":true,\"feature\":\"%s\","
@@ -998,7 +998,7 @@ int cmd_docs(Cg *cg, int argc, char **argv, bool json) {
             docs_feature_override = argv[++i];
         else if (!action && argv[i][0] != '-') { sub = argv[i]; action = true; }
         else {
-            fprintf(stderr, "cg docs: unexpected argument %s\n", argv[i]);
+            fprintf(stderr, "hyperfide docs: unexpected argument %s\n", argv[i]);
             docs_feature_override = NULL;
             return 1;
         }
@@ -1012,7 +1012,7 @@ int cmd_docs(Cg *cg, int argc, char **argv, bool json) {
     else if (strcmp(sub, "trace") == 0) rc = docs_trace(cg, json);
     else if (strcmp(sub, "close") == 0) rc = docs_close(cg, json);
     else {
-        fprintf(stderr, "usage: cg docs [status|plan|packet|generate|check|trace|close] [-f feature]\n");
+        fprintf(stderr, "usage: hyperfide docs [status|plan|packet|generate|check|trace|close] [-f feature]\n");
         rc = 1;
     }
     docs_feature_override = NULL;

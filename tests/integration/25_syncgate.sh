@@ -272,7 +272,7 @@ EOF
     err="$("$CG" spec trace --no-sync 2>&1 >/dev/null)"
     hasnt "$err" "indexing"
     err="$(CG_BUSY_TIMEOUT_MS=300 "$CG" spec trace 2>&1 >/dev/null)"
-    has "$err" "another cg process is indexing"
+    has_any "$err" "another cg process is indexing" "another hyperfide process is indexing"
     wait
 fi
 

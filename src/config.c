@@ -1,13 +1,13 @@
 /*
- * codify.kvx — project configuration, one optional file at the root of a
- * tree.
+ * hyperfide.kvx (legacy codify.kvx) — project configuration, one optional
+ * file at the root of a tree.
  *
  *   [sync]  auto = true             implicit syncs (hooks, read-command
  *                                   freshness, MCP/LSP/serve/watch)
  *   [paths] spec = "spec"           workflow.kvx, feature specs, mirrors
  *           context = ".codify"     agent-context.md, recap.md
  *           skills = ".agents/skills"   generated SKILL.md files
- *           codemap = "CODEMAP.md"  written by cg codemap
+ *           codemap = "CODEMAP.md"  written by hyperfide codemap
  *   [index] workers = auto          parse workers per index pass: 1..64,
  *                                   or auto (0) for the machine's choice
  *           walk = auto             how a whole-tree pass finds changes:
@@ -22,7 +22,10 @@
  * A missing file or key is the built-in default, which is what makes a
  * repository without the file behave exactly as before. A value that cannot
  * be used is reported once per process, naming the key and the file, and the
- * default stands in for it: configuration never stops a command.
+ * default stands in for it: a value never stops a command. The one refusal
+ * is which file to read: hyperfide.kvx beside codify.kvx without a completed
+ * names migration exits 2, because spec/hyperfide 26.3 requires a config
+ * conflict to be detected and resolved explicitly, never guessed.
  */
 #include "cg.h"
 #include <ctype.h>
@@ -165,12 +168,12 @@ static void config_selected_path(const char *root,char *out,size_t capacity) {
 typedef enum { CFG_BOOL, CFG_PATH, CFG_INT, CFG_STR, CFG_DUR,
                CFG_LIST, CFG_ENUM } CfgType;   /* codify-v15 3.1, 1.3 */
 
-/* The schema. Order is the order of every listing and of `cg config init`. */
+/* The schema. Order is the order of every listing and of `hyperfide config init`. */
 static const struct {
     const char *section, *key;
     CfgType type;
     const char *dflt;
-    const char *doc;               /* the comment `cg config init` writes */
+    const char *doc;               /* the comment `hyperfide config init` writes */
 } CFG_KEYS[CFG_NKEYS] = {
     [CFG_SYNC_AUTO]    = { "sync",  "auto",    CFG_BOOL, "true",
                            "implicit syncs: hooks, read-command freshness, "
@@ -182,7 +185,7 @@ static const struct {
     [CFG_PATH_SKILLS]  = { "paths", "skills",  CFG_PATH, ".agents/skills",
                            "generated SKILL.md files" },
     [CFG_PATH_CODEMAP] = { "paths", "codemap", CFG_PATH, "CODEMAP.md",
-                           "written by cg codemap" },
+                           "written by hyperfide codemap" },
     [CFG_INDEX_WORKERS] = { "index", "workers", CFG_INT, "auto",
                            "parse workers per index pass: 1-64, or auto" },
     /* codify-v15 3.1 */
@@ -199,7 +202,7 @@ static const struct {
                            "codify/projection" },
     /* codify-v15 2.4 */
     [CFG_FLEET_DISCOVER] = { "fleet", "discover", CFG_BOOL, "true",
-                           "fleet status/tree, serve and watch --fleet run cg "
+                           "fleet status/tree, serve and watch --fleet run hyperfide "
                            "fleet discover first (once per 10s)" },
     /* codify-v15 3.2 */
     [CFG_PROJ_STEER]   = { "projection", "steer", CFG_BOOL, "true",
@@ -207,8 +210,8 @@ static const struct {
                            "finds a new conflict" },
     /* codify-v15 1.4 */
     [CFG_HOOKS_SHELL_ADVICE] = { "hooks", "shell_advice", CFG_BOOL, "true",
-                           "cg hook pre-bash points a shell grep/find at "
-                           "cg grep and cg files" },
+                           "hyperfide hook pre-bash points a shell grep/find at "
+                           "hyperfide grep and hyperfide files" },
     /* codify-v15 1.3 */
     [CFG_INDEX_WALK]   = { "index", "walk", CFG_ENUM, "auto",
                            "how a whole-tree pass finds changes: auto, git, "
@@ -231,7 +234,7 @@ static const char CFG_TEMPLATE[] =
 "spec    = \"spec\"            # workflow.kvx, feature specs, rendered mirrors\n"
 "context = \".hyperfide/context\"         # agent-context.md, recap.md\n"
 "skills  = \".agents/skills\"  # generated SKILL.md files\n"
-"codemap = \"CODEMAP.md\"      # written by cg codemap\n"
+"codemap = \"CODEMAP.md\"      # written by hyperfide codemap\n"
 "\n"
 "[index]\n"
 "# workers = auto            # parse workers per index pass: 1-64; auto sizes from the machine\n"
@@ -247,10 +250,10 @@ static const char CFG_TEMPLATE[] =
 "# min_interval = \"15s\"     # an automatic build waits this long after the last one\n"
 "\n"
 "[fleet]\n"
-"# discover = true           # fleet status/tree, serve and watch --fleet run cg fleet discover first (once per 10s)\n"
+"# discover = true           # fleet status/tree, serve and watch --fleet run hyperfide fleet discover first (once per 10s)\n"
 "\n"
 "[hooks]\n"
-"# shell_advice = true       # cg hook pre-bash points a shell grep/find at cg grep and cg files\n";
+"# shell_advice = true       # hyperfide hook pre-bash points a shell grep/find at hyperfide grep and hyperfide files\n";
 
 /* ---------------- reading and validating ---------------- */
 
@@ -389,6 +392,17 @@ static char *cfg_slot(CgConfig *c, int i) {
     }
 }
 
+/* The default a key takes in this tree. New canonical configuration gets
+ * canonical context; a legacy-only or file-less repository keeps .codify. */
+static const char *cfg_dflt(const CgConfig *c, int i) {
+    struct stat st;
+    size_t n = strlen(c->file), m = strlen("/hyperfide.kvx");
+    if (i == CFG_PATH_CONTEXT && n > m &&
+        !strcmp(c->file + n - m, "/hyperfide.kvx") && stat(c->file, &st) == 0)
+        return ".hyperfide/context";
+    return CFG_KEYS[i].dflt;
+}
+
 static void cfg_defaults(CgConfig *c, const char *root) {
     memset(c, 0, sizeof *c);
     snprintf(c->root, sizeof c->root, "%s", root);
@@ -405,14 +419,8 @@ static void cfg_defaults(CgConfig *c, const char *root) {
     c->proj_min_interval = 15;
     for (int i = 0; i < CFG_NKEYS; i++) {
         char *s = cfg_slot(c, i);
-        if (s) snprintf(s, sizeof c->spec, "%s", CFG_KEYS[i].dflt);
+        if (s) snprintf(s, sizeof c->spec, "%s", cfg_dflt(c, i));
     }
-    /* New canonical configuration gets canonical context; explicit [paths]
-     * values still override this below. Legacy-only repositories keep defaults. */
-    char canonical[4600];struct stat selected;
-    snprintf(canonical,sizeof canonical,"%s/hyperfide.kvx",root);
-    if(!strcmp(c->file,canonical)&&stat(canonical,&selected)==0)
-        snprintf(c->context,sizeof c->context,".hyperfide/context");
 }
 
 /* Parse <root>/codify.kvx into c, every problem into is (may be NULL). */
@@ -536,7 +544,7 @@ static void cfg_read(const char *root, CgConfig *c, CfgIssues *is) {
                 cfg_issue(is, "bad_value", x->section, x->key,
                           "%s: [%s] %s = %s %s — using the default \"%s\"",
                           c->file, x->section, x->key, x->raw, why,
-                          CFG_KEYS[i].dflt);
+                          cfg_dflt(c, i));
             else {
                 snprintf(cfg_slot(c, i), sizeof c->spec, "%s", norm);
                 c->from_file[i] = true;
@@ -585,7 +593,7 @@ const CgConfig *config_load(const char *root) {
     for (int i = 0; i < is.n; i++)
         if (strcmp(is.v[i].kind, "parse") == 0 ||
             strcmp(is.v[i].kind, "bad_value") == 0) {
-            if (!cfg_quiet) fprintf(stderr, "cg: %s\n", is.v[i].msg);
+            if (!cfg_quiet) fprintf(stderr, "hyperfide: %s\n", is.v[i].msg);
             node->c.nproblems++;
         }
     free(is.v);
@@ -840,7 +848,7 @@ static void cfg_setting_json(const CgConfig *c, int i, StrBuf *b) {
     sb_puts(b, ",\"default\":");
     if (CFG_KEYS[i].type == CFG_BOOL) sb_puts(b, CFG_KEYS[i].dflt);
     else if (CFG_KEYS[i].type == CFG_LIST) sb_puts(b, "[]");
-    else sb_json_str(b, CFG_KEYS[i].dflt);
+    else sb_json_str(b, cfg_dflt(c, i));
     sb_printf(b, ",\"origin\":\"%s\"}",
               c->from_file[i] ? cfg_file_name(c) : "default");
 }
@@ -873,7 +881,7 @@ static int cfg_list(const char *root, bool json) {
                       c.from_file[i] ? cfg_file_name(&c) : "default");
         }
         if (is.n)
-            sb_printf(&b, "%d problem(s) — `cg config check` lists them\n",
+            sb_printf(&b, "%d problem(s) — `hyperfide config check` lists them\n",
                       is.n);
     }
     fputs(b.p, stdout);
@@ -887,12 +895,12 @@ static int cfg_init(const char *root) {
     config_selected_path(root,path,sizeof path);
     struct stat st;
     if (stat(path, &st) == 0) {
-        fprintf(stderr, "cg config: %s already exists — left alone (`cg "
+        fprintf(stderr, "hyperfide config: %s already exists — left alone (`hyperfide "
                 "config set` changes one key)\n", path);
         return 1;
     }
     if (write_entire_file(path, CFG_TEMPLATE, sizeof CFG_TEMPLATE - 1) != 0) {
-        fprintf(stderr, "cg config: cannot write %s\n", path);
+        fprintf(stderr, "hyperfide config: cannot write %s\n", path);
         return 1;
     }
     printf("wrote %s\n", path);
@@ -902,7 +910,7 @@ static int cfg_init(const char *root) {
 static int cfg_get(const char *root, const char *dotted, bool json) {
     int i = cfg_index_dotted(dotted);
     if (i < 0) {
-        fprintf(stderr, "cg config: unknown key '%s' (`cg config` lists "
+        fprintf(stderr, "hyperfide config: unknown key '%s' (`hyperfide config` lists "
                 "them)\n", dotted);
         return 1;
     }
@@ -922,7 +930,7 @@ static int cfg_get(const char *root, const char *dotted, bool json) {
 static int cfg_set(const char *root, const char *dotted, const char *value) {
     int i = cfg_index_dotted(dotted);
     if (i < 0) {
-        fprintf(stderr, "cg config: unknown key '%s' (`cg config` lists "
+        fprintf(stderr, "hyperfide config: unknown key '%s' (`hyperfide config` lists "
                 "them)\n", dotted);
         return 1;
     }
@@ -930,7 +938,7 @@ static int cfg_set(const char *root, const char *dotted, const char *value) {
     if (CFG_KEYS[i].type == CFG_ENUM) {
         int w = config_parse_walk(value);
         if (w < 0) {
-            fprintf(stderr, "cg config: %s takes auto, git, or full — not "
+            fprintf(stderr, "hyperfide config: %s takes auto, git, or full — not "
                     "'%s'\n", dotted, value);
             return 1;
         }
@@ -938,7 +946,7 @@ static int cfg_set(const char *root, const char *dotted, const char *value) {
     } else if (CFG_KEYS[i].type == CFG_INT) {
         int n = config_parse_workers(value);
         if (n < 0) {
-            fprintf(stderr, "cg config: %s takes a worker count from 1 to "
+            fprintf(stderr, "hyperfide config: %s takes a worker count from 1 to "
                     "%d, or auto — not '%s'\n", dotted, CG_MAX_WORKERS,
                     value);
             return 1;
@@ -948,21 +956,21 @@ static int cfg_set(const char *root, const char *dotted, const char *value) {
     } else if (CFG_KEYS[i].type == CFG_BOOL) {
         int b = cfg_parse_bool(value);
         if (b < 0) {
-            fprintf(stderr, "cg config: %s takes true or false, not '%s'\n",
+            fprintf(stderr, "hyperfide config: %s takes true or false, not '%s'\n",
                     dotted, value);
             return 1;
         }
         snprintf(norm, sizeof norm, "%s", b ? "true" : "false");
     } else if (CFG_KEYS[i].type == CFG_STR) {     /* codify-v15 3.1 */
         if (!value[0] || strpbrk(value, " \t")) {
-            fprintf(stderr, "cg config: %s takes a branch name, not '%s'\n",
+            fprintf(stderr, "hyperfide config: %s takes a branch name, not '%s'\n",
                     dotted, value);
             return 1;
         }
         snprintf(norm, sizeof norm, "%s", value);
     } else if (CFG_KEYS[i].type == CFG_DUR) {
         if (hier_duration(value) < 0) {
-            fprintf(stderr, "cg config: %s takes a duration (90s, 30m, 24h, "
+            fprintf(stderr, "hyperfide config: %s takes a duration (90s, 30m, 24h, "
                     "2d), not '%s'\n", dotted, value);
             return 1;
         }
@@ -988,7 +996,7 @@ static int cfg_set(const char *root, const char *dotted, const char *value) {
     } else {
         const char *why = cfg_path_check(value, norm, sizeof norm);
         if (why) {
-            fprintf(stderr, "cg config: %s = \"%s\" %s — nothing written\n",
+            fprintf(stderr, "hyperfide config: %s = \"%s\" %s — nothing written\n",
                     dotted, value, why);
             return 1;
         }
@@ -1002,7 +1010,7 @@ static int cfg_set(const char *root, const char *dotted, const char *value) {
                                    "configuration for Hyperfide. Every key "
                                    "is optional.\n";
         if (write_entire_file(path, head, sizeof head - 1) != 0) {
-            fprintf(stderr, "cg config: cannot write %s\n", path);
+            fprintf(stderr, "hyperfide config: cannot write %s\n", path);
             return 1;
         }
     }
@@ -1013,7 +1021,7 @@ static int cfg_set(const char *root, const char *dotted, const char *value) {
            ? kvx_set_raw(path, CFG_KEYS[i].section, CFG_KEYS[i].key, norm)
            : kvx_set_string(path, CFG_KEYS[i].section, CFG_KEYS[i].key, norm);
     if (rc != 0) {
-        fprintf(stderr, "cg config: cannot write %s\n", path);
+        fprintf(stderr, "hyperfide config: cannot write %s\n", path);
         return 1;
     }
     printf("%s = %s (%s)\n", dotted, norm, path);
@@ -1058,7 +1066,7 @@ int cmd_config(int argc, char **argv, bool json) {
         sb_free(&t); sb_free(&j);
         return n ? 1 : 0;
     }
-    fprintf(stderr, "usage: cg config [init | get <section.key> | "
+    fprintf(stderr, "usage: hyperfide config [init | get <section.key> | "
             "set <section.key> <value> | check] [--json]\n");
     return 1;
 }

@@ -53,7 +53,7 @@ static bool workers_opt(int *argc, char **argv, const char *cmd, int *out) {
     if (!v) return true;
     int n = config_parse_workers(v);
     if (n < 0) {
-        fprintf(stderr, "cg %s: --workers takes 1 to %d, or auto — not "
+        fprintf(stderr, "hyperfide %s: --workers takes 1 to %d, or auto — not "
                 "'%s'\n", cmd, CG_MAX_WORKERS, v);
         return false;
     }
@@ -67,13 +67,17 @@ static int query_budget_arg(int argc, char **argv) {
     return 0;
 }
 
-static int cmd_info(const SysInfo *si, Cg *cg, bool json, int flag_workers) {
+static int cmd_info(const SysInfo *si, Cg *cg, bool json, int flag_workers,
+                    bool canonical_workers) {
     /* the count an unbounded foreground pass would ask for, and who chose
      * it; background passes, the file count, and the slot gate bound it
      * per pass (cg sync --json reports what one actually used) */
     const char *worigin;
     int wanted = syncgate_worker_request(cg ? cg->root : NULL, si,
                                          flag_workers, &worigin);
+    /* Environment aliasing copies the canonical value into the legacy slot. */
+    if (!strcmp(worigin, "CG_INDEX_WORKERS") && canonical_workers)
+        worigin = "HYPERFIDE_INDEX_WORKERS";
     char key[64];
     char *ms = NULL, *nf = NULL, *nb = NULL;
     if (cg) {
@@ -170,12 +174,17 @@ static void index_fresh(Cg *cg, const SysInfo *si) {
 }
 
 int main(int argc, char **argv) {
-    if (hyperfide_environment_aliases() != 0) return 78;
+    const char *cmd = argc > 1 ? argv[1] : "";
+    bool canonical_workers = getenv("HYPERFIDE_INDEX_WORKERS") &&
+                             getenv("HYPERFIDE_INDEX_WORKERS")[0];
+    bool host_hook = argc >= 3 && !strcmp(cmd, "hook") &&
+        (!strcmp(argv[2], "post-edit") || !strcmp(argv[2], "event") ||
+         !strcmp(argv[2], "pre-bash"));
+    if (hyperfide_environment_aliases() != 0) return host_hook ? 0 : 78;
     if (argc < 2) { usage(); return 1; }
     int hrc = help_route(argc, argv);
     if (hrc >= 0) return hrc;
     kvx_status_hook = events_kvx_status;
-    const char *cmd = argv[1];
     journal_set_command(cmd, argc > 2 ? argv[2] : NULL);
     bool json = flag(&argc, argv, "--json");
     native_no_discover = flag(&argc, argv, "--no-discover"); /* codify-v15 2.4 */
@@ -188,8 +197,8 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    { int launcher_rc = hf_entrypoint_dispatch(argc,argv); if (launcher_rc >= 0) return launcher_rc; }
-    { int remote_rc = hf_client_dispatch(argc,argv,stdout,stderr); if (remote_rc >= 0) return remote_rc; }
+    { int launcher_rc = hf_entrypoint_dispatch(argc,argv); if (launcher_rc >= 0) return host_hook ? 0 : launcher_rc; }
+    { int remote_rc = hf_client_dispatch(argc,argv,stdout,stderr); if (remote_rc >= 0) return host_hook ? 0 : remote_rc; }
 
     /* spec works without .codegraph — dispatch before opening the graph */
     if (strcmp(cmd, "spec") == 0) {
@@ -219,7 +228,7 @@ int main(int argc, char **argv) {
             if (pcg) cg_close(pcg);
             return 1;
         }
-        int rc = cmd_info(&si, pcg, json, fw);
+        int rc = cmd_info(&si, pcg, json, fw, canonical_workers);
         if (pcg) cg_close(pcg);
         return rc;
     }
@@ -230,22 +239,25 @@ int main(int argc, char **argv) {
         bool force  = flag(&argc, argv, "--force");
         char here[4096], root[4096];
         if (!getcwd(here, sizeof here)) {
-            fprintf(stderr, "cg: cannot determine the current directory\n");
+            fprintf(stderr, "hyperfide: cannot determine the current directory\n");
             return 1;
         }
         char probe[4600];
         struct stat pst;
         snprintf(probe, sizeof probe, "%s/%s", here, CG_DIR);
+        /* a no-op, so `hyperfide init && hyperfide index` chains on a tree
+         * that is already set up */
         if (stat(probe, &pst) == 0) {
-            fprintf(stderr, "cg: already initialized at %s\n", here);
-            return 1;
+            fprintf(stderr, "hyperfide: already initialized at %s — nothing "
+                            "to do\n", here);
+            return 0;
         }
         const char *home = getenv("HOME");
         if (!force && home && home[0] && strcmp(here, home) == 0) {
             fprintf(stderr,
-                "cg: refusing to initialize in your home directory.\n"
+                "hyperfide: refusing to initialize in your home directory.\n"
                 "    Every project underneath would silently bind to this "
-                "index.\n    Run cg init inside a project, or --force if you "
+                "index.\n    Run hyperfide init inside a project, or --force if you "
                 "meant it.\n");
             return 1;
         }
@@ -268,7 +280,7 @@ int main(int argc, char **argv) {
          * often a stray index that would silently capture this directory. */
         if (cg_find_root(root, sizeof root) == 0 && !nested) {
             fprintf(stderr,
-                "cg: %s is already a Codify project and encloses this "
+                "hyperfide: %s is already a Codify project and encloses this "
                 "directory.\n    Commands here would operate on it, not on "
                 "%s.\n    Use --nested to make this its own project "
                 "anyway.\n", root, here);
@@ -318,7 +330,7 @@ int main(int argc, char **argv) {
      * at all is answered first: the suggestion must not hide behind "not
      * inside a Codify project" when cg is run from an uninitialised tree. */
     if (!help_known(cmd)) {
-        fprintf(stderr, "cg: unknown command '%s' (try `cg help`)\n", cmd);
+        fprintf(stderr, "hyperfide: unknown command '%s' (try `hyperfide help`)\n", cmd);
         help_suggest(cmd);
         return 1;
     }
@@ -335,8 +347,8 @@ int main(int argc, char **argv) {
                       strcmp(cmd, "projection") == 0;  /* --branch adds */
     if (cg_scope_set(&cg, mem_export ? NULL : scope_branch,
                      all_branches) != 0) {
-        fprintf(stderr, "cg: no branch named '%s' in this graph "
-                        "(cg branches lists them)\n", scope_branch);
+        fprintf(stderr, "hyperfide: no branch named '%s' in this graph "
+                        "(hyperfide branches lists them)\n", scope_branch);
         cg_close(&cg);
         return 1;
     }
@@ -587,7 +599,7 @@ int main(int argc, char **argv) {
             rc = 1;
         } else if (task && !tag) {
             fprintf(stderr,
-                    "cg: --task %s is not an in_progress task of the active spec\n",
+                    "hyperfide: --task %s is not an in_progress task of the active spec\n",
                     task);
             rc = 1;
         }
@@ -761,7 +773,7 @@ int main(int argc, char **argv) {
         if (prompt) index_fresh(&cg, &si);    /* a briefing shows code as it is */
         rc = cmd_resume(&cg, task, json, prompt);
     } else {
-        fprintf(stderr, "cg: unknown command '%s' (try `cg help`)\n", cmd);
+        fprintf(stderr, "hyperfide: unknown command '%s' (try `hyperfide help`)\n", cmd);
         help_suggest(cmd);
         rc = 1;
     }

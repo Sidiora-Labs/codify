@@ -187,7 +187,7 @@ sed -i "s/\"version\":\"$VERSION\"/\"version\":\"0.0.1\"/" \
 rc=0
 out="$("$CG" integrate doctor --json)" || rc=$?
 [ "$rc" -eq 1 ] || fail "doctor accepted a stale plugin"
-has "$out" "codify@codify is 0.0.1 but cg is $VERSION"
+has_any "$out" "codify@codify is 0.0.1 but cg is $VERSION" "codify@codify is 0.0.1 but hyperfide is $VERSION"
 
 # ---- cg hook install leaves settings.json to the installed plugin
 sed -i "s/\"version\":\"0.0.1\"/\"version\":\"$VERSION\"/" \

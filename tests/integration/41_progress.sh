@@ -104,7 +104,7 @@ PY
     CG_PROGRESS=plain "$CG" sync --wait 8000 >"$TMP/out" 2>"$TMP/err" || rc=$?
     wait
     [ "$rc" -eq 0 ] || fail "sync behind the gate failed ($rc)"
-    has "$(cat "$TMP/err")" "for another cg process's index pass"
+    has_any "$(cat "$TMP/err")" "for another cg process's index pass" "for another hyperfide process's index pass"
     has "$(cat "$TMP/out")" "indexed 1 file"
 
     python3 - "$PWD/.codegraph/graph.db" 2.5 <<'PY' &

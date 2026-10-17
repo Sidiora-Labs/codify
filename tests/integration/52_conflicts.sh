@@ -141,8 +141,8 @@ for k in ('kind','path','symbol','lines','branches','agents','advice'):
 # ---- steering: each agent once per finding, the req 9.3 sentence
 steer="$(events agent.steer)"
 [ "$(printf '%s\n' "$steer" | grep -c .)" = 8 ] || fail "8 steers expected: $steer"
-has "$steer" "Projection: your branch feat-a and feat-b (agent $AB) both change compute in src/core.c — coordinate or merge feat-b before you qualify; see cg projection findings"
-has "$steer" "Projection: your branch feat-b and feat-a (agent $AA) both change compute in src/core.c — coordinate or merge feat-a before you qualify; see cg projection findings"
+has_any "$steer" "Projection: your branch feat-a and feat-b (agent $AB) both change compute in src/core.c — coordinate or merge feat-b before you qualify; see cg projection findings" "Projection: your branch feat-a and feat-b (agent $AB) both change compute in src/core.c — coordinate or merge feat-b before you qualify; see hyperfide projection findings"
+has_any "$steer" "Projection: your branch feat-b and feat-a (agent $AA) both change compute in src/core.c — coordinate or merge feat-a before you qualify; see cg projection findings" "Projection: your branch feat-b and feat-a (agent $AA) both change compute in src/core.c — coordinate or merge feat-a before you qualify; see hyperfide projection findings"
 has "$steer" "both edit settings.txt within 3 lines"
 has "$steer" "helper"
 

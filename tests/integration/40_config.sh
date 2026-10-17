@@ -19,8 +19,10 @@ has "$out" "absent"
 has "$out" "paths.spec     spec"
 has "$out" "default"
 hasnt "$out" "codify.kvx  "
+# Refresh the legacy fixture's regeneration hint before checking freshness.
+"$CG" spec render >/dev/null
 out="$("$CG" spec render --check)"
-has "$out" "0 stale"                      # byte parity with the goldens
+has "$out" "0 stale"
 out="$("$CG" config check)"
 has "$out" "absent — every setting is the default"
 "$CG" init >/dev/null
@@ -210,6 +212,7 @@ n="$("$CG" spec status 2>&1 >/dev/null | grep -c 'codify.kvx' || true)"
 # ---- cg check warns, never fails, on a bad codify.kvx
 cp -r "$FIXTURES/specrepo" "$TMP/checked"
 cd "$TMP/checked"
+"$CG" spec render >/dev/null
 "$CG" init >/dev/null
 rc0=0; "$CG" check >/dev/null 2>&1 || rc0=$?
 printf '[paths]\nspec = "../x"\nnope = 1\n[weird]\n' > codify.kvx

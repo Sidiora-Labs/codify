@@ -45,60 +45,60 @@ print(h["additionalContext"])' || fail "not one clean JSON object: $out"
 
 # rg over the tree
 out="$(pre s1 'rg foo')"
-has "$out" "cg grep foo"
+has_any "$out" "cg grep foo" "hyperfide grep foo"
 has "$out" "grep_code"
 has "$out" "Why:"
 
 # grep -rn with a directory: the path carried as --path
 out="$(pre s1 'grep -rn foo src')"
-has "$out" "cg grep foo --path src"
+has_any "$out" "cg grep foo --path src" "hyperfide grep foo --path src"
 
 # -i and the path both carried
 out="$(pre s1 'grep -rni Foo src/sub')"
-has "$out" "cg grep -i Foo --path src/sub"
+has_any "$out" "cg grep -i Foo --path src/sub" "hyperfide grep -i Foo --path src/sub"
 
 # find -name -> cg files
 out="$(pre s1 "find . -name '*.c'")"
-has "$out" "cg files '*.c'"
+has_any "$out" "cg files '*.c'" "hyperfide files '*.c'"
 has "$out" "find_files"
 
 # find with a directory
 out="$(pre s1 "find src -name '*.c' -type f")"
-has "$out" "cg files '*.c' --path src"
+has_any "$out" "cg files '*.c' --path src" "hyperfide files '*.c' --path src"
 
 # a piped grep: filtering a file list is cg files
 out="$(pre s1 "find . -name '*.c' | grep sub")"
-has "$out" "cg files sub"
+has_any "$out" "cg files sub" "hyperfide files sub"
 
 # a grep fed by xargs over find's files, and a grep after cat
 out="$(pre s1 "find src -name '*.c' | xargs grep -n foo")"
-has "$out" "cg grep foo --path 'src/**/*.c'"
+has_any "$out" "cg grep foo --path 'src/**/*.c'" "hyperfide grep foo --path 'src/**/*.c'"
 out="$(pre s1 'cat src/a.c | grep -i foo')"
-has "$out" "cg grep -i foo --path src/a.c"
+has_any "$out" "cg grep -i foo --path src/a.c" "hyperfide grep -i foo --path src/a.c"
 
 # after && and ; with cd moving the directory, redirections ignored
 out="$(pre s1 'cd src && grep -rn "foo(" . 2>/dev/null | head -5')"
-has "$out" "cg grep 'foo(' --path src"
+has_any "$out" "cg grep 'foo(' --path src" "hyperfide grep 'foo(' --path src"
 out="$(pre s1 'echo start; ack bar src/sub')"
-has "$out" "cg grep bar --path src/sub"
+has_any "$out" "cg grep bar --path src/sub" "hyperfide grep bar --path src/sub"
 
 # ls -R and fd
 out="$(pre s1 'ls -R src')"
-has "$out" "cg files --dirs src"
+has_any "$out" "cg files --dirs src" "hyperfide files --dirs src"
 out="$(pre s1 'fd -e c . src')"
-has "$out" "cg files"
+has_any "$out" "cg files" "hyperfide files"
 has "$out" "--path src"
 
 # a regex stays a regex
 out="$(pre s1 'rg -i "fo+o" src')"
-has "$out" "cg grep -E -i fo+o --path src"
+has_any "$out" "cg grep -E -i fo+o --path src" "hyperfide grep -E -i fo+o --path src"
 
 # once per session: the identical command is silent the second time,
 # another session hears it again
 out="$(pre s1 'rg foo')"
 [ -z "$out" ] || fail "second identical command was not silent: $out"
 out="$(pre s2 'rg foo')"
-has "$out" "cg grep foo"
+has_any "$out" "cg grep foo" "hyperfide grep foo"
 
 # a path outside the tree is silent
 out="$(pre s3 'grep -rn foo /etc')"
@@ -134,7 +134,7 @@ out="$("$CG" config get hooks.shell_advice 2>&1 || true)"
 has "$out" "false"
 rm codify.kvx
 out="$(pre s5 'rg foo')"
-has "$out" "cg grep foo"
+has_any "$out" "cg grep foo" "hyperfide grep foo"
 "$CG" config init >/dev/null
 has "$(cat hyperfide.kvx 2>/dev/null || cat codify.kvx)" "shell_advice"   # hyperfide.kvx since 26.3
 rm -f hyperfide.kvx codify.kvx
