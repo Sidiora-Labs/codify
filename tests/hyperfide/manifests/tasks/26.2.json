@@ -7,7 +7,7 @@
     ],
     "approved": true
   },
-  "campaign_id": "hyperfide-task-26.2-canonical-entrypoint-v1",
+  "campaign_id": "hyperfide-task-26.2-canonical-entrypoint-v1-requal-12aa390190b3",
   "case_ids": [
     "V-026",
     "V-028"
@@ -52,23 +52,23 @@
   "inputs": [
     {
       "path": "Makefile",
-      "sha256": "5ccb73a215e78f83d340538b79b253b284cbbaca15a8db96805050a229361c31",
-      "size": 4519
+      "sha256": "40cee85c4626ae57fe8bd7332788456812e54f3f8c96fc628f814dfc8ad1e54c",
+      "size": 5022
     },
     {
       "path": "build/hyperfide-native",
-      "sha256": "25648b3af546495a255eae77f130a053072ff8a9b04883a0a8c1737fb8f90155",
-      "size": 396328
+      "sha256": "e9cafa47ac941c06fde622534b92fa1fc56470ebfb80a4a7f98977e24e725171",
+      "size": 574552
     },
     {
       "path": "cg",
-      "sha256": "036a0ebead748cce5a1207dd96660ce5cef2c7a15c3c9b2385a20b423d86a7a4",
-      "size": 69086576
+      "sha256": "08127e8ff517a8f67819f0538a592c2f5a362d1131092cab83a340860332f87e",
+      "size": 69285024
     },
     {
       "path": "hyperfide",
-      "sha256": "036a0ebead748cce5a1207dd96660ce5cef2c7a15c3c9b2385a20b423d86a7a4",
-      "size": 69086576
+      "sha256": "08127e8ff517a8f67819f0538a592c2f5a362d1131092cab83a340860332f87e",
+      "size": 69285024
     },
     {
       "path": "scripts/hyperfide-entrypoint.sh",
@@ -82,8 +82,8 @@
     },
     {
       "path": "scripts/install.sh",
-      "sha256": "51e3dd5ea2273a3fdb6ef09f286e2c1ab04dc65aac5402afe50b80703df223ed",
-      "size": 13745
+      "sha256": "4cb14bf566c2f10e287a899a65f662aea7fcdb642f570c65c651ec073f7eb13e",
+      "size": 14276
     },
     {
       "path": "scripts/release.sh",
@@ -97,8 +97,8 @@
     },
     {
       "path": "src/help.c",
-      "sha256": "defd6aae957251792cc2e2c1d1efd1bd6ce5859efd55094bda38c89a54e762d0",
-      "size": 78955
+      "sha256": "4acb21666529a5a5cde4d544982e631ad74bb726d864c541df4a45c2d05fd61e",
+      "size": 81794
     },
     {
       "path": "tests/hyperfide/cases/tasks/26_2.py",
