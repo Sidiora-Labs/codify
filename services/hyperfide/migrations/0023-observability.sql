@@ -133,15 +133,6 @@ CREATE TRIGGER artifact_binding BEFORE INSERT OR UPDATE ON hyperfide.observabili
 
 CREATE TRIGGER artifact_binding BEFORE INSERT OR UPDATE ON hyperfide.observability_notifications FOR EACH ROW EXECUTE FUNCTION hyperfide.observability_artifact_binding();
 
-CREATE TABLE hyperfide.observability_recipient_bindings (
- organisation_id uuid NOT NULL,run_id uuid NOT NULL,consumer_id uuid NOT NULL,session_id uuid NOT NULL,registered_actor_id uuid NOT NULL,
- registered_at timestamptz NOT NULL DEFAULT clock_timestamp(),PRIMARY KEY(organisation_id,run_id,consumer_id),
- UNIQUE(organisation_id,run_id,session_id),FOREIGN KEY(organisation_id,run_id,consumer_id) REFERENCES hyperfide.event_consumers(organisation_id,run_id,id),
- FOREIGN KEY(organisation_id,run_id,session_id) REFERENCES hyperfide.agent_sessions(organisation_id,run_id,id)
-);
-CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.observability_recipient_bindings FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
-CREATE TRIGGER immutable_binding BEFORE UPDATE OR DELETE ON hyperfide.observability_recipient_bindings FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','consumer_id','session_id','registered_actor_id','registered_at');
-
 ALTER TABLE hyperfide.observability_metric_series ADD COLUMN measurement_kind text NOT NULL CHECK(measurement_kind IN ('MEASUREMENT_REPORT','PROVIDER_INVOICE_REPORT','REPLAY'));
 CREATE TRIGGER immutable_measurement_kind BEFORE UPDATE ON hyperfide.observability_metric_series FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('measurement_kind');
 
