@@ -1,0 +1,127 @@
+{
+  "approval": {
+    "allowed_actions": [],
+    "approved": true
+  },
+  "campaign_id": "hyperfide-driver-component-27-3-v3-journal-v1",
+  "case_ids": [
+    "V-036",
+    "V-037",
+    "V-038",
+    "V-039",
+    "V-040",
+    "V-041",
+    "V-042",
+    "V-043",
+    "V-044",
+    "V-045",
+    "V-046",
+    "V-050",
+    "V-051",
+    "V-052"
+  ],
+  "expected_assertion_ids": [
+    "campaign.live.approved-staged-profile",
+    "campaign.live.observed-activity-lineage",
+    "campaign.live.waiting-not-active",
+    "campaign.live.resume-not-new-lifetime",
+    "campaign.live.snapshot.partial-inventory",
+    "campaign.live.snapshot.main-audit-missing",
+    "campaign.live.snapshot.main-build",
+    "campaign.live.snapshot.unapproved-frontier",
+    "campaign.live.snapshot.missing-native-id",
+    "campaign.live.snapshot.wrong-auth-reference",
+    "campaign.live.snapshot.unregistered-sandbox",
+    "campaign.live.snapshot.local-frontier",
+    "campaign.live.snapshot.main-implementation",
+    "campaign.live.snapshot.source-drift",
+    "campaign.live.snapshot.slo-errors",
+    "campaign.live.snapshot.slo-latency",
+    "campaign.live.snapshot.unknown-activity",
+    "campaign.live.snapshot.duplicate-session",
+    "campaign.live.replayed-observation",
+    "campaign.live.observer-gap",
+    "campaign.live.short-soak-not-promoted",
+    "campaign.live.missing-auth-references",
+    "campaign.live.prior48-receipt-required",
+    "campaign.live.no-direct-scale-jump",
+    "campaign.live.independent-observer-required",
+    "campaign.live.confirmed-cleanup",
+    "campaign.live.destroying-not-absent",
+    "campaign.live.unknown-cleanup-debt",
+    "campaign.live.cleanup-omitted-resource",
+    "campaign.live.explicit-retention",
+    "campaign.live.expired-retention",
+    "campaign.live.nonrunning-resources-reserve-quota",
+    "campaign.live.idle-native-reserves-quota",
+    "campaign.live.actual-ed25519-reader-proof",
+    "campaign.live.trusted-reader-scope",
+    "campaign.live.signed-content-tamper",
+    "campaign.live.invalid-actual-signature",
+    "campaign.live.unapproved-signed-reader",
+    "campaign.live.wrong-signed-scope",
+    "campaign.live.wrong-signed-source",
+    "campaign.live.wrong-signed-repositories",
+    "campaign.live.signed-replay-other-request",
+    "campaign.live.reader-proof-required",
+    "campaign.live.approved-trust-reference-required",
+    "campaign.live.same-controller-reader-rejected",
+    "campaign.live.numeric-authority-epoch-rejected",
+    "campaign.live.scope-identities-require-uuid",
+    "campaign.live.verification-key-pin-tamper",
+    "campaign.live.missing-durable-reader-role",
+    "campaign.live.prior48-must-cover-V050",
+    "campaign.live.provider-canary-cannot-omit-lifecycle",
+    "campaign.live.complete-required-case-coverage",
+    "campaign.live.no-implicit-execution"
+  ],
+  "inputs": [
+    {
+      "path": "tests/hyperfide/qualify.py",
+      "sha256": "8aa17f5e2572c8557f15353f7267e98600547fb0f2693486c0e0f2fc1abce8c2",
+      "size": 37538
+    },
+    {
+      "path": "tests/hyperfide/check-evidence.py",
+      "sha256": "cc8de56fb25bea153490b4143a231f1ff6f4dac758baaea4bf90fb7d9ba236a0",
+      "size": 30633
+    },
+    {
+      "path": "tests/hyperfide/manifest.schema.json",
+      "sha256": "3407092d7e6e452bb288e996f840bd5bab22d6c0f494a49bf944cd73c18078b8",
+      "size": 3216
+    },
+    {
+      "path": "tests/hyperfide/registry.json",
+      "sha256": "77d72fc82aa56142b5cd19b93b0e8ecc469c01ed6182ea3d5ae53b2955580e61",
+      "size": 8284
+    },
+    {
+      "path": "tests/hyperfide/campaigns/deterministic.py",
+      "sha256": "69f2b5803b785a177847c3719c0fba0515b1b494bdbdca1cedd4c8a0de5b546c",
+      "size": 45929
+    },
+    {
+      "path": "tests/hyperfide/campaigns/live.py",
+      "sha256": "d8de80d861b90a86f45766d0a98cbfbdbb999ca135f56d04f4612fde54495314",
+      "size": 18441
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/27_3.py",
+      "sha256": "4139a234cbd82c53f35838493134f034bc86b6d02de05edaf5e08622cc7298bb",
+      "size": 14973
+    }
+  ],
+  "policy": {
+    "evidence_scope": "DRIVER_COMPONENT_ONLY",
+    "fixture_scope": "Public synthetic component validation plus actual bounded subprocess/canonical-checker boundaries; no live fleet occupancy",
+    "full_campaign_source_binding": "policy.source_manifest_digest must equal actual19 integratedRepositoryManifest sha256-prefixed digest",
+    "full_campaigns": "UNRUN; require actual signed API bridges and approved pinned corpus/auth/profile/SLO inputs",
+    "full_case_status": "INCOMPLETE"
+  },
+  "registered_variant": "task:27.3",
+  "resources": [],
+  "schema_version": 1,
+  "scope": "task-component",
+  "seed": 17
+}

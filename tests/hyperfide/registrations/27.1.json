@@ -56,7 +56,21 @@
     "harness.artifact.required-per-receipt",
     "harness.artifact.old-snapshot-tamper",
     "harness.artifact.logical-alias-forgery",
-    "harness.cleanup.immutable-absence-reference"
+    "harness.cleanup.immutable-absence-reference",
+    "harness.proof.component-inspection-is-not-authority",
+    "harness.proof.component-cannot-satisfy-full",
+    "harness.proof.exact-anchor-and-source",
+    "harness.proof.case-and-closed-policy-binding",
+    "harness.proof.path-escape-and-symlink",
+    "harness.proof.duplicate-and-unknown-request-keys",
+    "harness.proof.real-canonical-artifact-tamper",
+    "harness.proof.portable-real-source-and-executable-checks",
+    "harness.proof.portable-rejects-missing-map-and-changed-tool",
+    "harness.proof.portable-rejects-wrong-commit-and-escape",
+    "harness.proof.postcheck-bytes-are-rechecked",
+    "harness.proof.git-filter-no-execution",
+    "harness.proof.external-campaign-closed-environment",
+    "harness.proof.private-staging-lock"
   ],
   "cases": [
     "V-056"
@@ -72,7 +86,10 @@
     "tests/hyperfide/selftest_harness.py",
     "tests/hyperfide/cases/tasks/27_1.py",
     "tests/hyperfide/manifest.schema.json",
-    "tests/hyperfide/test_required_artifact_receipts.py"
+    "tests/hyperfide/test_required_artifact_receipts.py",
+    "tests/hyperfide/inspect-proof.py",
+    "tests/hyperfide/proof_relocation.py",
+    "tests/hyperfide/test_inspect_proof.py"
   ],
   "source_roots": [
     "tests/hyperfide"

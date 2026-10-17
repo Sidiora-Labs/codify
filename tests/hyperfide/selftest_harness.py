@@ -44,6 +44,20 @@ ASSERTIONS = [
     "harness.artifact.old-snapshot-tamper",
     "harness.artifact.logical-alias-forgery",
     "harness.cleanup.immutable-absence-reference",
+    'harness.proof.component-inspection-is-not-authority',
+    'harness.proof.component-cannot-satisfy-full',
+    'harness.proof.exact-anchor-and-source',
+    'harness.proof.case-and-closed-policy-binding',
+    'harness.proof.path-escape-and-symlink',
+    'harness.proof.duplicate-and-unknown-request-keys',
+    'harness.proof.real-canonical-artifact-tamper',
+    'harness.proof.portable-real-source-and-executable-checks',
+    'harness.proof.portable-rejects-missing-map-and-changed-tool',
+    'harness.proof.portable-rejects-wrong-commit-and-escape',
+    'harness.proof.postcheck-bytes-are-rechecked',
+    "harness.proof.git-filter-no-execution",
+    "harness.proof.external-campaign-closed-environment",
+    "harness.proof.private-staging-lock",
 ]
 
 PROBE = r"""import json
@@ -648,6 +662,53 @@ class HarnessTests(unittest.TestCase):
     def test_53_cleanup_immutable_absence_reference(self):
         self.required_artifact_regression("test_real_cleanup_reference_uses_immutable_absence_evidence")
 
+    def proof_regression(self, method):
+        from test_inspect_proof import ProofInspectionTests
+        result = unittest.TestResult()
+        ProofInspectionTests(method).run(result)
+        self.assertEqual(result.testsRun, 1)
+        self.assertFalse(result.skipped, "proof inspection regression cannot skip")
+        self.assertTrue(result.wasSuccessful(), str(result.errors + result.failures))
+
+    def test_54_proof_component_inspection_is_not_authority(self):
+        self.proof_regression('test_component_inspection_is_not_authority')
+
+    def test_55_proof_component_cannot_satisfy_full(self):
+        self.proof_regression('test_component_cannot_satisfy_full')
+
+    def test_56_proof_exact_anchor_and_source(self):
+        self.proof_regression('test_exact_anchor_and_source')
+
+    def test_57_proof_case_and_closed_policy_binding(self):
+        self.proof_regression('test_case_and_closed_policy_binding')
+
+    def test_58_proof_path_escape_and_symlink(self):
+        self.proof_regression('test_path_escape_and_symlink')
+
+    def test_59_proof_duplicate_and_unknown_request_keys(self):
+        self.proof_regression('test_duplicate_and_unknown_request_keys')
+
+    def test_60_proof_real_canonical_artifact_tamper(self):
+        self.proof_regression('test_real_canonical_artifact_tamper')
+
+    def test_61_proof_portable_real_source_and_executable_checks(self):
+        self.proof_regression('test_portable_real_source_and_executable_checks')
+
+    def test_62_proof_portable_rejects_missing_map_and_changed_tool(self):
+        self.proof_regression('test_portable_rejects_missing_map_and_changed_tool')
+
+    def test_63_proof_portable_rejects_wrong_commit_and_escape(self):
+        self.proof_regression('test_portable_rejects_wrong_commit_and_escape')
+
+    def test_64_proof_postcheck_bytes_are_rechecked(self):
+        self.proof_regression('test_postcheck_bytes_are_rechecked')
+
+    def test_65_proof_git_filter_no_execution(self):
+        self.proof_regression("test_git_filter_configuration_never_executes")
+    def test_66_proof_external_campaign_environment(self):
+        self.proof_regression("test_portable_external_campaign_with_closed_environment")
+    def test_67_proof_private_staging_lock(self):
+        self.proof_regression("test_portable_stage_permissions_and_exclusive_lock")
 
 class InventoryResult(unittest.TextTestResult):
     def __init__(self, *args, **kwargs):
