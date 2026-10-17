@@ -13,7 +13,9 @@
     "finding.repair.attach",
     "finding.repair.submit",
     "finding.repair.resolve",
-    "finding.repair.fail"
+    "finding.repair.fail",
+    "finding.repair.inspect",
+    "finding.repair.recheck"
   ],
   "requires": [
     "5.2",

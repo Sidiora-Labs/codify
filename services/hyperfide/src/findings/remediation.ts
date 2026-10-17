@@ -124,10 +124,43 @@ async function failure(value:FindingTransaction,input:unknown):Promise<Record<st
 export async function inspectFindingResolution(tx:FindingTransaction['tx'],scope:FindingScope,findingId:string):Promise<{current:boolean;reason?:string}>{
  try{await semanticDisposition(tx,scope);const f=await finding(tx,scope,uuid(findingId));if(f.phase!=='RESOLVED'){return {current:false,reason:'FINDING_NOT_RESOLVED'};}const rows=await tx.query('SELECT * FROM hyperfide.finding_repairs WHERE organisation_id=$1 AND run_id=$2 AND finding_id=$3 AND state=\'RESOLVED\' ORDER BY updated_at DESC,id DESC LIMIT 1',[scope.organisation_id,scope.run_id,findingId]);const r=rows.rows[0];if(!r||r.resolution_digest!==f.resolution_digest){return {current:false,reason:'RESOLUTION_PROOF_MISSING'};}await qualifiedRepairProof(tx,scope,r,f,r.resolution_proof?.reproduction_plan_id,true);return {current:true};}catch(error){if(error instanceof FoundationError)return {current:false,reason:'RESOLUTION_PROOF_STALE_OR_UNAVAILABLE'};throw error;}
 }
+async function repairHistory(value:FindingTransaction,findingId:string):Promise<Record<string,unknown>>{
+ const {tx,scope}=value,parameters=[scope.organisation_id,scope.run_id,findingId];
+ const repairs=await tx.query('SELECT id AS repair_id,request_id,repair_task_id,state,max_attempts,attempt_count,attempt_id,attempt_generation::text,custody_id,custody_generation::text,intended_source_object_id,resolution_digest,resolution_evidence_ids,state_version::text,updated_at FROM hyperfide.finding_repairs WHERE organisation_id=$1 AND run_id=$2 AND finding_id=$3 ORDER BY updated_at,id',parameters);
+ const events=await tx.query('SELECT e.repair_id,e.event_type,e.payload,e.actor_role FROM hyperfide.finding_repair_events e JOIN hyperfide.finding_repairs r ON r.organisation_id=e.organisation_id AND r.run_id=e.run_id AND r.id=e.repair_id WHERE r.organisation_id=$1 AND r.run_id=$2 AND r.finding_id=$3 ORDER BY e.created_at,e.id',parameters);
+ const used=repairs.rows.reduce((total,row)=>total+BigInt(row.attempt_count),0n),limits=[...new Set(repairs.rows.map(row=>String(row.max_attempts)))];
+ return {repairs:repairs.rows,repair_events:events.rows,attempt_budget:{used:used.toString(),max_attempts:limits.length===1?limits[0]:null,exhausted:limits.length===1&&used>=BigInt(limits[0]!)}};
+}
+async function externalIssue(value:FindingTransaction,findingId:string):Promise<Record<string,unknown>|null>{
+ // GitHub state is descriptive projection only; it is reported, never used as assurance.
+ const installed=await value.tx.query("SELECT to_regclass('hyperfide.finding_github_mappings')::text AS installed");if(!installed.rows[0]?.installed)return null;
+ const rows=await value.tx.query('SELECT issue_number::text,external_state,external_updated_at FROM hyperfide.finding_github_mappings WHERE organisation_id=$1 AND run_id=$2 AND finding_id=$3',[value.scope.organisation_id,value.scope.run_id,findingId]);return rows.rows[0]??null;
+}
+async function inspect(value:FindingTransaction,input:unknown):Promise<Record<string,unknown>>{
+ const p=record(input);fields(p,['finding_id']);const findingId=uuid(p.finding_id),{tx,scope}=value;
+ const f=await finding(tx,scope,findingId);
+ return {finding_id:findingId,phase:f.phase,registry_version:String(f.registry_version),resolution:await inspectFindingResolution(tx,scope,findingId),external_issue:await externalIssue(value,findingId),...await repairHistory(value,findingId)};
+}
+async function recheck(value:FindingTransaction,input:unknown):Promise<Record<string,unknown>>{
+ const p=record(input);fields(p,['finding_id','expected_state_version']);const findingId=uuid(p.finding_id),version=decimal(p.expected_state_version),{tx,scope}=value;
+ const f=await finding(tx,scope,findingId,true);await manager(value,String(f.owner_package_id));
+ if(f.phase!=='RESOLVED')fail('FINDING_NOT_RESOLVED','Only a resolved finding can be rechecked against current evidence');
+ if(String(f.registry_version)!==version)fail('STALE_FINDING','Finding changed since the recheck was requested');
+ const current=await inspectFindingResolution(tx,scope,findingId);if(current.current)return {finding_id:findingId,current:true,reopened:false};
+ // A relevant input change (or unavailable proof) withdraws restored assurance. The
+ // resolved repair row and its resolution_evidence_ids remain as immutable history.
+ const prior=await tx.query('SELECT id,resolution_evidence_ids FROM hyperfide.finding_repairs WHERE organisation_id=$1 AND run_id=$2 AND finding_id=$3 AND state=\'RESOLVED\' ORDER BY updated_at DESC,id DESC LIMIT 1',[scope.organisation_id,scope.run_id,findingId]);
+ await tx.query('UPDATE hyperfide.finding_registry_records SET phase=\'REOPENED\',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND finding_id=$3',[scope.organisation_id,scope.run_id,findingId]);
+ await tx.query('UPDATE hyperfide.findings SET state=\'OPEN\',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[scope.organisation_id,scope.run_id,findingId]);
+ await emit(tx,scope,findingId,(BigInt(version)+1n).toString(),'finding.reopened',{finding_id:findingId,reason:current.reason??'RESOLUTION_PROOF_STALE_OR_UNAVAILABLE',prior_repair_id:prior.rows[0]?.id??null,resolution_evidence_ids:prior.rows[0]?.resolution_evidence_ids??[]});
+ return {finding_id:findingId,current:false,reopened:true,reason:current.reason,prior_repair_id:prior.rows[0]?.id??null,resolution_evidence_ids:prior.rows[0]?.resolution_evidence_ids??[]};
+}
 export function createComponent(_context:ComponentContext):Component{return {apiVersion:1,actions:{
  'finding.repair.request':(input,context)=>withFindingTransaction(context,'finding.repair.request',value=>request(value,input)),
  'finding.repair.attach':(input,context)=>withFindingTransaction(context,'finding.repair.attach',value=>attach(value,input)),
  'finding.repair.submit':(input,context)=>withFindingTransaction(context,'finding.repair.submit',value=>submit(value,input)),
  'finding.repair.resolve':(input,context)=>withFindingTransaction(context,'finding.repair.resolve',value=>resolve(value,input)),
- 'finding.repair.fail':(input,context)=>withFindingTransaction(context,'finding.repair.fail',value=>failure(value,input))
+ 'finding.repair.fail':(input,context)=>withFindingTransaction(context,'finding.repair.fail',value=>failure(value,input)),
+ 'finding.repair.inspect':(input,context)=>withFindingTransaction(context,'finding.repair.inspect',value=>inspect(value,input)),
+ 'finding.repair.recheck':(input,context)=>withFindingTransaction(context,'finding.repair.recheck',value=>recheck(value,input))
 }};}

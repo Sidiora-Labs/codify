@@ -27,8 +27,18 @@
     "findings.repair.unqualified-blocks-publication",
     "findings.repair.accepted-condition-immutable",
     "findings.repair.request-policy-immutable",
+    "findings.repair.inspect-api-current-status",
+    "findings.repair.external-close-recorded-descriptively",
+    "findings.repair.external-close-not-resolution",
+    "findings.repair.external-close-no-repair-change",
+    "findings.repair.recheck-requires-resolution",
+    "findings.repair.matching-observation-no-duplicate-dispatch",
+    "findings.repair.retry-policy-change-refused",
+    "findings.repair.unbounded-retry-policy-refused",
+    "findings.repair.refused-retries-preserve-evidence-links",
     "findings.repair.genuine-execution-start-observed",
-    "findings.repair.genuine-independent-resolution"
+    "findings.repair.genuine-independent-resolution",
+    "findings.repair.reopen-after-relevant-change"
   ],
   "argv": [
     "python3",
