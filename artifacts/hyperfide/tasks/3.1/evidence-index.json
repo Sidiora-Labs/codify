@@ -1,13 +1,9 @@
 {
   "task": "3.1",
-  "commit": "e72bf9acdc6e42e81f53f1c65a9ff9df62c1d5a6",
+  "commit": "12aa390190b3d3e360e079254378a381103fc236",
+  "requalified_on": "12aa390190b3d3e360e079254378a381103fc236",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-001 --manifest tests/hyperfide/manifests/tasks/3.1.json && python3 tests/hyperfide/qualify.py --case V-008 --manifest tests/hyperfide/manifests/tasks/3.1.json",
   "exit_code": 0,
-  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"00e5532d-49b9-4932-9b4f-cfae86463120\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/3.1/campaigns/70d3cefbc69271468cb859bacb67c80e79869e933d7a7d05a0b7802833c89d38\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"659f06fb-158f-405d-b899-56428528cd07\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/3.1/campaigns/70d3cefbc69271468cb859bacb67c80e79869e933d7a7d05a0b7802833c89d38\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
-  "ran_at": "2026-10-17T09:35:34Z",
-  "executed_as": "hf (repository owner; qualify's neutral-config safe_git refuses a root-owned checkout as dubious ownership)",
-  "campaign_dir": "artifacts/hyperfide/tasks/3.1/campaigns/70d3cefbc69271468cb859bacb67c80e79869e933d7a7d05a0b7802833c89d38",
-  "assertions": 74,
-  "scope": "task-component",
-  "full_case_status": "INCOMPLETE"
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"ae3f94cf-2cdf-4ec0-afcf-f06b3fb3091a\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/3.1/campaigns/22c5d1a2755b5ba38f27ca9e4be574660617c84dc27dabde0f655a92d8427863\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"08f069df-e5a1-4c55-89e8-a347e5cb071b\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/3.1/campaigns/22c5d1a2755b5ba38f27ca9e4be574660617c84dc27dabde0f655a92d8427863\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T13:57:09.667075+00:00"
 }
