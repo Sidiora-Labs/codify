@@ -54,10 +54,29 @@ function selectedCheck(registry:Data,id:string):Data{
  digest(check.executable_digest);
  return check;
 }
+// Projection/graph conflicts are retained as immutable, explicitly uncertain
+// guidance. They never satisfy coverage and never prove that a candidate builds.
+const PROJECTION_SOURCES=['GRAPH','CONTRACT','PROJECTION'],PROJECTION_FACETS=['UNITS','PRECISION','STALENESS','ERRORS','RETRY','IDEMPOTENCY','ORDERING','SIGNATURE','OTHER'];
+function projectionGuidance(value:unknown):Data[]{
+ if(value===undefined)return [];
+ if(!Array.isArray(value)||value.length>64)fail('REVIEW_INPUT_INVALID','Projection conflicts must be a bounded list');
+ const items=value.map(item=>{
+  const conflict=obj(item,['source','facet','producer','consumer','detail']);
+  if(!PROJECTION_SOURCES.includes(String(conflict.source))||!PROJECTION_FACETS.includes(String(conflict.facet)))fail('REVIEW_INPUT_INVALID','Unknown projection conflict source or facet');
+  return {kind:'PROJECTION_CONFLICT',source:conflict.source,facet:conflict.facet,producer:text(conflict.producer,512),consumer:text(conflict.consumer,512),detail:text(conflict.detail),certainty:'UNCERTAIN'};
+ });
+ if(new Set(items.map(item=>canonical(item))).size!==items.length)fail('REVIEW_INPUT_INVALID','Duplicate projection conflict');
+ return items;
+}
+function uncertainGuidance(rows:Data[]):Data[]{
+ const retained=rows.find(row=>Array.isArray(row.snapshot?.guidance))?.snapshot.guidance??[];
+ const inferred=rows.some(row=>row.snapshot&&row.snapshot.graph_complete!==true)?[{kind:'GRAPH_INFERENCE',source:'GRAPH',facet:'OTHER',detail:'Graph references are inferred or incomplete for this reproduction input',certainty:'UNCERTAIN'}]:[];
+ return [...retained,...inferred].map((item:Data)=>({...item,certainty:'UNCERTAIN',proof:false,satisfies_coverage:false,evidence_ids:[]}));
+}
 export async function planReproduction(ctx:ComponentContext,value:unknown):Promise<unknown>{
- const v=obj(value,['organisation_id','run_id','request_id','candidate_digest','candidate_input_manifest_digest','template_id','qualification_scope','original','repaired']);
+ const v=obj(value,['organisation_id','run_id','request_id','candidate_digest','candidate_input_manifest_digest','template_id','qualification_scope','original','repaired','projection_conflicts'],['projection_conflicts']);
  const binding=scope(v);authorizeReview(ctx,binding,['OPERATOR','LEADER','COORDINATOR','FEATURE_MANAGER']);
- const requestId=uuid(v.request_id),candidate=digest(v.candidate_digest),candidateInput=digest(v.candidate_input_manifest_digest),template=text(v.template_id,128);
+ const requestId=uuid(v.request_id),candidate=digest(v.candidate_digest),candidateInput=digest(v.candidate_input_manifest_digest),template=text(v.template_id,128),guidance=projectionGuidance(v.projection_conflicts);
  if(!['COMPONENT','CONTRACT','SYSTEM'].includes(String(v.qualification_scope)))fail('REPRODUCTION_INPUT_INVALID','Unknown qualification scope');
  const original=obj(v.original,['custody_id','snapshot']),repaired=obj(v.repaired,['custody_id','snapshot']);
  const originalId=uuid(original.custody_id),repairedId=uuid(repaired.custody_id),requestDigest=hash(v);
@@ -87,7 +106,7 @@ export async function planReproduction(ctx:ComponentContext,value:unknown):Promi
    const snapshot:Data={...current,plan_id:planId,variant:index===0?'ORIGINAL':'REPAIRED',candidate_input_manifest_digest:candidateInput,
     task_id:after.task_id,source_task_id:source.task_id,origin_task_id:before.task_id,origin_registry_digest:originRegistry.registry_digest,source_criteria_digest:source.criteria_digest,custody_id:source.id,custody_generation:String(source.custody_generation),attempt_id:source.source_attempt_id,attempt_generation:String(source.source_generation),
     repository_id:source.repository_id,source_object_id:source.source_object_id,criteria_digest:registry.task.criteria_digest,
-    registry_digest:registry.registry_digest,source_manifest_digest:source.source_manifest_digest,source_tree_id:discovered.rows[0].tree_object_id,check,contract_ids:(current.contract_versions as Data[]).map(row=>row.id)};
+    registry_digest:registry.registry_digest,source_manifest_digest:source.source_manifest_digest,source_tree_id:discovered.rows[0].tree_object_id,check,contract_ids:(current.contract_versions as Data[]).map(row=>row.id),guidance};
    snapshot.execution_inputs={source:{source_manifest_digest:source.source_manifest_digest,source_set:current.source_set},dependency:{manifest_digest:current.dependency_manifest_digest},toolchain:{environment_profile_id:current.environment_profile_id,digest:current.toolchain_digest},configuration:{digest:current.configuration_digest},graph:{manifest_id:current.graph_manifest_id,digest:current.graph_manifest_digest,source_set:current.graph_source_set},contract:{versions:current.contract_versions}};
    if(!Array.isArray(check.input_keys)||!check.input_keys.length||check.input_keys.some((key:unknown)=>typeof key!=='string'||!Object.hasOwn(snapshot.execution_inputs,key)))fail('REPRODUCTION_REGISTRY_INVALID','Registered check declares an unknown or unbound execution input');
    const inputDigest=hash(snapshot);
@@ -96,7 +115,7 @@ export async function planReproduction(ctx:ComponentContext,value:unknown):Promi
    snapshots.push({job_id:jobIds[index],variant:snapshot.variant,input_manifest_digest:inputDigest,source_set:snapshot.source_set});
   }
   for(const field of ['spec_revision_id','spec_digest','configuration_digest','dependency_manifest_digest','contract_versions','environment_profile_id','environment_digest','toolchain_digest'])if(canonical(contexts[0]![field])!==canonical(contexts[1]![field]))fail('REPRODUCTION_CONTEXT_MISMATCH','Original and repaired checks must share the same accepted criterion and execution context');
-  return {plan_id:planId,candidate_digest:candidate,candidate_input_manifest_digest:candidateInput,jobs:snapshots,status:'UNRUN',replayed:false};
+  return {plan_id:planId,candidate_digest:candidate,candidate_input_manifest_digest:candidateInput,jobs:snapshots,status:'UNRUN',execution_plane:'REMOTE',guidance:uncertainGuidance([{snapshot:{guidance,graph_complete:contexts[1]!.graph_complete}}]),replayed:false};
  });
 }
 async function lockJob(db:ReviewDb,binding:ReviewScope,id:string):Promise<Data>{
@@ -284,6 +303,10 @@ export async function executeReproduction(ctx:ComponentContext,value:unknown):Pr
   if(artifactPaths.some((item:unknown)=>typeof item!=='string'||item.length>255))fail('REPRODUCTION_REGISTRY_INVALID','Registered artifact path is invalid');
   const actual=await db.query<Data>(`SELECT session_id FROM hyperfide.runner_registry WHERE organisation_id=$1 AND run_id=$2 AND sandbox_id=$3 AND slot_id=$4 AND boot_generation=$5 AND state='CURRENT'`,[binding.organisation_id,binding.run_id,job.sandbox_id,job.slot_id,job.sandbox_boot_generation]);
   if(actual.rows.length!==1)fail('REPRODUCTION_RUNNER_UNAVAILABLE','An exact current registered runner observation is required');
+  // Reproductions are scheduled only onto a registered remote TEST slot; the
+  // supervisory control host is never a placement target.
+  const placement=await db.query<Data>(`SELECT 1 FROM hyperfide.worker_slots slot JOIN hyperfide.sandboxes box ON box.organisation_id=slot.organisation_id AND box.id=slot.sandbox_id AND box.boot_generation=slot.boot_generation WHERE slot.organisation_id=$1 AND slot.id=$2 AND slot.sandbox_id=$3 AND slot.boot_generation=$4 AND slot.capacity_kind='TEST' AND box.observed_state='RUNNING'`,[binding.organisation_id,job.slot_id,job.sandbox_id,job.sandbox_boot_generation]);
+  if(placement.rows.length!==1)fail('REPRODUCTION_PLACEMENT_INVALID','Reproduction dispatch requires a current registered remote TEST slot');
   const registry=capability<Data>(ctx,'12.1','runner.registry.v1',['lookup']),registered=await registry.lookup(db,{...binding,session_id:actual.rows[0]!.session_id});
   if(registered.sandbox_id!==job.sandbox_id||registered.slot_id!==job.slot_id||String(registered.boot_generation)!==String(job.sandbox_boot_generation)||registered.repository_id!==job.snapshot.repository_id||registered.source_object_id!==job.snapshot.source_object_id||registered.source_tree_id!==job.snapshot.source_tree_id||registered.source_digest!==job.snapshot.source_manifest_digest)fail('REPRODUCTION_SOURCE_MISMATCH','Actual prepared runner source differs from the immutable reproduction source');
   if(job.runner_session_id&&(job.runner_session_id!==registered.session_id||String(job.runner_slot_generation)!==String(registered.slot_generation)))fail('REPRODUCTION_RECONCILE_REQUIRED','Recorded runner was replaced; reconcile the existing operation without relaunching');
@@ -364,10 +387,10 @@ export async function executeReproduction(ctx:ComponentContext,value:unknown):Pr
 function receiptManifestDigest(result:Data):string{const body={...result};delete body.evidence_ids;delete body.receipt_artifact;return hash(body);}
 export async function inspectReproduction(db:ReviewDb,binding:ReviewScope,planId:string):Promise<unknown>{
  await primary(db);await lockReviewDisposition(db,binding);uuid(planId);
- const rows=await db.query<Data>(`SELECT job.*,receipt.id AS receipt_id,receipt.lease_generation AS receipt_generation,receipt.result FROM hyperfide.review_reproduction_jobs job LEFT JOIN hyperfide.review_reproduction_receipts receipt ON receipt.organisation_id=job.organisation_id AND receipt.run_id=job.run_id AND receipt.job_id=job.id AND receipt.lease_generation=job.lease_generation WHERE job.organisation_id=$1 AND job.run_id=$2 AND job.id=ANY($3::uuid[])`,[binding.organisation_id,binding.run_id,[planId,pairedId(planId)]]);
+ const rows=await db.query<Data>(`SELECT job.*,receipt.id AS receipt_id,receipt.lease_generation AS receipt_generation,receipt.result,slot.capacity_kind AS slot_capacity_kind FROM hyperfide.review_reproduction_jobs job LEFT JOIN hyperfide.review_reproduction_receipts receipt ON receipt.organisation_id=job.organisation_id AND receipt.run_id=job.run_id AND receipt.job_id=job.id AND receipt.lease_generation=job.lease_generation LEFT JOIN hyperfide.worker_slots slot ON slot.organisation_id=job.organisation_id AND slot.id=job.slot_id WHERE job.organisation_id=$1 AND job.run_id=$2 AND job.id=ANY($3::uuid[])`,[binding.organisation_id,binding.run_id,[planId,pairedId(planId)]]);
  const currentPlan=rows.rows.find(row=>row.snapshot?.plan_id===planId&&row.snapshot?.plan_kind==='CURRENT_SOURCE'&&row.snapshot?.variant==='REPAIRED');
  if(currentPlan){
-  const causal=await db.query<Data>(`SELECT job.*,receipt.id AS receipt_id,receipt.lease_generation AS receipt_generation,receipt.result FROM hyperfide.review_reproduction_jobs job LEFT JOIN hyperfide.review_reproduction_receipts receipt ON receipt.organisation_id=job.organisation_id AND receipt.run_id=job.run_id AND receipt.job_id=job.id AND receipt.lease_generation=job.lease_generation WHERE job.organisation_id=$1 AND job.run_id=$2 AND job.id=$3 AND job.snapshot->>'variant'='ORIGINAL' AND job.snapshot->>'plan_id'=$4`,[binding.organisation_id,binding.run_id,currentPlan.snapshot.historical_original_job_id,currentPlan.snapshot.causal_plan_id]);
+  const causal=await db.query<Data>(`SELECT job.*,receipt.id AS receipt_id,receipt.lease_generation AS receipt_generation,receipt.result,slot.capacity_kind AS slot_capacity_kind FROM hyperfide.review_reproduction_jobs job LEFT JOIN hyperfide.review_reproduction_receipts receipt ON receipt.organisation_id=job.organisation_id AND receipt.run_id=job.run_id AND receipt.job_id=job.id AND receipt.lease_generation=job.lease_generation LEFT JOIN hyperfide.worker_slots slot ON slot.organisation_id=job.organisation_id AND slot.id=job.slot_id WHERE job.organisation_id=$1 AND job.run_id=$2 AND job.id=$3 AND job.snapshot->>'variant'='ORIGINAL' AND job.snapshot->>'plan_id'=$4`,[binding.organisation_id,binding.run_id,currentPlan.snapshot.historical_original_job_id,currentPlan.snapshot.causal_plan_id]);
   rows.rows.push(...causal.rows);
  }
  let status:'COMPLETE'|'INCOMPLETE'|'STALE'|'CONFLICT'='COMPLETE';
@@ -406,10 +429,12 @@ export async function inspectReproduction(db:ReviewDb,binding:ReviewScope,planId
   if(!historical&&result&&Array.isArray(result.limitations)&&result.limitations.length&&status==='COMPLETE')status='INCOMPLETE';
   const checks=result?.checks,terminal=['PASSED','FAILED'].includes(row.state),valid=terminal&&row.receipt_id&&String(row.receipt_generation)===String(row.lease_generation)&&admitted&&Array.isArray(checks)&&checks.length===1&&checks[0]?.id===row.template_id&&checks[0]?.status===(row.state==='PASSED'?'PASS':'FAIL')&&result?.outcome===checks[0]?.status&&result?.job_id===row.id&&result?.candidate_digest===row.candidate_digest&&result?.input_manifest_digest===row.input_manifest_digest&&String(result?.lease_generation)===String(row.lease_generation)&&canonical(result?.source_set)===canonical(row.snapshot.source_set);
   if(!valid&&status==='COMPLETE')status='INCOMPLETE';
-  results[variant.toLowerCase()]={historical,currentness:historical?'HISTORICAL_CAUSAL_PROOF':'CURRENT_EXECUTION_PROOF',causal_plan_id:historical?currentPlan!.snapshot.causal_plan_id:row.snapshot.plan_id,causal_job_id:historical?row.id:null,registry_current:registryCurrent,origin_registry_current:originRegistryCurrent,source_origin:row.snapshot.source_origin??'SUBMITTED_RESULT',publication_operation_id:row.snapshot.publication_operation_id??null,qualification_receipt_digest:row.snapshot.qualification_receipt_digest??null,git_provenance_manifest_digest:row.snapshot.git_provenance_manifest_digest??null,integration_input_manifest_digest:row.snapshot.integration_input_manifest_digest??null,limitations:result?.limitations??[],job_id:row.id,custody_id:row.snapshot.custody_id,custody_generation:row.snapshot.custody_generation??null,task_id:row.snapshot.task_id,source_task_id:row.snapshot.source_task_id,origin_task_id:row.snapshot.origin_task_id,criteria_digest:row.snapshot.criteria_digest,source_criteria_digest:row.snapshot.source_criteria_digest,registry_digest:row.snapshot.registry_digest,origin_registry_digest:row.snapshot.origin_registry_digest,template_id:row.template_id,check_definition_digest:hash(row.snapshot.check),qualification_scope:row.qualification_scope,source_set:row.snapshot.source_set,input_manifest_digest:row.input_manifest_digest,outcome:valid?(row.state==='PASSED'?'PASS':'FAIL'):'UNKNOWN',receipt_id:row.receipt_id??null,evidence_ids:admitted?result!.evidence_ids:[],checks:valid?checks:[],job_state:row.state,last_error_code:row.last_error_code??null};
+  results[variant.toLowerCase()]={historical,currentness:historical?'HISTORICAL_CAUSAL_PROOF':'CURRENT_EXECUTION_PROOF',causal_plan_id:historical?currentPlan!.snapshot.causal_plan_id:row.snapshot.plan_id,causal_job_id:historical?row.id:null,registry_current:registryCurrent,origin_registry_current:originRegistryCurrent,source_origin:row.snapshot.source_origin??'SUBMITTED_RESULT',publication_operation_id:row.snapshot.publication_operation_id??null,qualification_receipt_digest:row.snapshot.qualification_receipt_digest??null,git_provenance_manifest_digest:row.snapshot.git_provenance_manifest_digest??null,integration_input_manifest_digest:row.snapshot.integration_input_manifest_digest??null,limitations:result?.limitations??[],job_id:row.id,custody_id:row.snapshot.custody_id,custody_generation:row.snapshot.custody_generation??null,task_id:row.snapshot.task_id,source_task_id:row.snapshot.source_task_id,origin_task_id:row.snapshot.origin_task_id,criteria_digest:row.snapshot.criteria_digest,source_criteria_digest:row.snapshot.source_criteria_digest,registry_digest:row.snapshot.registry_digest,origin_registry_digest:row.snapshot.origin_registry_digest,template_id:row.template_id,check_definition_digest:hash(row.snapshot.check),qualification_scope:row.qualification_scope,source_set:row.snapshot.source_set,input_manifest_digest:row.input_manifest_digest,outcome:valid?(row.state==='PASSED'?'PASS':'FAIL'):'UNKNOWN',receipt_id:row.receipt_id??null,evidence_ids:admitted?result!.evidence_ids:[],checks:valid?checks:[],job_state:row.state,last_error_code:row.last_error_code??null,
+   placement:{execution_plane:row.sandbox_id?'REMOTE':'UNASSIGNED',sandbox_id:row.sandbox_id??null,sandbox_boot_generation:row.sandbox_boot_generation==null?null:String(row.sandbox_boot_generation),slot_id:row.slot_id??null,capacity_kind:row.slot_capacity_kind??null,runner_session_id:row.runner_session_id??null,receipt_execution_plane:result?.physical?.execution_plane??null,receipt_sandbox_id:result?.physical?.sandbox_id??null}};
  }
  const first=rows.rows[0];
- return {status,plan_id:planId,plan_kind:currentPlan?'CURRENT_SOURCE':'PAIRED',causal_plan_id:currentPlan?.snapshot?.causal_plan_id??planId,candidate_digest:(currentPlan??first)?.candidate_digest??null,candidate_input_manifest_digest:(currentPlan??first)?.snapshot?.candidate_input_manifest_digest??null,...results};
+ return {status,plan_id:planId,plan_kind:currentPlan?'CURRENT_SOURCE':'PAIRED',causal_plan_id:currentPlan?.snapshot?.causal_plan_id??planId,candidate_digest:(currentPlan??first)?.candidate_digest??null,candidate_input_manifest_digest:(currentPlan??first)?.snapshot?.candidate_input_manifest_digest??null,...results,
+  guidance:uncertainGuidance(rows.rows),proof_basis:'REMOTE_EXECUTION_RECEIPTS_ONLY',guidance_is_proof:false,candidate_build:'NOT_PROVEN_BY_GUIDANCE',system_correctness:'NOT_PROVEN'};
 }
 export async function fenceReproductionJobs(db:ReviewDb,binding:ReviewScope,control:ReviewControl):Promise<unknown>{
  await primary(db);await lockReviewDisposition(db,binding,true);
