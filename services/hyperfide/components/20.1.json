@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "20.1",
+  "task": "20.1",
+  "roles": [
+    "control"
+  ],
+  "module": "decisions/adapters.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "decision.routes.describe",
+    "decision.adapter.prepare",
+    "decision.adapter.invoke",
+    "decision.configuration.migrate"
+  ],
+  "requires": []
+}

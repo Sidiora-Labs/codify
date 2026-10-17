@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "20.4",
+  "task": "20.4",
+  "roles": [
+    "control"
+  ],
+  "module": "decisions/jobs.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "decision.jobs.submit",
+    "decision.jobs.status",
+    "decision.jobs.process",
+    "decision.jobs.cancel",
+    "decision.jobs.replay"
+  ],
+  "requires": [
+    "4.2",
+    "6.1",
+    "6.2",
+    "14.1",
+    "20.2",
+    "20.3"
+  ]
+}
