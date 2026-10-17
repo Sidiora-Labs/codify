@@ -45,7 +45,8 @@
     "native21.authority-claim-refused",
     "native21.applied-advice-refused",
     "native21.malformed-response-abstains",
-    "native21.deadline-abstains"
+    "native21.deadline-abstains",
+    "signed21.setup"
   ],
   "argv": [
     "python3",
