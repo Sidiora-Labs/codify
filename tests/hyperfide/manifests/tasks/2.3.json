@@ -6,7 +6,7 @@
     ],
     "approved": true
   },
-  "campaign_id": "hyperfide-task-2.3-amendment-admission-v1",
+  "campaign_id": "hyperfide-task-2.3-amendment-admission-v1-requal-12aa390190b3",
   "case_ids": [
     "V-001",
     "V-014"
@@ -66,8 +66,8 @@
     },
     {
       "path": "services/hyperfide/components/2.2.json",
-      "sha256": "c783880b0e30bb2fb3a9e08116c9e836295f86db8e142985eba719a937b731ed",
-      "size": 399
+      "sha256": "a2110a3226a66d5d6ac701307dd7948b3b62aefce03db77789b62fa7342956ae",
+      "size": 375
     },
     {
       "path": "services/hyperfide/components/2.3.json",
@@ -126,8 +126,8 @@
     },
     {
       "path": "services/hyperfide/src/assurance/validity.ts",
-      "sha256": "13afc14b98c51e191b7c0e8838863c247f4ddb46499bd2a9582f5b6cf96e8283",
-      "size": 25593
+      "sha256": "de9abe6048e4e835f300c0f49ccffb18759432ee377f46999bffd0c3812cdb05",
+      "size": 27160
     },
     {
       "path": "services/hyperfide/src/components/registry.ts",
@@ -136,13 +136,13 @@
     },
     {
       "path": "services/hyperfide/src/components/service.ts",
-      "sha256": "9bc9b235ca40944692bae091e2028715330d52930fcf2051ddf9e0c05a2736a1",
-      "size": 10773
+      "sha256": "529bdc90d091c4a05e9d1c16431c41b2d617e029f4d5f3d43354e19afffbacf7",
+      "size": 10886
     },
     {
       "path": "services/hyperfide/src/identity/enrollment.ts",
-      "sha256": "b1f041afde7b0680498603b2a2590978f566987e68435ce2157a0b119a5502e9",
-      "size": 43117
+      "sha256": "250a4803207e6737f979453bb12da5b56cba70a62b89d0c1d58dd87bf00937b2",
+      "size": 43464
     },
     {
       "path": "services/hyperfide/src/policy/programme.ts",
@@ -151,8 +151,8 @@
     },
     {
       "path": "services/hyperfide/src/spec/dependencies.ts",
-      "sha256": "12c3eba89d1b14c7cfff77cdbedd60001ab7b4fa79e3610651a37f213ad1d6d1",
-      "size": 24538
+      "sha256": "6ba20d93a77b5d6872588cb15c2730829c6e051780b1bf81d48df1980a5d35bc",
+      "size": 33540
     },
     {
       "path": "services/hyperfide/src/spec/import.ts",
@@ -161,8 +161,8 @@
     },
     {
       "path": "services/hyperfide/src/spec/obligations.ts",
-      "sha256": "69e9cd13226e38ae59c0ac9efe1c17928c31853a6781f3d1d3137ed2b363fbf9",
-      "size": 21814
+      "sha256": "e81632b1415ccb68899272062b4b9aa5c18142f26b624da65ee7f9994c04938c",
+      "size": 21809
     },
     {
       "path": "services/hyperfide/src/spec/revisions.ts",
@@ -236,8 +236,8 @@
     },
     {
       "path": "services/hyperfide/dist/spec/dependencies.js",
-      "sha256": "127b2af8b26591d04b28a542f14127197f5b6fc38e1eaeb717567c60fc6b78d9",
-      "size": 25894
+      "sha256": "7ae1bc29e0a343eb1763d3ee42e1eb88d07f0815de183089da838745c805028d",
+      "size": 36317
     },
     {
       "path": "services/hyperfide/dist/spec/import.js",
@@ -246,13 +246,13 @@
     },
     {
       "path": "services/hyperfide/dist/spec/obligations.js",
-      "sha256": "b3f982c5ec0823b32393f139230d5b340ba9ff637eb6dfa233b35460e2d4f33e",
-      "size": 22024
+      "sha256": "56569d223661c03528c17f2bd10614f855cee1784fab8906416b61f5a9c92170",
+      "size": 22018
     },
     {
       "path": "services/hyperfide/dist/assurance/validity.js",
-      "sha256": "48c29ec0b5ec5c1513d439a80f2f492c410dca51234c940ce1898c0c8a72a33f",
-      "size": 27850
+      "sha256": "1bd482609d5cd704a72b4e0c6c7f4d1b0c70ad625918f2b09b152ac655c37b57",
+      "size": 29552
     },
     {
       "path": "tests/hyperfide/registrations/2.3.json",
