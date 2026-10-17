@@ -14,7 +14,8 @@
     "review.reproduction.execute",
     "review.reproduction.inspect",
     "review.reproduction.renew",
-    "review.reproduction.current.plan"
+    "review.reproduction.current.plan",
+    "review.reproduction.repair.record"
   ],
   "requires": [
     "spec-obligations",

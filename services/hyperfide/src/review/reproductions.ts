@@ -8,6 +8,7 @@ import {authorizeReview,canonical,decimal,digest,fail,hash,obj,oid,primary,revie
 import type {ReviewControl,ReviewDb,ReviewScope} from './coverage.js';
 import {buildReviewSnapshot} from './receipts.js';
 import {registerReproductionJobInputs} from '../runner/reproduction_jobs.js';
+import {recordRepairReproduction,inspectRepairReproduction} from './repair_reproduction.js';
 
 type Data=Record<string,any>;
 interface Runner {
@@ -387,6 +388,7 @@ export async function executeReproduction(ctx:ComponentContext,value:unknown):Pr
 function receiptManifestDigest(result:Data):string{const body={...result};delete body.evidence_ids;delete body.receipt_artifact;return hash(body);}
 export async function inspectReproduction(db:ReviewDb,binding:ReviewScope,planId:string):Promise<unknown>{
  await primary(db);await lockReviewDisposition(db,binding);uuid(planId);
+ const retained=await inspectRepairReproduction(db,binding,planId);if(retained)return retained;
  const rows=await db.query<Data>(`SELECT job.*,receipt.id AS receipt_id,receipt.lease_generation AS receipt_generation,receipt.result,slot.capacity_kind AS slot_capacity_kind FROM hyperfide.review_reproduction_jobs job LEFT JOIN hyperfide.review_reproduction_receipts receipt ON receipt.organisation_id=job.organisation_id AND receipt.run_id=job.run_id AND receipt.job_id=job.id AND receipt.lease_generation=job.lease_generation LEFT JOIN hyperfide.worker_slots slot ON slot.organisation_id=job.organisation_id AND slot.id=job.slot_id WHERE job.organisation_id=$1 AND job.run_id=$2 AND job.id=ANY($3::uuid[])`,[binding.organisation_id,binding.run_id,[planId,pairedId(planId)]]);
  const currentPlan=rows.rows.find(row=>row.snapshot?.plan_id===planId&&row.snapshot?.plan_kind==='CURRENT_SOURCE'&&row.snapshot?.variant==='REPAIRED');
  if(currentPlan){
@@ -508,6 +510,7 @@ export function createComponent(context:ComponentContext):Component{
  const guarded=(fn:(ctx:ComponentContext,input:unknown)=>Promise<unknown>)=>async(input:unknown,ctx:ComponentContext)=>{try{return await fn(ctx,input);}catch(error){throw reviewError(error);}};
  return {apiVersion:1,close:unregisterInputs,actions:{
   'review.reproduction.renew':guarded(renewReproduction),'review.reproduction.plan':guarded(planReproduction),
+  'review.reproduction.repair.record':guarded(recordRepairReproduction),
   'review.reproduction.current.plan':guarded(planCurrentSourceReproduction),'review.reproduction.assign':guarded(assignReproduction),'review.reproduction.execute':guarded(executeReproduction),
   'review.reproduction.inspect':guarded(async(ctx,input)=>{const v=obj(input,['organisation_id','run_id','plan_id']);return transaction(ctx,scope(v),db=>inspectReproduction(db,scope(v),uuid(v.plan_id)),false);})
  }};

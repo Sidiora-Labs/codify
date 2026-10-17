@@ -67,10 +67,17 @@ export async function loadResultPreparationContext(tx:PrimaryTransaction,
  const actualIntent=intent as Data;
  if(!object(actualIntent.execution_profile)||typeof actualIntent.policy_digest!=='string')
   fail('QUALIFICATION_PREPARATION_CONTEXT_REQUIRED','The actual accepted runtime and run policy context is unavailable');
+ const counterfactuals=(await tx.query("SELECT f.resolution_condition->'counterfactual_check_ids' AS checks FROM hyperfide.finding_repairs r JOIN hyperfide.finding_registry_records f ON f.organisation_id=r.organisation_id AND f.run_id=r.run_id AND f.finding_id=r.finding_id WHERE r.organisation_id=$1 AND r.run_id=$2 AND r.custody_id=$3 AND r.state='READY_FOR_RECHECK' FOR SHARE OF r,f",
+  [organisation_id,run_id,result.custody_id])).rows;
+ const counterfactual_check_ids=[...new Set(counterfactuals.flatMap(row=>Array.isArray(row.checks)?row.checks:[]))].sort();
+ if(counterfactual_check_ids.some(id=>!actualIntent.proof_policy.checks.some((check:Data)=>check.id===id)))
+  fail('QUALIFICATION_PROOF_STALE','Recorded repair counterfactual is absent from the current accepted registry');
  const accepted_context={
   execution_profile:actualIntent.execution_profile,policy_digest:digest(actualIntent.policy_digest),
   task_id:intent.task_id,spec_revision_id:intent.spec_revision_id,spec_generation:String(intent.spec_generation),
   criteria_digest:intent.criteria_digest,registry_digest:intent.registry_digest,proof_policy_digest:hash(intent.proof_policy),
+  registered_checks:intent.proof_policy.checks,
+  counterfactual_check_ids,
   resource_requirements:intent.resource_requirements,
  };
  const body={organisation_id,run_id,job_id,custody_id:result.custody_id,job_state:job.state,job_lease_generation:String(job.lease_generation),result,
@@ -258,6 +265,8 @@ export async function buildResultPreparationControl(context:ResultPreparationCon
  const policy=helper.readPreparationRecipePolicy(context.parent_preparation_manifest,recipe_bytes);
  const control={schema_version:1,purpose:'RESULT',parent_profile_id:context.parent_profile_id,
   parent_profile_digest:context.parent_profile_digest,result:effectiveResultProjection(context.result),
+  baseline_source_object_id:context.result.baseline_source_object_id,
+  counterfactual_checks:context.accepted_context.registered_checks.filter((check:Data)=>context.accepted_context.counterfactual_check_ids.includes(check.id)),
   repository_binding:context.repository_binding,derived_profile_id:uuid(derived_profile_id),
   commands:policy.commands,cache_scope:policy.cache_scope,cache_paths:policy.cache_paths,
   minimum_free_bytes:policy.minimum_free_bytes,minimum_free_inodes:policy.minimum_free_inodes,

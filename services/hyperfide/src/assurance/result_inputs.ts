@@ -53,6 +53,27 @@ export function resultInputProducer(ctx:ComponentContext){
   let output:Data;
   try{output=JSON.parse(Buffer.from(result.stdout.bytes).toString('utf8'));}catch{fail('QUALIFICATION_MEASUREMENT_INTEGRITY','Preparation did not return complete measured JSON');}
   const intent=admitted.intent!,context=intent.context as ResultPreparationContext,binding=admitted.binding!;
+  const counterfactual=output.counterfactual,checks=context.accepted_context.registered_checks.filter((check:Data)=>context.accepted_context.counterfactual_check_ids.includes(check.id));
+  if(!Array.isArray(counterfactual)||!Array.isArray(checks)||counterfactual.length!==checks.length)
+   fail('QUALIFICATION_COUNTERFACTUAL_INCOMPLETE','Every accepted original check needs complete native output');
+  const captured=(value:Data)=>{
+   if(!value||typeof value.base64!=='string')fail('QUALIFICATION_COUNTERFACTUAL_INCOMPLETE','Captured original bytes required');
+   const bytes=Buffer.from(value.base64,'base64');
+   if(bytes.toString('base64')!==value.base64||String(bytes.length)!==value.size_bytes||'sha256:'+createHash('sha256').update(bytes).digest('hex')!==value.digest)
+    fail('QUALIFICATION_COUNTERFACTUAL_INCOMPLETE','Original captured bytes differ from retained measurement');
+  };
+  for(const [index,check] of checks.entries()){
+   const original=counterfactual[index];
+   if(!original||canonical(original.check)!==canonical(check)||canonical(original.argv)!==canonical(check.argv)||
+    original.source_object_id!==context.result.baseline_source_object_id||!/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(original.source_tree_id)||
+    original.parent_profile_digest!==context.parent_profile_digest||!Number.isSafeInteger(original.exit_code)||original.exit_code<0||original.exit_code>255||
+    original.signal!==null||original.timed_out!==false||original.output_complete!==true||!Number.isSafeInteger(original.pid)||original.pid<1||
+    !Number.isFinite(Date.parse(original.started_at))||!Number.isFinite(Date.parse(original.ended_at))||Date.parse(original.ended_at)<Date.parse(original.started_at)||
+    Date.parse(original.started_at)<Date.parse(result.started_at)||Date.parse(original.ended_at)>Date.parse(result.ended_at)||
+    !Array.isArray(original.artifacts)||canonical(original.artifacts.map((a:Data)=>a.path))!==canonical(check.required_artifacts))
+    fail('QUALIFICATION_COUNTERFACTUAL_INCOMPLETE','Original execution must bind the exact accepted baseline and registered command');
+   captured(original.stdout);captured(original.stderr);for(const ref of original.artifacts)captured(ref);
+  }
   const measurement=Buffer.from(output.measurement_base64,'base64'),measured=JSON.parse(measurement.toString('utf8'));
   const derived=rederiveResultProfile(context,{...measured,observation_artifact_digest:'sha256:'+createHash('sha256').update(measurement).digest('hex')},intent.derived_profile_id,measurement);
   const manifest=validateManifestMetadata(output.manifest),workspace=validateManifestMetadata(output.workspace_manifest),observed=output.readiness;
@@ -80,6 +101,13 @@ export function resultInputProducer(ctx:ComponentContext){
   const measuredRef=await keep(measurement),verification=await keep(Buffer.from(canonical({derived,observed,input_manifest})+'\n'));
   const {stdout:_stdout,stderr:_stderr,artifacts:_artifacts,...executionBody}=result;
   const execution=await keep(Buffer.from(canonical(executionBody)));
+  const nativeArtifact=await transaction(requestContext,async tx=>{
+   const ref=(result as Data).native_receipt;
+   const row=(await tx.query("SELECT id,digest,size_bytes::text FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND status='COMPLETE'",
+    [...s,ref?.artifact_id])).rows[0];
+   if(!row)fail('QUALIFICATION_ARTIFACT_INCOMPLETE','Actual native receipt bytes must remain retained');
+   return {artifact_id:row.id,digest:row.digest,size_bytes:row.size_bytes};
+  },false,'READ');
   const source=await artifact(requestContext,'artifact.object.read',{organisation_id:s[0],run_id:s[1],artifact_id:context.result.source_manifest_artifact_id});
   const sourceRef={artifact_id:source.artifact.artifact_id,receipt_id:source.receipt.receipt_id,digest:source.artifact.digest,size_bytes:String(source.artifact.size_bytes)};
   const now=await transaction(requestContext,async tx=>(await tx.query('SELECT clock_timestamp() AS now')).rows[0].now,false,'READ');
@@ -97,11 +125,11 @@ export function resultInputProducer(ctx:ComponentContext){
    repository_id:context.result.repository_id,source_object_id:context.result.source_object_id,source_tree_id:context.result.source_tree_id,source_manifest_digest:context.result.source_manifest_digest,
    profile_id:intent.derived_profile_id,profile_digest:derived.profile_digest,preparation_digest:manifest.digest,preparation_context_digest:context.context_digest,
    preparation_operation_id:operation,baseline_packet_digest:context.baseline_packet_digest,accepted_context_digest:hash(context.accepted_context),
-   input_manifest,input_manifest_digest:hash(input_manifest),role_context,criteria_digest:context.accepted_context.criteria_digest,
+   counterfactual,input_manifest,input_manifest_digest:hash(input_manifest),role_context,criteria_digest:context.accepted_context.criteria_digest,
    registry_digest:context.accepted_context.registry_digest,spec_revision_id:context.accepted_context.spec_revision_id,spec_generation:context.accepted_context.spec_generation,
    runner_session_id:intent.session_id,source_state_digest:observed.source_state_digest,workspace_digest:workspace.digest,
    environment_digest:hash({operation_id:operation,profile_digest:derived.profile_digest,workspace_digest:workspace.digest,source_state_digest:observed.source_state_digest}),
-   retained_artifacts:[storedManifest,stdout,measuredRef,verification,execution,sourceRef].map(ref=>({artifact_id:ref.artifact_id,artifact_digest:ref.digest,artifact_size_bytes:ref.size_bytes}))};
+   retained_artifacts:[storedManifest,stdout,measuredRef,verification,execution,sourceRef,nativeArtifact].map(ref=>({artifact_id:ref.artifact_id,artifact_digest:ref.digest,artifact_size_bytes:ref.size_bytes}))};
   const receiptDigest=hash(receipt),receiptRef=await keep(Buffer.from(canonical(receipt)));
   try{return await transaction(requestContext,async tx=>{
    assertPrimaryTransaction(tx);await executionGate(requestContext,tx,s,'ADMISSION');
