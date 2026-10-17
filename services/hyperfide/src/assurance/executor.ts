@@ -171,6 +171,68 @@ async function renewJob(ctx:ComponentContext,s:[string,string],id:string,generat
   await client.query("UPDATE hyperfide.qualification_jobs SET lease_expires_at=$4::timestamptz,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[...s,id,renewed.expires_at]);
  });
 }
+/** Refuses provider results that are not the admitted check: an unrelated command's zero exit cannot stand in for it. */
+export function assertRemoteBinding(raw:Data,expected:{plan:Data;observed:Data;check:Data;snapshot:Data;sandbox_id:string;scope:[string,string]}):void{
+ const {plan,observed,check,snapshot}=expected,s=expected.scope;
+ if(!raw||typeof raw!=='object'||raw.execution_plane!=='REMOTE'||raw.truncated!==false||raw.operation_id!==plan.operation_id||raw.session_id!==plan.session_id||
+  raw.sandbox_id!==expected.sandbox_id||raw.boot_id!==observed.boot_id||
+  raw.slot_id!==observed.slot_id||String(raw.slot_generation)!==observed.slot_generation||!raw.native_resource_id||!raw.process_ref||!raw.start_identity||
+  canonical(raw.argv)!==canonical(check.argv)||raw.cwd!==plan.cwd||
+  raw.source_manifest_digest!==snapshot.manifest.source_manifest_digest||raw.source_object_id!==snapshot.manifest.source_object_id||raw.source_tree_id!==snapshot.manifest.source_tree_id||raw.source_digest!==snapshot.manifest.source_manifest_digest||raw.source_provenance_digest!==snapshot.inputs.source||
+  raw.source_state_digest!==observed.source_state_digest||raw.policy_digest!==plan.policy_digest||
+  raw.executable_digest!==check.executable_digest||raw.environment_digest!==plan.environment_digest||
+  raw.repository_id!==snapshot.manifest.repository_id||raw.organisation_id!==s[0]||raw.run_id!==s[1]||
+  String(raw.boot_generation)!==String(observed.boot_generation)||typeof raw.started_at!=='string'||typeof raw.ended_at!=='string'||
+  !Number.isFinite(raw.duration_ms)||raw.duration_ms<0||!Number.isFinite(Date.parse(raw.started_at))||!Number.isFinite(Date.parse(raw.ended_at))||
+  Date.parse(raw.ended_at)<Date.parse(raw.started_at)||typeof raw.spool_digest!=='string'||!/^sha256:[0-9a-f]{64}$/.test(raw.spool_digest))
+  fail('QUALIFICATION_REMOTE_BINDING_INVALID','Provider-observed execution identity differs from admitted check');
+}
+/** Complete command/environment/exit record retained for every executed check, passing or not. */
+export function commandRecord(check:Data,plan:Data,observed:Data,raw:Data):Data{
+ return {argv:check.argv,cwd:plan.cwd,workspace_path:observed.workspace_path,
+  environment:plan.environment,environment_digest:plan.environment_digest,exit_code:raw.exit_code,signal:raw.signal??null,timed_out:raw.timed_out,
+  interrupted:raw.interrupted,output_truncated:false,started_at:raw.started_at,ended_at:raw.ended_at,duration_ms:raw.duration_ms};
+}
+/** A check passes only on an affirmative, complete observation; unknown or absent fields fail with visible reasons. */
+export function judgeCheck(raw:Data,requiredArtifacts:readonly string[],files:readonly Data[]):{outcome:'PASS'|'FAIL';reasons:string[]}{
+ const reasons:string[]=[];
+ if(raw?.status!=='COMPLETED')reasons.push('REMOTE_STATUS_NOT_COMPLETED');
+ if(raw?.outcome!=='SUCCEEDED')reasons.push('REMOTE_OUTCOME_NOT_SUCCEEDED');
+ if(raw?.exit_code!==0)reasons.push('EXIT_STATUS_NOT_ZERO');
+ if(raw?.signal!==null)reasons.push('SIGNAL_NOT_ABSENT');
+ if(raw?.timed_out!==false)reasons.push('TIMED_OUT_OR_UNKNOWN');
+ if(raw?.interrupted!==false)reasons.push('INTERRUPTED_OR_UNKNOWN');
+ if(raw?.output_complete!==true)reasons.push('OUTPUT_INCOMPLETE');
+ if(raw?.cleanup_status!=='CONFIRMED'||raw?.cleanup?.complete!==true||raw?.cleanup?.observed_process_absent!==true)reasons.push('CLEANUP_NOT_CONFIRMED');
+ if(!Array.isArray(requiredArtifacts)||!requiredArtifacts.length)reasons.push('REQUIRED_ARTIFACTS_UNDECLARED');
+ else for(const name of requiredArtifacts){
+  const matches=files.filter(file=>file?.path===name);
+  if(matches.length!==1||matches[0]!.status||!matches[0]!.artifact_id||!/^sha256:[0-9a-f]{64}$/.test(matches[0]!.digest??''))reasons.push('REQUIRED_ARTIFACT_MISSING:'+name);
+ }
+ return {outcome:reasons.length?'FAIL':'PASS',reasons};
+}
+/** Receipt outcome over the exact registered selection: missing, duplicate, unknown, failed or stale checks never PASS. */
+export function qualificationOutcome(required:readonly string[],results:readonly Data[],sourceObjectId:string):{outcome:'PASS'|'FAIL';unmet:Data[]}{
+ const unmet:Data[]=[],registered=Array.isArray(required)?required:[];
+ if(!registered.length)unmet.push({check_id:null,reasons:['NO_REQUIRED_CHECKS']});
+ else if(new Set(registered).size!==registered.length)unmet.push({check_id:null,reasons:['DUPLICATE_REQUIRED_CHECK']});
+ for(const id of new Set(registered)){
+  const matches=results.filter(result=>result?.check_id===id);
+  if(!matches.length){unmet.push({check_id:id,reasons:['REQUIRED_CHECK_MISSING']});continue;}
+  if(matches.length>1){unmet.push({check_id:id,reasons:['DUPLICATE_CHECK_RESULT']});continue;}
+  const result=matches[0]!,reasons:string[]=[];
+  if(result.outcome!=='PASS')reasons.push(...(Array.isArray(result.reasons)&&result.reasons.length?result.reasons:['CHECK_NOT_PASSED']));
+  if(!sourceObjectId||result.source_object_id!==sourceObjectId)reasons.push('STALE_SOURCE_REVISION');
+  if(reasons.length)unmet.push({check_id:id,reasons});
+ }
+ for(const result of results)if(!registered.includes(result?.check_id))unmet.push({check_id:result?.check_id??null,reasons:['UNKNOWN_CHECK']});
+ return {outcome:unmet.length?'FAIL':'PASS',unmet};
+}
+/** Policy or inputs that changed after admission make the run stale; its gate result is never recorded. */
+export function assertSnapshotCurrent(admitted:{policy:unknown;inputs:unknown},current:{policy:unknown;inputs:unknown}):void{
+ if(hash(current.policy)!==hash(admitted.policy))fail('QUALIFICATION_POLICY_STALE','Accepted proof registry changed during execution');
+ if(canonical(current.inputs)!==canonical(admitted.inputs))fail('QUALIFICATION_INPUT_STALE','Inputs changed while independent verification ran');
+}
 /** Orchestrates actual remote sessions. No command or Git checkout runs on control. */
 export async function runRegisteredChecks(ctx:ComponentContext,job:Data,snapshot:Data):Promise<Data>{
  const s:[string,string]=[job.organisation_id,job.run_id],owner=identity(ctx),remote=remoteExecutor(ctx);
@@ -211,39 +273,22 @@ export async function runRegisteredChecks(ctx:ComponentContext,job:Data,snapshot
    });
    // prepare() has returned and its transaction committed before any remote process starts.
    const raw=await remote.execute(prepared.permit,signal) as Data;
-   if(raw.execution_plane!=='REMOTE'||raw.truncated!==false||raw.operation_id!==prepared.plan.operation_id||raw.session_id!==prepared.plan.session_id||
-    raw.sandbox_id!==owner.sandbox_id||raw.boot_id!==prepared.observed.boot_id||
-    raw.slot_id!==prepared.observed.slot_id||String(raw.slot_generation)!==prepared.observed.slot_generation||!raw.native_resource_id||!raw.process_ref||!raw.start_identity||
-    canonical(raw.argv)!==canonical(check.argv)||raw.cwd!==prepared.plan.cwd||
-    raw.source_manifest_digest!==snapshot.manifest.source_manifest_digest||raw.source_object_id!==snapshot.manifest.source_object_id||raw.source_tree_id!==snapshot.manifest.source_tree_id||raw.source_digest!==snapshot.manifest.source_manifest_digest||raw.source_provenance_digest!==snapshot.inputs.source||
-    raw.source_state_digest!==prepared.observed.source_state_digest||raw.policy_digest!==prepared.plan.policy_digest||
-    raw.executable_digest!==check.executable_digest||raw.environment_digest!==prepared.plan.environment_digest||
-    raw.repository_id!==snapshot.manifest.repository_id||raw.organisation_id!==s[0]||raw.run_id!==s[1]||
-    String(raw.boot_generation)!==String(prepared.observed.boot_generation)||typeof raw.started_at!=='string'||typeof raw.ended_at!=='string'||
-    !Number.isFinite(raw.duration_ms)||raw.duration_ms<0||!Number.isFinite(Date.parse(raw.started_at))||!Number.isFinite(Date.parse(raw.ended_at))||
-    Date.parse(raw.ended_at)<Date.parse(raw.started_at)||typeof raw.spool_digest!=='string'||!/^sha256:[0-9a-f]{64}$/.test(raw.spool_digest))
-     fail('QUALIFICATION_REMOTE_BINDING_INVALID','Provider-observed execution identity differs from admitted check');
+   assertRemoteBinding(raw,{plan:prepared.plan,observed:prepared.observed,check,snapshot,sandbox_id:owner.sandbox_id,scope:s});
    const stdout=remoteBytes(raw.stdout),stderr=remoteBytes(raw.stderr),files:Data[]=[];
-   let complete=true;
    if(!Array.isArray(raw.artifacts))fail('QUALIFICATION_REMOTE_OUTPUT_INCOMPLETE','Remote artifact inventory missing');
    for(const name of check.required_artifacts){
     const file=raw.artifacts.find((item:Data)=>item.path===name);
-    if(!file){complete=false;files.push({path:name,status:'MISSING'});continue;}
+    if(!file){files.push({path:name,status:'MISSING'});continue;}
     try{
      const bytes=remoteBytes(file);
      if(bytes.length>MAX_OUTPUT)throw new Error();
      files.push({path:name,...await uploadBytes(ctx,s,bytes)});
-    }catch{complete=false;files.push({path:name,status:'MISSING_OR_INVALID'});}
+    }catch{files.push({path:name,status:'MISSING_OR_INVALID'});}
    }
    const output={stdout:await uploadBytes(ctx,s,stdout),stderr:await uploadBytes(ctx,s,stderr)};
-   const command={argv:check.argv,cwd:prepared.plan.cwd,workspace_path:prepared.observed.workspace_path,
-    environment:prepared.plan.environment,environment_digest:prepared.plan.environment_digest,exit_code:raw.exit_code,signal:raw.signal??null,timed_out:raw.timed_out,
-    interrupted:raw.interrupted,output_truncated:false,started_at:raw.started_at,ended_at:raw.ended_at,duration_ms:raw.duration_ms};
-   const passed=raw.outcome==='SUCCEEDED'&&raw.exit_code===0&&raw.signal===null&&raw.timed_out===false&&raw.interrupted===false&&
-    raw.status==='COMPLETED'&&raw.output_complete===true&&raw.cleanup_status==='CONFIRMED'&&
-    raw.cleanup?.complete===true&&raw.cleanup?.observed_process_absent===true&&complete;
+   const verdict=judgeCheck(raw,check.required_artifacts,files);
    results.push({check_id:check.id,source_object_id:snapshot.manifest.source_object_id,environment_digest:owner.environment_digest,
-    executable_digest:check.executable_digest,command,output,artifacts:files,outcome:passed?'PASS':'FAIL',
+    executable_digest:check.executable_digest,command:commandRecord(check,prepared.plan,prepared.observed,raw),output,artifacts:files,outcome:verdict.outcome,reasons:verdict.reasons,
     input_keys:check.input_keys,input_manifest:snapshot.inputs,
     execution:{source_manifest_digest:snapshot.manifest.source_manifest_digest,source_state_digest:raw.source_state_digest,source_provenance_digest:snapshot.inputs.source,
      environment_digest:prepared.plan.environment_digest,assignment_environment_digest:owner.environment_digest,input_validation:prepared.observed.input_validation,
@@ -253,13 +298,13 @@ export async function runRegisteredChecks(ctx:ComponentContext,job:Data,snapshot
      native_resource_id:raw.native_resource_id,sandbox_id:raw.sandbox_id,boot_id:raw.boot_id,slot_id:raw.slot_id,slot_generation:String(raw.slot_generation),
      process_ref:raw.process_ref,start_identity:raw.start_identity,spool_digest:raw.spool_digest,cleanup_status:raw.cleanup_status,cleanup:raw.cleanup}});
   }
+  const required=snapshot.policy.checks.map((c:Data)=>c.id),summary=qualificationOutcome(required,results,snapshot.manifest.source_object_id);
   return {schema_version:1,job_id:job.id,task_id:job.custody.task_id,source_attempt_id:job.custody.source_attempt_id,source_attempt_generation:String(job.custody.source_generation),lease_generation:String(job.lease_generation),custody_id:job.custody_id,
    custody_generation:String(job.custody_generation),rubric_digest:job.rubric_digest,registry_digest:hash(snapshot.policy),criteria_digest:snapshot.manifest.criteria_digest,
    source_manifest_digest:snapshot.manifest.source_manifest_digest,source_origin:snapshot.manifest.source_origin??'SUBMITTED_RESULT',input_manifest:snapshot.inputs,
    source_object_id:snapshot.manifest.source_object_id,verifier_id:owner.verifier_id,verifier_sandbox_id:owner.sandbox_id,verifier_boot_id:invocation(ctx).principal.boot_id,verifier_boot_generation:invocation(ctx).principal.boot_generation,
    environment_digest:owner.environment_digest,environment_digest_kind:'ASSIGNMENT_DESCRIPTOR',reservation_id:owner.reservation_id,allocation_id:owner.allocation_id,allocation_generation:owner.allocation_generation,
-   required_check_ids:snapshot.policy.checks.map((c:Data)=>c.id),checks:results,
-   outcome:results.length===snapshot.policy.checks.length&&results.every(c=>c.outcome==='PASS')?'PASS':'FAIL'};
+   required_check_ids:required,checks:results,unmet:summary.unmet,outcome:summary.outcome};
  }finally{clearInterval(heartbeat);}
 }
 async function execute(ctx:ComponentContext,raw:unknown):Promise<Data>{
@@ -303,9 +348,7 @@ async function execute(ctx:ComponentContext,raw:unknown):Promise<Data>{
   if(!admission.requalification)currentCustody(job.custody,String(job.custody_generation));
   else if(!['ACTIVE','RELEASED'].includes(job.custody.authority))fail('QUALIFICATION_STALE_CUSTODY','Requalification disposition revoked');
   const current=await client.query('SELECT input_manifest FROM hyperfide.assurance_applicability WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3 FOR UPDATE',[...s,job.custody_id]);
-  if(hash(await loadPolicy(ctx,job.custody.task,client))!==hash(admission.snapshot!.policy))fail('QUALIFICATION_POLICY_STALE','Accepted proof registry changed during execution');
-  if(canonical(current.rows[0]?.input_manifest)!==canonical(admission.snapshot!.inputs))
-   fail('QUALIFICATION_INPUT_STALE','Inputs changed while independent verification ran');
+  assertSnapshotCurrent(admission.snapshot!,{policy:await loadPolicy(ctx,job.custody.task,client),inputs:current.rows[0]?.input_manifest});
   const evidenceId=randomUUID();
   await client.query('SELECT hyperfide.require_complete_artifact($1,$2,$3)',[...s,receiptArtifact.artifact_id]);
   await client.query("INSERT INTO hyperfide.evidence(organisation_id,run_id,id,attempt_id,attempt_generation,repository_id,source_object_id,criteria_digest,manifest_digest,artifact_id,admission_state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'ADMITTED')",
@@ -376,6 +419,61 @@ export async function inspectExecution(ctx:ComponentContext,raw:unknown):Promise
  const v=fields(raw,['organisation_id','run_id','job_id','lease_generation']),s=scope(ctx,v);
  return transaction(ctx,db=>inspectExecutionReceipt(db,{organisation_id:s[0],run_id:s[1]},uuid(v.job_id),decimal(v.lease_generation)),false,'READ');
 }
+const FORCED_STATUS=/^(done|complete|completed|passed|pass|qualified|accepted|green|succeeded|success|closed|merged)$/i;
+/** Names what a legacy claim asserts. Every signal stays historical: none is a gate receipt or releases dependent work. */
+export function classifyLegacyClaim(claim:unknown):Data{
+ const signals=new Set<string>();
+ const visit=(value:unknown,key:string,depth:number):void=>{
+  if(depth>8)return;
+  if(Array.isArray(value)){for(const item of value)visit(item,key,depth+1);return;}
+  if(value&&typeof value==='object'){for(const [name,item] of Object.entries(value as Data))visit(item,name.toLowerCase(),depth+1);return;}
+  if(/status|state/.test(key)&&typeof value==='string'&&FORCED_STATUS.test(value.trim()))signals.add('FORCED_STATUS');
+  if(/force|override|skip/.test(key)&&value===true)signals.add('FORCE_FLAG');
+  if(/pass|qualified|success|done/.test(key)&&value===true)signals.add('ASSERTED_PASS');
+  if(/proof|evidence|summary|notes?|log/.test(key)&&typeof value==='string'&&value.trim())signals.add('PROOF_TEXT');
+  if(/message|comment|claim/.test(key)&&typeof value==='string'&&value.trim())signals.add('AGENT_MESSAGE');
+  if(/exit/.test(key)&&value===0)signals.add('UNBOUND_EXIT_STATUS');
+ };
+ visit(claim,'',0);
+ return {qualification:'HISTORY_ONLY',authoritative:false,releases_dependent_work:false,signals:[...signals].sort(),
+  reason:'Legacy status, proof text, force flags and unbound exit codes are history; only a server-executed gate receipt with accepted coverage qualifies'};
+}
+async function importHistory(ctx:ComponentContext,raw:unknown):Promise<Data>{
+ roles(ctx,['COORDINATOR','OPERATOR']);
+ const v=fields(raw,['organisation_id','run_id','task_id','provenance','legacy_claim']),s=scope(ctx,v);
+ uuid(v.task_id);
+ if(typeof v.provenance!=='string'||!v.provenance.trim()||v.provenance.length>2048||!v.legacy_claim||typeof v.legacy_claim!=='object')
+  fail('QUALIFICATION_INPUT_INVALID','Legacy claims require provenance and remain historical');
+ await transaction(ctx,db=>db.query('INSERT INTO hyperfide.assurance_history(organisation_id,run_id,task_id,provenance,legacy_claim) VALUES($1,$2,$3,$4,$5)',[...s,v.task_id,v.provenance,v.legacy_claim]));
+ return {imported:true,...classifyLegacyClaim(v.legacy_claim)};
+}
+const RELEASING_STATES=['QUALIFIED','INTEGRATING','INTEGRATED'];
+/** Distinguishes forced historical task status and imported claims from current server-executed evidence. */
+export async function inspectQualificationHistory(db:PrimaryClient,s:{organisation_id:string;run_id:string},taskId:string):Promise<Data>{
+ await assuranceBarrier(db,s,'SHARED');
+ const scopeValues=[uuid(s.organisation_id),uuid(s.run_id),uuid(taskId)];
+ const task=(await db.query("SELECT state,definition->>'declared_status' AS declared_status,definition->'history_only' AS history_only FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3",scopeValues)).rows[0];
+ if(!task)fail('QUALIFICATION_NOT_FOUND','Task not found');
+ const history=(await db.query('SELECT legacy_claim FROM hyperfide.assurance_history WHERE organisation_id=$1 AND run_id=$2 AND task_id=$3 ORDER BY imported_at,id LIMIT 1001',scopeValues)).rows;
+ const receipts=(await db.query("SELECT count(*) FILTER (WHERE p.receipt->>'outcome'='PASS')::text AS passing,count(*)::text AS total FROM hyperfide.assurance_job_receipts p "
+  +"JOIN hyperfide.qualification_jobs j ON j.organisation_id=p.organisation_id AND j.run_id=p.run_id AND j.id=p.job_id "
+  +"JOIN hyperfide.submission_custodies c ON c.organisation_id=j.organisation_id AND c.run_id=j.run_id AND c.id=j.custody_id "
+  +"WHERE p.organisation_id=$1 AND p.run_id=$2 AND c.task_id=$3",scopeValues)).rows[0];
+ const dependents=(await db.query("SELECT task_id FROM hyperfide.task_dependencies WHERE organisation_id=$1 AND predecessor_run_id=$2 AND predecessor_task_id=$3 AND milestone='QUALIFIED' ORDER BY task_id LIMIT 1001",scopeValues)).rows.map(row=>row.task_id as string);
+ const qualified=RELEASING_STATES.includes(task.state);
+ const signals=new Set<string>();
+ if(typeof task.declared_status==='string'&&FORCED_STATUS.test(task.declared_status.trim()))signals.add('FORCED_DECLARED_STATUS');
+ for(const row of history)for(const signal of classifyLegacyClaim(row.legacy_claim).signals)signals.add(signal);
+ return {task_id:taskId,task_state:task.state,qualified,
+  historical:{declared_status:task.declared_status??null,history_only:true,imported_claims:history.length,signals:[...signals].sort(),authoritative:false},
+  current_evidence:{receipts:String(receipts?.total??'0'),passing_receipts:String(receipts?.passing??'0'),task_qualified:qualified},
+  releases_dependent_work:qualified,blocked_dependents:qualified?[]:dependents};
+}
+async function inspectHistory(ctx:ComponentContext,raw:unknown):Promise<Data>{
+ roles(ctx,['OPERATOR','COORDINATOR','VERIFIER','INTEGRATOR']);
+ const v=fields(raw,['organisation_id','run_id','task_id']),s=scope(ctx,v);
+ return transaction(ctx,db=>inspectQualificationHistory(db,{organisation_id:s[0],run_id:s[1]},uuid(v.task_id)),false,'READ');
+}
 export function createComponent(ctx:ComponentContext):Component & {capabilities:Record<string,unknown>}{
  const unregister=ctx.dependencies?registerQualificationInputReader(ctx):undefined;
  return {apiVersion:1,close:async()=>{unregister?.();},capabilities:{'assurance.execution.v1':Object.freeze({inspectExecutionReceipt})},actions:{
@@ -385,14 +483,7 @@ export function createComponent(ctx:ComponentContext):Component & {capabilities:
   'qualification.job.assign':(raw,requestContext)=>assignJob(requestContext,raw),
   'qualification.job.claim':(raw,requestContext)=>claimJob(requestContext,raw),
   'qualification.execute':(raw,requestContext)=>execute(requestContext,raw),
-  'qualification.history.import':async(raw,requestContext)=>{
-   const ctx=requestContext;roles(ctx,['COORDINATOR','OPERATOR']);
-   const v=fields(raw,['organisation_id','run_id','task_id','provenance','legacy_claim']),s=scope(ctx,v);
-   uuid(v.task_id);
-   if(typeof v.provenance!=='string'||!v.provenance.trim()||v.provenance.length>2048||!v.legacy_claim||typeof v.legacy_claim!=='object')
-    fail('QUALIFICATION_INPUT_INVALID','Legacy claims require provenance and remain historical');
-   await transaction(ctx,db=>db.query('INSERT INTO hyperfide.assurance_history(organisation_id,run_id,task_id,provenance,legacy_claim) VALUES($1,$2,$3,$4,$5)',[...s,v.task_id,v.provenance,v.legacy_claim]));
-   return {imported:true,qualification:'HISTORY_ONLY',authoritative:false};
-  }
+  'qualification.history.import':(raw,requestContext)=>importHistory(requestContext,raw),
+  'qualification.history.inspect':(raw,requestContext)=>inspectHistory(requestContext,raw)
  }};
 }

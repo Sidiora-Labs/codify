@@ -15,7 +15,8 @@
     "qualification.history.import",
     "qualification.preparation.plan",
     "qualification.preparation.inspect",
-    "qualification.execution.inspect"
+    "qualification.execution.inspect",
+    "qualification.history.inspect"
   ],
   "requires": [
     "16.1",
