@@ -8,6 +8,7 @@ import {promisify} from 'node:util';
 import type pg from 'pg';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError,object} from '../policy/programme.js';
+import {cleanupIntegration,releaseTerminalReservations} from './cleanup.js';
 
 const exec=promisify(execFile);
 export interface DB {query<Row extends pg.QueryResultRow=any>(text:string,values?:unknown[]):Promise<pg.QueryResult<Row>>}
@@ -236,31 +237,77 @@ async function bindReviews(pool:DB,input:unknown):Promise<unknown>{
   const inspected=await reviewCoverage(db,s,m,row.input_manifest_digest,id,phase);return {candidate_id:id,phase,review_inputs_bound:true,review_bindings_digest:inspected.digest,candidate_qualified:false};
  });
 }
+/** Latest recorded remote outcome per required gate for this exact immutable
+ * manifest. A FAIL is a rejection of the combined commit set, independent of
+ * the historical PASS receipts of its individually qualified contributors. */
+export async function gateOutcomes(db:DB,s:Scope,id:string,row:Record<string,any>,m:CandidateManifest):Promise<Record<string,any>[]>{
+ const receipts=(await db.query("SELECT DISTINCT ON(r.gate_id) r.gate_id,r.job_id,r.attempt,r.outcome,r.exit_code,r.assertion_count,r.stdout_digest,r.stderr_digest,r.input_manifest_digest,j.state AS job_state,j.reservation_id FROM hyperfide.integration_gate_receipts r JOIN hyperfide.integration_jobs j ON j.organisation_id=r.organisation_id AND j.run_id=r.run_id AND j.id=r.job_id WHERE r.organisation_id=$1 AND r.run_id=$2 AND r.candidate_id=$3 AND j.state IN('SUCCEEDED','FAILED') ORDER BY r.gate_id,r.attempt DESC",[...values(s),id])).rows;
+ return m.required_gates.map(gate=>{const r=receipts.find(x=>x.gate_id===gate.id);return r?{gate_id:gate.id,outcome:r.input_manifest_digest===row.input_manifest_digest?r.outcome:'STALE',job_id:r.job_id,job_state:r.job_state,attempt:String(r.attempt),exit_code:r.exit_code,assertion_count:String(r.assertion_count),stdout_digest:r.stdout_digest,stderr_digest:r.stderr_digest,reservation_id:r.reservation_id}:{gate_id:gate.id,outcome:'MISSING'};});
+}
+export function commitSetEvidence(row:Record<string,any>,m:CandidateManifest):Record<string,unknown>{
+ return {candidate_head:m.candidate_head,tree:m.tree,input_manifest_digest:row.input_manifest_digest,commit_set:m.commit_set,commit_set_digest:hash(canonical(m.commit_set)),contributors:m.contributors.map(c=>({custody_id:c.custody_id,custody_generation:c.custody_generation,task_id:c.task_id,source_object_id:c.source_object_id,qualification_receipt_digest:c.qualification_receipt_digest}))};
+}
+interface Readiness {s:Scope;id:string;run:Record<string,any>;row:Record<string,any>;m:CandidateManifest;reviews?:{digest:string;observations:Record<string,any>[]}}
+/** Ordered admission obligations. candidateReady fails closed on the first
+ * unmet one; integration.candidate.status evaluates each independently. */
+const READINESS:[string,(db:DB,r:Readiness)=>Promise<void>][]=[
+ ['candidate_not_rejected',async(db,{s,id,row,m})=>{const failed=(await gateOutcomes(db,s,id,row,m)).filter(g=>g.outcome==='FAIL');if(row.state==='FAILED'||failed.length)fail('INTEGRATION_CANDIDATE_REJECTED','Combined candidate failed required gate(s) '+(failed.map(g=>g.gate_id).join(',')||'(recorded)')+' for exact commit set '+hash(canonical(m.commit_set))+' at '+m.candidate_head);}],
+ ['run_inputs',async(_db,{run,m})=>{if(run.spec_revision_id!==m.spec_revision_id||String(run.spec_generation)!==m.spec_generation||run.policy_digest!==m.policy_digest||run.authority_epoch!==m.authority_epoch)fail('INTEGRATION_INPUT_STALE','Run inputs changed');}],
+ ['branch_authority',async(db,{s,run,m})=>{
+  const authority=await db.query("SELECT * FROM hyperfide.branch_authorities WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE",[...values(s),m.branch_authority_id]);
+  const a=authority.rows[0];if(!a||a.authority!=='ACTIVE'||String(a.branch_generation)!==m.branch_generation||a.expected_old_head!==m.expected_old_head||a.authority_epoch!==run.authority_epoch)fail('INTEGRATION_BRANCH_STALE','Branch authority changed');}],
+ ['contributors',async(db,{s,m})=>{for(const contributor of m.contributors){const c=await custody(db,s,contributor.custody_id,contributor.custody_generation);if(c.source_object_id!==contributor.source_object_id||c.source_manifest_digest!==contributor.source_manifest_digest||c.evidence_manifest_digest!==contributor.evidence_manifest_digest||c.accepted_criteria_digest!==contributor.proof_criteria_digest||c.qualification_receipt_digest!==contributor.qualification_receipt_digest||c.proof_source_manifest_digest!==contributor.proof_source_manifest_digest)fail('INTEGRATION_INPUT_STALE','Contributor input changed');}}],
+ ['repository_set',async(db,{s,m})=>{
+  const selected=(await db.query('SELECT repository_id FROM hyperfide.run_repositories WHERE organisation_id=$1 AND run_id=$2 ORDER BY repository_id',values(s))).rows.map(r=>r.repository_id);
+  if(canonical(selected)!==canonical(m.commit_set.map(entry=>entry.repository_id).sort()))fail('INTEGRATION_REPOSITORY_SET_MISMATCH','Immutable candidate must cover every run repository');
+  for(const entry of m.commit_set.filter(entry=>entry.repository_id!==m.repository_id)){
+   const inBatch=await db.query("SELECT 1 FROM hyperfide.integration_candidates c JOIN hyperfide.integration_candidate_manifests manifest ON manifest.organisation_id=c.organisation_id AND manifest.run_id=c.run_id AND manifest.candidate_id=c.id WHERE c.organisation_id=$1 AND c.run_id=$2 AND c.repository_id=$3 AND c.candidate_head=$4 AND manifest.manifest->>'request_id'=$5 AND c.state IN('PENDING','READY','PUBLISHED')",[...values(s),entry.repository_id,entry.candidate_head,m.request_id]);if(inBatch.rowCount)continue;
+   const latest=(await db.query("SELECT candidate_head FROM hyperfide.publication_operations WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 AND state='PUBLISHED' AND observed_head=candidate_head ORDER BY created_at DESC,id DESC LIMIT 1",[...values(s),entry.repository_id])).rows[0];
+   const unsettled=await db.query("SELECT 1 FROM hyperfide.publication_operations WHERE organisation_id=$1 AND repository_id=$2 AND state IN('RUNNING','OUTCOME_UNKNOWN')",[s.organisation_id,entry.repository_id]);
+   if(latest?.candidate_head!==entry.candidate_head||unsettled.rowCount)fail('INTEGRATION_BASELINE_STALE','Pinned unchanged published repository has changed or is uncertain');
+  }}],
+ ['reviews',async(db,r)=>{r.reviews=await reviewCoverage(db,r.s,r.m,r.row.input_manifest_digest,r.id);}],
+ ['gates',async(db,r)=>{
+  const reviews=r.reviews??await reviewCoverage(db,r.s,r.m,r.row.input_manifest_digest,r.id);
+  const receipts=await db.query("SELECT r.gate_id,r.outcome,r.input_manifest_digest,r.proof,j.review_bindings_digest,j.verification_input_digest FROM hyperfide.integration_gate_receipts r JOIN hyperfide.integration_jobs j ON j.organisation_id=r.organisation_id AND j.run_id=r.run_id AND j.id=r.job_id WHERE r.organisation_id=$1 AND r.run_id=$2 AND r.candidate_id=$3 AND j.state='SUCCEEDED' ORDER BY r.attempt DESC",[...values(r.s),r.id]);
+  for(const gate of r.m.required_gates){const receipt=receipts.rows.find(x=>x.gate_id===gate.id);if(!receipt||receipt.outcome!=='PASS'||receipt.input_manifest_digest!==r.row.input_manifest_digest||receipt.review_bindings_digest!==reviews.digest||receipt.proof?.scope_digest!==receipt.verification_input_digest)fail('INTEGRATION_GATE_INCOMPLETE','Required candidate gate is not current PASS');}}],
+ ['findings',async(db,{s,m})=>{
+  const findingsModule='../findings/registry.js';let inspectFindings:unknown;
+  try{inspectFindings=(await import(findingsModule)).inspectBlockingFindings;}catch{fail('INTEGRATION_FINDINGS_UNAVAILABLE','Current finding disposition inspector unavailable');}
+  if(typeof inspectFindings!=='function')fail('INTEGRATION_FINDINGS_UNAVAILABLE','Finding inspector unavailable');
+  const findings=await inspectFindings(db,{...s,repository_id:m.repository_id,source_object_id:m.candidate_head});
+  if(!object(findings)||findings.clear!==true||!Array.isArray(findings.blockers)||findings.blockers.length)fail('INTEGRATION_FINDING_BLOCKS','Applicable blocking findings remain');}],
+ // The authoritative17 review inspector validates the actual graph source set/provenance for every required source. Candidate-manifest digests are not graph source-manifest identities.
+];
 export async function candidateReady(db:DB,s:Scope,id:string,admittedPublicationId?:string):Promise<{row:Record<string,any>;manifest:CandidateManifest}>{
  await semanticDisposition(db,s,'WRITE');
  const run=await currentRun(db,s,true,admittedPublicationId);const {row,manifest:m}=await readCandidate(db,s,id,true);
- if(run.spec_revision_id!==m.spec_revision_id||String(run.spec_generation)!==m.spec_generation||run.policy_digest!==m.policy_digest||run.authority_epoch!==m.authority_epoch)fail('INTEGRATION_INPUT_STALE','Run inputs changed');
- const authority=await db.query("SELECT * FROM hyperfide.branch_authorities WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE",[...values(s),m.branch_authority_id]);
- const a=authority.rows[0];if(!a||a.authority!=='ACTIVE'||String(a.branch_generation)!==m.branch_generation||a.expected_old_head!==m.expected_old_head||a.authority_epoch!==run.authority_epoch)fail('INTEGRATION_BRANCH_STALE','Branch authority changed');
- for(const contributor of m.contributors){const c=await custody(db,s,contributor.custody_id,contributor.custody_generation);if(c.source_object_id!==contributor.source_object_id||c.source_manifest_digest!==contributor.source_manifest_digest||c.evidence_manifest_digest!==contributor.evidence_manifest_digest||c.accepted_criteria_digest!==contributor.proof_criteria_digest||c.qualification_receipt_digest!==contributor.qualification_receipt_digest||c.proof_source_manifest_digest!==contributor.proof_source_manifest_digest)fail('INTEGRATION_INPUT_STALE','Contributor input changed');}
- const selected=(await db.query('SELECT repository_id FROM hyperfide.run_repositories WHERE organisation_id=$1 AND run_id=$2 ORDER BY repository_id',values(s))).rows.map(r=>r.repository_id);
- if(canonical(selected)!==canonical(m.commit_set.map(entry=>entry.repository_id).sort()))fail('INTEGRATION_REPOSITORY_SET_MISMATCH','Immutable candidate must cover every run repository');
- for(const entry of m.commit_set.filter(entry=>entry.repository_id!==m.repository_id)){
-  const inBatch=await db.query("SELECT 1 FROM hyperfide.integration_candidates c JOIN hyperfide.integration_candidate_manifests manifest ON manifest.organisation_id=c.organisation_id AND manifest.run_id=c.run_id AND manifest.candidate_id=c.id WHERE c.organisation_id=$1 AND c.run_id=$2 AND c.repository_id=$3 AND c.candidate_head=$4 AND manifest.manifest->>'request_id'=$5 AND c.state IN('PENDING','READY','PUBLISHED')",[...values(s),entry.repository_id,entry.candidate_head,m.request_id]);if(inBatch.rowCount)continue;
-  const latest=(await db.query("SELECT candidate_head FROM hyperfide.publication_operations WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 AND state='PUBLISHED' AND observed_head=candidate_head ORDER BY created_at DESC,id DESC LIMIT 1",[...values(s),entry.repository_id])).rows[0];
-  const unsettled=await db.query("SELECT 1 FROM hyperfide.publication_operations WHERE organisation_id=$1 AND repository_id=$2 AND state IN('RUNNING','OUTCOME_UNKNOWN')",[s.organisation_id,entry.repository_id]);
-  if(latest?.candidate_head!==entry.candidate_head||unsettled.rowCount)fail('INTEGRATION_BASELINE_STALE','Pinned unchanged published repository has changed or is uncertain');
- }
- const reviews=await reviewCoverage(db,s,m,row.input_manifest_digest,id);
- const receipts=await db.query("SELECT r.gate_id,r.outcome,r.input_manifest_digest,r.proof,j.review_bindings_digest,j.verification_input_digest FROM hyperfide.integration_gate_receipts r JOIN hyperfide.integration_jobs j ON j.organisation_id=r.organisation_id AND j.run_id=r.run_id AND j.id=r.job_id WHERE r.organisation_id=$1 AND r.run_id=$2 AND r.candidate_id=$3 AND j.state='SUCCEEDED' ORDER BY r.attempt DESC",[...values(s),id]);
- for(const gate of m.required_gates){const receipt=receipts.rows.find(r=>r.gate_id===gate.id);if(!receipt||receipt.outcome!=='PASS'||receipt.input_manifest_digest!==row.input_manifest_digest||receipt.review_bindings_digest!==reviews.digest||receipt.proof?.scope_digest!==receipt.verification_input_digest)fail('INTEGRATION_GATE_INCOMPLETE','Required candidate gate is not current PASS');}
- const findingsModule='../findings/registry.js';let inspectFindings:unknown;
- try{inspectFindings=(await import(findingsModule)).inspectBlockingFindings;}catch{fail('INTEGRATION_FINDINGS_UNAVAILABLE','Current finding disposition inspector unavailable');}
- if(typeof inspectFindings!=='function')fail('INTEGRATION_FINDINGS_UNAVAILABLE','Finding inspector unavailable');
- const findings=await inspectFindings(db,{...s,repository_id:m.repository_id,source_object_id:m.candidate_head});
- if(!object(findings)||findings.clear!==true||!Array.isArray(findings.blockers)||findings.blockers.length)fail('INTEGRATION_FINDING_BLOCKS','Applicable blocking findings remain');
- // The authoritative17 review inspector validates the actual graph source set/provenance for every required source. Candidate-manifest digests are not graph source-manifest identities.
+ const state:Readiness={s,id,run,row,m};for(const [,check] of READINESS)await check(db,state);
  return {row,manifest:m};
+}
+/** Candidate-level status (V-034): every obligation reports its own current
+ * outcome; a lower-level PASS (isolated task qualification, one gate) never
+ * implies candidate admission, integration or successor release. */
+async function candidateStatus(pool:DB,input:unknown):Promise<unknown>{
+ const v=obj(input);keys(v,['organisation_id','run_id','candidate_id']);const s=scope(v),id=uuid(v.candidate_id);
+ const base=await tx(pool,async db=>{
+  const {row,manifest:m}=await readCandidate(db,s,id);const run=(await db.query('SELECT * FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2',values(s))).rows[0];
+  const tasks=(await db.query('SELECT t.id,t.state,c.qualification_outcome,c.authority FROM hyperfide.tasks t LEFT JOIN hyperfide.submission_custodies c ON c.organisation_id=t.organisation_id AND c.run_id=t.run_id AND c.id=t.current_custody_id WHERE t.organisation_id=$1 AND t.run_id=$2 AND t.id=ANY($3::uuid[])',[...values(s),m.contributors.map(c=>c.task_id)])).rows;
+  return {row,m,run,tasks,gates:await gateOutcomes(db,s,id,row,m)};
+ },'READ');
+ const obligations:{id:string;status:'MET'|'UNMET';code?:string;message?:string}[]=[];
+ let current:Readiness|undefined;
+ for(const [name,check] of READINESS){
+  try{await tx(pool,async db=>{const run=(await db.query('SELECT * FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2',values(s))).rows[0];const {row,manifest:m}=await readCandidate(db,s,id);const state:Readiness={s,id,run,row,m,...(current?.reviews?{reviews:current.reviews}:{})};current=state;await check(db,state);});obligations.push({id:name,status:'MET'});}
+  catch(error){obligations.push({id:name,status:'UNMET',...(error instanceof FoundationError?{code:error.code,message:error.message}:{code:'INTEGRATION_OBLIGATION_UNOBSERVABLE',message:String((error as Error)?.message??error).slice(0,300)})});}
+ }
+ try{await tx(pool,db=>currentRun(db,s));obligations.unshift({id:'run_admits_integration',status:'MET'});}
+ catch(error){obligations.unshift({id:'run_admits_integration',status:'UNMET',code:error instanceof FoundationError?error.code:'INTEGRATION_OBLIGATION_UNOBSERVABLE',message:String((error as Error)?.message??error).slice(0,300)});}
+ const unmet=obligations.filter(o=>o.status==='UNMET');
+ const verdict=unmet.some(o=>o.code==='INTEGRATION_CANDIDATE_REJECTED')?'REJECTED':base.row.state==='READY'||base.row.state==='PUBLISHED'?base.row.state:unmet.length?'HELD':'ADMISSIBLE';
+ return {candidate_id:id,state:base.row.state,verdict,evidence:commitSetEvidence(base.row,base.m),gates:base.gates,obligations,unmet_obligations:unmet.map(o=>o.code),
+  contributors:base.m.contributors.map(c=>{const t=base.tasks.find(x=>x.id===c.task_id);return {task_id:c.task_id,custody_id:c.custody_id,isolated_qualification:t?.qualification_outcome??'UNKNOWN',qualification_receipt_digest:c.qualification_receipt_digest,task_state:t?.state??'UNKNOWN',integrated:t?.state==='INTEGRATED'};}),
+  candidate_qualified:false,integrated:base.row.state==='PUBLISHED',successors_released:false};
 }
 const CANDIDATE_BUILD_SCRIPT="import {execFileSync} from 'node:child_process';\nimport {randomUUID,createHash} from 'node:crypto';\nconst chunks=[];for await(const x of process.stdin)chunks.push(x);\nconst input=JSON.parse(Buffer.concat(chunks).toString('utf8'));\nconst env={PATH:process.env.PATH,HOME:'/nonexistent',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_TERMINAL_PROMPT:'0',GIT_AUTHOR_NAME:'Hyperfide',GIT_AUTHOR_EMAIL:'integration@hyperfide.invalid',GIT_COMMITTER_NAME:'Hyperfide',GIT_COMMITTER_EMAIL:'integration@hyperfide.invalid',GIT_AUTHOR_DATE:'2000-01-01T00:00:00Z',GIT_COMMITTER_DATE:'2000-01-01T00:00:00Z'};\nconst g=(args,binary=false)=>execFileSync('git',['--no-replace-objects','-c','core.hooksPath=/dev/null','-c','gc.auto=0',...args],{env,encoding:binary?undefined:'utf8',maxBuffer:12*1024*1024,timeout:120000});\nconst oid=/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;\nif(!oid.test(input.base)||!Array.isArray(input.commits)||!input.commits.length||input.commits.some(c=>!oid.test(c)))throw Error('invalid pinned commits');\nlet head=input.base;\nfor(const source of input.commits){if(g(['cat-file','-t',source]).trim()!=='commit')throw Error('source is not commit');const tree=g(['merge-tree','--write-tree',head,source]).trim();if(!oid.test(tree))throw Error('merge conflict');head=g(['commit-tree',tree,'-p',head,'-p',source,'-m','Hyperfide immutable integration candidate']).trim();}\nconst tree=g(['rev-parse',head+'^{tree}']).trim(),ref='refs/hyperfide/integration/'+randomUUID();\ng(['update-ref',ref,head]);\ntry{const bundle=g(['bundle','create','-',ref,'^'+input.base],true);if(bundle.length>8*1024*1024)throw Error('candidate delta exceeds captured bundle bound; durable object transfer required');console.log(JSON.stringify({head,tree,parents:g(['show','-s','--format=%P',head]).trim().split(' ').filter(Boolean),bundle:bundle.toString('base64'),bundle_digest:'sha256:'+createHash('sha256').update(bundle).digest('hex'),ref}));}\nfinally{g(['update-ref','-d',ref]);}\n";
 async function createCandidate(pool:DB,cfg:IntegrationConfig,input:unknown):Promise<unknown>{
@@ -338,6 +385,7 @@ async function createCandidate(pool:DB,cfg:IntegrationConfig,input:unknown):Prom
 }
 async function runGates(pool:DB,_cfg:IntegrationConfig,_env:Readonly<NodeJS.ProcessEnv>,input:unknown):Promise<unknown>{
  const v=obj(input);keys(v,['organisation_id','run_id','candidate_id','reservation_id','session_id']);const s=scope(v),id=uuid(v.candidate_id),reservation=uuid(v.reservation_id),session=uuid(v.session_id);
+ await remoteGateRuntime();
  const job=await tx(pool,async db=>{
   const run=await currentRun(db,s,true),candidate=await readCandidate(db,s,id,true);
   const active=await db.query("SELECT id,state FROM hyperfide.integration_jobs WHERE organisation_id=$1 AND run_id=$2 AND candidate_id=$3 AND state IN ('RUNNING','OUTCOME_UNKNOWN') FOR UPDATE",[...values(s),id]);if(active.rows[0])return {existing_job_id:String(active.rows[0].id),state:String(active.rows[0].state)};
@@ -349,6 +397,12 @@ async function runGates(pool:DB,_cfg:IntegrationConfig,_env:Readonly<NodeJS.Proc
  if('existing_job_id' in job)return {job_id:job.existing_job_id,state:job.state,recovery_required:true,redispatched:false};
  return executeCandidateJob(pool,s,id,job);
 }
+/** Required gates only ever run remotely: refuse before taking any job
+ * authority or reservation when the qualified remote runtime is absent. */
+async function remoteGateRuntime():Promise<void>{
+ const context=currentInvocation().context,env=context.env;await runnerRemote(context);
+ if(!env.HYPERFIDE_REMOTE_NODE_DIGEST||!env.HYPERFIDE_REMOTE_CLOSURE_MODULE||!env.HYPERFIDE_REMOTE_CLOSURE_DIGEST)fail('INTEGRATION_REMOTE_RUNTIME_UNAVAILABLE','Qualified remote integration runtime, closure digest and observed Node digest are required before candidate job authority is taken');
+}
 async function executeCandidateJob(pool:DB,s:Scope,id:string,job:{id:string;row:Record<string,any>;plans:{gate:GateConfig;prepared:Awaited<ReturnType<typeof prepareRemote>>}[];verificationInput:string}):Promise<unknown>{
  const results:Record<string,unknown>[]=[];
  for(const entry of job.plans){
@@ -359,14 +413,14 @@ async function executeCandidateJob(pool:DB,s:Scope,id:string,job:{id:string;row:
   await tx(pool,async db=>{await currentRun(db,s,true,undefined,false,{kind:'CANDIDATE',id:job.id});await readCandidate(db,s,id,true);await db.query('INSERT INTO hyperfide.integration_gate_receipts(organisation_id,run_id,candidate_id,job_id,gate_id,input_manifest_digest,outcome,exit_code,assertion_count,stdout_digest,stderr_digest,stdout,stderr,proof) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT(organisation_id,run_id,job_id,gate_id) DO NOTHING',[...values(s),id,job.id,entry.gate.id,job.row.input_manifest_digest,outcome,observed.exitCode,assertions,hash(stdout),hash(stderr),stdout,stderr,{...proof,remote_spool_digest:capture.spool_digest,remote_cleanup_receipt_digest:capture.cleanup.receipt_digest}]);});
   results.push({gate_id:entry.gate.id,outcome,remote_process_ref:capture.process_ref,spool_digest:capture.spool_digest});
  }
- await tx(pool,async db=>{await currentRun(db,s,true,undefined,false,{kind:'CANDIDATE',id:job.id});await db.query("UPDATE hyperfide.integration_jobs SET state=$4,finished_at=clock_timestamp() WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND state IN ('RUNNING','OUTCOME_UNKNOWN')",[...values(s),job.id,results.every(r=>r.outcome==='PASS')?'SUCCEEDED':'FAILED']);});
+ await tx(pool,async db=>{await currentRun(db,s,true,undefined,false,{kind:'CANDIDATE',id:job.id});await db.query("UPDATE hyperfide.integration_jobs SET state=$4,finished_at=clock_timestamp() WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND state IN ('RUNNING','OUTCOME_UNKNOWN')",[...values(s),job.id,results.every(r=>r.outcome==='PASS')?'SUCCEEDED':'FAILED']);if(results.some(r=>r.outcome!=='PASS'))await db.query("UPDATE hyperfide.integration_candidates SET state='FAILED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND state IN('PENDING','VERIFYING')",[...values(s),id]);await releaseTerminalReservations(db,s,job.id);});
  return {job_id:job.id,results,scope:'CANDIDATE_GATES_ONLY',candidate_qualified:false};
 }
 async function recoverCandidateJob(pool:DB,input:unknown):Promise<unknown>{
  const v=obj(input);keys(v,['organisation_id','run_id','job_id']);const s=scope(v),jobId=uuid(v.job_id);
  const saved=await tx(pool,async db=>{
   await currentRun(db,s,true,undefined,false,{kind:'CANDIDATE',id:jobId});const row=(await db.query('SELECT * FROM hyperfide.integration_jobs WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE',[...values(s),jobId])).rows[0];if(!row)fail('INTEGRATION_JOB_UNKNOWN','Recorded integration job required');
-  if(!['RUNNING','OUTCOME_UNKNOWN'].includes(row.state))return {terminal:true,state:row.state};
+  if(!['RUNNING','OUTCOME_UNKNOWN'].includes(row.state)){await releaseTerminalReservations(db,s,jobId);return {terminal:true,state:row.state};}
   if(!Array.isArray(row.execution_manifest)||!row.execution_manifest.length)fail('INTEGRATION_REMOTE_RECOVERY_UNAVAILABLE','Immutable exact remote plans unavailable; no redispatch');
   const candidate=await readCandidate(db,s,row.candidate_id),plans=[];for(const raw of row.execution_manifest){const entry=obj(raw);plans.push({gate:entry.gate as GateConfig,prepared:await restoreRemote(db,entry.remote)});}
   return {terminal:false,state:row.state,candidate_id:row.candidate_id,job:{id:jobId,row:candidate.row,plans,verificationInput:row.verification_input_digest}};
@@ -381,6 +435,8 @@ export function createComponent(ctx:ComponentContext):Component{
  'integration.candidate.bind_reviews':async input=>bindReviews(primaryClient(),input),
  'integration.candidate.inspect':async input=>{const v=obj(input);keys(v,['organisation_id','run_id','candidate_id']);return readCandidate(primaryClient(),scope(v),uuid(v.candidate_id));},
  'integration.candidate.reconcile':async input=>recoverCandidateJob(primaryClient(),input),
+ 'integration.candidate.status':async input=>candidateStatus(primaryClient(),input),
+ 'integration.candidate.cleanup':async input=>cleanupIntegration(primaryClient(),await settings(),input),
  'integration.candidate.verify':async input=>runGates(primaryClient(),await settings(),ctx.env,input),
  'integration.candidate.admit':async input=>{const v=obj(input);keys(v,['organisation_id','run_id','candidate_id']);const s=scope(v),id=uuid(v.candidate_id);return tx(primaryClient(),async db=>{const c=await candidateReady(db,s,id);await db.query("UPDATE hyperfide.integration_candidates SET state='READY',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[...values(s),id]);return {candidate_id:id,input_manifest_digest:c.row.input_manifest_digest,state:'READY',integrated:false,wave_closed:false,programme_qualified:false};});}
  }});

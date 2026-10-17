@@ -19,6 +19,8 @@ import tempfile
 from urllib.parse import urlsplit,urlunsplit
 
 ROOT=Path(__file__).resolve().parents[4]
+# Fixture Git must never daemonize auto-maintenance: detached children outlive the probe.
+os.environ.update({"GIT_CONFIG_COUNT":"2","GIT_CONFIG_KEY_0":"maintenance.auto","GIT_CONFIG_VALUE_0":"false","GIT_CONFIG_KEY_1":"gc.auto","GIT_CONFIG_VALUE_1":"0"})
 TASK=os.environ.get("HYPERFIDE_INTEGRATION_TEST_TASK","19.1")
 DATABASE="hf_integration_"+TASK.replace(".","_")
 FAILED=[]
@@ -26,13 +28,13 @@ U=lambda n:f"00000000-0000-4000-8000-{n:012x}"
 SCOPE={"organisation_id":U(1),"run_id":U(5)}
 D="sha256:"+"c"*64
 IDS={
-"19.1":["candidate.registered-wire","candidate.strict-input","candidate.scope-denied","candidate.real-merge","candidate.deterministic-objects","candidate.conflict-refused","candidate.typed-generations","candidate.immutable-request","candidate.empty-targets-refused","candidate.authenticated-run-bound"],
+"19.1":["candidate.registered-wire","candidate.strict-input","candidate.scope-denied","candidate.real-merge","candidate.deterministic-objects","candidate.conflict-refused","candidate.typed-generations","candidate.immutable-request","candidate.empty-targets-refused","candidate.authenticated-run-bound","candidate.remote-gates-required","candidate.combined-fail-rejected","candidate.successor-not-released","candidate.level-status-explicit","candidate.input-change-invalidates","candidate.history-intact","candidate.cleanup-reconciles","candidate.cleanup-idempotent"],
 "19.2":["publication.registered-wire","publication.strict-input","publication.role-denied","publication.unsigned-push-denied","publication.target-unchanged","publication.immutable-admission","publication.target-lock-exclusive","publication.effective-hook-path-pinned","publication.github-configured-boundary","publication.github-sole-publisher","publication.github-worker-bypass-refused","publication.github-force-bypass-refused","publication.github-unknown-bypass-refused","publication.client-hook-suppressed","publication.server-hook-still-enforced","publication.token-persist-failure-revokes","publication.askpass-failure-revokes","publication.orphan-remains-unknown","publication.custody-preflight-no-mint","publication.source-url-rewrite-isolated","publication.https-source-config-isolated","publication.invalid-token-response-revokes"],
 "19.3":["closure.registered-wire","closure.level-required","closure.wave-required","closure.programme-cannot-narrow","closure.policy-requires-gates","closure.policy-requires-acceptance","closure.evaluation-immutable","closure.unregistered-assertions-refused","closure.declared-coverage-bound","closure.policy-valid-shape"],
 "19.4":["release.registered-wire","release.strict-input","release.empty-set-refused","release.caller-cannot-claim-published","release.immutable-manifest","release.partial-remains-explicit"]
 }
 ACTIONS={
-"19.1":["integration.candidate.create","integration.candidate.inspect","integration.candidate.verify","integration.candidate.admit"],
+"19.1":["integration.candidate.create","integration.candidate.inspect","integration.candidate.verify","integration.candidate.admit","integration.candidate.status","integration.candidate.cleanup"],
 "19.2":["integration.publication.capabilities","integration.publication.authorize","integration.publication.execute","integration.publication.reconcile","integration.publication.inspect"],
 "19.3":["integration.closure.evaluate","integration.closure.verify","integration.closure.inspect"],
 "19.4":["integration.release.create","integration.release.inspect","integration.release.evaluate"]
@@ -61,7 +63,7 @@ def sql(statement,*,database=DATABASE,allow_error=False):
     return result
 def node(source,args=None,env=None):
     return run(["node","--input-type=module","-e",source,*[str(x) for x in (args or [])]],env=env or db_env())
-def cleanup():
+def cleanup(emit=True):
     sql("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='"+DATABASE+"' AND pid<>pg_backend_pid()",database="postgres")
     sql('DROP DATABASE IF EXISTS "'+DATABASE+'";',database="postgres")
     absent=not sql("SELECT datname FROM pg_database WHERE datname='"+DATABASE+"'",database="postgres").stdout.strip()
@@ -74,7 +76,8 @@ def cleanup():
         proof=json.loads(authartifact.read_text())
         authabsent=proof.get("observed_absent") is True and isinstance(proof.get("database"),str) and re.fullmatch(r"hf_integration_identity_[a-z0-9_]{1,55}",proof["database"]) is not None and not sql("SELECT datname FROM pg_database WHERE datname='"+proof["database"]+"'",database="postgres").stdout.strip()
     resources=[{"id":"integration-"+TASK+"-database","status":"deleted" if absent else "unknown","observed_absent":absent,"evidence_artifact":"integration/database-absence.json"},{"id":"integration-"+TASK+"-identity-database","status":"deleted" if authabsent else "unknown","observed_absent":authabsent,"evidence_artifact":"integration/identity-database-absence.json"}]
-    print(json.dumps({"type":"cleanup","complete":absent and authabsent,"resources":resources}),flush=True)
+    if emit:print(json.dumps({"type":"cleanup","complete":absent and authabsent,"resources":resources}),flush=True)
+    return absent and authabsent
 def bootstrap():
     sql('CREATE DATABASE "'+DATABASE+'";',database="postgres")
     sql((ROOT/"services/hyperfide/migrations/0001-authority.sql").read_text())
@@ -163,6 +166,42 @@ class Fixture:
         expect(row.get("ok") is True,"Registry describe failed")
         data=row.get("result",row.get("output",{}))
         expect(TASK in json.dumps(data) and all(a in json.dumps(data) for a in ACTIONS[TASK]),"Task component/action not linked")
+def canon(value):return json.dumps(value,sort_keys=True,separators=(",",":"),ensure_ascii=False)
+def sha(value):return "sha256:"+hashlib.sha256(value.encode() if isinstance(value,str) else value).hexdigest()
+def q(value):return "NULL" if value is None else "'"+str(value).replace("'","''")+"'"
+def integration_seed(ids,run,repository,oids,gate):
+    """Recorded rows for two independently qualified contributors and two immutable combined candidates.
+    Candidate700 holds the recorded remote FAIL of its combined commit set; candidate701 holds a recorded PASS.
+    These rows stand in for 16.x qualification/12.4 remote execution which cannot run in this sandbox."""
+    o,r,R=ids["organisation"],ids["run"],repository
+    s=[f"INSERT INTO hyperfide.repositories(organisation_id,project_id,id,name,url) VALUES({q(o)},{q(ids['project'])},{q(R)},'integration-fixture','https://example.invalid/integration.git');"]
+    for key in ("base","left","right","head"):s.append(f"INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id) VALUES({q(o)},{q(R)},{q(oids[key])});")
+    s.append(f"INSERT INTO hyperfide.run_repositories(organisation_id,run_id,repository_id,source_object_id,integration_ref) VALUES({q(o)},{q(r)},{q(R)},{q(oids['base'])},'refs/heads/main');")
+    s.append(f"INSERT INTO hyperfide.feature_packages(organisation_id,run_id,id,package_key,wave) VALUES({q(o)},{q(r)},{q(U(600))},'integration',1);")
+    contributors=[]
+    for n,key in enumerate(("left","right")):
+        task,attempt,custody=U(610+n),U(620+n),U(630+n)
+        s.append(f"INSERT INTO hyperfide.tasks(organisation_id,run_id,id,task_key,feature_package_id,spec_revision_id,criteria_digest,definition,wave) VALUES({q(o)},{q(r)},{q(task)},{q('19.1-'+key)},{q(U(600))},{q(run['spec_revision_id'])},{q(D)},'{{}}',1);")
+        s.append(f"INSERT INTO hyperfide.attempts(organisation_id,run_id,id,task_id,generation,authority_epoch,input_packet_digest,execution_state) VALUES({q(o)},{q(r)},{q(attempt)},{q(task)},1,{q(run['authority_epoch'])},{q(D)},'SUCCEEDED');")
+        s.append(f"INSERT INTO hyperfide.submission_custodies(organisation_id,run_id,id,task_id,source_attempt_id,source_generation,custody_generation,authority_epoch,repository_id,source_object_id,source_manifest_digest,evidence_manifest_digest,criteria_digest,authority,qualification_outcome) VALUES({q(o)},{q(r)},{q(custody)},{q(task)},{q(attempt)},1,1,{q(run['authority_epoch'])},{q(R)},{q(oids[key])},{q(D)},{q(D)},{q(D)},'ACTIVE','PASS');")
+        s.append(f"UPDATE hyperfide.tasks SET current_custody_id={q(custody)},state='QUALIFIED',state_version=state_version+1 WHERE organisation_id={q(o)} AND run_id={q(r)} AND id={q(task)};")
+        contributors.append({"custody_id":custody,"custody_generation":"1","task_id":task,"source_object_id":oids[key],"criteria_digest":D,"source_manifest_digest":D,"evidence_manifest_digest":D,"proof_criteria_digest":D,"qualification_receipt_digest":sha("isolated-qualification-"+key),"proof_source_manifest_digest":D})
+    s.append(f"INSERT INTO hyperfide.branch_authorities(organisation_id,run_id,id,repository_id,branch_ref,branch_generation,authority_epoch,expected_old_head) VALUES({q(o)},{q(r)},{q(U(640))},{q(R)},'refs/heads/main',1,{q(run['authority_epoch'])},{q(oids['base'])});")
+    s.append(f"INSERT INTO hyperfide.capacity_accounts(organisation_id,id,pool_id,dimension,configured_limit,provenance_digest) VALUES({q(o)},{q(U(650))},{q(ids['pool'])},'TEST',10,{q(D)});")
+    for n in range(4):s.append(f"INSERT INTO hyperfide.reservations(organisation_id,run_id,id,request_id,capacity_account_id,quantity,expires_at,state) VALUES({q(o)},{q(r)},{q(U(660+n))},{q(U(670+n))},{q(U(650))},1,clock_timestamp()+interval '1 hour','ALLOCATED');")
+    commit_set=[{"repository_id":R,"candidate_head":oids["head"],"expected_old_head":oids["base"]}];digests={}
+    for n,(candidate,state) in enumerate(((U(700),"FAILED"),(U(701),"PENDING"))):
+        manifest={"version":1,"request_id":U(710+n),"run_id":r,"spec_revision_id":run["spec_revision_id"],"spec_generation":str(run["spec_generation"]),"policy_digest":run["policy_digest"],"authority_epoch":run["authority_epoch"],"repository_id":R,"branch_authority_id":U(640),"branch_generation":"1","target_ref":"refs/heads/main","expected_old_head":oids["base"],"candidate_head":oids["head"],"tree":oids["tree"],"parents":oids["parents"],"git_provenance_manifest":{"kind":"GIT_CANDIDATE_PROVENANCE_V1","source_object_id":oids["head"]},"git_provenance_manifest_digest":sha(canon({"kind":"GIT_CANDIDATE_PROVENANCE_V1","source_object_id":oids["head"]})),"contributors":contributors,"commit_set":commit_set,"execution_session_id":U(720),"execution_receipt_digest":D,"declared_context":{"environment_digest":D,"contract_digest":D,"authority":"UNVERIFIED_CALLER_LABELS"},"context_authority":"IMMUTABLE_REVIEW_INPUT_BINDINGS","required_gates":[gate],"review_policy_digest":D,"review_rubrics":[D],"required_graph":True,"review_sources":sorted({oids["head"],oids["left"],oids["right"]})}
+        digests[candidate]=sha(canon(manifest));first=contributors[0]
+        s.append(f"INSERT INTO hyperfide.integration_candidates(organisation_id,run_id,id,task_id,custody_id,custody_generation,repository_id,branch_authority_id,branch_generation,expected_old_head,candidate_head,input_manifest_digest,request_id,state) VALUES({q(o)},{q(r)},{q(candidate)},{q(first['task_id'])},{q(first['custody_id'])},1,{q(R)},{q(U(640))},1,{q(oids['base'])},{q(oids['head'])},{q(digests[candidate])},{q(U(730+n))},{q(state)});")
+        s.append(f"INSERT INTO hyperfide.integration_candidate_manifests(organisation_id,run_id,candidate_id,manifest) VALUES({q(o)},{q(r)},{q(candidate)},{q(canon(manifest))}::jsonb);")
+        for c in contributors:s.append(f"INSERT INTO hyperfide.candidate_custodies(organisation_id,run_id,candidate_id,custody_id,custody_generation,task_id,repository_id) VALUES({q(o)},{q(r)},{q(candidate)},{q(c['custody_id'])},1,{q(c['task_id'])},{q(R)});")
+    for job,candidate,reservation,state,outcome in ((U(740),U(700),U(660),"FAILED","FAIL"),(U(741),U(701),U(661),"SUCCEEDED","PASS"),(U(742),U(700),U(662),"RUNNING",None)):
+        s.append(f"INSERT INTO hyperfide.integration_jobs(organisation_id,run_id,id,candidate_id,executor_id,reservation_id,state,finished_at,source_object_id,source_tree_id,review_bindings_digest,verification_input_digest,execution_manifest) VALUES({q(o)},{q(r)},{q(job)},{q(candidate)},{q(U(720))},{q(reservation)},{q(state)},{'NULL' if state=='RUNNING' else 'clock_timestamp()'},{q(oids['head'])},{q(oids['tree'])},{q(D)},{q(D)},{q(canon([{'gate':gate,'remote':{'plan':{'operation_id':U(750)}}}] if state=='RUNNING' else []))}::jsonb);")
+        if outcome:
+            out=canon({"type":"assertion","id":"fixture.actual-assertion","outcome":outcome})+"\n"
+            s.append(f"INSERT INTO hyperfide.integration_gate_receipts(organisation_id,run_id,candidate_id,job_id,gate_id,input_manifest_digest,outcome,exit_code,assertion_count,stdout_digest,stderr_digest,stdout,stderr,proof) VALUES({q(o)},{q(r)},{q(candidate)},{q(job)},{q(gate['id'])},{q(digests[candidate])},{q(outcome)},{0 if outcome=='PASS' else 1},1,{q(sha(out))},{q(sha(''))},{q(out)},'',{q(canon({'scope_digest':D}))}::jsonb);")
+    return "\n".join(s),commit_set
 def candidate_cases(f):
     check(IDS[TASK][0],f.wire)
     check(IDS[TASK][1],lambda:f.reject(TASK,"integration.candidate.create",{**SCOPE,"claim_pass":True},"INTEGRATION_INVALID"))
@@ -185,6 +224,130 @@ def candidate_cases(f):
     check(IDS[TASK][7],immutable)
     check(IDS[TASK][8],lambda:f.reject(TASK,"integration.candidate.create",{**SCOPE,"request_id":U(102),"targets":[],"environment_digest":D,"contract_digest":D},"INTEGRATION_INVALID"))
     check(IDS[TASK][9],lambda:f.reject(TASK,"integration.candidate.inspect",{**SCOPE,"run_id":U(998),"candidate_id":U(81)},"INTEGRATION_SCOPE_DENIED"))
+    integration_cases(f)
+def integration_cases(f):
+    """do_1..do_3 and cleanup through the running service against recorded remote outcomes."""
+    state={}
+    def prepare():
+        if "error" in state:raise AssertionError(state["error"])
+        if state:return state
+        try:
+            expect(f.auth is not None,"Real authenticated dependency closure unavailable: "+str(f.auth_error))
+            def commit(name,base,filename):
+                f.g(["checkout","-qb",name,base]);(f.repository/filename).write_text(name+"\n");f.g(["add",filename]);f.g(["commit","-qm",name]);oid=f.g(["rev-parse","HEAD"]).stdout.strip();f.g(["checkout","-q","main"]);return oid
+            left=commit("task-a",f.base_oid,"task-a.txt");right=commit("task-b",f.base_oid,"task-b.txt")
+            env={**f.gitenv,"GIT_AUTHOR_NAME":"Hyperfide","GIT_AUTHOR_EMAIL":"integration@hyperfide.invalid","GIT_COMMITTER_NAME":"Hyperfide","GIT_COMMITTER_EMAIL":"integration@hyperfide.invalid"}
+            head=f.base_oid
+            for source in (left,right):
+                tree=f.g(["merge-tree","--write-tree",head,source]).stdout.strip()
+                head=run(["git","commit-tree",tree,"-p",head,"-p",source,"-m","Hyperfide immutable integration candidate"],cwd=f.repository,env=env).stdout.strip()
+            oids={"base":f.base_oid,"left":left,"right":right,"head":head,"tree":f.g(["rev-parse",head+"^{tree}"]).stdout.strip(),"parents":f.g(["show","-s","--format=%P",head]).stdout.split()}
+            run_row=f.auth.sql("SELECT spec_revision_id,spec_generation::text AS spec_generation,policy_digest,authority_epoch FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2",[f.auth.ids["organisation"],f.auth.ids["run"]])[0]
+            statements,commit_set=integration_seed(f.auth.ids,run_row,U(3),oids,f.gate)
+            f.auth.sql(statements)
+            state.update(oids=oids,commit_set=commit_set,run=run_row)
+            return state
+        except Exception as error:
+            state["error"]=type(error).__name__+": "+str(error);raise
+    def db(statement,values=None):return f.auth.sql(statement,values or [])
+    def result(row):
+        expect(row.get("ok") is True,"Service refused: "+json.dumps(row)[:1500]);return row.get("result",row.get("output"))
+    def status(candidate):return result(f.invoke(TASK,"integration.candidate.status",{**SCOPE,"candidate_id":candidate}))
+    def remote_required():
+        prepare()
+        row=f.invoke(TASK,"integration.candidate.verify",{**SCOPE,"candidate_id":U(701),"reservation_id":U(663),"session_id":U(720)})
+        code=row.get("error",{}).get("code")
+        # Positive remote dispatch needs a live runner.remote.v1 provider: UNVERIFIED here, refusal must be explicit.
+        expect(row.get("ok") is False and code in ("INTEGRATION_REMOTE_EXECUTOR_UNAVAILABLE","INTEGRATION_REMOTE_RUNTIME_UNAVAILABLE"),"Gates were not refused explicitly without the remote executor: "+json.dumps(row)[:800])
+        expect(db("SELECT count(*)::int AS n FROM hyperfide.integration_jobs WHERE candidate_id=$1 AND reservation_id=$2",[U(701),U(663)])[0]["n"]==0,"Refused verification created job authority")
+        expect(db("SELECT count(*)::int AS n FROM hyperfide.integration_gate_receipts")[0]["n"]==2,"Refused verification fabricated a gate receipt")
+        expect(db("SELECT state FROM hyperfide.reservations WHERE id=$1",[U(663)])[0]["state"]=="ALLOCATED","Refused verification consumed the separate reservation")
+    check(IDS[TASK][10],remote_required)
+    def combined_rejected():
+        prepare()
+        row=f.invoke(TASK,"integration.candidate.admit",{**SCOPE,"candidate_id":U(700)})
+        error=row.get("error",{})
+        expect(row.get("ok") is False and error.get("code")=="INTEGRATION_CANDIDATE_REJECTED","Failing combined candidate was not rejected: "+json.dumps(row)[:800])
+        expect(sha(canon(state["commit_set"])) in error.get("message","") and state["oids"]["head"] in error.get("message",""),"Rejection lacks exact commit-set evidence")
+        report=status(U(700))
+        expect(report["verdict"]=="REJECTED" and report["evidence"]["commit_set"]==state["commit_set"] and report["evidence"]["commit_set_digest"]==sha(canon(state["commit_set"])),"Status lacks exact rejected commit set")
+        gate=report["gates"][0]
+        expect(gate["outcome"]=="FAIL" and gate["exit_code"]==1 and gate["job_id"]==U(740) and gate["stdout_digest"].startswith("sha256:"),"Status lacks recorded failing gate evidence")
+        expect([c["isolated_qualification"] for c in report["contributors"]]==["PASS","PASS"] and sorted(c["source_object_id"] for c in report["evidence"]["contributors"])==sorted([state["oids"]["left"],state["oids"]["right"]]),"Individually passing contributors not preserved as evidence")
+        expect(db("SELECT state FROM hyperfide.integration_candidates WHERE id=$1",[U(700)])[0]["state"]=="FAILED","Rejected candidate state changed")
+    check(IDS[TASK][11],combined_rejected)
+    def successor_held():
+        prepare()
+        report=status(U(700))
+        expect(report["successors_released"] is False and report["integrated"] is False and report["candidate_qualified"] is False and all(c["integrated"] is False and c["task_state"]=="QUALIFIED" for c in report["contributors"]),"Isolated qualification implied integration")
+        program="""import {ResourceContainer} from './services/hyperfide/dist/storage/runtime.js';import {requireMilestone} from './services/hyperfide/dist/scheduler/claim.js';
+const [organisation_id,run_id,task]=process.argv.slice(1),r=new ResourceContainer('control',process.env,new AbortController().signal),out={};
+try{for(const milestone of ['QUALIFIED','INTEGRATED']){try{await r.gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:0},tx=>requireMilestone(tx,{organisation_id,run_id},task,milestone));out[milestone]='RELEASED'}catch(e){out[milestone]=e.code??String(e.message)}}}finally{await r.close?.()}
+console.log(JSON.stringify(out));"""
+        env={**f.auth.env};observed=json.loads(run(["node","--input-type=module","-e",program,f.auth.ids["organisation"],f.auth.ids["run"],U(610)],env=env).stdout.strip().splitlines()[-1])
+        expect(observed=={"QUALIFIED":"RELEASED","INTEGRATED":"DEPENDENCY_NOT_INTEGRATED"},"Scheduler released an integration-dependent successor from isolated qualification: "+json.dumps(observed))
+    check(IDS[TASK][12],successor_held)
+    def level_status():
+        prepare()
+        report=status(U(701))
+        names=[o["id"] for o in report["obligations"]]
+        expect(names==["run_admits_integration","candidate_not_rejected","run_inputs","branch_authority","contributors","repository_set","reviews","gates","findings"],"Candidate obligations not individually reported: "+json.dumps(names))
+        by={o["id"]:o for o in report["obligations"]}
+        expect(by["candidate_not_rejected"]["status"]=="MET" and by["run_inputs"]["status"]=="MET" and by["branch_authority"]["status"]=="MET","Current candidate inputs misreported")
+        expect(by["contributors"]["status"]=="UNMET" and by["reviews"]["status"]=="UNMET" and by["gates"]["status"]=="UNMET","Missing qualification/review evidence silently satisfied")
+        expect(report["gates"][0]["outcome"]=="PASS" and report["verdict"]=="HELD" and report["candidate_qualified"] is False and report["unmet_obligations"],"A passing lower-level gate closed the candidate level: "+json.dumps(report)[:800])
+        row=f.invoke(TASK,"integration.candidate.admit",{**SCOPE,"candidate_id":U(701)})
+        expect(row.get("ok") is False and row["error"]["code"] in report["unmet_obligations"] and row["error"]["code"]!="INTEGRATION_INPUT_STALE","Admission disagreed with reported obligations: "+json.dumps(row)[:600])
+        state["admit_before"]=row["error"]["code"]
+    check(IDS[TASK][13],level_status)
+    history_sql=["SELECT row_to_json(c)::text AS v FROM hyperfide.submission_custodies c ORDER BY id","SELECT json_build_object('id',id,'state',state,'custody',current_custody_id,'v',state_version)::text AS v FROM hyperfide.tasks WHERE id=ANY($1::uuid[]) ORDER BY id","SELECT row_to_json(r)::text AS v FROM hyperfide.integration_gate_receipts r ORDER BY attempt","SELECT row_to_json(j)::text AS v FROM hyperfide.integration_jobs j WHERE id=ANY($1::uuid[]) ORDER BY id","SELECT row_to_json(m)::text AS v FROM hyperfide.integration_candidate_manifests m ORDER BY candidate_id"]
+    def history():return [[r["v"] for r in db(sql_text,[[U(610),U(611),U(740),U(741)]] if "$1" in sql_text else [])] for sql_text in history_sql]
+    def input_changed():
+        prepare()
+        state["history"]=history()
+        expect("admit_before" in state,"Pre-change admission was not observed")
+        changed=sha("changed-dependency-policy")
+        db("UPDATE hyperfide.runs SET policy_digest=$3,state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[f.auth.ids["organisation"],f.auth.ids["run"],changed])
+        row=f.invoke(TASK,"integration.candidate.admit",{**SCOPE,"candidate_id":U(701)})
+        expect(row.get("ok") is False and row["error"]["code"]=="INTEGRATION_INPUT_STALE","Changed dependency input did not invalidate admission: "+json.dumps(row)[:600])
+        report=status(U(701));by={o["id"]:o for o in report["obligations"]}
+        expect(by["run_inputs"]["status"]=="UNMET" and by["run_inputs"]["code"]=="INTEGRATION_INPUT_STALE" and report["verdict"]=="HELD","Status did not invalidate the affected candidate")
+        expect(db("SELECT state FROM hyperfide.integration_candidates WHERE id=$1",[U(701)])[0]["state"]=="PENDING","Stale candidate was admitted")
+    check(IDS[TASK][14],input_changed)
+    def history_intact():
+        prepare()
+        expect("history" in state,"History snapshot unavailable")
+        after=history()
+        expect(after==state["history"] and len(after[0])==2 and len(after[2])==2,"Historical isolated task or gate results changed")
+        expect([r["qualification_outcome"] for r in db("SELECT qualification_outcome FROM hyperfide.submission_custodies ORDER BY id")]==["PASS","PASS"],"Isolated qualification history lost")
+    check(IDS[TASK][15],history_intact)
+    def leftovers():
+        leftover=[]
+        for directory in (f.repository,f.receive):
+            ref="refs/hyperfide/integration/"+U(760 if directory==f.repository else 761)
+            run(["git","--git-dir="+str(directory if directory==f.receive else directory/".git"),"update-ref",ref,f.base_oid]);leftover.append((directory,ref))
+        bundle=f.base/("candidate-transfer-"+U(762)+".bundle");bundle.write_bytes(b"partial bundle");return leftover,bundle
+    def refs_of(directory):return run(["git","--git-dir="+str(directory if directory==f.receive else directory/".git"),"for-each-ref","--format=%(refname)","refs/hyperfide/integration/"]).stdout.split()
+    def cleanup_reconciles():
+        prepare()
+        leftover,bundle=leftovers()
+        report=result(f.invoke(TASK,"integration.candidate.cleanup",SCOPE))
+        expect(all(not refs_of(directory) for directory,_ in leftover) and sorted(d["ref"] for d in report["deleted_refs"])==sorted(r for _,r in leftover),"Leftover candidate refs not deleted: "+json.dumps(report)[:800])
+        expect(not bundle.exists() and report["removed_paths"]==[str(bundle)],"Candidate transfer leftover not removed")
+        reservations={r["id"]:r["state"] for r in db("SELECT id,state FROM hyperfide.reservations WHERE id=ANY($1::uuid[])",[[U(660),U(661),U(662),U(663)]])}
+        expect(reservations=={U(660):"RELEASE_PENDING",U(661):"RELEASE_PENDING",U(662):"ALLOCATED",U(663):"ALLOCATED"} and sorted(r["reservation_id"] for r in report["released_reservations"])==[U(660),U(661)],"Terminal job reservations not released exactly: "+json.dumps(reservations))
+        kinds={(d["kind"],d["resource"]) for d in report["debt"]}
+        expect(report["complete"] is False and ("REMOTE_JOB_OUTCOME_UNKNOWN","integration_job:"+U(742)) in kinds and ("REMOTE_WORKSPACE_UNREACHABLE","/tmp/hyperfide/integration-"+U(750)) in kinds,"Unreachable abandoned remote work not reported as debt: "+json.dumps(report["debt"]))
+        state["cleanup_debt"]=report["debt"]
+    check(IDS[TASK][16],cleanup_reconciles)
+    def cleanup_idempotent():
+        prepare()
+        expect("cleanup_debt" in state,"First cleanup unobserved")
+        report=result(f.invoke(TASK,"integration.candidate.cleanup",SCOPE))
+        expect(report["deleted_refs"]==[] and report["removed_paths"]==[] and report["released_reservations"]==[],"Repeated cleanup was not idempotent: "+json.dumps(report)[:800])
+        expect(report["complete"] is False and report["debt"]==state["cleanup_debt"],"Repeated cleanup erased unresolved debt")
+        expect(db("SELECT state FROM hyperfide.integration_jobs WHERE id=$1",[U(742)])[0]["state"]=="RUNNING","Cleanup fabricated an outcome for abandoned remote work")
+    check(IDS[TASK][17],cleanup_idempotent)
 def publication_cases(f):
     check(IDS[TASK][0],f.wire)
     check(IDS[TASK][1],lambda:f.reject(TASK,"integration.publication.execute",{**SCOPE,"operation_id":U(1),"new_head":f.feature_oid},"INTEGRATION_INVALID"))
@@ -314,5 +477,5 @@ def main():
             try:{"19.1":candidate_cases,"19.2":publication_cases,"19.3":closure_cases,"19.4":release_cases}[TASK](fixture)
             finally:fixture.close()
         return 1 if FAILED else 0
-    finally:cleanup()
+    finally:cleanup(emit=False)
 if __name__=="__main__":raise SystemExit(main())
