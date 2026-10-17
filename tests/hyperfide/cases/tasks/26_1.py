@@ -41,6 +41,7 @@ def main():
  check("branding.editor.preserve-command-identities",lambda:all(x["command"].startswith("codify.") for x in editor["contributes"]["commands"]))
  check("branding.editor.display-command-titles",lambda:all(x["title"].startswith("Hyperfide:") for x in editor["contributes"]["commands"]))
  check("branding.installer.display",lambda:(lambda p:p.returncode==0 and p.stdout.startswith("Hyperfide installer:") and "hyperfide (canonical)" in p.stdout)(subprocess.run(["bash",str(ROOT/"scripts/install.sh"),"--help"],text=True,capture_output=True,timeout=10,stdin=subprocess.DEVNULL)))
+ print(json.dumps({"type":"cleanup","complete":True,"resources":[]}),flush=True)
  return bool(FAILED)
 if __name__=="__main__":
  if "--cleanup" in sys.argv:
