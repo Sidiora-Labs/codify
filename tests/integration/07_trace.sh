@@ -11,7 +11,7 @@ touch verify.marker
 "$CG" spec start 2.1 >/dev/null
 rc=0; out="$("$CG" spec done 2.1 2>&1)" || rc=$?
 [ "$rc" -eq 1 ] || fail "done without a graph should refuse (rc=$rc)"
-has "$out" "run \`cg init\` first"
+has_any "$out" "run \`cg init\` first" "run \`hyperfide init\` first"
 has "$out" "NOT marked done"
 
 # ---- full flow with a graph ----

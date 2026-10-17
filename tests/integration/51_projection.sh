@@ -237,6 +237,6 @@ printf 'int x(void) { return 0; }\n' > x.c
 "$CG" init >/dev/null
 expect_rc 1 "$CG" projection build
 err="$("$CG" projection build 2>&1 || true)"
-has "$err" "cg projection: no git repository at $TMP/nogit"
+has_any "$err" "cg projection: no git repository at $TMP/nogit" "hyperfide projection: no git repository at $TMP/nogit"
 
 echo "51_projection: ok"

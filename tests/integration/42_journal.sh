@@ -42,7 +42,7 @@ hold_lock 4
 out="$("$CG" remember "journal keeps decisions" --type decision --task jr/1.1 \
        --symbols formatName --files src/a.c 2>&1)"
 has "$out" "queued"
-has "$out" "next cg command"
+has_any "$out" "next cg command" "next hyperfide command"
 js="$("$CG" remember "second queued note" --json 2>/dev/null)"
 has "$js" '"queued":true'
 [ "$(pending)" = 2 ] || fail "expected 2 journal records, got $(pending)"

@@ -238,7 +238,7 @@ assert all(isinstance(x["seen"], int) for x in d["agents"]), d
     # a solo process sees the hint to join the fleet
     out="$(CG_AGENT=solo "$CG" fleet status)"
     has "$out" "you: solo — no role"
-    has "$out" "CG_ROLE=main|feature|worker"
+    has_any "$out" "CG_ROLE=main|feature|worker" "HYPERFIDE_ROLE=main|feature|worker"
 
     # ---- plan: managers and wave workers, planned names and live owners
     out="$("$CG" fleet plan)"
@@ -448,7 +448,7 @@ EOF
     has "$out" "branch:   wave/fleet/1 from feature/fleet (created)   [feature/fleet cut from main]"
     has "$out" "worktree: $wt/wave-fleet-1 (created)"
     has "$out" "claim:    attempt "
-    has "$out" "next: cd $wt/wave-fleet-1 && CG_AGENT=w-fleet-1 CG_ROLE=worker CG_PARENT=fm-fleet CG_FEATURE=fleet CG_WAVE=1 cg spec start 2.1"
+    has_any "$out" "next: cd $wt/wave-fleet-1 && CG_AGENT=w-fleet-1 CG_ROLE=worker CG_PARENT=fm-fleet CG_FEATURE=fleet CG_WAVE=1 cg spec start 2.1" "next: cd $wt/wave-fleet-1 && HYPERFIDE_AGENT=w-fleet-1 HYPERFIDE_ROLE=worker HYPERFIDE_PARENT=fm-fleet HYPERFIDE_FEATURE=fleet HYPERFIDE_WAVE=1 hyperfide spec start 2.1"
     branches="$(git branch --list --format='%(refname:short)')"
     has "$branches" "feature/fleet"
     has "$branches" "wave/fleet/1"
@@ -533,10 +533,10 @@ assert d["env"] == {"CG_AGENT": "w-fleet-1", "CG_ROLE": "worker", "CG_PARENT": "
     # not yet qualified on the branch tip: merge-up refuses
     expect_rc 1 "$CG" fleet merge-up 2.1
     err="$("$CG" fleet merge-up 2.1 2>&1 >/dev/null || true)"
-    has "$err" "2.1 is in_progress on wave/fleet/1, not done — qualify it (cg spec done 2.1) and commit, or --force"
+    has_any "$err" "2.1 is in_progress on wave/fleet/1, not done — qualify it (cg spec done 2.1) and commit, or --force" "2.1 is in_progress on wave/fleet/1, not done — qualify it (hyperfide spec done 2.1) and commit, or --force"
     expect_rc 1 "$CG" fleet merge-up 3.1
     err="$("$CG" fleet merge-up 3.1 2>&1 >/dev/null || true)"
-    has "$err" "no branch wave/fleet/2 for 3.1 — run cg fleet begin 3.1 first"
+    has_any "$err" "no branch wave/fleet/2 for 3.1 — run cg fleet begin 3.1 first" "no branch wave/fleet/2 for 3.1 — run hyperfide fleet begin 3.1 first"
     cd "$wt/wave-fleet-1"
     echo 'export function alpha(){ return 2 }' > src/a.ts
     CG_AGENT=w-fleet-1 "$CG" spec done 2.1 >/dev/null
@@ -581,7 +581,7 @@ assert d["worktree"].endswith("/feature-fleet") and len(d["head"]) == 40, d
     cd "$proj"
     expect_rc 1 "$CG" fleet merge-up 3.1
     out="$("$CG" fleet merge-up 3.1 2>/dev/null || true)"
-    has "$out" "cg fleet: wave/fleet/2 does not merge into feature/fleet"
+    has_any "$out" "cg fleet: wave/fleet/2 does not merge into feature/fleet" "hyperfide fleet: wave/fleet/2 does not merge into feature/fleet"
     has "$out" "conflicts in 1 path(s):"
     has "$out" "  docs/d.md"
     has "$out" "merge aborted"
@@ -593,7 +593,7 @@ assert d["merged"] is False and d["conflicts"] == ["docs/d.md"] and d["kept"] is
 ' || fail "merge-up conflict JSON"
     # --keep leaves the merge in place for the manager to resolve
     out="$("$CG" fleet merge-up 3.1 --keep 2>/dev/null || true)"
-    has "$out" "merge left in place at $wt/feature-fleet — resolve, commit, then cg fleet merge-up 3.1 again"
+    has_any "$out" "merge left in place at $wt/feature-fleet — resolve, commit, then cg fleet merge-up 3.1 again" "merge left in place at $wt/feature-fleet — resolve, commit, then hyperfide fleet merge-up 3.1 again"
     has "$(git -C "$wt/feature-fleet" diff --name-only --diff-filter=U)" "docs/d.md"
     git -C "$wt/feature-fleet" merge --abort
     # a dirty feature worktree is refused before any merge
@@ -907,7 +907,7 @@ echo "\$CG_ROLE|\$AGENT|\$TASK|\$CG_PARENT|\$CG_FEATURE|\${CG_WAVE:--}|\$CG_BRAN
 if [ "\$CG_ROLE" = worker ]; then
     [ -n "\${CG_ATTEMPT:-}" ] || exit 9
     [ "\${CG_FENCE:-0}" -gt 0 ] || exit 9
-    grep -q "cg fleet merge-up \$TASK" "\$PF" || exit 9
+    grep -Eq "(cg|hyperfide) fleet merge-up \$TASK" "\$PF" || exit 9
     "$CG" spec start "\$TASK" >/dev/null || exit 1
     case "\$TASK" in
       2.1) echo 'export function alpha(){ return 1 }' > src/a.ts ;;
@@ -923,7 +923,7 @@ fi
 [ -z "\${CG_TASK:-}" ] || exit 9
 [ -z "\${CG_ATTEMPT:-}" ] || exit 9
 [ -n "\${CG_WAVE:-}" ] || exit 9
-grep -q "cg fleet land \$CG_WAVE -f \$CG_FEATURE" "\$PF" || exit 9
+grep -Eq "(cg|hyperfide) fleet land \$CG_WAVE -f \$CG_FEATURE" "\$PF" || exit 9
 left="\$("$CG" fleet tree -f "\$CG_FEATURE" --json | python3 -c 'import json,os,sys; m = [m for m in json.load(sys.stdin)["managers"] if m["wave"] == int(os.environ["CG_WAVE"])][0]; print(m["tasks"]["total"] - m["tasks"]["done"])')"
 [ "\$left" -eq 0 ] || exit 0
 exec "$CG" fleet land "\$CG_WAVE" -f "\$CG_FEATURE" --no-pr >/dev/null
@@ -987,10 +987,10 @@ EOF
 
     # the briefings end on the command that moves the work upward
     has "$(cat .codegraph/agents/fleet-2.1.prompt)" "you are a task worker on task/fleet/2.1, reporting to wm-fleet-1"
-    has "$(cat .codegraph/agents/fleet-2.1.prompt)" "cg fleet merge-up 2.1"
+    has_any "$(cat .codegraph/agents/fleet-2.1.prompt)" "cg fleet merge-up 2.1" "hyperfide fleet merge-up 2.1"
     has "$(cat .codegraph/agents/fleet-manager-1.prompt)" "You are wm-fleet-1, the wave manager for wave 1 of fleet."
-    has "$(cat .codegraph/agents/fleet-manager-1.prompt)" "cg fleet land 1 -f fleet"
-    has "$(cat .codegraph/agents/fleet-manager-1.prompt)" "cg fleet pr 1 -f fleet"
+    has_any "$(cat .codegraph/agents/fleet-manager-1.prompt)" "cg fleet land 1 -f fleet" "hyperfide fleet land 1 -f fleet"
+    has_any "$(cat .codegraph/agents/fleet-manager-1.prompt)" "cg fleet pr 1 -f fleet" "hyperfide fleet pr 1 -f fleet"
     has "$(cat .codegraph/agents/fleet-manager-2.prompt)" "the wave manager for wave 2 of fleet"
 
     # the subtree is complete because it merged, not because a process exited
@@ -1107,7 +1107,7 @@ EOF
     has "$err" "(--ahead claims it against the projection)"
     out="$("$CG" fleet begin 3.2 --ahead)"
     has "$out" "branch:   task/fleet/3.2 from wave/fleet/2"
-    has "$out" "cg spec start 3.2 --ahead"
+    has_any "$out" "cg spec start 3.2 --ahead" "hyperfide spec start 3.2 --ahead"
     python3 - <<'EOF' || fail "begin --ahead did not record ahead on the lease"
 import sqlite3
 db = sqlite3.connect(".codegraph/graph.db", timeout=10)

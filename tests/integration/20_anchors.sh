@@ -500,7 +500,7 @@ assert any(x['symbol'] == 'post_entry' for x in d['stale']), d['stale']
 assert 'uncovered' in d and 'anchored' in d, sorted(d)
 "
 out="$("$CG" check 2>/dev/null)" || true
-has "$out" "cg anchors --stale"
+has_any "$out" "cg anchors --stale" "hyperfide anchors --stale"
 
 # (w) a repository that never adopted the convention: capture, retrieval,
 # survey, and anchors all function on a tree with no comments at all

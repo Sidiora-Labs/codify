@@ -567,7 +567,7 @@ if [ "\$CG_ROLE" = worker ]; then
     if ! "$CG" spec done 3.1 > "$TMP/go/done-3.1" 2>&1; then
         cp "$TMP/go/done-3.1" "$TMP/go/refused-3.1"
         i=0
-        until "$CG" events --kind agent.steer --json -n 50 | grep "\"agent\":\"\$AGENT\"" | grep -q "cg fleet sync"; do
+        until "$CG" events --kind agent.steer --json -n 50 | grep "\"agent\":\"\$AGENT\"" | grep -Eq "(cg|hyperfide) fleet sync"; do
             i=\$((i+1)); [ \$i -lt 600 ] || exit 1; sleep 0.2
         done
         "$CG" fleet sync > "$TMP/go/sync-3.1" 2>&1 || exit 1
@@ -615,10 +615,10 @@ print(min(s) if s else 0)"; }
     has "$p" "## Ahead of its requirements"
     has "$p" "requirements are still open: 2.1"
     has "$p" "--branch codify/projection"
-    has "$p" "cg projection findings"
+    has_any "$p" "cg projection findings" "hyperfide projection findings"
     has "$p" "task/fleet/2.1"
-    has "$p" "cg spec start 3.1 --ahead"
-    has "$p" "\`cg spec done 3.1\` refuses until 2.1 lands on main"
+    has_any "$p" "cg spec start 3.1 --ahead" "hyperfide spec start 3.1 --ahead"
+    has_any "$p" "\`cg spec done 3.1\` refuses until 2.1 lands on main" "\`hyperfide spec done 3.1\` refuses until 2.1 lands on main"
     hasnt "$(cat "$TMP/go/prompt-2.1")" "## Ahead of its requirements"
     wait_for 30 '[ -f "$TMP/go/refused-3.1" ]' || fail "3.1 never tried done: $(cat "$TMP/go/done-3.1" 2>/dev/null)"
     has "$(cat "$TMP/go/start-3.1")" "ahead of 2.1"
@@ -640,13 +640,13 @@ m = [e for e in ev if e["payload"]["outcome"] == "merged" and e["payload"]["bran
 assert m and m[0]["payload"]["landed"] == "wave/fleet/1", ev
 assert m[0]["payload"]["steered"] == ["w-fleet-3.1"], m
 ' || fail "main was not merged forward into wave/fleet/2"
-    has "$("$CG" events --kind agent.steer --json -n 50 | grep '"agent":"w-fleet-3.1"')" "cg fleet sync"
+    has_any "$("$CG" events --kind agent.steer --json -n 50 | grep '"agent":"w-fleet-3.1"')" "cg fleet sync" "hyperfide fleet sync"
     s="$(cat "$TMP/go/sync-3.1")"
     has "$s" "synced wave/fleet/2 into task/fleet/3.1"
     has "$s" "land wave/fleet/1 into main"
     has "$s" "spec/fleet/spec.kvx"
     has "$s" "projection: base main"
-    has "$(cat "$(run_field log)")" "merged forward into wave/fleet/2; 1 worker(s) steered to cg fleet sync"
+    has_any "$(cat "$(run_field log)")" "merged forward into wave/fleet/2; 1 worker(s) steered to cg fleet sync" "merged forward into wave/fleet/2; 1 worker(s) steered to hyperfide fleet sync"
     "$CG" events --kind fleet.sync --json -n 20 | grep -q '"outcome":"merged"' || fail "no fleet.sync event"
     has "$(git show main:spec/fleet/spec.kvx)" 'status     = "done"'
     "$CG" spec status --json -f fleet | pyjson '
@@ -666,7 +666,7 @@ assert d["done"] == 3, d
     log="$(cat "$(run_field log)")"
     has "$log" "forward merge of main into wave/fleet/2 conflicted (src/a.ts)"
     has "$log" "escalated to wm-fleet-2"
-    has "$log" "main (resolved by its manager) merged forward into wave/fleet/2; 1 worker(s) steered to cg fleet sync"
+    has_any "$log" "main (resolved by its manager) merged forward into wave/fleet/2; 1 worker(s) steered to cg fleet sync" "main (resolved by its manager) merged forward into wave/fleet/2; 1 worker(s) steered to hyperfide fleet sync"
     "$CG" events --kind fleet.forward --json -n 20 | python3 -c '
 import json, sys
 ev = [json.loads(l)["payload"] for l in sys.stdin if l.strip()]
@@ -679,7 +679,7 @@ assert r and r[0]["steered"] == ["w-fleet-3.1"], ev
     m="$("$CG" events --kind agent.steer --json -n 50 | grep '"agent":"wm-fleet-2"')"
     has "$m" "could not be merged forward into wave/fleet/2"
     has "$m" "projection finding:"
-    has "$("$CG" events --kind agent.steer --json -n 50 | grep '"agent":"w-fleet-3.1"')" "cg fleet sync"
+    has_any "$("$CG" events --kind agent.steer --json -n 50 | grep '"agent":"w-fleet-3.1"')" "cg fleet sync" "hyperfide fleet sync"
     has "$(git show main:src/a.ts)" "return 1"
 
     # ---- sequential: 3.1 waits for the land

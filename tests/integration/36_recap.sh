@@ -95,7 +95,7 @@ out="$("$CG" recap 2>"$TMP/err")"
 has "$out" "wrote $TMP/proj/.codify/recap.md"
 has "$(cat "$TMP/err")" "0 decision calls (2 from the cache)"    # the --decided run filled it
 brief="$(cat .codify/recap.md)"
-has "$brief" "<!-- cg recap"
+has_any "$brief" "<!-- cg recap" "<!-- hyperfide recap"
 has "$brief" "picked by openrouter/upstage/solar-decide"
 has "$brief" "This release adds the gauge"                        # the fake writer's canned prose
 python3 - "$OPENAI_FAKE_DIR/req-1.json" <<'EOF' || fail "writer request shape"

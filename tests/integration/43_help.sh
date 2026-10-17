@@ -170,10 +170,10 @@ readme = open(os.path.join(repo, "README.md")).read()
 named = set()
 tops = {n for n in names if " " not in n}
 for line in readme.split("\n"):
-    if not line.startswith("| `cg "):
+    if not line.startswith(("| `cg ", "| `hyperfide ")):
         continue
     cell = re.split(r"(?<!\\)\|", line)[1]
-    spans = re.findall(r"`cg ([^`]*)`", cell)
+    spans = re.findall(r"`(?:cg|hyperfide) ([^`]*)`", cell)
     for sp in spans:
         top = sp.split()[0]
         assert top in tops, f"README names unknown command cg {top}: {line[:60]}"

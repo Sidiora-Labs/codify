@@ -174,14 +174,14 @@ echo 'export function alpha(){}' > src/a.ts
 # ---- refusal outside parallel/prod mode, with a one-line hint
 rc=0; out="$("$CG" spec run 2>&1)" || rc=$?
 [ "$rc" -eq 1 ] || fail "expected rc 1 in standard mode, got $rc"
-has "$out" "cg spec mode parallel"
+has_any "$out" "cg spec mode parallel" "hyperfide spec mode parallel"
 
 "$CG" spec mode parallel >/dev/null
 
 # ---- refusal without a Codify index
 rc=0; out="$("$CG" spec run 2>&1)" || rc=$?
 [ "$rc" -eq 1 ] || fail "expected rc 1 without .codegraph, got $rc"
-has "$out" "cg init"
+has_any "$out" "cg init" "hyperfide init"
 
 # ---- three leaf tasks: 2.1/2.2 touches-disjoint in wave 1, 3.1 behind 2.1
 "$CG" spec add 2.1 --title "Alpha file" --wave 1 \

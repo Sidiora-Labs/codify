@@ -142,7 +142,7 @@ assert d["version"] == 1 and d["generation"] == "full-baseline", d
 assert d["audience_sections"]["user"], d
 assert d["audience_sections"]["developer"], d
 assert len(d["evidence"]) >= 9, d
-assert any(e["source"] == "cg spec trace" for e in d["evidence"]), d
+assert any(e["source"] in ("cg spec trace", "hyperfide spec trace") for e in d["evidence"]), d
 PY
 
     mkdir -p "$TMP/gaps"
@@ -152,12 +152,13 @@ PY
     "$CG" spec start 1.1 >/dev/null
     "$CG" spec done 1.1 >/dev/null
     "$CG" docs packet >/dev/null
-    has "$(cat .codegraph/docs/gaps-demo/packet.md)" \
-        'Evidence unavailable from `cg changelog`'
+    has_any "$(cat .codegraph/docs/gaps-demo/packet.md)" \
+        'Evidence unavailable from `cg changelog`' \
+        'Evidence unavailable from `hyperfide changelog`'
     python3 - <<'PY'
 import json
 d=json.load(open(".codegraph/docs/gaps-demo/provenance.json"))
-row=next(e for e in d["evidence"] if e["source"] == "cg changelog")
+row=next(e for e in d["evidence"] if e["source"] in ("cg changelog", "hyperfide changelog"))
 assert row["available"] is False and row["exit_code"] != 0, row
 PY
 }
@@ -388,7 +389,7 @@ EOF
         || fail 'documentation agent prompt was not written'
     [ -s .codegraph/agents/connector-demo-@docs.log ] \
         || fail 'documentation agent log was not written'
-    has "$(cat .codegraph/agents/connector-demo-@docs.prompt)" 'cg docs close'
+    has_any "$(cat .codegraph/agents/connector-demo-@docs.prompt)" 'cg docs close' 'hyperfide docs close'
     st="$($CG spec status --json)"
     has "$st" '"status":"done"'
     has "$st" '"claims":[]'
