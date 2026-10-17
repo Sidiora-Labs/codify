@@ -3,7 +3,7 @@ import {createHash} from 'node:crypto';
 import {assertInvocation} from '../../transport/protocol.js';
 import {isCredentialAuthority,composeEnvironment,type CredentialAuthority} from '../../identity/credentials.js';
 import {isArtifactStoreCapability,assertCompleteArtifactReferences} from '../../artifacts/objects.js';
-import type {ProviderPersistenceHooks as RuntimeProviderPersistenceHooks,ProviderPreparationBinding} from '../pools.js';
+import type {ProviderPersistenceHooks as RuntimeProviderPersistenceHooks,ProviderPreparationBinding,ProviderQuotaObserver,QuotaObservation} from '../pools.js';
 import { Sandbox, ExecControlUnsupportedError } from 'railway';
 import type { Component, ComponentContext } from '../../components/registry.js';
 import {
@@ -76,6 +76,52 @@ export async function completeSessions(client:RailwayClient,sandboxId:string,sig
     tokens.add(next);cursor=next;
   }
   return {sessions,enumeration_complete:false,available:true};
+}
+/** Pinned SDK 3.16.0 exposes no sandbox quota query. This shape is answered only by the
+ * simulated component fixture; live use stays QUOTA_UNQUALIFIED until an approved campaign pins it. */
+const quotaQuery='query RailwayQuota($environmentId:String!){sandboxQuota(environmentId:$environmentId){accountId environmentId limits{scope dimension limit}}}';
+const RAILWAY_QUOTA_DIMENSIONS=['SANDBOX','CPU_MILLIS','MEMORY_BYTES','DISK_BYTES'];
+export const RAILWAY_QUOTA_TTL_MS=300000;
+export async function observeRailwayQuota(client:RailwayClient,s:ProviderScope,signal?:AbortSignal):Promise<QuotaObservation[]> {
+  client.assertScope(s);
+  if(client.config.mode!=='component-fixture')
+    throw new Error('QUOTA_UNQUALIFIED: Railway quota API is unpinned in SDK 3.16.0; an approved live campaign must qualify it');
+  const data=await client.request<{sandboxQuota:unknown}>(quotaQuery,{environmentId:s.environment_id},signal);
+  const v=object(data.sandboxQuota,['accountId','environmentId','limits']);
+  if(v.accountId!==s.provider_account_id||v.environmentId!==s.environment_id||!Array.isArray(v.limits)||
+    !v.limits.length||v.limits.length>RAILWAY_QUOTA_DIMENSIONS.length*2)throw new RailwayRequestError('PROTOCOL');
+  const evidence=hash({query:quotaQuery,scope:s,response:v}),observed=new Date();
+  const observed_at=observed.toISOString(),expires_at=new Date(observed.getTime()+RAILWAY_QUOTA_TTL_MS).toISOString();
+  const seen=new Set<string>();
+  return v.limits.map(raw=>{
+    const l=object(raw,['scope','dimension','limit']);
+    if(!['ACCOUNT','ENVIRONMENT'].includes(String(l.scope))||!RAILWAY_QUOTA_DIMENSIONS.includes(String(l.dimension))||
+      typeof l.limit!=='string'||!/^(0|[1-9][0-9]{0,17})$/.test(l.limit)||seen.has(l.scope+':'+l.dimension))
+      throw new RailwayRequestError('PROTOCOL');
+    seen.add(l.scope+':'+l.dimension);
+    return {scope_kind:l.scope as 'ACCOUNT'|'ENVIRONMENT',scope_key:l.scope==='ACCOUNT'?s.provider_account_id:s.environment_id,
+      dimension:l.dimension as QuotaObservation['dimension'],limit:l.limit,observed_at,expires_at,evidence_digest:evidence,
+      basis:'PROVIDER_API',evidence_reference:'simulated:railway-component-fixture:'+evidence};
+  });
+}
+/** Approved-probe input validation for networking, quota, idle policy and the 72-hour profile.
+ * Inputs are untrusted and can never carry qualification; every dimension stays UNQUALIFIED
+ * until a later approved live campaign records evidence, so full-scale use remains blocked. */
+export function qualifyRailwayProfileInputs(client:RailwayClient,input:unknown,policies:readonly {scope:ProviderScope;idle_timeout_minutes:number}[]=[]) {
+  const v=object(input,['scope','network_isolation','idle_timeout_minutes','lifecycle_hours']);
+  const s=scope(v.scope);client.assertScope(s);
+  if(!['ISOLATED','PRIVATE'].includes(String(v.network_isolation)))throw new Error('Railway network isolation');
+  const idle=integer(v.idle_timeout_minutes,0,10080),hours=integer(v.lifecycle_hours,1,72);
+  const policy=policies.find(p=>sameScope(p.scope,s));
+  if(policies.length&&!policy)throw new Error('Railway qualification pool policy unavailable');
+  if(policy&&policy.idle_timeout_minutes!==idle)throw new Error('Railway idle policy differs from trusted runtime policy');
+  const pending=(reason:string,value:unknown)=>({input:value,status:'UNQUALIFIED' as const,reason});
+  return {scope:s,simulated:client.config.mode==='component-fixture',...client.provenance(),
+    checks:{network:pending('LIVE_ACCOUNT_NETWORK_PROBE_REQUIRED',v.network_isolation),
+      quota:pending('LIVE_QUOTA_API_UNPINNED',null),
+      idle_policy:pending('LIVE_IDLE_POLICY_PROBE_REQUIRED',idle),
+      lifecycle:pending(hours===72?'LIVE_72H_ENDURANCE_CAMPAIGN_REQUIRED':'LIVE_LIFECYCLE_CAMPAIGN_REQUIRED',hours)},
+    full_scale_use:'BLOCKED' as const,create_replay:'NEVER' as const,authority:'NONE' as const};
 }
 export type ProviderPersistenceHooks=RuntimeProviderPersistenceHooks;
 export interface RailwayAdapterDependencies {
@@ -395,7 +441,8 @@ export function createComponent(context:ComponentContext):Component {
       if(client.config.mode!=='component-fixture')throw new Error('Railway live sessions require trusted sandbox binding');
       return {...await completeSessions(client,text(v.sandbox_id),context.signal,integer(v.max_pages,1,10000)),
         ...client.provenance(),authority:'NONE'};
-    }
+    },
+    'railway.qualification.evaluate':(input,context)=>qualifyRailwayProfileInputs(configuredClient(context),input,runtime?.policies)
   }};
 }
 
@@ -525,15 +572,17 @@ function railwayCredentialResolver(authority:CredentialAuthority,hooks:ProviderP
     return {...composeEnvironment({image:{},build:{},runtime:{},process:values})};
   };
 }
-function installRailwayRuntime(context:ComponentContext):{close:()=>Promise<void>} {
+function installRailwayRuntime(context:ComponentContext):{close:()=>Promise<void>;policies:RailwayPoolPolicy[]} {
   const client=configuredClient(context),policies=railwayRuntimePolicies(context);
   const registrar=context.dependencies.require('8.2','provider.registry.v1',(v):v is {
     registerProviderAdapter:RailwayRegistrar;
     registerArtifactReferenceReader:(reader:typeof assertCompleteArtifactReferences)=>()=>void;
-    registerIsolationTransport:(provider:'railway',factory:(scope:ProviderScope)=>RailwayIsolationTransport)=>()=>void
+    registerIsolationTransport:(provider:'railway',factory:(scope:ProviderScope)=>RailwayIsolationTransport)=>()=>void;
+    registerProviderQuotaObserver:(provider:'railway',observer:ProviderQuotaObserver)=>()=>void
   }=>!!v&&typeof v==='object'&&typeof (v as {registerProviderAdapter?:unknown}).registerProviderAdapter==='function'&&
     typeof (v as {registerIsolationTransport?:unknown}).registerIsolationTransport==='function'&&
-    typeof (v as {registerArtifactReferenceReader?:unknown}).registerArtifactReferenceReader==='function');
+    typeof (v as {registerArtifactReferenceReader?:unknown}).registerArtifactReferenceReader==='function'&&
+    typeof (v as {registerProviderQuotaObserver?:unknown}).registerProviderQuotaObserver==='function');
   const credentials=context.dependencies.require('14.2','identity.credentials',isCredentialAuthority);
   const artifacts=context.dependencies.require('15.2','artifact.store.v1',isArtifactStoreCapability);
   const root=context.env.HF_RAILWAY_PROCESS_ROOT;if(!root)throw new Error('Railway process root missing');
@@ -544,6 +593,11 @@ function installRailwayRuntime(context:ComponentContext):{close:()=>Promise<void
     if(!policies.some(v=>sameScope(v.scope,s)))throw new Error('Railway isolation pool policy unavailable');
     return createRailwayIsolationTransport(client,s);
   });}catch(error){unregisterReader();void sessions.detachAll();throw error;}
+  let unregisterQuota:()=>void;
+  try{unregisterQuota=registrar.registerProviderQuotaObserver('railway',async(s,signal)=>{
+    if(!policies.some(v=>sameScope(v.scope,s)))throw new Error('Railway quota pool policy unavailable');
+    return observeRailwayQuota(client,s,signal);
+  });}catch(error){unregisterIsolation();unregisterReader();void sessions.detachAll();throw error;}
   let unregister:()=>void;
   try{unregister=registerRailwayProvider(registrar.registerProviderAdapter,client,(s,hooks)=>{
     assertInvocation(hooks.invocation);
@@ -598,6 +652,6 @@ function installRailwayRuntime(context:ComponentContext):{close:()=>Promise<void
       }
     };
   });
-  }catch(error){unregisterIsolation();unregisterReader();void sessions.detachAll();throw error;}
-  return {close:async()=>{unregister();unregisterIsolation();unregisterReader();await sessions.detachAll();}};
+  }catch(error){unregisterQuota();unregisterIsolation();unregisterReader();void sessions.detachAll();throw error;}
+  return {policies,close:async()=>{unregister();unregisterQuota();unregisterIsolation();unregisterReader();await sessions.detachAll();}};
 }
