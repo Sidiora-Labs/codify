@@ -12,7 +12,10 @@
     "railway.preparation.describe",
     "railway.preparation.reference.verify",
     "railway.preparation.restore.observe",
-    "railway.preparation.checkpoint.resolve"
+    "railway.preparation.checkpoint.resolve",
+    "railway.preparation.capture",
+    "railway.preparation.template.build",
+    "railway.preparation.sentinel.verify"
   ],
   "requires": [
     "8.1",

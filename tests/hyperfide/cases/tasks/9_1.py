@@ -12,9 +12,11 @@ import select
 import signal
 import subprocess
 import sys
+import shutil
 import tempfile
 import threading
 import time
+import uuid
 from datetime import datetime,timedelta,timezone
 
 ROOT=Path(__file__).resolve().parents[4]
@@ -25,7 +27,8 @@ SCOPE={"organisation_id":"org-1","pool_id":"pool-1","provider":"railway","provid
 RESOURCE={"native_sandbox_id":"sandbox-1","sandbox_boot_generation":"7"}
 ACTIONS=[
  "railway.preparation.describe","railway.preparation.reference.verify","railway.preparation.restore.observe",
- "railway.preparation.checkpoint.resolve","railway.profile.validate","railway.profile.observe",
+ "railway.preparation.checkpoint.resolve","railway.preparation.capture","railway.preparation.template.build",
+ "railway.preparation.sentinel.verify","railway.profile.validate","railway.profile.observe",
  "railway.process.describe","railway.process.start","railway.process.inspect","railway.process.stdin",
  "railway.process.detach","railway.process.stop","railway.process.spool.verify",
  "railway.reconciliation.create","railway.inventory.list","railway.sessions.list"
@@ -110,6 +113,10 @@ class Fixture:
     if "generateShellToken" in query:data={"generateShellToken":"fixture-jwt"}
     elif "sandboxTemplateBuild" in query:data={"sandboxTemplateBuild":{"id":"fixture-build-ID","status":"READY"}}
     elif "sandboxCheckpointCreate" in query:
+     # Simulated disk-only checkpoint: copy the sandbox disk, never its process table or runner identity.
+     disk=Path(owner.config["preparation_root"])/"sandboxes"/variables["sandboxId"]/"disk"
+     target=Path(owner.config["preparation_root"])/"checkpoint-disks"/variables["name"]
+     if disk.is_dir() and not target.exists():shutil.copytree(disk,target,symlinks=False)
      data={"sandboxCheckpointCreate":{"id":"captured-checkpoint-ID","key":variables["name"],
             "environmentId":"environment-1","createdAt":utc()}}
     elif "sandboxCheckpoints" in query:
@@ -179,7 +186,8 @@ class Service:
    for dependency in fragment["requires"]:include(dependency)
   for name in ("9.1","9.2","9.3","9.4","14.1"):include(name)
   environment={"HF_RAILWAY_CONFIG":str(fixture.config_path),"HF_RAILWAY_FIXTURE_TOKEN":"not-a-real-credential",
-               "HF_RAILWAY_PROCESS_ROOT":str(Path(directory)/"spool")}
+               "HF_RAILWAY_PROCESS_ROOT":str(Path(directory)/"spool"),
+               "HF_PREPARATION_ALLOWED_ROOT":str(Path(directory)/"prepared-input"/"allowed")}
   self.actual=identity.IdentityFixture(components=tuple(sorted(names)),extra_env=environment,service_role="provisioner")
   self.process=self.actual.child
  def call(self,component,action,payload):
@@ -243,6 +251,20 @@ const stop=async()=>{
 process.on('SIGTERM',stop);process.on('SIGINT',stop);
 server.listen(0,'127.0.0.1',()=>{save();fs.writeFileSync(readyPath,JSON.stringify({port:server.address().port}));});
 """
+def simulated_sandbox(fixture,sandbox_id,boot_id,preparation_digest,processes=()):
+ """Simulated provider sandbox view (component-fixture only; never live provider evidence)."""
+ root=Path(fixture.config["preparation_root"])/"sandboxes"/sandbox_id
+ (root/"disk").mkdir(parents=True,exist_ok=True)
+ (root/"runner.json").write_text(json.dumps({"boot_id":boot_id,"preparation_digest":preparation_digest,
+   "environment_id":fixture.config["environment_id"],"region":fixture.config["region"],"writers_stopped":True,"credentials_revoked":True}))
+ (root/"processes.json").write_text(json.dumps(list(processes)))
+ return root
+def simulated_restore(fixture,key,sandbox_id,preparation_digest):
+ """Simulated disk-only restore: checkpoint disk bytes, a fresh boot and an empty process table."""
+ root=simulated_sandbox(fixture,sandbox_id,"boot-restored-"+uuid.uuid4().hex,preparation_digest)
+ shutil.rmtree(root/"disk");shutil.copytree(Path(fixture.config["preparation_root"])/"checkpoint-disks"/key,root/"disk")
+ return root
+
 class WebSocketFixture:
  def __init__(self,directory,fixture):
   self.directory=Path(directory);self.state=self.directory/"ws-state.json";self.ready=self.directory/"ws-ready.json"
@@ -276,7 +298,12 @@ def main():
       "railway.preparation.checkpoint-id-not-key","railway.preparation.ambiguous-key","railway.preparation.cross-environment-key",
       "railway.preparation.no-mutation","railway.preparation.bounded-response-stream",
       "railway.preparation.lock-before-quiescence","railway.preparation.quiescence-through-capture",
-      "railway.preparation.release-on-refusal","railway.preparation.pinned-sdk-template","railway.preparation.recipe-mismatch","railway.preparation.same-native-id-refused","railway.preparation.expired-capture-no-effect"]
+      "railway.preparation.release-on-refusal","railway.preparation.pinned-sdk-template","railway.preparation.recipe-mismatch","railway.preparation.same-native-id-refused","railway.preparation.expired-capture-no-effect",
+      "railway.preparation.contaminated-capture-refused","railway.preparation.service-capture",
+      "railway.preparation.service-template-build","railway.preparation.service-recipe-mismatch",
+      "railway.preparation.sentinel-file-restored","railway.preparation.sentinel-process-absent",
+      "railway.preparation.sentinel-fresh-boot","railway.preparation.sentinel-alive-refused",
+      "railway.preparation.sentinel-source-boot-refused","railway.preparation.sentinel-content-mismatch-refused"]
  if sys.argv[1:]==["--inventory"]:print(json.dumps(ids[:11]+ids[22:23]+ids[11:22]+ids[23:]));return 0
  complete=False
  with tempfile.TemporaryDirectory(prefix="hyperfide-railway91-") as folder:
@@ -380,6 +407,69 @@ process.stdout.write(JSON.stringify({good,rejected,failureEvents,recipeRejected,
    check(ids[21],lambda:expect(observed["recipeRejected"],"unapproved recipe execution"))
    check(ids[23],lambda:expect(observed["expiredRejected"] and observed["expiredNoEffects"],
       "expired valid preparation reached quiescence/provider allocation"))
+   # Service path (simulated provider): sentinel process and file in the source, disk-only checkpoint, fresh restore.
+   marker="hf-sentinel-"+uuid.uuid4().hex
+   sentinel=subprocess.Popen([sys.executable,"-c","import time;time.sleep(600)",marker],stdin=subprocess.DEVNULL,
+     stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+   try:
+    source_boot="boot-source-"+uuid.uuid4().hex
+    source=simulated_sandbox(fixture,"sentinel-source",source_boot,manifest["digest"],[{"pid":sentinel.pid,"marker":marker}])
+    sentinel_bytes=os.urandom(4096)+b"sentinel"
+    (source/"disk"/"state").mkdir();(source/"disk"/"state"/"sentinel.bin").write_bytes(sentinel_bytes)
+    capture={"sandbox_id":"sentinel-source","scope":clone(SCOPE),"manifest":manifest,"candidate_path":"candidate",
+             "scan_policy":preparation.SCAN}
+    # A canary planted after manifest creation contaminates the candidate: refused before any provider request.
+    leak=prep.candidate/"leaked-credential.txt";leak.write_text("token="+preparation.SECRET+"\n")
+    before=len(fixture.requests)
+    contaminated=service.call("9.1","railway.preparation.capture",capture)
+    leak.unlink()
+    check(ids[24],lambda:(reject(contaminated),expect(len(fixture.requests)==before,"contaminated capture reached the provider"),
+      expect(not (Path(fixture.config["preparation_root"])/"checkpoints").exists(),"contaminated capture persisted")))
+    captured=service.call("9.1","railway.preparation.capture",capture)
+    def service_capture():
+     value=result(captured)
+     b=value["base"]
+     expect(value["simulated"] is True and value["mode"]=="component-fixture" and value["authority"]=="NONE",value)
+     expect(b["checkpoint"]["id"]=="captured-checkpoint-ID" and b["checkpoint"]["key"]=="hyperfide-"+manifest["digest"][7:] and
+            b["source_boot_id"]==source_boot and b["source_native_sandbox_id"]=="sentinel-source" and b["disk_only"] is True,b)
+     mutation=[r for r in fixture.requests[before:] if "sandboxCheckpointCreate" in r["query"]]
+     expect(len(mutation)==1 and mutation[0]["variables"]["sandboxId"]=="sentinel-source","checkpoint mutation")
+     persisted=json.loads((Path(fixture.config["preparation_root"])/"checkpoints"/(b["checkpoint"]["key"]+".json")).read_text())
+     expect(persisted==b,"persisted checkpoint differs")
+    check(ids[25],service_capture)
+    count=len(fixture.requests)
+    template={"candidate_path":"candidate","manifest":manifest,"scan_policy":preparation.SCAN,"scope":clone(SCOPE)}|pinned_recipe
+    check(ids[26],lambda:(expect(result(service.call("9.1","railway.preparation.template.build",template))["built"] is True,"template"),
+      expect(any("sandboxTemplateBuild" in r["query"] for r in fixture.requests[count:]),"service template build absent")))
+    check(ids[27],lambda:reject(service.call("9.1","railway.preparation.template.build",template|{"commands":["unapproved command"]})))
+    b=result(captured)["base"];key=b["checkpoint"]["key"]
+    verify={"base":b,"scope":clone(SCOPE),"preparation_digest":manifest["digest"],"child_sandbox_id":"restored-1",
+            "sentinel":{"path":"state/sentinel.bin","sha256":sha(sentinel_bytes),"process_marker":marker}}
+    simulated_restore(fixture,key,"restored-1",manifest["digest"])
+    restored=service.call("9.1","railway.preparation.sentinel.verify",verify)
+    def file_restored():
+     value=result(restored)
+     expect(value["sentinel_file"]=="IDENTICAL" and value["simulated"] is True,value)
+     expect((Path(fixture.config["preparation_root"])/"sandboxes/restored-1/disk/state/sentinel.bin").read_bytes()==sentinel_bytes,"bytes")
+    check(ids[28],file_restored)
+    def process_absent():
+     value=result(restored)
+     expect(sentinel.poll() is None,"source sentinel process must still be alive for this observation")
+     expect(value["sentinel_process"]=="ABSENT" and value["process_memory_restored"] is False,value)
+    check(ids[29],process_absent)
+    check(ids[30],lambda:(lambda v:expect(v["enrollment_required"] is True and v["authority"]=="NONE" and
+      v["boot_id"]!=source_boot and v["boot_id"].startswith("boot-restored-"),v))(result(restored)))
+    alive=simulated_restore(fixture,key,"restored-2",manifest["digest"])
+    (alive/"processes.json").write_text(json.dumps([{"pid":sentinel.pid,"marker":marker}]))
+    check(ids[31],lambda:reject(service.call("9.1","railway.preparation.sentinel.verify",verify|{"child_sandbox_id":"restored-2"})))
+    copied=simulated_restore(fixture,key,"restored-3",manifest["digest"])
+    runner=json.loads((copied/"runner.json").read_text());runner["boot_id"]=source_boot;(copied/"runner.json").write_text(json.dumps(runner))
+    check(ids[32],lambda:reject(service.call("9.1","railway.preparation.sentinel.verify",verify|{"child_sandbox_id":"restored-3"})))
+    changed=simulated_restore(fixture,key,"restored-4",manifest["digest"])
+    (changed/"disk/state/sentinel.bin").write_bytes(sentinel_bytes+b"!")
+    check(ids[33],lambda:reject(service.call("9.1","railway.preparation.sentinel.verify",verify|{"child_sandbox_id":"restored-4"})))
+   finally:
+    sentinel.kill();sentinel.wait(timeout=10)
    service.close();fixture.close();complete=True
   finally:
    if service.process.poll() is None:service.process.kill();service.process.wait()
