@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "9.3",
+  "task": "9.3",
+  "roles": [
+    "provisioner"
+  ],
+  "module": "providers/railway/processes.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "railway.process.describe",
+    "railway.process.start",
+    "railway.process.inspect",
+    "railway.process.stdin",
+    "railway.process.detach",
+    "railway.process.stop",
+    "railway.process.spool.verify"
+  ],
+  "requires": [
+    "9.2"
+  ]
+}
