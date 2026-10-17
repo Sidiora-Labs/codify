@@ -3,7 +3,7 @@
     "allowed_actions": [],
     "approved": true
   },
-  "campaign_id": "hyperfide-task-11.2-native-bootstrap-v1",
+  "campaign_id": "hyperfide-task-11.2-native-bootstrap-v1-requal-12aa390190b3",
   "case_ids": [
     "V-038",
     "V-039"
@@ -50,28 +50,28 @@
   "inputs": [
     {
       "path": "Makefile",
-      "sha256": "15a4ba0d37f9282fe0eb7b77de54de1f3c3bc5246cd283afe7fc54ad6d0f5e8b",
-      "size": 4205
+      "sha256": "40cee85c4626ae57fe8bd7332788456812e54f3f8c96fc628f814dfc8ad1e54c",
+      "size": 5022
     },
     {
       "path": "build/hyperfide-native",
-      "sha256": "68ed77a8495917080fbdda2ff963e027426230cd01dce5797e66d5f2cf9d9193",
-      "size": 396368
+      "sha256": "e9cafa47ac941c06fde622534b92fa1fc56470ebfb80a4a7f98977e24e725171",
+      "size": 574552
     },
     {
       "path": "build/hyperfide-native-registry.inc",
-      "sha256": "281b423c9b11c4dfa42b66a2634bd0159e423364d196f147c09f56d4d4eaafe1",
-      "size": 2838
+      "sha256": "a223fb3d8ab1ef79ed7a160ef3eb9afb2f9bf69128302a55740c24e25acc756f",
+      "size": 3793
     },
     {
       "path": "scripts/hyperfide-native-components.py",
-      "sha256": "5eb01214a3a91430cf2b66b2f15b40b91d06db8a87a00d88a11aca90985a23c2",
-      "size": 9165
+      "sha256": "e9d35c48c7fa582299809f03e485451ba86eb4585f9262150e38b49979ae1ef3",
+      "size": 14830
     },
     {
       "path": "src/cg.h",
-      "sha256": "6c58363f66c65e4e7f91960845596626a41abbbf966ea75e0f70523c1635cb3d",
-      "size": 93626
+      "sha256": "feb03659cfb42cfbecc796aca90b467dd954e44065b18dcc2526f8899c991e4a",
+      "size": 93698
     },
     {
       "path": "src/hyperfide/bootstrap.c",
@@ -95,8 +95,8 @@
     },
     {
       "path": "src/hyperfide/components/schema.kvx",
-      "sha256": "d93d9aa1d266794445bf1f236674319947f9f74437b5ce1528e83bbebfbf3fa1",
-      "size": 328
+      "sha256": "e543d2bbbaf1cc956101b84c55b95483f4e26c7e6a11c1ff11935621190036a0",
+      "size": 351
     },
     {
       "path": "src/hyperfide/preparation_support.h",
