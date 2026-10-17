@@ -5,13 +5,18 @@ import {FoundationError} from '../policy/programme.js';
 import {assertInvocation} from '../transport/protocol.js';
 import type {InvocationContext} from '../transport/protocol.js';
 import type {PrimaryTransaction,QuerySession} from '../storage/transactions.js';
+import {assertPrimaryTransaction} from '../storage/transactions.js';
+import {readSemanticDisposition,writeSemanticDisposition} from '../storage/dispositions.js';
 
 const MAX_OBJECT=256*1024,MAX_MANIFEST=512*1024,MAX_CHUNKS=4096;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const DIGEST=/^sha256:[0-9a-f]{64}$/;
 const BACKEND='s3-v1';
-export const ARTIFACT_ACTIONS=Object.freeze(['artifact.object.put','artifact.object.read','artifact.object.inspect','artifact.object.reconcile','artifact.manifest.commit','artifact.manifest.read','artifact.pending.list'] as const);
-type Scope={organisation_id:string;run_id:string};
+export const ARTIFACT_ACTIONS=Object.freeze(['artifact.object.put','artifact.object.read','artifact.object.inspect','artifact.object.reconcile','artifact.manifest.commit','artifact.manifest.read','artifact.pending.list','artifact.object.locate'] as const);
+export type ArtifactScope={organisation_id:string;run_id:string};
+type Scope=ArtifactScope;
+export interface ArtifactReference{artifact_id:string;receipt_id:string;digest:string;size_bytes:string}
+export interface ArtifactReceipt extends ArtifactScope{schema_version:1;receipt_id:string;artifact_id:string;digest:string;size_bytes:string;storage_backend:string;storage_key:string;completed_at:string}
 type Invocation={principal:{organisation_id:string;run_id:string;role:string};guard:(tx:QuerySession)=>Promise<void>;signal:AbortSignal};
 type RequestContext=ComponentContext&{invocation?:Invocation};
 type Retention={retention_class:string;retention_until:string|null;retention_hold:boolean};
@@ -19,7 +24,7 @@ type Artifact=Scope&Retention&{id:string;digest:string;size_bytes:string;storage
 type Chunk={sequence:number;artifact_id:string;digest:string;size_bytes:string;offset_bytes:string};
 type Manifest=Scope&{schema_version:1;kind:'chunk-manifest';expected_chunks:number;total_size_bytes:string;content_digest:string;complete:true;truncated:false;missing_ranges:never[];chunks:Chunk[]};
 type Config={endpoint:URL;region:string;bucket:string;access:string;secret:string;token:string|undefined;organisation:string;runs:ReadonlySet<string>};
-type Observation={availability:'VERIFIED';bytes:Buffer}|{availability:'ABSENT'|'UNKNOWN'};
+type Observation={availability:'VERIFIED';bytes:Buffer;etag:string|null}|{availability:'ABSENT'|'UNKNOWN'};
 const hash=(bytes:Buffer|string)=>'sha256:'+createHash('sha256').update(bytes).digest('hex');
 function fail(code:string,message:string):never{throw new FoundationError(code,message);}
 function fields(input:unknown,required:readonly string[],optional:readonly string[]=[]):Record<string,unknown>{
@@ -66,13 +71,14 @@ function encode(value:string):string{return encodeURIComponent(value).replace(/[
 /** Requests use a fixed trusted origin and never follow redirects with credentials. */
 class S3 {
  constructor(private readonly config:Config,private readonly signal:AbortSignal){}
- private async request(method:'GET'|'PUT',key:string,body?:Buffer):Promise<Response>{
+ private async request(method:'GET'|'PUT'|'DELETE',key:string,body?:Buffer,etag?:string):Promise<Response>{
  const c=this.config,now=new Date().toISOString().replace(/[:-]|\.\d{3}/g,''),day=now.slice(0,8);
  const pathname='/'+encode(c.bucket)+'/'+key.split('/').map(encode).join('/');
  const url=new URL(pathname,c.endpoint),payload=createHash('sha256').update(body??Buffer.alloc(0)).digest('hex');
  const headers:Record<string,string>={'host':url.host,'x-amz-content-sha256':payload,'x-amz-date':now};
  if(c.token)headers['x-amz-security-token']=c.token;
  if(method==='PUT')headers['if-none-match']='*';
+ if(method==='DELETE'&&etag)headers['if-match']=etag;
  const names=Object.keys(headers).sort(),canonicalHeaders=names.map(name=>name+':'+headers[name]!.trim()+'\n').join('');
  const canonical=[method,pathname,'',canonicalHeaders,names.join(';'),payload].join('\n');
  const credentialScope=day+'/'+c.region+'/s3/aws4_request';
@@ -107,11 +113,25 @@ class S3 {
  finally{reader.releaseLock();}
  const bytes=Buffer.concat(parts);
  if(received!==max||hash(bytes)!==expectedDigest)fail('ARTIFACT_INTEGRITY','Stored object checksum or length does not match');
- return {availability:'VERIFIED',bytes};
+ return {availability:'VERIFIED',bytes,etag:response.headers.get('etag')};
  }catch(error){if(error instanceof FoundationError)throw error;if(attempt===1)return {availability:'UNKNOWN'};}
  }
  return {availability:'UNKNOWN'};
  }
+ async destroy(key:string,expectedDigest:string,size:string):Promise<'ABSENT'|'UNKNOWN'>{
+ const observed=await this.observe(key,expectedDigest,size);
+ if(observed.availability==='ABSENT')return 'ABSENT';
+ if(observed.availability!=='VERIFIED')return 'UNKNOWN';
+ if(!observed.etag||!/^"[\x21\x23-\x7e]{1,1024}"$/.test(observed.etag))fail('ARTIFACT_BACKEND_PROTOCOL','Conditional destruction requires a strong opaque ETag');
+ try{
+ const response=await this.request('DELETE',key,undefined,observed.etag);await response.body?.cancel();
+ if(response.status===412||response.status===409||response.status===429||response.status>=500)return 'UNKNOWN';
+ if(!((response.status>=200&&response.status<300)||response.status===404))fail('ARTIFACT_BACKEND_REJECTED','Object backend rejected destruction');
+ }catch(error){if(error instanceof FoundationError)throw error;return 'UNKNOWN';}
+ const after=await this.observe(key,expectedDigest,size);
+ return after.availability==='ABSENT'?'ABSENT':'UNKNOWN';
+ }
+
 }
 const selected='organisation_id,run_id,id,digest,size_bytes::text,storage_backend,storage_key,status,retention_class,retention_until,retention_hold,state_version::text,completed_at';
 function iso(value:Date|string|null):string|null{return value===null?null:new Date(value).toISOString();}
@@ -121,6 +141,33 @@ function receipt(row:Artifact):unknown{
  const binding={schema_version:1,organisation_id:row.organisation_id,run_id:row.run_id,artifact_id:row.id,digest:row.digest,size_bytes:row.size_bytes,storage_backend:row.storage_backend,storage_key:row.storage_key,completed_at:iso(row.completed_at)};
  return {...binding,receipt_id:hash(JSON.stringify(binding))};
 }
+/**
+ * Pins a durable metadata binding in the caller's guarded primary transaction.
+ * Physical byte verification remains a separate artifact-store operation.
+ */
+export async function assertCompleteArtifactReferences(tx:PrimaryTransaction,scope:ArtifactScope,references:readonly ArtifactReference[]):Promise<readonly Readonly<ArtifactReceipt>[]>{
+ assertPrimaryTransaction(tx);
+ const organisation=uuid(scope.organisation_id),run=uuid(scope.run_id);
+ if(!Array.isArray(references)||references.length>4096)fail('ARTIFACT_INPUT_INVALID','Artifact reference batch exceeds the reviewed bound');
+ const expected=references.map(reference=>({artifact_id:uuid(reference.artifact_id),digest:digest(reference.digest),receipt_id:digest(reference.receipt_id),size_bytes:decimal(reference.size_bytes,9223372036854775807n)}));
+ if(!expected.length)return Object.freeze([]);
+ const ids=[...new Set(expected.map(reference=>reference.artifact_id))].sort();
+ const result=await tx.query<Artifact>('SELECT '+selected+' FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND id=ANY($3::uuid[]) ORDER BY id FOR SHARE',[organisation,run,ids]);
+ const rows=new Map(result.rows.map(row=>[row.id,row]));
+ const receipts=expected.map(reference=>{
+ const row=rows.get(reference.artifact_id);
+ if(!row||row.status!=='COMPLETE'||!row.completed_at)fail('ARTIFACT_NOT_COMPLETE','Artifact reference is unavailable');
+ if(row.digest!==reference.digest||row.size_bytes!==reference.size_bytes)fail('ARTIFACT_BINDING_CONFLICT','Artifact reference differs from immutable metadata');
+ const binding=receipt(row) as ArtifactReceipt|null;
+ if(!binding||binding.receipt_id!==reference.receipt_id)fail('ARTIFACT_BINDING_CONFLICT','Artifact receipt differs from immutable metadata');
+ return Object.freeze(binding);
+ });
+ return Object.freeze(receipts);
+}
+export async function assertCompleteArtifactReference(tx:PrimaryTransaction,scope:ArtifactScope,reference:ArtifactReference):Promise<Readonly<ArtifactReceipt>>{
+ return (await assertCompleteArtifactReferences(tx,scope,[reference]))[0]!;
+}
+
 function envelope(row:Artifact,availability:'VERIFIED'|'ABSENT'|'UNKNOWN',extra:Record<string,unknown>={}):Record<string,unknown>{
  return {outcome:availability==='VERIFIED'&&row.status==='COMPLETE'?'SUCCEEDED':'UNKNOWN',availability,artifact:publicArtifact(row),receipt:availability==='VERIFIED'?receipt(row):null,authority:'NONE',live_qualification:'NOT_EVALUATED',...extra};
 }
@@ -139,17 +186,17 @@ export class ArtifactStore{
  return scope;
  }
  private backend():S3{return new S3(this.config(),AbortSignal.any([this.context.signal,this.context.invocation?.signal??this.context.signal]));}
- private async transaction<T>(operation:(client:PrimaryTransaction)=>Promise<T>):Promise<T>{
+ private async transaction<T>(operation:(client:PrimaryTransaction)=>Promise<T>,mode:'READ'|'WRITE'='WRITE'):Promise<T>{
  const invocation=this.context.invocation;
  if(!invocation)fail('AUTH_REQUIRED','Artifact operation requires verified caller authority');
- return this.context.resources.gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:invocation.signal,guard:tx=>invocation.guard(tx)},async tx=>{
+ return this.context.resources.gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:invocation.signal,guard:async tx=>{await (mode==='WRITE'?writeSemanticDisposition:readSemanticDisposition)(tx,invocation.principal);await invocation.guard(tx);}},async tx=>{
  const result=await operation(tx);
  await invocation.guard(tx);
  return result;
  });
  }
  private async load(scope:Scope,id:string,client?:QuerySession):Promise<Artifact>{
- if(!client)return this.transaction(tx=>this.load(scope,id,tx));
+ if(!client)return this.transaction(tx=>this.load(scope,id,tx),'READ');
  const result=await client.query<Artifact>('SELECT '+selected+' FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[scope.organisation_id,scope.run_id,id]);
  const row=result.rows[0];if(!row)fail('ARTIFACT_NOT_FOUND','Artifact is not registered in this scope');
  if(row.storage_backend!==BACKEND||(row.storage_key!==keyOf(scope,row.digest)&&row.storage_key!==keyOf(scope,row.digest,true)))fail('ARTIFACT_BINDING_CONFLICT','Artifact backend binding differs');
@@ -202,7 +249,7 @@ export class ArtifactStore{
  if(observation.availability!=='VERIFIED')return envelope(row,observation.availability);
  // Manifest promotion requires validated child references; generic reconciliation cannot bypass them.
  let current=row;
- const edgeCount=await this.transaction(tx=>tx.query<{count:string}>('SELECT count(*)::text AS count FROM hyperfide.artifact_dependencies WHERE organisation_id=$1 AND run_id=$2 AND parent_artifact_id=$3',[scope.organisation_id,scope.run_id,row.id]));
+ const edgeCount=await this.transaction(tx=>tx.query<{count:string}>('SELECT count(*)::text AS count FROM hyperfide.artifact_dependencies WHERE organisation_id=$1 AND run_id=$2 AND parent_artifact_id=$3',[scope.organisation_id,scope.run_id,row.id]),'READ');
  if(operation==='reconcile'&&row.status==='PENDING'){
  if(row.storage_key===keyOf(scope,row.digest,true)||edgeCount.rows[0]!.count!=='0')fail('ARTIFACT_NOT_COMPLETE','Resume manifest commit to validate chunk closure');
  current=await this.complete(row);
@@ -253,7 +300,7 @@ export class ArtifactStore{
  if('sha256:'+hasher.digest('hex')!==manifest.content_digest)fail('ARTIFACT_INTEGRITY','Concatenated content checksum differs');
  }
  private async edges(scope:Scope,parent:string,client?:QuerySession):Promise<Chunk[]>{
- if(!client)return this.transaction(tx=>this.edges(scope,parent,tx));
+ if(!client)return this.transaction(tx=>this.edges(scope,parent,tx),'READ');
  const result=await client.query<{sequence:number;child_artifact_id:string;offset_bytes:string;size_bytes:string;digest:string}>('SELECT d.sequence,d.child_artifact_id,d.offset_bytes::text,d.size_bytes::text,a.digest FROM hyperfide.artifact_dependencies d JOIN hyperfide.artifacts a ON a.organisation_id=d.organisation_id AND a.run_id=d.run_id AND a.id=d.child_artifact_id WHERE d.organisation_id=$1 AND d.run_id=$2 AND d.parent_artifact_id=$3 ORDER BY d.sequence',[scope.organisation_id,scope.run_id,parent]);
  return result.rows.map(row=>({sequence:row.sequence,artifact_id:row.child_artifact_id,digest:row.digest,size_bytes:row.size_bytes,offset_bytes:row.offset_bytes}));
  }
@@ -282,11 +329,20 @@ export class ArtifactStore{
  });
  return envelope(row,'VERIFIED',{manifest_digest:row.digest,content_digest:manifest.content_digest,chunk_count:manifest.chunks.length});
  }
+ private async locate(input:unknown):Promise<unknown>{
+ const value=fields(input,[...scopeKeys,'digest','expected_size_bytes']),scope=this.scope(value),identity=digest(value.digest),size=decimal(value.expected_size_bytes,BigInt(MAX_MANIFEST));
+ const row=await this.transaction(async tx=>(await tx.query<Artifact>('SELECT '+selected+' FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND digest=$3',[scope.organisation_id,scope.run_id,identity])).rows[0],'READ');
+ if(!row)return {outcome:'NOT_FOUND',metadata_state:'ABSENT',availability:'NOT_EVALUATED',artifact:null,receipt:null,retry_authority:'NONE',authority:'NONE',live_qualification:'NOT_EVALUATED'};
+ if(row.size_bytes!==size)fail('ARTIFACT_BINDING_CONFLICT','Located object size differs from expected immutable identity');
+ if(row.status!=='COMPLETE')return envelope(row,'UNKNOWN',{metadata_state:'PRESENT',requires_reconciliation:row.status==='PENDING',retry_authority:'NONE'});
+ return this.object({...scope,artifact_id:row.id},'inspect');
+ }
+
  private async pending(input:unknown):Promise<unknown>{
  const value=fields(input,scopeKeys,['limit','after_artifact_id']),scope=this.scope(value),limit=value.limit??100;
  if(typeof limit!=='number'||!Number.isInteger(limit)||limit<1||limit>1000)fail('ARTIFACT_INPUT_INVALID','Invalid inventory limit');
  const after=value.after_artifact_id===undefined?null:uuid(value.after_artifact_id);
- const rows=await this.transaction(tx=>tx.query<Artifact>("SELECT "+selected+" FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND status='PENDING' AND ($3::uuid IS NULL OR id>$3::uuid) ORDER BY id LIMIT $4",[scope.organisation_id,scope.run_id,after,limit+1]));
+ const rows=await this.transaction(tx=>tx.query<Artifact>("SELECT "+selected+" FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND status='PENDING' AND ($3::uuid IS NULL OR id>$3::uuid) ORDER BY id LIMIT $4",[scope.organisation_id,scope.run_id,after,limit+1]),'READ');
  return {artifacts:rows.rows.slice(0,limit).map(publicArtifact),next_cursor:rows.rows.length>limit?rows.rows[limit-1]!.id:null,destructive_action:false,authority:'NONE',live_qualification:'NOT_EVALUATED'};
  }
  async invoke(action:string,input:unknown,context?:ComponentContext|InvocationContext):Promise<unknown>{
@@ -304,12 +360,29 @@ export class ArtifactStore{
  case 'artifact.manifest.commit':return await this.commit(input);
  case 'artifact.manifest.read':return await this.object(input,'manifest');
  case 'artifact.pending.list':return await this.pending(input);
+ case 'artifact.object.locate':return await this.locate(input);
  default:fail('ARTIFACT_INPUT_INVALID','Unknown artifact operation');
  }})();
- if(this.context.invocation)await this.transaction(async()=>undefined);
+ if(this.context.invocation)await this.transaction(async()=>undefined,'READ');
  return result;
  }catch(error){if(error instanceof FoundationError)throw error;fail('ARTIFACT_DATABASE_UNAVAILABLE','Artifact metadata operation failed; reconcile before retry');}
  }
+ async destroyTombstoned(input:unknown,context?:ComponentContext):Promise<unknown>{
+ const actor=context?context.invocation:this.context.invocation;assertInvocation(actor);
+ if(actor!==this.context.invocation)return new ArtifactStore({...this.context,invocation:actor}).destroyTombstoned(input);
+ assertInvocation(this.context.invocation);
+ const value=fields(input,[...scopeKeys,'artifact_id','gc_operation_id','expected_digest']),scope=this.scope(value),id=uuid(value.artifact_id),operation=uuid(value.gc_operation_id),expected=digest(value.expected_digest);
+ const row=await this.transaction(async tx=>{
+ const artifact=await this.load(scope,id,tx);
+ const intent=(await tx.query("SELECT * FROM hyperfide.artifact_gc_operations WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3 FOR SHARE",[scope.organisation_id,scope.run_id,operation])).rows[0];
+ if(!intent||!['REQUESTED','UNKNOWN'].includes(String(intent.state))||artifact.status!=='QUARANTINED'||intent.artifact_id!==id||artifact.digest!==expected||intent.digest!==expected||intent.storage_backend!==artifact.storage_backend||intent.storage_key!==artifact.storage_key||String(intent.size_bytes)!==artifact.size_bytes)fail('ARTIFACT_GC_AUTHORITY_INVALID','Destruction requires its matching persisted quarantine intent');
+ return artifact;
+ });
+ const observed=await this.backend().destroy(row.storage_key,row.digest,row.size_bytes);
+ await this.transaction(async()=>undefined,'READ');
+ return {outcome:observed,current_object_absent:observed==='ABSENT',physical_version_erasure:'NOT_QUALIFIED',grants_authority:false};
+ }
+
  close():void{/* Shared PostgreSQL pool lifecycle belongs to the storage resource owner. */}
 }
 export interface ArtifactStoreCapability{invoke(action:string,input:unknown,context:ComponentContext|InvocationContext):Promise<unknown>}
@@ -317,5 +390,5 @@ export function isArtifactStoreCapability(value:unknown):value is ArtifactStoreC
 export function createArtifactStore(context:ComponentContext):ArtifactStore{return new ArtifactStore(context);}
 export function createComponent(context:ComponentContext):Component{
  const store=createArtifactStore(context),actions=Object.fromEntries(ARTIFACT_ACTIONS.map(action=>[action,(input:unknown,invocationContext:ComponentContext)=>store.invoke(action,input,invocationContext)]));
- return {apiVersion:1,actions,capabilities:{'artifact.store.v1':Object.freeze({invoke:(action:string,input:unknown,ctx:ComponentContext|InvocationContext)=>store.invoke(action,input,ctx)})},close:()=>store.close()};
+ return {apiVersion:1,actions,capabilities:{'artifact.backend.v1':Object.freeze({destroyTombstoned:(input:unknown,ctx:ComponentContext)=>store.destroyTombstoned(input,ctx)}),'artifact.store.v1':Object.freeze({invoke:(action:string,input:unknown,ctx:ComponentContext|InvocationContext)=>store.invoke(action,input,ctx)})},close:()=>store.close()};
 }

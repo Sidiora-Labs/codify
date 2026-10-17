@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "id": "15.3",
+  "task": "15.3",
+  "roles": [
+    "control"
+  ],
+  "module": "artifacts/adoption.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "artifact.adoption.validate",
+    "artifact.adoption.adopt",
+    "artifact.checkpoint.register",
+    "artifact.checkpoint.import",
+    "artifact.checkpoint.inspect"
+  ],
+  "requires": [
+    "3.2",
+    "4.2",
+    "5.2",
+    "13.2",
+    "15.2"
+  ]
+}

@@ -3,7 +3,7 @@
 Import SchedulerFixture for downstream tests; import never grants authority.
 """
 from __future__ import annotations
-import concurrent.futures,copy,importlib.util,json,os,socket,sys
+import concurrent.futures,copy,importlib.util,json,os,socket,subprocess,sys
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[4]
 spec=importlib.util.spec_from_file_location("hf_packet_fixture",ROOT/"tests/hyperfide/cases/tasks/3_2.py")
@@ -18,7 +18,7 @@ def check(name,callback):
  except Exception as error:FAILED.append(name);actual=type(error).__name__+": "+str(error)
  print(json.dumps({"type":"assertion","id":name,"expected":"observed","actual":actual}),flush=True)
 class SchedulerFixture(PacketFixture):
- def __init__(self,extra_components=(),extra_setup=None,agent_limit=2,bootstrap=True):
+ def __init__(self,extra_components=(),extra_setup=None,agent_limit=2,bootstrap=True,sandbox_cpu_limit=8000,sandbox_cpu_headroom=1000,source_object_id=None):
   def setup(f):
    packet.apply_migration(f,"0005-scheduling")
    i=f.ids;f.accounts={};f.claims={}
@@ -26,6 +26,9 @@ class SchedulerFixture(PacketFixture):
    i["dispatch_consumer"]=uid()
    f.sql("INSERT INTO hyperfide.event_consumers(organisation_id,run_id,id,consumer_key) VALUES($1,$2,$3,'scheduler-dispatch')",[i["organisation"],i["run"],i["dispatch_consumer"]])
    f.env["HF_SCHEDULER_DISPATCH_CONSUMER_ID"]=i["dispatch_consumer"]
+   i["native_consumer"]=uid()
+   f.sql("INSERT INTO hyperfide.event_consumers(organisation_id,run_id,id,consumer_key) VALUES($1,$2,$3,'native-control')",[i["organisation"],i["run"],i["native_consumer"]])
+   f.env["HF_SCHEDULER_NATIVE_CONSUMER_ID"]=i["native_consumer"]
    limits={"AGENT":agent_limit,"CPU_MILLIS":8000,"MEMORY_BYTES":17179869184,"DISK_BYTES":34359738368,"BUILD":2,"TEST":2,"REVIEW":2,"INDEX":2,"INTEGRATION":2,"PREPARATION":2}
    for dimension,limit in limits.items():
     ident=uid();f.accounts[dimension]=ident
@@ -41,7 +44,10 @@ class SchedulerFixture(PacketFixture):
      policy=copy.deepcopy(f.packet_proof);policy["criteria_digest"]=criteria
      f.sql("INSERT INTO hyperfide.proof_registries(organisation_id,run_id,task_id,spec_generation,spec_revision_id,criteria_digest,registry_digest,policy) VALUES($1,$2,$3,1,$4,$5,$6,$7)",[i["organisation"],i["run"],task_id,i["spec"],criteria,identity(policy),json.dumps(policy)])
    if extra_setup:extra_setup(f)
-  super().__init__(extra_components=("5.1","5.2","5.3","5.4")+tuple(extra_components),extra_setup=setup,bootstrap=bootstrap,seed_historical_runtime=False)
+  super().__init__(extra_components=("5.1","5.2","5.3","5.4")+tuple(extra_components),extra_setup=setup,bootstrap=bootstrap,seed_historical_runtime=False,**({"source_object_id":source_object_id} if source_object_id is not None else {}))
+  # Explicit trusted fixed test envelope; not provider/kernel measurement evidence.
+  qualified=self.primary("return claims.qualifySandboxBudget(tx,data.qualification);",{"qualification":{"organisation_id":self.ids["organisation"],"sandbox_id":self.ids["sandbox"],"sandbox_boot_generation":"1","qualification_id":uid(),"evidence_digest":sha(b"explicit-fixed-test-envelope"),"source":"OPERATOR_FIXED","hard_limits":{"cpu_millis":str(sandbox_cpu_limit),"memory_bytes":"17179869184","disk_bytes":"34359738368"},"headroom":{"cpu_millis":str(sandbox_cpu_headroom),"memory_bytes":"1073741824","disk_bytes":"0"}}})
+  expect("result" in qualified,"Trusted fixture budget failed: "+json.dumps(qualified))
  def capacity(self,job="AGENT"):
   requirements=self.packet_definition["resource_requirements"]
   dimensions={"CPU_MILLIS":str(requirements["cpu_millis"]),"MEMORY_BYTES":requirements["memory_bytes"],"DISK_BYTES":requirements["disk_bytes"],job:"1"}
@@ -56,6 +62,24 @@ class SchedulerFixture(PacketFixture):
  def claim(self,name="a",request=None,lease_ms=300000):
   request=request or self.prepare_claim(name,lease_ms);result=self.ok("scheduler.claim",request,key="manager2" if name=="b" else "manager",component="5.1")
   self.claims[name]={"request":request,"result":result};return result
+ def primary(self,body,data=None):
+  """Exercise actual trusted lower APIs with a real primary brand; not a public auth substitute."""
+  script="""import fs from 'node:fs';
+import {createResourceContainer} from './services/hyperfide/dist/storage/runtime.js';
+import * as claims from './services/hyperfide/dist/scheduler/claim.js';
+import * as leases from './services/hyperfide/dist/scheduler/leases.js';
+import {ResourceScheduler} from './services/hyperfide/dist/scheduler/resources.js';
+const data=JSON.parse(fs.readFileSync(0,'utf8'));
+const resources=createResourceContainer({role:'control',env:process.env,signal:new AbortController().signal});
+try{const result=await resources.gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:3,guard:async tx=>{
+ const run=await tx.query('SELECT authority_epoch FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR SHARE',[data.scope.organisation_id,data.scope.run_id]);
+ if(run.rows[0]?.authority_epoch!==data.epoch)throw Error('Test primary epoch changed');
+}},async tx=>{"""+body+"""});
+process.stdout.write(JSON.stringify({result}));}catch(e){process.stdout.write(JSON.stringify({error:{code:e.code??'ERROR',message:e.message}}));}finally{await resources.close();}
+"""
+  payload={"scope":{"organisation_id":self.ids["organisation"],"run_id":self.ids["run"]},"epoch":self.ids["epoch"],**(data or {})}
+  result=subprocess.run(["node","--input-type=module","-e",script],input=json.dumps(payload),text=True,cwd=ROOT,env=self.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=20)
+  expect(result.returncode==0,"Trusted product API probe failed: "+result.stderr[:1500]);return json.loads(result.stdout)
  def counts(self):
   return self.sql("SELECT dimension,reserved::text,allocated::text FROM hyperfide.capacity_accounts WHERE organisation_id=$1 AND pool_id=$2 ORDER BY dimension",[self.ids["organisation"],self.ids["pool"]])
 def main():
@@ -101,6 +125,37 @@ def main():
    expect(f.sql("SELECT count(*)::int n FROM pg_database WHERE datname=$1",[db],admin=True)[0]["n"]==0,"Fixture database remains")
    with socket.socket() as sock:expect(sock.connect_ex(("127.0.0.1",port))!=0,"Listener remains")
   check("claim.cleanup.observed",cleanup)
+ q=SchedulerFixture(agent_limit=1)
+ try:
+  qa=q.prepare_claim('a');qb=q.prepare_claim('b')
+  before=q.counts()
+  def quota_race():
+   with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+    futures=[executor.submit(q.invoke,'scheduler.claim',request,key=key,component='5.1') for request,key in [(qa,'manager'),(qb,'manager2')]]
+    replies=[future.result()[1] for future in futures]
+   expect(sum(r.get('ok') is True for r in replies)==1,'Quota race granted zero or two owners')
+   expect(q.sql("SELECT count(*)::int n FROM hyperfide.attempts WHERE compute_authority='CURRENT'")[0]['n']==1,'Quota loser leaked compute ownership')
+   expect(q.sql("SELECT reserved+allocated AS occupied FROM hyperfide.capacity_accounts WHERE id=$1",[q.accounts['AGENT']])[0]['occupied']=='1','Pool exceeded its exact primary budget')
+  check('claim.concurrent.multi-manager-quota',quota_race)
+  check('claim.quota-rollback.full-vector',lambda:expect(q.sql("SELECT count(*)::int n FROM hyperfide.reservations")[0]['n']==4,'Failed quota claim leaked partial vector'))
+ finally:
+  db=q.database;path=q.path;q.close();check('claim.quota-cleanup.observed',lambda:expect(not path.exists() and q.sql("SELECT count(*)::int n FROM pg_database WHERE datname=$1",[db],admin=True)[0]['n']==0,'Quota fixture remains'))
+ local=SchedulerFixture(agent_limit=2,sandbox_cpu_limit=1500,sandbox_cpu_headroom=0)
+ try:
+  la=local.prepare_claim('a');lb=local.prepare_claim('b')
+  def sandbox_race():
+   with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+    futures=[pool.submit(local.invoke,'scheduler.claim',r,key=k,component='5.1') for r,k in [(la,'manager'),(lb,'manager2')]]
+    responses=[f.result()[1] for f in futures]
+   expect(sum(r.get('ok') is True for r in responses)==1,'A single sandbox admitted excess aggregate CPU')
+   expect(sum(r.get('error',{}).get('code')=='SANDBOX_CAPACITY_EXHAUSTED' for r in responses)==1,'Budget loser did not identify actual sandbox constraint')
+   budget=local.sql("SELECT held_cpu_millis::text cpu,held_memory_bytes::text memory FROM hyperfide.sandbox_execution_budgets WHERE sandbox_id=$1",[local.ids['sandbox']])[0]
+   expect(budget=={'cpu':'1000','memory':'2147483648'},'Failed local charge leaked multidimensional counters')
+  check('claim.concurrent.sandbox-budget',sandbox_race)
+  check('claim.sandbox.pool-budget-independent',lambda:expect(local.sql("SELECT allocated::text amount,configured_limit::text budget FROM hyperfide.capacity_accounts WHERE id=$1",[local.accounts['AGENT']])[0]=={'amount':'1','budget':'2'},'Local limit was replaced with global pool quota'))
+  check('claim.sandbox.exact-charge',lambda:expect(local.sql("SELECT count(*)::int n FROM hyperfide.sandbox_execution_charges WHERE state='HELD'")[0]['n']==1,'Failed admission left multiple per-box authorities'))
+ finally:
+  db=local.database;path=local.path;local.close();check('claim.sandbox-cleanup.observed',lambda:expect(not path.exists() and local.sql("SELECT count(*)::int n FROM pg_database WHERE datname=$1",[db],admin=True)[0]['n']==0,'Local budget fixture remains'))
  return 1 if FAILED else 0
 if __name__=="__main__":
  if "--cleanup" in sys.argv:raise SystemExit("Independent crash cleanup requires the persisted owned-resource receipt; not falsely reporting success.")

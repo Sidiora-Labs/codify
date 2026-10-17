@@ -16,7 +16,8 @@
     "artifact.object.reconcile",
     "artifact.manifest.commit",
     "artifact.manifest.read",
-    "artifact.pending.list"
+    "artifact.pending.list",
+    "artifact.object.locate"
   ],
   "requires": [
     "4.2"

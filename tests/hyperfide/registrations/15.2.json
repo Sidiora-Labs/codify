@@ -57,6 +57,9 @@
     "artifacts.manifest.promotion-bypass",
     "artifacts.http.independent-sigv4",
     "artifacts.secrets.sanitized",
+    "artifacts.object.locate-id-loss",
+    "artifacts.object.locate-absent",
+    "artifacts.object.locate-pending",
     "artifacts.auth.stdio-required",
     "artifacts.auth.forged-context",
     "artifacts.auth.revoked-mid-upload"

@@ -1,0 +1,7 @@
+[component]
+schema_version = 1
+id = "13.3"
+source = "src/hyperfide/connector_recovery.c"
+entry = "hf_component_13_3"
+actions = ["connector.recover"]
+requires = ["13.1"]

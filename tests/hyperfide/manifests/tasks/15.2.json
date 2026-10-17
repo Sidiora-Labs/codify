@@ -64,6 +64,9 @@
     "artifacts.manifest.promotion-bypass",
     "artifacts.http.independent-sigv4",
     "artifacts.secrets.sanitized",
+    "artifacts.object.locate-id-loss",
+    "artifacts.object.locate-absent",
+    "artifacts.object.locate-pending",
     "artifacts.auth.stdio-required",
     "artifacts.auth.forged-context",
     "artifacts.auth.revoked-mid-upload"
@@ -86,8 +89,8 @@
     },
     {
       "path": "services/hyperfide/components/15.2.json",
-      "sha256": "c1cddede17ff69407c190a3325bc3fa8d0cb074c04e7f08d1c00d67b88392edc",
-      "size": 457
+      "sha256": "7ab470f29929ec7dc22b0e4e70255241590b0a25ed3362978867489f1168d842",
+      "size": 487
     },
     {
       "path": "services/hyperfide/components/4.1.json",
@@ -111,18 +114,18 @@
     },
     {
       "path": "services/hyperfide/dist/artifacts/objects.d.ts",
-      "sha256": "00ab641fefc719fdea827afc0c32adb34388c4577ce667e32b6b9a7a1440bfbe",
-      "size": 1799
+      "sha256": "5c2d9ea319e4b518f621a18f8b76dd4d9e844b6f7d869d93336e7a5d2ece9a69",
+      "size": 1845
     },
     {
       "path": "services/hyperfide/dist/artifacts/objects.js",
-      "sha256": "45a470b61b2eac58ae5b7a068a986e46531a9696b73dc0ea3a96cc8dc8bdc270",
-      "size": 31435
+      "sha256": "e61dee128994c49659d18ed74ac4d806c392cb935be0c1ddc18ac971cf11d243",
+      "size": 32671
     },
     {
       "path": "services/hyperfide/dist/artifacts/objects.js.map",
-      "sha256": "148a7a4ce9a972715ecf69c6ffb6343145e5b7f5a6db7004d709a6e464788b4f",
-      "size": 30071
+      "sha256": "ffd54948947c3f577121dd4852c1b03ffbd30b1ada9c8f19620608278d44ea6f",
+      "size": 31243
     },
     {
       "path": "services/hyperfide/dist/components/registry.d.ts",
@@ -371,8 +374,8 @@
     },
     {
       "path": "services/hyperfide/src/artifacts/objects.ts",
-      "sha256": "73f619315408d44758d1f0c29fd11d4ea784ce6db5f139d7c37a0b3b0272f85a",
-      "size": 29091
+      "sha256": "04f98642e9690c2fd5646a58a9303a3410675ad9ddd8a2ee0ef6cf827e2e0c22",
+      "size": 30193
     },
     {
       "path": "services/hyperfide/src/components/registry.ts",
@@ -456,8 +459,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/15_2.py",
-      "sha256": "d8c2c85ea4e4748173517d1b5ab0ea45ac364eb07e0217f58fc681c750418025",
-      "size": 52137
+      "sha256": "15764545b61284d7bc8eee82aea806b88aca503e652e846440eb8ebe24fbfa91",
+      "size": 54584
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
@@ -476,8 +479,8 @@
     },
     {
       "path": "tests/hyperfide/registrations/15.2.json",
-      "sha256": "180a63348b77a2c26d8114faa00e6020c4c407b1ddb6a81630179c1fece3fd9c",
-      "size": 4427
+      "sha256": "cb2f508ef5a5e1ee530ba5494ba4dbc85e370d848a3f5f2e74c9c290b133a8db",
+      "size": 4543
     },
     {
       "path": "tests/hyperfide/registry.json",

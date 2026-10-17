@@ -197,7 +197,7 @@ export function gatewayFor(context:ComponentContext):Pick<TransactionGateway,'wi
   if(!resources?.gateway)fail('DEPENDENCY_UNAVAILABLE','The registered primary transaction gateway is required');
   const gateway=resources.gateway,invocation=invocationFor(context);
   return {withPrimaryTransaction:async <T>(options:Parameters<TransactionGateway['withPrimaryTransaction']>[0],operation:(tx:PrimaryTransaction)=>Promise<T>|T):Promise<T>=>{
-   return gateway.withPrimaryTransaction(options,async tx=>{
+   return gateway.withPrimaryTransaction({...options,guard:async tx=>{await invocation.guard(tx);await options.guard?.(tx);}},async tx=>{
     const scope={organisation_id:invocation.principal.organisation_id,run_id:invocation.principal.run_id};
     const key=invocation.operation.idempotency_key,name='envelope.'+invocation.payload.action;
     const payload={payload_digest:invocation.operation.payload_digest};
@@ -222,8 +222,8 @@ export function actorFor(context:ComponentContext,scope:SchedulerScope,request:R
     leader_generation:decimal(request.leader_generation,'leader_generation'),
     ...(request.package_generation===undefined?{}:{package_generation:decimal(request.package_generation,'package_generation')})};
 }
-export function dispatchRecipients(context:ComponentContext):{consumer_ids:string[]}{
-  const primary=uuid(context.env.HF_SCHEDULER_DISPATCH_CONSUMER_ID,'trusted dispatch consumer');
+export function dispatchRecipients(context:ComponentContext,kind:'dispatch'|'native'='dispatch'):{consumer_ids:string[]}{
+  const primary=uuid(kind==='native'?context.env.HF_SCHEDULER_NATIVE_CONSUMER_ID:context.env.HF_SCHEDULER_DISPATCH_CONSUMER_ID,'trusted '+kind+' consumer');
   const audit=(context.env.HF_SCHEDULER_AUDIT_CONSUMER_IDS??'').split(',').filter(Boolean)
     .map(value=>uuid(value,'trusted audit consumer'));
   return {consumer_ids:[...new Set([primary,...audit])]};
@@ -407,8 +407,8 @@ export async function requireTaskBarriers(tx:PrimaryTransaction,scope:SchedulerS
   await requireMilestone(tx,{organisation_id:scope.organisation_id,run_id:dependency.predecessor_run_id},dependency.predecessor_task_id,dependency.milestone,
    {repository_id:dependency.predecessor_repository_id,integration_ref:dependency.integration_ref});
  }
- const previous=await tx.query<{id:string}>('SELECT id FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND wave<$3 ORDER BY wave,id',
- [scope.organisation_id,scope.run_id,wave]);
+ const previous=await tx.query<{id:string}>('SELECT id FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND wave<$3 AND NOT(definition ? $4) ORDER BY wave,id',
+ [scope.organisation_id,scope.run_id,wave,'retirement']);
  for(const predecessor of previous.rows)await requireMilestone(tx,scope,predecessor.id,'QUALIFIED');
 }
 
@@ -425,6 +425,8 @@ export async function requirePacketAdmission(tx:PrimaryTransaction,input:ClaimRe
  runtime.sandbox_id!==input.sandbox_id||runtime.slot_id!==input.slot_id||runtime.sandbox_boot_generation!==input.sandbox_boot_generation||
  intent.registry_digest!==proof.registry_digest||input.package_generation!==undefined&&identity.package_generation!==input.package_generation)
   fail('EXECUTION_PACKET_MISMATCH','Prospective execution packet does not pin this exact admission');
+ const prepared=await tx.query<{preparation_digest:string|null}>('SELECT preparation_digest FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2',[input.organisation_id,input.sandbox_id]);
+ if(prepared.rows[0]?.preparation_digest!==runtime.preparation_digest)fail('PREPARATION_MISMATCH','Current sandbox preparation differs from the admitted packet');
  return packetPolicyResources(loaded.packet);
 }
 
@@ -433,6 +435,8 @@ export async function jobPolicy(tx:PrimaryTransaction,scope:SchedulerScope,task_
  'SELECT id,feature_package_id,spec_revision_id,spec_generation,criteria_digest FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR SHARE',
  [scope.organisation_id,scope.run_id,task_id]);
  const task=tasks.rows[0];if(!task)fail('TASK_MISSING','Job must bind an accepted task');
+ const retired=await tx.query("SELECT id FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND definition ? 'retirement'",[scope.organisation_id,scope.run_id,task_id]);
+ if(retired.rows.length)fail('TASK_RETIRED','Retired accepted intent cannot admit a new resource job');
  await assertNoExecutionHold(tx,scope,{package_id:task.feature_package_id,operation});
  const run=await tx.query<{state:string}>('SELECT state FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR SHARE',[scope.organisation_id,scope.run_id]);
  if(!(operation==='ADVANCE'?['READY','RUNNING','DRAINING']:['READY','RUNNING']).includes(run.rows[0]?.state??''))fail('RUN_NOT_ADMITTING','Run state does not allow this resource job');
@@ -461,15 +465,19 @@ export async function allocateReservations(tx:PrimaryTransaction,input:Scheduler
 }
 export async function assertJobReservation(tx:PrimaryTransaction,input:SchedulerScope&{
  task_id:string;job_kind:string;reservation_id:string;
-}):Promise<{request_id:string;pool_id:string;reservations:unknown[];resource_requirements:PacketResourceRequirements}>{
+}):Promise<{request_id:string;pool_id:string;reservations:unknown[];resource_requirements:PacketResourceRequirements;spec_revision_id:string;spec_generation:string;criteria_digest:string;resource_policy_digest:string}>{
  assertPrimaryTransaction(tx);await lockRun(tx,input);
  if(!['BUILD','TEST','REVIEW','INDEX','INTEGRATION','PREPARATION'].includes(input.job_kind))fail('INVALID_REQUEST','Unknown qualified job kind');
- const row=await tx.query<{request_id:string;pool_id:string}>(
- "SELECT r.request_id,w.pool_id FROM hyperfide.reservations r JOIN hyperfide.resource_waiters w ON w.organisation_id=r.organisation_id AND w.run_id=r.run_id AND w.request_id=r.request_id JOIN hyperfide.capacity_accounts a ON a.organisation_id=r.organisation_id AND a.id=r.capacity_account_id "+
+ const row=await tx.query<{request_id:string;pool_id:string;spec_revision_id:string;spec_generation:string;criteria_digest:string;resource_policy_digest:string}>(
+ "SELECT r.request_id,w.pool_id,w.spec_revision_id,w.spec_generation,w.criteria_digest,w.resource_policy_digest FROM hyperfide.reservations r JOIN hyperfide.resource_waiters w ON w.organisation_id=r.organisation_id AND w.run_id=r.run_id AND w.request_id=r.request_id JOIN hyperfide.capacity_accounts a ON a.organisation_id=r.organisation_id AND a.id=r.capacity_account_id "+
  "WHERE r.organisation_id=$1 AND r.run_id=$2 AND r.id=$3 AND w.task_id=$4 AND w.job_kind=$5 AND w.state='ADMITTED' AND r.state='ALLOCATED' AND a.dimension=$5 AND a.qualification_state='QUALIFIED'",
  [input.organisation_id,input.run_id,input.reservation_id,input.task_id,input.job_kind]);
  const selected=row.rows[0];if(!selected)fail('JOB_RESERVATION_INVALID','Job requires its own admitted allocated reservation in a qualified account');
  const policy=await jobPolicy(tx,input,input.task_id),expected=await approvedDimensions(tx,input,selected.pool_id,policy,input.job_kind);
+ const accepted=await tx.query<{spec_revision_id:string;spec_generation:string;criteria_digest:string}>('SELECT spec_revision_id,spec_generation,criteria_digest FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[input.organisation_id,input.run_id,input.task_id]);
+ if(!accepted.rows[0]||['spec_revision_id','spec_generation','criteria_digest'].some(key=>accepted.rows[0]![key as keyof typeof accepted.rows[0]]!==selected[key as 'spec_revision_id'|'spec_generation'|'criteria_digest'])||selected.resource_policy_digest!==requestDigest(policy))
+ fail('JOB_POLICY_STALE','Job reservation pins no longer match accepted task intent');
+
  const reservations=await tx.query<{id:string;capacity_account_id:string;quantity:string;state:string;qualification_state:string;live:boolean}>(
  'SELECT r.id,r.capacity_account_id,r.quantity,r.state,a.qualification_state,r.expires_at>clock_timestamp() AS live FROM hyperfide.reservations r JOIN hyperfide.capacity_accounts a ON a.organisation_id=r.organisation_id AND a.id=r.capacity_account_id WHERE r.organisation_id=$1 AND r.run_id=$2 AND r.request_id=$3 ORDER BY r.capacity_account_id FOR SHARE OF r,a',
  [input.organisation_id,input.run_id,selected.request_id]);
@@ -504,6 +512,7 @@ export async function bindJobReservation(tx:PrimaryTransaction,input:SchedulerSc
  sandbox_boot_generation:string;assignee_session_id:string;
 }):Promise<JobAllocation>{
  assertPrimaryTransaction(tx);await lockRun(tx,input);
+ await lockSandboxBudget(tx,input);
  const approved=await assertJobReservation(tx,input);
  const existing=await tx.query<{id:string;slot_id:string;sandbox_id:string;sandbox_boot_generation:string;assignee_session_id:string}>(
  'SELECT id,slot_id,sandbox_id,sandbox_boot_generation,assignee_session_id FROM hyperfide.resource_job_allocations WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3 FOR UPDATE',
@@ -520,7 +529,7 @@ export async function bindJobReservation(tx:PrimaryTransaction,input:SchedulerSc
  const current=slot.rows[0];
  if(!current||current.state!=='READY'||current.capacity_kind!==input.job_kind||current.pool_id!==approved.pool_id||current.observed_state!=='RUNNING'||current.boot_generation!==input.sandbox_boot_generation)
   fail('JOB_SLOT_UNAVAILABLE','Job slot is not a current ready slot of the declared kind in this pool');
- const roles:Record<string,string[]>={BUILD:['WORKER'],TEST:['VERIFIER'],REVIEW:['VERIFIER','COMMIT_WATCHER'],INDEX:['INDEXER'],INTEGRATION:['INTEGRATOR'],PREPARATION:['WORKER']};
+ const roles:Record<string,string[]>={BUILD:['WORKER'],TEST:['VERIFIER'],REVIEW:['VERIFIER','COMMIT_WATCHER'],INDEX:['INDEXER'],INTEGRATION:['INTEGRATOR'],PREPARATION:['WORKER','INDEXER','VERIFIER']};
  const assignee=await tx.query<{role:string;state:string;slot_id:string;sandbox_id:string;sandbox_boot_generation:string}>(
  'SELECT role,state,slot_id,sandbox_id,sandbox_boot_generation FROM hyperfide.agent_sessions WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR SHARE',
  [input.organisation_id,input.run_id,input.assignee_session_id]);
@@ -528,6 +537,7 @@ export async function bindJobReservation(tx:PrimaryTransaction,input:SchedulerSc
  if(!actor||!roles[input.job_kind]?.includes(actor.role)||!['REGISTERED','RUNNING'].includes(actor.state)||actor.slot_id!==input.slot_id||actor.sandbox_id!==input.sandbox_id||actor.sandbox_boot_generation!==input.sandbox_boot_generation)
   fail('JOB_ASSIGNEE_INVALID','Registered job assignee is not bound to this exact executor and role');
  const id=randomUUID();
+ await reserveSandboxResources(tx,{...input,request_id:approved.request_id,job_kind:input.job_kind,resources:{cpu_millis:String(approved.resource_requirements.cpu_millis),memory_bytes:approved.resource_requirements.memory_bytes,disk_bytes:approved.resource_requirements.disk_bytes}});
  await tx.query('INSERT INTO hyperfide.resource_job_allocations(organisation_id,run_id,id,request_id,task_id,reservation_id,job_kind,slot_id,sandbox_id,sandbox_boot_generation,assignee_session_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
  [input.organisation_id,input.run_id,id,approved.request_id,input.task_id,input.reservation_id,input.job_kind,input.slot_id,input.sandbox_id,input.sandbox_boot_generation,input.assignee_session_id]);
  await tx.query("UPDATE hyperfide.worker_slots SET state='ALLOCATED',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[input.organisation_id,input.slot_id]);
@@ -579,8 +589,9 @@ export async function releaseJobAllocation(tx:PrimaryTransaction,input:JobLeaseR
  if(!row||row.generation!==decimal(input.allocation_generation,'allocation_generation')||row.assignee_session_id!==uuid(input.assignee_session_id,'assignee_session_id'))
   fail('JOB_ALLOCATION_STALE','Cleanup must identify the exact job allocation and assignee');
  if(row.state!=='ACTIVE')return {allocation_id:row.id,state:row.state,resources_still_counted:row.state!=='RELEASED',replayed:true};
+ await markSandboxReleasePending(tx,{organisation_id:input.organisation_id,run_id:input.run_id,request_id:row.request_id});
  await tx.query("UPDATE hyperfide.resource_job_allocations SET state='RELEASE_PENDING',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[input.organisation_id,input.run_id,row.id]);
- await tx.query("UPDATE hyperfide.reservations SET state='RELEASE_PENDING',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3 AND state IN ('PROVISIONING','ALLOCATED')",[input.organisation_id,input.run_id,row.request_id]);
+ await tx.query("UPDATE hyperfide.reservations r SET state='RELEASE_PENDING',state_version=r.state_version+1 FROM hyperfide.capacity_accounts c WHERE r.organisation_id=$1 AND r.run_id=$2 AND r.request_id=$3 AND r.state IN ('PROVISIONING','ALLOCATED') AND c.organisation_id=r.organisation_id AND c.id=r.capacity_account_id AND c.capacity_class<>'PHYSICAL'",[input.organisation_id,input.run_id,row.request_id]);
  await tx.query("UPDATE hyperfide.worker_slots SET state='DRAINING',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2 AND sandbox_id=$3 AND boot_generation=$4 AND state='ALLOCATED'",[input.organisation_id,row.slot_id,row.sandbox_id,row.sandbox_boot_generation]);
  return {allocation_id:row.id,state:'RELEASE_PENDING',resources_still_counted:true,replayed:false};
 }
@@ -618,6 +629,7 @@ export async function claimTask(tx:PrimaryTransaction,input:ClaimRequest,actor:S
       [input.organisation_id,item.capacity_account_id]);
     if(!row.rows[0])fail('CAPACITY_ACCOUNT_MISSING','A requested capacity account does not exist');
   }
+  await lockSandboxBudget(tx,input);
   const slot=await tx.query<{state:string;capacity_kind:string;pool_id:string;boot_generation:string;observed_state:string}>(
     'SELECT w.state,w.capacity_kind,s.pool_id,s.boot_generation,s.observed_state FROM hyperfide.worker_slots w '+
     'JOIN hyperfide.sandboxes s ON s.organisation_id=w.organisation_id AND s.id=w.sandbox_id '+
@@ -643,6 +655,7 @@ export async function claimTask(tx:PrimaryTransaction,input:ClaimRequest,actor:S
   const custody=await tx.query('SELECT id FROM hyperfide.submission_custodies WHERE organisation_id=$1 AND run_id=$2 '+
     'AND task_id=$3 AND authority=\'ACTIVE\' FOR SHARE',[input.organisation_id,input.run_id,input.task_id]);
   if(custody.rows.length)fail('ACTIVE_SUBMISSION_CUSTODY','An admitted result retains coordinator ownership');
+  if(object(candidate.rows[0].definition).retirement!==undefined)fail('TASK_RETIRED','Retired accepted history cannot be claimed');
   if(!['PENDING','READY','FAILED','STALE'].includes(task.state))fail('TASK_NOT_ELIGIBLE','Task is not eligible for a new compute attempt');
   const active=await tx.query<{lease_expires_at:string}>('SELECT lease_expires_at FROM hyperfide.attempts '+
     'WHERE organisation_id=$1 AND run_id=$2 AND task_id=$3 AND compute_authority=\'CURRENT\' FOR UPDATE',
@@ -669,6 +682,8 @@ export async function claimTask(tx:PrimaryTransaction,input:ClaimRequest,actor:S
     [input.organisation_id,input.run_id,attempt_id,input.task_id,generation,input.authority_epoch,input.input_packet_digest,
       input.sandbox_id,input.slot_id,input.sandbox_boot_generation,expires]);
   const reservations=await reserveCapacity(tx,{organisation_id:input.organisation_id,run_id:input.run_id,request_id:input.request_id,attempt_id,dimensions:input.capacity,expires_at:expires});
+  await allocateReservations(tx,{organisation_id:input.organisation_id,run_id:input.run_id,reservation_ids:reservations.map(row=>uuid(object(row).id,'reservation_id'))});
+  await reserveSandboxResources(tx,{...input,job_kind:'AGENT',resources:{cpu_millis:String(policy.cpu_millis),memory_bytes:policy.memory_bytes,disk_bytes:policy.disk_bytes}});
   await tx.query('INSERT INTO hyperfide.compute_leases(organisation_id,run_id,id,attempt_id,attempt_generation,authority_epoch,'+
     'sandbox_boot_generation,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
     [input.organisation_id,input.run_id,randomUUID(),attempt_id,generation,input.authority_epoch,input.sandbox_boot_generation,expires]);
@@ -682,14 +697,120 @@ export async function claimTask(tx:PrimaryTransaction,input:ClaimRequest,actor:S
   const token:ComputeToken={organisation_id:input.organisation_id,run_id:input.run_id,task_id:input.task_id,
     attempt_id,attempt_generation:generation,authority_epoch:input.authority_epoch,sandbox_id:input.sandbox_id,
     slot_id:input.slot_id,sandbox_boot_generation:input.sandbox_boot_generation};
-  const result={token,lease_expires_at:expires,reservations};
+  const allocated=await tx.query('SELECT id,capacity_account_id,quantity,state,accounting_bucket FROM hyperfide.reservations WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3 ORDER BY capacity_account_id',[input.organisation_id,input.run_id,input.request_id]);
+  const result={token,lease_expires_at:expires,reservations:allocated.rows};
   await enqueue(tx,{organisation_id:input.organisation_id,run_id:input.run_id,id:randomUUID(),aggregate_type:'scheduler-claim',aggregate_id:input.request_id,aggregate_version:'1',
     event_type:'scheduler.dispatch.requested',payload:{token,request_id:input.request_id,input_packet_digest:input.input_packet_digest}},recipients);
   await recordOutcome(tx,input,actor.session_id,'scheduler.claim',input.request_id,input,result);
   return result;
 }
+
+export interface SandboxResourceVector {cpu_millis:string;memory_bytes:string;disk_bytes:string}
+export interface SandboxExecutor extends SchedulerScope {sandbox_id:string;sandbox_boot_generation:string;slot_id:string}
+export interface SandboxBudgetQualification {
+ organisation_id:string;sandbox_id:string;sandbox_boot_generation:string;qualification_id:string;evidence_digest:string;
+ source:'PROVIDER_OBSERVATION'|'OPERATOR_FIXED';hard_limits:SandboxResourceVector;headroom:SandboxResourceVector;
+}
+function sandboxVector(value:SandboxResourceVector,headroom=false):SandboxResourceVector{
+ const row=fields(value,['cpu_millis','memory_bytes','disk_bytes']);
+ return {cpu_millis:decimal(row.cpu_millis,'cpu_millis',headroom),memory_bytes:decimal(row.memory_bytes,'memory_bytes',headroom),disk_bytes:decimal(row.disk_bytes,'disk_bytes',true)};
+}
+/** Trusted producer seam. Callers must retain an actual measured or operator-qualified
+ * fixed envelope; a requested provider size or nominal profile is not evidence. */
+export async function qualifySandboxBudget(tx:PrimaryTransaction,input:SandboxBudgetQualification):Promise<unknown>{
+ assertPrimaryTransaction(tx);uuid(input.organisation_id,'organisation_id');uuid(input.sandbox_id,'sandbox_id');
+ decimal(input.sandbox_boot_generation,'sandbox_boot_generation');uuid(input.qualification_id,'qualification_id');digest(input.evidence_digest,'evidence_digest');
+ if(!['PROVIDER_OBSERVATION','OPERATOR_FIXED'].includes(input.source))fail('SANDBOX_BUDGET_UNQUALIFIED','An actual trusted hard-limit qualification is required');
+ const hard=sandboxVector(input.hard_limits),headroom=sandboxVector(input.headroom,true);
+ for(const name of ['cpu_millis','memory_bytes','disk_bytes'] as const)
+  if(BigInt(headroom[name])>BigInt(hard[name])||(name!=='disk_bytes'&&headroom[name]===hard[name]))fail('SANDBOX_HEADROOM_INVALID','Reserved headroom must leave usable capacity');
+ const boot=await tx.query<{boot_generation:string}>('SELECT boot_generation FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2 FOR SHARE',[input.organisation_id,input.sandbox_id]);
+ if(boot.rows[0]?.boot_generation!==input.sandbox_boot_generation)fail('STALE_SANDBOX_BOOT','Budget qualification must bind the observed current boot');
+ const old=await tx.query('SELECT * FROM hyperfide.sandbox_execution_budgets WHERE organisation_id=$1 AND sandbox_id=$2 AND sandbox_boot_generation=$3 FOR UPDATE',[input.organisation_id,input.sandbox_id,input.sandbox_boot_generation]);
+ if(old.rows[0]){
+  const row=old.rows[0];
+  if(row.qualification_id!==input.qualification_id||row.evidence_digest!==input.evidence_digest||row.qualification_source!==input.source||
+   Object.keys(hard).some(k=>row['hard_'+k]!==hard[k as keyof SandboxResourceVector]||row['headroom_'+k]!==headroom[k as keyof SandboxResourceVector]))
+   fail('SANDBOX_BUDGET_CONFLICT','A boot hard-limit qualification is immutable; reconcile an actual changed resource envelope explicitly');
+  return {qualified:true,replayed:true};
+ }
+ await tx.query('INSERT INTO hyperfide.sandbox_execution_budgets(organisation_id,sandbox_id,sandbox_boot_generation,qualification_id,evidence_digest,qualification_source,hard_cpu_millis,hard_memory_bytes,hard_disk_bytes,headroom_cpu_millis,headroom_memory_bytes,headroom_disk_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
+ [input.organisation_id,input.sandbox_id,input.sandbox_boot_generation,input.qualification_id,input.evidence_digest,input.source,hard.cpu_millis,hard.memory_bytes,hard.disk_bytes,headroom.cpu_millis,headroom.memory_bytes,headroom.disk_bytes]);
+ return {qualified:true,replayed:false};
+}
+export async function lockSandboxBudget(tx:PrimaryTransaction,input:SandboxExecutor):Promise<void>{
+ assertPrimaryTransaction(tx);await lockRun(tx,input);
+ const sandbox=await tx.query<{pool_id:string;boot_generation:string}>('SELECT pool_id,boot_generation FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2 FOR SHARE',[input.organisation_id,input.sandbox_id]);
+ if(sandbox.rows[0]?.boot_generation!==input.sandbox_boot_generation)fail('STALE_SANDBOX_BOOT','Execution budget belongs to another sandbox boot');
+ await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[input.organisation_id+':'+sandbox.rows[0].pool_id+':resource-admission']);
+ const budget=await tx.query('SELECT qualification_id FROM hyperfide.sandbox_execution_budgets WHERE organisation_id=$1 AND sandbox_id=$2 AND sandbox_boot_generation=$3 FOR UPDATE',[input.organisation_id,input.sandbox_id,input.sandbox_boot_generation]);
+ if(!budget.rows[0])fail('SANDBOX_BUDGET_UNQUALIFIED','No trusted usable execution budget is qualified for this exact sandbox boot');
+ const slot=await tx.query('SELECT id FROM hyperfide.worker_slots WHERE organisation_id=$1 AND sandbox_id=$2 AND id=$3 AND boot_generation=$4',[input.organisation_id,input.sandbox_id,input.slot_id,input.sandbox_boot_generation]);
+ if(!slot.rows[0])fail('JOB_SLOT_UNAVAILABLE','Execution budget must bind a registered exact-boot slot');
+}
+export async function reserveSandboxResources(tx:PrimaryTransaction,input:SandboxExecutor&{
+ request_id:string;attempt_id?:string;job_kind:string;resources:SandboxResourceVector;
+}):Promise<unknown>{
+ await lockSandboxBudget(tx,input);uuid(input.request_id,'request_id');
+ if(!['AGENT','CHILD','BUILD','TEST','REVIEW','INDEX','INTEGRATION','PREPARATION'].includes(input.job_kind))fail('INVALID_REQUEST','Unknown sandbox execution job kind');
+ const resources=sandboxVector(input.resources);
+ const old=await tx.query('SELECT * FROM hyperfide.sandbox_execution_charges WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3 FOR UPDATE',[input.organisation_id,input.run_id,input.request_id]);
+ if(old.rows[0]){
+  const row=old.rows[0];
+  if(row.sandbox_id!==input.sandbox_id||row.sandbox_boot_generation!==input.sandbox_boot_generation||row.slot_id!==input.slot_id||row.attempt_id!==(input.attempt_id??null)||row.job_kind!==input.job_kind||Object.keys(resources).some(k=>row[k]!==resources[k as keyof SandboxResourceVector]))fail('IDEMPOTENCY_CONFLICT','Sandbox execution request has different immutable resource bindings');
+  if(row.state!=='HELD')fail('SANDBOX_CHARGE_REVOKED','Released or uncertain execution cannot acquire fresh authority through replay');
+  return {charge_id:row.id,generation:row.generation,replayed:true};
+ }
+ const counter=await tx.query('UPDATE hyperfide.sandbox_execution_budgets SET held_cpu_millis=held_cpu_millis+$4::bigint,held_memory_bytes=held_memory_bytes+$5::bigint,held_disk_bytes=held_disk_bytes+$6::bigint,state_version=state_version+1 WHERE organisation_id=$1 AND sandbox_id=$2 AND sandbox_boot_generation=$3 AND held_cpu_millis+$4::bigint<=hard_cpu_millis-headroom_cpu_millis AND held_memory_bytes+$5::bigint<=hard_memory_bytes-headroom_memory_bytes AND held_disk_bytes+$6::bigint<=hard_disk_bytes-headroom_disk_bytes RETURNING qualification_id',
+ [input.organisation_id,input.sandbox_id,input.sandbox_boot_generation,resources.cpu_millis,resources.memory_bytes,resources.disk_bytes]);
+ if(!counter.rows[0])fail('SANDBOX_CAPACITY_EXHAUSTED','Aggregate sandbox execution would exceed the qualified hard limit minus reserved headroom');
+ const id=randomUUID();
+ await tx.query('INSERT INTO hyperfide.sandbox_execution_charges(organisation_id,run_id,id,request_id,sandbox_id,sandbox_boot_generation,slot_id,attempt_id,job_kind,cpu_millis,memory_bytes,disk_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
+ [input.organisation_id,input.run_id,id,input.request_id,input.sandbox_id,input.sandbox_boot_generation,input.slot_id,input.attempt_id??null,input.job_kind,resources.cpu_millis,resources.memory_bytes,resources.disk_bytes]);
+ return {charge_id:id,generation:'1',replayed:false};
+}
+export async function markSandboxReleasePending(tx:PrimaryTransaction,input:SchedulerScope&{request_id?:string;attempt_id?:string}):Promise<void>{
+ assertPrimaryTransaction(tx);
+ if((input.request_id===undefined)===(input.attempt_id===undefined))fail('INVALID_REQUEST','Exact request or attempt identity is required for logical release');
+ await tx.query("UPDATE hyperfide.sandbox_execution_charges SET state='RELEASE_PENDING',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND state='HELD' AND (($3::uuid IS NOT NULL AND request_id=$3) OR ($4::uuid IS NOT NULL AND attempt_id=$4))",
+ [input.organisation_id,input.run_id,input.request_id??null,input.attempt_id??null]);
+}
+export async function assertSandboxReservation(tx:PrimaryTransaction,input:SchedulerScope&{reservation_id:string}):Promise<unknown>{
+ assertPrimaryTransaction(tx);
+ const row=await tx.query("SELECT c.*,b.qualification_id,b.evidence_digest,(b.hard_cpu_millis-b.headroom_cpu_millis)::text AS usable_cpu_millis,(b.hard_memory_bytes-b.headroom_memory_bytes)::text AS usable_memory_bytes,(b.hard_disk_bytes-b.headroom_disk_bytes)::text AS usable_disk_bytes FROM hyperfide.reservations r JOIN hyperfide.sandbox_execution_charges c ON c.organisation_id=r.organisation_id AND c.run_id=r.run_id AND c.request_id=r.request_id JOIN hyperfide.sandbox_execution_budgets b ON b.organisation_id=c.organisation_id AND b.sandbox_id=c.sandbox_id AND b.sandbox_boot_generation=c.sandbox_boot_generation JOIN hyperfide.sandboxes s ON s.organisation_id=c.organisation_id AND s.id=c.sandbox_id AND s.boot_generation=c.sandbox_boot_generation WHERE r.organisation_id=$1 AND r.run_id=$2 AND r.id=$3 AND r.state='ALLOCATED' AND c.state='HELD' FOR SHARE OF c,b,s",
+ [input.organisation_id,input.run_id,input.reservation_id]);
+ if(!row.rows[0])fail('SANDBOX_CHARGE_UNAVAILABLE','Current native execution requires the exact held per-boot sandbox resource charge');
+ const r=row.rows[0];
+ return {charge_id:r.id,generation:r.generation,request_id:r.request_id,organisation_id:r.organisation_id,run_id:r.run_id,sandbox_id:r.sandbox_id,sandbox_boot_generation:r.sandbox_boot_generation,slot_id:r.slot_id,attempt_id:r.attempt_id,job_kind:r.job_kind,resources:{cpu_millis:r.cpu_millis,memory_bytes:r.memory_bytes,disk_bytes:r.disk_bytes},usable_limits:{cpu_millis:r.usable_cpu_millis,memory_bytes:r.usable_memory_bytes,disk_bytes:r.usable_disk_bytes},qualification_id:r.qualification_id,evidence_digest:r.evidence_digest};
+}
+export async function readCurrentComputeToken(tx:PrimaryTransaction,input:SchedulerScope&{task_id:string}):Promise<ComputeToken|null>{
+ assertPrimaryTransaction(tx);await lockRun(tx,input);
+ const rows=await tx.query<{task_id:string;attempt_id:string;attempt_generation:string;authority_epoch:string;sandbox_id:string;slot_id:string;sandbox_boot_generation:string}>(
+ "SELECT a.task_id,a.id AS attempt_id,a.generation AS attempt_generation,a.authority_epoch,a.sandbox_id,a.slot_id,a.sandbox_boot_generation FROM hyperfide.tasks t JOIN hyperfide.attempts a ON a.organisation_id=t.organisation_id AND a.run_id=t.run_id AND a.id=t.current_attempt_id AND a.generation=t.generation WHERE t.organisation_id=$1 AND t.run_id=$2 AND t.id=$3 AND a.compute_authority='CURRENT'",[input.organisation_id,input.run_id,input.task_id]);
+ return rows.rows[0]?{organisation_id:input.organisation_id,run_id:input.run_id,...rows.rows[0]}:null;
+}
+
+export async function releaseSandboxCharges(tx:PrimaryTransaction,scope:SchedulerScope,request_ids:string[]):Promise<void>{
+ assertPrimaryTransaction(tx);
+ for(const request of [...new Set(request_ids)].sort()){
+  const charges=await tx.query('SELECT * FROM hyperfide.sandbox_execution_charges WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3 FOR UPDATE',[scope.organisation_id,scope.run_id,request]);
+  const row=charges.rows[0];if(!row||row.state==='RELEASED')continue;
+  if(row.state!=='RELEASE_PENDING')fail('RELEASE_NOT_PENDING','Sandbox execution retains logical authority');
+  const debt=await tx.query<{total:string;unreleased:string}>("SELECT count(*)::text total,count(*) FILTER(WHERE r.state<>'RELEASED')::text unreleased FROM hyperfide.reservations r JOIN hyperfide.capacity_accounts a ON a.organisation_id=r.organisation_id AND a.id=r.capacity_account_id WHERE r.organisation_id=$1 AND r.run_id=$2 AND r.request_id=$3 AND a.capacity_class<>'PHYSICAL'",[scope.organisation_id,scope.run_id,request]);
+  if(debt.rows[0]!.total==='0'||debt.rows[0]!.unreleased!=='0')continue;
+  const changed=await tx.query('UPDATE hyperfide.sandbox_execution_budgets SET held_cpu_millis=held_cpu_millis-$4::bigint,held_memory_bytes=held_memory_bytes-$5::bigint,held_disk_bytes=held_disk_bytes-$6::bigint,state_version=state_version+1 WHERE organisation_id=$1 AND sandbox_id=$2 AND sandbox_boot_generation=$3 AND held_cpu_millis>=$4::bigint AND held_memory_bytes>=$5::bigint AND held_disk_bytes>=$6::bigint RETURNING qualification_id',[scope.organisation_id,row.sandbox_id,row.sandbox_boot_generation,row.cpu_millis,row.memory_bytes,row.disk_bytes]);
+  if(!changed.rows[0])fail('ACCOUNTING_INCONSISTENT','Exact sandbox charge is not covered by its counter');
+  await tx.query("UPDATE hyperfide.sandbox_execution_charges SET state='RELEASED',released_at=clock_timestamp(),state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[scope.organisation_id,scope.run_id,row.id]);
+ }
+}
+
+export async function inspectSandboxCharge(tx:PrimaryTransaction,input:SchedulerScope&{request_id:string}):Promise<Record<string,unknown>|null>{
+ assertPrimaryTransaction(tx);
+ const result=await tx.query('SELECT * FROM hyperfide.sandbox_execution_charges WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3 FOR SHARE',[input.organisation_id,input.run_id,uuid(input.request_id,'request_id')]);
+ const r=result.rows[0];return r?{charge_id:r.id,generation:r.generation,request_id:r.request_id,organisation_id:r.organisation_id,run_id:r.run_id,sandbox_id:r.sandbox_id,sandbox_boot_generation:r.sandbox_boot_generation,slot_id:r.slot_id,attempt_id:r.attempt_id,job_kind:r.job_kind,state:r.state,resources:{cpu_millis:r.cpu_millis,memory_bytes:r.memory_bytes,disk_bytes:r.disk_bytes},execution_authority:false}:null;
+}
 export function createComponent(context:ComponentContext):Component{
-  return {apiVersion:1,capabilities:{'scheduler.allocations.v1':Object.freeze({assertJobReservation,allocateReservations,bindJobReservation,readJobAllocation,renewJobAllocation,releaseJobAllocation,validateResourceVector}),'scheduler.controls.v1':Object.freeze({applyExecutionControl,assertNoExecutionHold}),'scheduler.claims.v1':Object.freeze({claimTask,reserveCapacity,requireSchedulerAuthority})},actions:{
+  return {apiVersion:1,capabilities:{'scheduler.allocations.v1':Object.freeze({assertJobReservation,allocateReservations,bindJobReservation,readJobAllocation,renewJobAllocation,releaseJobAllocation,validateResourceVector}),'scheduler.controls.v1':Object.freeze({applyExecutionControl,assertNoExecutionHold}),'scheduler.claims.v1':Object.freeze({claimTask,reserveCapacity,requireSchedulerAuthority,readCurrentComputeToken}),'scheduler.sandbox-budget.v1':Object.freeze({qualifySandboxBudget,lockSandboxBudget,reserveSandboxResources,markSandboxReleasePending,assertSandboxReservation,inspectSandboxCharge})},actions:{
     'scheduler.claim':async (value,context)=>{
       const input=parseClaim(value),actor=actorFor(context,input,object(value));
       return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal,guard:tx=>invocationFor(context).guard(tx)},

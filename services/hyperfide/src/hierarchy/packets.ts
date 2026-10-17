@@ -32,10 +32,23 @@ function resourceRequirements(value:unknown):Record<string,unknown>{
 }
 
 
+
+/** Metadata integrity only; actual filesystem verification remains the preparation service's job. */
+function manifestMetadata(value:unknown){
+ if(!object(value)||(value.schema_version!==1&&value.schema_version!==2))return refuse('ENVIRONMENT_PROFILE_INVALID','Supported complete preparation manifest required');
+ const keys=value.schema_version===1?['schema_version','profile','files','directories','scan','digest']:['schema_version','profile','files','directories','symlinks','hardlinks','scan','digest'];
+ const manifest=record(value,keys);
+ if(!Array.isArray(manifest.files)||!Array.isArray(manifest.directories)||!object(manifest.scan)||(manifest.schema_version===2&&(!Array.isArray(manifest.symlinks)||!Array.isArray(manifest.hardlinks))))
+  return refuse('ENVIRONMENT_PROFILE_INVALID','Complete preparation inventory arrays required');
+ const {digest:preparationDigest,...body}=manifest;
+ if(hash(body)!==digest(preparationDigest))return refuse('ENVIRONMENT_PROFILE_INVALID','Complete raw preparation manifest body differs from its digest');
+ return manifest;
+}
+
 async function preparationManifest(tx:QuerySession,organisationId:string,profileId:string){
  const profiles=await tx.query('SELECT content_digest,manifest FROM hyperfide.environment_profiles WHERE organisation_id=$1 AND id=$2',[organisationId,profileId]);
  const row=profiles.rows[0];if(!row||!object(row.manifest))return refuse('ENVIRONMENT_PROFILE_REQUIRED','An immutable preparation manifest is required');
- const manifest=row.manifest,profile=validateProfile(manifest.profile);
+ const manifest=manifestMetadata(row.manifest),profile=validateProfile(manifest.profile);
  const clock=await tx.query('SELECT clock_timestamp() AS now');
  if(Date.parse(profile.policy.expires_at)<=new Date(clock.rows[0]!.now).getTime())return refuse('ENVIRONMENT_PROFILE_EXPIRED','Preparation profile expired before planning');
  if(manifest.schema_version!==1||!Array.isArray(manifest.files)||!Array.isArray(manifest.directories)||!object(manifest.scan)||manifest.digest!==row.content_digest)return refuse('ENVIRONMENT_PROFILE_INVALID','Stored preparation manifest identity is invalid');
@@ -96,15 +109,19 @@ export async function readExecutionPacket(tx:QuerySession,input:{organisation_id
 export async function validateExecutionInputs(tx:PrimaryTransaction,input:{organisation_id:string;run_id:string;digest:string}){
  const loaded=await loadExecutionPacket(tx,input),m=loaded.packet.mandatory;
  if(!object(m)||!object(m.identity)||!object(m.runtime)||!object(m.inputs)||!Array.isArray(m.inputs.repositories)||!object(m.inputs.graph))return refuse('PACKET_INPUTS_MISSING','Admission requires complete immutable runtime/source inputs');
+ const currentTask=await tx.query("SELECT t.spec_revision_id,t.spec_generation::text,t.criteria_digest,r.authority_epoch FROM hyperfide.tasks t JOIN hyperfide.runs r ON r.organisation_id=t.organisation_id AND r.id=t.run_id WHERE t.organisation_id=$1 AND t.run_id=$2 AND t.id=$3 FOR SHARE OF t,r",[uuid(input.organisation_id),uuid(input.run_id),uuid(m.identity.task_id)]);
+ const current=currentTask.rows[0];
+ if(!current||current.spec_revision_id!==m.identity.spec_revision_id||current.spec_generation!==m.identity.spec_generation||current.criteria_digest!==m.identity.criteria_digest||current.authority_epoch!==m.identity.authority_epoch)
+  return refuse('EXECUTION_INPUTS_STALE','Current task acceptance or platform epoch differs from immutable packet inputs');
  const prepared=await preparationManifest(tx,uuid(input.organisation_id),uuid(m.runtime.environment_profile_id));
  if(prepared.preparation_digest!==m.runtime.preparation_digest||hash(prepared.declared_profile)!==hash(m.runtime.declared_profile))return refuse('EXECUTION_INPUTS_STALE','Accepted environment manifest differs from immutable packet inputs');
- const graph=m.inputs.graph,checked=['IMMUTABLE_PACKET','ACCEPTED_ENVIRONMENT_MANIFEST'];
+ const graph=m.inputs.graph,checked=['IMMUTABLE_PACKET','CURRENT_ACCEPTED_TASK','CURRENT_AUTHORITY_EPOCH','ACCEPTED_ENVIRONMENT_MANIFEST'];
  if(graph.required){
   const source=await import(new URL('../graph/publication.js',import.meta.url).href);
   if(typeof source.loadGraphSnapshot!=='function')return refuse('GRAPH_INPUT_UNAVAILABLE','Actual current graph eligibility loader is unavailable');
   const current=await source.loadGraphSnapshot(tx,{organisation_id:uuid(input.organisation_id),run_id:uuid(input.run_id),authority_epoch:uuid(m.identity.authority_epoch)},uuid(graph.manifest_id),
    m.inputs.repositories.map(value=>{if(!object(value))return refuse('PACKET_INPUTS_MISSING','Invalid immutable repository pin');return {repository_id:uuid(value.repository_id),source_object_id:text(value.source_object_id,64),overlay_digest:null};}));
-  const exact=['manifest_digest','source_manifest_digest','input_digest','parser_digest','schema_digest','config_digest','source_set','file_coverage','source_coverage'];
+  const exact=['manifest_digest','source_manifest_digest','input_digest','parser_digest','schema_digest','config_digest','source_set','file_coverage','source_coverage','semantic_projection_complete','unprojected_semantic_edge_count','unresolved_reference_count'];
   if(!Array.isArray(current.source_coverage)||current.source_coverage.length<1||current.source_coverage.length>64||exact.some(key=>canonical(current[key])!==canonical(graph[key])))
    return refuse('EXECUTION_INPUTS_STALE','Current required graph provenance differs from the exact immutable packet inputs');
   checked.push('CURRENT_REQUIRED_GRAPH_ARTIFACTS');
@@ -115,11 +132,8 @@ export async function validateExecutionInputs(tx:PrimaryTransaction,input:{organ
 
 /** Pure hashes of supplied prepared bytes. The caller must establish provenance and readiness. */
 export function derivePreparedEnvironmentRoles(manifest:unknown,context:unknown){
- if(!object(manifest)||manifest.schema_version!==1||!Array.isArray(manifest.files)||!Array.isArray(manifest.directories)||!object(manifest.scan))
-  return refuse('ENVIRONMENT_PROFILE_INVALID','Complete immutable preparation manifest required');
- const {digest:preparationDigest,...body}=manifest;
- if(hash(body)!==digest(preparationDigest))return refuse('ENVIRONMENT_PROFILE_INVALID','Preparation manifest bytes differ from their digest');
- const profile=validateProfile(manifest.profile),ctx=record(context,['execution_profile','resource_requirements','policy_digest']);
+ const prepared=manifestMetadata(manifest),preparationDigest=digest(prepared.digest);
+ const profile=validateProfile(prepared.profile),ctx=record(context,['execution_profile','resource_requirements','policy_digest']);
  const execution=record(ctx.execution_profile,['connector','model_profile_ref','credential_profile_ref','timeout_seconds']);
  if(!['codex','claude-code'].includes(String(execution.connector)))return refuse('EXECUTION_PROFILE_INVALID','An explicit frontier execution profile is required');
  text(execution.model_profile_ref);text(execution.credential_profile_ref);
@@ -224,10 +238,11 @@ export function createComponent(context:ComponentContext):Component {
     const graphModule=await import(new URL('../graph/publication.js',import.meta.url).href);
     if(typeof graphModule.loadGraphSnapshot!=='function')return refuse('GRAPH_INPUT_UNAVAILABLE','Actual guarded graph snapshot loader is unavailable');
     const graph=await graphModule.loadGraphSnapshot(tx,{organisation_id:a.organisation_id,run_id:a.run_id,authority_epoch:a.authority_epoch},graphId,repos.rows.map(r=>({repository_id:r.repository_id,source_object_id:r.source_object_id,overlay_digest:null})));
-    if(!Array.isArray(graph.source_coverage)||graph.source_coverage.length<1||graph.source_coverage.length>64)return refuse('GRAPH_INPUT_UNAVAILABLE','Published graph lacks exact bundle-to-logical-source coverage');
+    if(!Array.isArray(graph.source_coverage)||graph.source_coverage.length<1||graph.source_coverage.length>64||typeof graph.semantic_projection_complete!=='boolean')return refuse('GRAPH_INPUT_UNAVAILABLE','Published graph lacks exact source or semantic projection coverage');
+    decimal(graph.unprojected_semantic_edge_count,true);decimal(graph.unresolved_reference_count,true);
     graphInputs={required:true,manifest_id:graphId,manifest_digest:digest(graph.manifest_digest),source_manifest_digest:digest(graph.source_manifest_digest),
      input_digest:digest(graph.input_digest),parser_digest:digest(graph.parser_digest),schema_digest:digest(graph.schema_digest),config_digest:digest(graph.config_digest),
-     source_set:graph.source_set,file_coverage:graph.file_coverage,source_coverage:graph.source_coverage};
+     source_set:graph.source_set,file_coverage:graph.file_coverage,source_coverage:graph.source_coverage,semantic_projection_complete:graph.semantic_projection_complete,unprojected_semantic_edge_count:graph.unprojected_semantic_edge_count,unresolved_reference_count:graph.unresolved_reference_count};
    }else{
     if(graphPolicy.manifest_id!==null)return refuse('GRAPH_INPUT_REQUIRED','Non-required graph policy cannot substitute a graph manifest');
     graphInputs={required:false,manifest_id:null,reason:text(graphPolicy.reason,4096)};

@@ -1,3 +1,5 @@
+import {markSandboxReleasePending} from './claim.js';
+import {loadExecutionPacket} from '../hierarchy/packets.js';
 import {randomUUID} from 'node:crypto';
 import type {Component,ComponentContext} from '../components/registry.js';
 import type {PrimaryTransaction} from '../storage/transactions.js';
@@ -32,6 +34,7 @@ export async function assertCurrentCompute(tx:PrimaryTransaction,token:ComputeTo
   if(!run.rows[0]||run.rows[0].authority_epoch!==token.authority_epoch)
     fail('STALE_AUTHORITY_EPOCH','Compute token does not belong to the active run epoch');
   const operation=options.operation??'ADVANCE';
+  if(options.allowExpired&&operation!=='CLEANUP')fail('INVALID_REQUEST','Expired authority may only be inspected for cleanup');
   if(operation!=='CLEANUP'&&!(['RENEWAL','CHECKPOINT'].includes(operation)?['READY','RUNNING','DRAINING','PAUSING','PAUSED']:['READY','RUNNING','DRAINING']).includes(run.rows[0].state))
     fail('RUN_NOT_EXECUTING','Run state does not permit this compute operation');
   const boot=await tx.query<{boot_generation:string;preparation_digest:string|null}>('SELECT boot_generation,preparation_digest FROM hyperfide.sandboxes '+
@@ -42,6 +45,8 @@ export async function assertCurrentCompute(tx:PrimaryTransaction,token:ComputeTo
     "SELECT a.id FROM hyperfide.slot_allocations a JOIN hyperfide.worker_slots w ON w.organisation_id=a.organisation_id AND w.id=a.slot_id AND w.sandbox_id=a.sandbox_id AND w.boot_generation=a.sandbox_boot_generation WHERE a.organisation_id=$1 AND a.run_id=$2 AND a.attempt_id=$3 AND a.attempt_generation=$4 AND a.slot_id=$5 AND a.sandbox_id=$6 AND a.sandbox_boot_generation=$7 AND a.state='ACTIVE' AND w.state='ALLOCATED' FOR UPDATE OF a,w",
     [token.organisation_id,token.run_id,token.attempt_id,token.attempt_generation,token.slot_id,token.sandbox_id,token.sandbox_boot_generation]);
   if(allocations.rows.length!==1)fail('COMPUTE_ALLOCATION_INVALID','Current compute requires its exact active slot allocation');
+  const charge=await tx.query("SELECT id FROM hyperfide.sandbox_execution_charges WHERE organisation_id=$1 AND run_id=$2 AND attempt_id=$3 AND slot_id=$4 AND sandbox_id=$5 AND sandbox_boot_generation=$6 AND job_kind='AGENT' AND state='HELD'",[token.organisation_id,token.run_id,token.attempt_id,token.slot_id,token.sandbox_id,token.sandbox_boot_generation]);
+  if(charge.rows.length!==1)fail('COMPUTE_SANDBOX_BUDGET_INVALID','Current compute requires its exact held per-sandbox charge');
   const tasks=await tx.query<{current_attempt_id:string|null;generation:string;feature_package_id:string;spec_revision_id:string;spec_generation:string;criteria_digest:string}>(
     'SELECT current_attempt_id,generation,feature_package_id,spec_revision_id,spec_generation,criteria_digest FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE',
     [token.organisation_id,token.run_id,token.task_id]);
@@ -74,6 +79,12 @@ export async function assertCurrentCompute(tx:PrimaryTransaction,token:ComputeTo
     '$1::timestamptz=$2::timestamptz AS same_expiry',[lease.expires_at,attempt.lease_expires_at]);
   if(!clock.rows[0]!.same_expiry)fail('AUTHORITY_INCONSISTENT','Attempt and compute lease expiries do not agree');
   if(!options.allowExpired&&!clock.rows[0]!.live)fail('COMPUTE_LEASE_EXPIRED','An expired compute lease cannot renew or submit');
+  const packet=object((await loadExecutionPacket(tx,{organisation_id:token.organisation_id,run_id:token.run_id,digest:attempt.input_packet_digest})).packet);
+  const identity=object(object(packet.mandatory).identity);
+  if(object(object(packet.mandatory).runtime).preparation_digest!==boot.rows[0]!.preparation_digest)
+   fail('STALE_PREPARATION','Current sandbox preparation differs from accepted compute inputs');
+  if(identity.task_id!==token.task_id||identity.attempt_id!==token.attempt_id||identity.attempt_generation!==token.attempt_generation||identity.spec_revision_id!==task.spec_revision_id||identity.spec_generation!==task.spec_generation||identity.criteria_digest!==task.criteria_digest)
+   fail('STALE_TASK_SPEC','Compute packet no longer matches accepted task intent');
   return {...token,compute_lease_id:lease.id,lease_expires_at:lease.expires_at,
     primary_now:clock.rows[0]!.primary_now,feature_package_id:task.feature_package_id,
     input_packet_digest:attempt.input_packet_digest,spec_revision_id:task.spec_revision_id,
@@ -110,6 +121,7 @@ export async function renewCompute(tx:PrimaryTransaction,token:ComputeToken,leas
 export async function releaseCompute(tx:PrimaryTransaction,token:ComputeToken,
     disposition:{execution_state:'SUBMITTED'|'CANCELLED'}):Promise<void>{
   await assertCurrentCompute(tx,token,{allowExpired:disposition.execution_state==='CANCELLED',operation:disposition.execution_state==='CANCELLED'?'CLEANUP':'ADVANCE'});
+  await markSandboxReleasePending(tx,{organisation_id:token.organisation_id,run_id:token.run_id,attempt_id:token.attempt_id});
   await tx.query('UPDATE hyperfide.attempts SET compute_authority=\'RELEASED\',execution_state=$4,state_version=state_version+1 '+
     'WHERE organisation_id=$1 AND run_id=$2 AND id=$3',
     [token.organisation_id,token.run_id,token.attempt_id,disposition.execution_state]);
@@ -159,6 +171,7 @@ export async function fenceCompute(tx:PrimaryTransaction,token:ComputeToken,opti
   if(!due.rows[0]?.expired)return {fenced:false,reason:'LEASE_CURRENT',resource_disposition:'UNCHANGED'};
  }
  const authority=options.reason==='EXPIRED'?'EXPIRED':'REVOKED';
+ await markSandboxReleasePending(tx,{organisation_id:token.organisation_id,run_id:token.run_id,attempt_id:token.attempt_id});
  await tx.query('UPDATE hyperfide.attempts SET compute_authority=$4,execution_state=$5,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3',
  [token.organisation_id,token.run_id,token.attempt_id,authority,options.reason==='STOP'?'CANCELLED':'FAILED']);
  await tx.query("UPDATE hyperfide.compute_leases SET state=$4,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND attempt_id=$3 AND state='ACTIVE'",
@@ -215,7 +228,7 @@ export function createComponent(context:ComponentContext):Component{
           [token.organisation_id,token.run_id,token.task_id]);
         const result={token,cancel_requested:true,termination_confirmed:false,resource_disposition:'RELEASE_PENDING'};
         await enqueue(tx,{organisation_id:token.organisation_id,run_id:token.run_id,id:randomUUID(),aggregate_type:'scheduler-cancel',
-          aggregate_id:request,aggregate_version:'1',event_type:'scheduler.compute.cancel.requested',payload:result},dispatchRecipients(context));
+          aggregate_id:request,aggregate_version:'1',event_type:'scheduler.compute.cancel.requested',payload:result},dispatchRecipients(context,'native'));
         await recordOutcome(tx,token,actor.session_id,'scheduler.cancel',request,input,result);return result;
       });
     },
@@ -225,7 +238,7 @@ export function createComponent(context:ComponentContext):Component{
       const actor=actorFor(context,scope,input);
       return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal,guard:tx=>invocationFor(context).guard(tx)},
         tx=>expireCompute(tx,scope,actor,uuid(input.authority_epoch,'authority_epoch'),
-          input.limit===undefined?100:boundedInteger(input.limit,'limit',1,1000),dispatchRecipients(context)));
+          input.limit===undefined?100:boundedInteger(input.limit,'limit',1,1000),dispatchRecipients(context,'native')));
     }
   }};
 }

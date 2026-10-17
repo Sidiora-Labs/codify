@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "variant": "task:15.1",
+  "task": "15.1",
+  "scope": "task-component",
+  "cases": [
+    "V-012",
+    "V-043"
+  ],
+  "assertion_ids": [
+    "checkpoint.capture.actual-native-dispatch",
+    "checkpoint.capture.no-authority",
+    "checkpoint.identity.actual-capsule-digest",
+    "checkpoint.identity.manifest-bound",
+    "checkpoint.identity.repository",
+    "checkpoint.identity.source-head-base",
+    "checkpoint.identity.environment-inputs",
+    "checkpoint.identity.recovery-packet",
+    "checkpoint.privacy.git-config",
+    "checkpoint.privacy.ignored-credentials",
+    "checkpoint.privacy.runtime-location",
+    "checkpoint.scope.ignored-explicit",
+    "checkpoint.consistency.claim-bounded",
+    "checkpoint.export.actual-byte-roundtrip",
+    "checkpoint.export.offset-refused",
+    "checkpoint.export.bounds-refused",
+    "checkpoint.export.end-refused",
+    "checkpoint.restore.actual-process",
+    "checkpoint.restore.binary-worktree",
+    "checkpoint.restore.binary-staging",
+    "checkpoint.restore.untracked-bytes",
+    "checkpoint.restore.file-modes",
+    "checkpoint.restore.directory-modes",
+    "checkpoint.restore.empty-directory",
+    "checkpoint.restore.nested-paths",
+    "checkpoint.restore.safe-symlink",
+    "checkpoint.restore.unstaged-deletion",
+    "checkpoint.restore.staged-deletion",
+    "checkpoint.restore.git-status-equivalence",
+    "checkpoint.restore.no-session-revival",
+    "checkpoint.restore.existing-destination",
+    "checkpoint.restore.wrong-repository",
+    "checkpoint.restore.wrong-environment",
+    "checkpoint.path.parent-escape",
+    "checkpoint.path.absolute",
+    "checkpoint.path.request-root-override",
+    "checkpoint.request.duplicate-fields",
+    "checkpoint.identity.invalid-uuid",
+    "checkpoint.identity.branch-mismatch",
+    "checkpoint.privacy.session-token-refused",
+    "checkpoint.authority.receipt-refused",
+    "checkpoint.authority.missing-trusted-root",
+    "checkpoint.restore.escape-refused",
+    "checkpoint.capture.replay-content-identity",
+    "checkpoint.integrity.corrupted-object",
+    "checkpoint.integrity.truncated-object",
+    "checkpoint.integrity.missing-object",
+    "checkpoint.integrity.malformed-envelope",
+    "checkpoint.integrity.tree-path-escape",
+    "checkpoint.identity.same-branch-distinct-repositories",
+    "checkpoint.source.fifo-refused",
+    "checkpoint.source.hardlink-refused",
+    "checkpoint.source.symlink-escape-refused",
+    "checkpoint.source.secret-path-refused",
+    "checkpoint.source.tracked-secret-refused",
+    "checkpoint.source.submodule-refused",
+    "checkpoint.source.file-bound",
+    "checkpoint.source.lfs-refused",
+    "checkpoint.source.concurrent-capture-lock",
+    "checkpoint.source.spool-recursion-refused",
+    "checkpoint.source.live-writer-instability",
+    "checkpoint.durable.actual-supervisor-object-roundtrip"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/15_1.py"
+  ],
+  "timeout_seconds": 240,
+  "required_env": [
+    "DATABASE_URL"
+  ],
+  "fixtures": [
+    "build/hyperfide-native",
+    "services/hyperfide/dist/control.js"
+  ],
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "identity.fixture.https"
+  ],
+  "resources": [
+    {
+      "id": "hf-task-15.1-database",
+      "kind": "postgresql-database",
+      "scope": "task15.1-dedicated"
+    }
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/15_1.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "required_artifacts": [
+    "checkpoint/database-absence.json",
+    "checkpoint/roundtrip-observations.json"
+  ],
+  "source_files": [
+    "Makefile",
+    "src/cg.h",
+    "src/sha256.c",
+    "scripts/hyperfide-native-components.py",
+    "src/hyperfide/checkpoint.c",
+    "src/hyperfide/component_main.c",
+    "src/hyperfide/components.h",
+    "src/hyperfide/components/schema.kvx",
+    "src/hyperfide/components/15.1.kvx",
+    "build/hyperfide-native",
+    "build/hyperfide-native-registry.inc",
+    "services/hyperfide/package.json",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/tsconfig.json",
+    "tests/hyperfide/support/identity_fixture.py",
+    "tests/hyperfide/cases/tasks/15_2.py",
+    "tests/hyperfide/cases/tasks/15_1.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py"
+  ],
+  "source_roots": [
+    "src/hyperfide",
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ]
+}
