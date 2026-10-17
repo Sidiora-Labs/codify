@@ -277,6 +277,9 @@ int  cg_schema_upgrade(Cg *cg);
  * is the built-in default. Paths are root-relative and normalized. */
 #define CG_CONFIG_FILE "hyperfide.kvx"
 #define CG_LEGACY_CONFIG_FILE "codify.kvx"
+/* the basename of the file this tree actually reads: hyperfide.kvx, or
+ * codify.kvx while the legacy file is the selected one (26.3 migration) */
+const char *config_file_name(const char *root);
 int hyperfide_environment_aliases(void);
 enum { CFG_SYNC_AUTO, CFG_PATH_SPEC, CFG_PATH_CONTEXT, CFG_PATH_SKILLS,
        CFG_PATH_CODEMAP, CFG_INDEX_WORKERS,

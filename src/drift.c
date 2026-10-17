@@ -146,7 +146,8 @@ static bool drift_exempt(const char *tree, const char *path) {
            !strncmp(path, ".codify/", 8) ||
            (!strncmp(path, ctx, nc) && path[nc] == '/') ||
            !strncmp(path, ".codegraph/", 11) || !strcmp(path, ".gitignore") ||
-           !strcmp(path, CG_CONFIG_FILE);
+           !strcmp(path, CG_CONFIG_FILE) ||
+           !strcmp(path, CG_LEGACY_CONFIG_FILE);
 }
 
 static bool drift_in_touches(const char *path, char **touches, int nt) {

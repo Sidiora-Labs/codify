@@ -199,7 +199,7 @@ int syncgate_worker_request(const char *root, const SysInfo *si, int flag,
     int n = config_parse_workers(getenv("CG_INDEX_WORKERS"));
     if (n > 0) { *origin = "CG_INDEX_WORKERS"; return n; }
     n = root ? config_index_workers(root) : 0;
-    if (n > 0) { *origin = CG_CONFIG_FILE; return n; }
+    if (n > 0) { *origin = config_file_name(root); return n; }
     *origin = "machine";
     return si->workers;
 }

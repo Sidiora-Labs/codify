@@ -208,14 +208,16 @@ int cmd_check(Cg *cg, bool json, bool strict)
         if (nconfig) {
             warnings++;
             sb_printf(&rep, "  warn  %d %s problem(s) — defaults used "
-                      "(cg config check):\n", nconfig, CG_CONFIG_FILE);
+                      "(cg config check):\n", nconfig,
+                      config_file_name(cg->root));
             for (char *line = ct.p, *nl; line && *line; line = nl) {
                 nl = strchr(line, '\n');
                 if (nl) *nl++ = 0;
                 sb_printf(&rep, "        %s\n", line);
             }
         } else {
-            sb_printf(&rep, "  ok    %s is valid\n", CG_CONFIG_FILE);
+            sb_printf(&rep, "  ok    %s is valid\n",
+                      config_file_name(cg->root));
         }
         sb_free(&ct);
     }
@@ -526,7 +528,7 @@ int cmd_brief(Cg *cg, bool json)
         if (!config_auto_sync(cg->root))
             sb_printf(&b, "sync: auto-sync is off ([sync] auto = false in "
                       "%s) — the graph may be stale; run `cg sync` after "
-                      "edits\n", CG_CONFIG_FILE);
+                      "edits\n", config_file_name(cg->root));
         if (cm >= 0)
             sb_printf(&b, "codemap: %s (%s)\n", cm_path,
                       cm == 0 ? "current" : cm == 1

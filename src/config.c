@@ -554,6 +554,17 @@ static CfgNode *cfg_cache;
 static pthread_mutex_t cfg_mu = PTHREAD_MUTEX_INITIALIZER;
 static bool cfg_quiet;
 
+/* Labels name the file that was read, not the canonical spelling: a tree
+ * still on codify.kvx is told about codify.kvx (origin columns, cg check,
+ * cg info, config check). */
+static const char *cfg_file_name(const CgConfig *c) {
+    const char *slash = strrchr(c->file, '/');
+    return slash ? slash + 1 : c->file;
+}
+const char *config_file_name(const char *root) {
+    return cfg_file_name(config_load(root));
+}
+
 const CgConfig *config_load(const char *root) {
     char key[4096];
     snprintf(key, sizeof key, "%s", root && root[0] ? root : ".");
@@ -831,7 +842,7 @@ static void cfg_setting_json(const CgConfig *c, int i, StrBuf *b) {
     else if (CFG_KEYS[i].type == CFG_LIST) sb_puts(b, "[]");
     else sb_json_str(b, CFG_KEYS[i].dflt);
     sb_printf(b, ",\"origin\":\"%s\"}",
-              c->from_file[i] ? CG_CONFIG_FILE : "default");
+              c->from_file[i] ? cfg_file_name(c) : "default");
 }
 
 static int cfg_list(const char *root, bool json) {
@@ -859,7 +870,7 @@ static int cfg_list(const char *root, bool json) {
             snprintf(dotted, sizeof dotted, "%s.%s", CFG_KEYS[i].section,
                      CFG_KEYS[i].key);
             sb_printf(&b, "  %-14s %-24s %s\n", dotted, cfg_value(&c, i),
-                      c.from_file[i] ? CG_CONFIG_FILE : "default");
+                      c.from_file[i] ? cfg_file_name(&c) : "default");
         }
         if (is.n)
             sb_printf(&b, "%d problem(s) — `cg config check` lists them\n",
@@ -986,8 +997,10 @@ static int cfg_set(const char *root, const char *dotted, const char *value) {
     config_selected_path(root,path,sizeof path);
     struct stat st;
     if (stat(path, &st) != 0) {
-        static const char head[] = "# codify.kvx — project configuration for "
-                                   "Codify. Every key is optional.\n";
+        /* an absent file is created under the canonical name */
+        static const char head[] = "# " CG_CONFIG_FILE " — project "
+                                   "configuration for Hyperfide. Every key "
+                                   "is optional.\n";
         if (write_entire_file(path, head, sizeof head - 1) != 0) {
             fprintf(stderr, "cg config: cannot write %s\n", path);
             return 1;
@@ -1038,10 +1051,10 @@ int cmd_config(int argc, char **argv, bool json) {
         } else if (warn[0]) {
             printf("warning: %s\n", warn);
         } else if (config_load(root)->present)
-            printf("%s/%s: ok\n", root, CG_CONFIG_FILE);
+            printf("%s/%s: ok\n", root, config_file_name(root));
         else
             printf("%s/%s: absent — every setting is the default\n", root,
-                   CG_CONFIG_FILE);
+                   config_file_name(root));
         sb_free(&t); sb_free(&j);
         return n ? 1 : 0;
     }
