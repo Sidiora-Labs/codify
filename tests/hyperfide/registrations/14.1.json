@@ -49,6 +49,8 @@
     "identity.delegate.current-implementation-worker",
     "identity.delegate.released-worker-mutation-denied",
     "identity.expiry.after-row-lock",
+    "identity.expiry.before-row-lock",
+    "identity.expiry.revoked-credential",
     "identity.expiry.after-global-authority-lock",
     "identity.main.missing-real-verifier-refused",
     "identity.main.nonoperator-refused",
