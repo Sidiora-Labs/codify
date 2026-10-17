@@ -12,6 +12,9 @@
     "hierarchy.supervisor.register",
     "hierarchy.supervisor.select",
     "hierarchy.child.register",
+    "hierarchy.child.usage.observe",
+    "hierarchy.child.release",
+    "hierarchy.child.verify",
     "hierarchy.adoption.propose",
     "hierarchy.adoption.acknowledge",
     "hierarchy.adoption.inspect"

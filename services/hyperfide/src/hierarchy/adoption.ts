@@ -10,21 +10,23 @@ import type {Component,ComponentContext} from '../components/registry.js';
 import type {PrimaryTransaction} from '../storage/transactions.js';
 import {assertPrimaryTransaction} from '../storage/transactions.js';
 import {object} from '../policy/programme.js';
-import {gateway,trustedActor,operation,ready,record,uuid,decimal,text,refuse,requireAuthority,hierarchyReadGuard,leadership,hash,digest,canonical} from './packages.js';
+import {gateway,trustedActor,operation,ready,record,uuid,decimal,text,strings,refuse,requireAuthority,hierarchyReadGuard,hierarchyWriteGuard,leadership,hash,digest,canonical} from './packages.js';
+import type {TrustedActor,Scope} from './packages.js';
 import {validateExecutionInputs} from './packets.js';
 import {parseComputeToken,assertCurrentCompute} from '../scheduler/leases.js';
-import {dimensions,validateResourceVector,reserveCapacity,lockSandboxBudget,reserveSandboxResources,inspectSandboxCharge} from '../scheduler/claim.js';
+import {dimensions,validateResourceVector,reserveCapacity,lockSandboxBudget,reserveSandboxResources,inspectSandboxCharge,markSandboxReleasePending} from '../scheduler/claim.js';
 const CHECKSUM='sha256:'+createHash('sha256').update(readFileSync(new URL('../../migrations/0034-child-sessions.sql',import.meta.url))).digest('hex');
+const TABLES=['hierarchy_supervisor_registrations','hierarchy_child_registrations','hierarchy_child_reservations','hierarchy_leadership_selections','hierarchy_child_usage','hierarchy_child_releases','hierarchy_adoptions','hierarchy_adoption_acknowledgements'];
 async function schema(tx:PrimaryTransaction):Promise<void>{
  await ready(tx);
- const found=await tx.query("SELECT count(*)::int AS n FROM information_schema.tables WHERE table_schema='hyperfide' AND table_name=ANY($1::text[])",[['hierarchy_supervisor_registrations','hierarchy_child_registrations','hierarchy_child_reservations','hierarchy_leadership_selections']]);
+ const found=await tx.query("SELECT count(*)::int AS n FROM information_schema.tables WHERE table_schema='hyperfide' AND table_name=ANY($1::text[])",[TABLES]);
  const provenance=await tx.query("SELECT 1 FROM hyperfide.schema_migrations WHERE version=34 AND name='0034-child-sessions' AND checksum=$1",[CHECKSUM]);
  let runnerChecksum:string;
  try{runnerChecksum='sha256:'+createHash('sha256').update(readFileSync(new URL('../../migrations/0012-runner-registry.sql',import.meta.url))).digest('hex');}
  catch{return refuse('HIERARCHY_ADOPTION_SCHEMA_REQUIRED','Trusted runner prelaunch migration bytes are absent');}
  const runner=await tx.query("SELECT 1 FROM hyperfide.schema_migrations WHERE version=12 AND name='0012-runner-registry' AND checksum=$1",[runnerChecksum]);
  const prelaunch=await tx.query("SELECT is_nullable FROM information_schema.columns WHERE table_schema='hyperfide' AND table_name='agent_sessions' AND column_name='native_session_id'");
- if(found.rows[0]?.n!==4||!provenance.rowCount||!runner.rowCount||prelaunch.rows[0]?.is_nullable!=='YES')return refuse('HIERARCHY_ADOPTION_SCHEMA_REQUIRED','Apply trusted child-session and runner prelaunch migrations first');
+ if(found.rows[0]?.n!==TABLES.length||!provenance.rowCount||!runner.rowCount||prelaunch.rows[0]?.is_nullable!=='YES')return refuse('HIERARCHY_ADOPTION_SCHEMA_REQUIRED','Apply trusted child-session and runner prelaunch migrations first');
 }
 function name(value:unknown):string{
  const s=text(value,128);if(!/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(s))return refuse('INVALID_REQUEST','Expected a bounded runtime profile reference');return s;
@@ -33,18 +35,100 @@ async function currentManager(tx:PrimaryTransaction,scope:{organisation_id:strin
  const rows=await tx.query('SELECT manager_session_id FROM hyperfide.feature_packages WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR SHARE',[scope.organisation_id,scope.run_id,packageId]);
  if(!rows.rows[0]?.manager_session_id)return refuse('PACKAGE_UNAVAILABLE','The task has no accountable current manager');return uuid(rows.rows[0].manager_session_id);
 }
+interface ChildState {row:Record<string,any>;reservations:Record<string,any>[];charge:Record<string,unknown>|null;release:Record<string,any>|null;refusal:[string,string]|null}
+/** Reads one registered descendant and the exact capacity it still holds; null when never registered. */
+async function childState(tx:PrimaryTransaction,org:string,run:string,child:string):Promise<ChildState|null>{
+ const rows=await tx.query('SELECT c.*,c.package_generation::text,c.attempt_generation::text,c.sandbox_boot_generation::text,c.created_at::text,s.native_session_id,s.state FROM hyperfide.hierarchy_child_registrations c JOIN hyperfide.agent_sessions s ON s.organisation_id=c.organisation_id AND s.run_id=c.run_id AND s.id=c.child_session_id WHERE c.organisation_id=$1 AND c.run_id=$2 AND c.child_session_id=$3 FOR SHARE OF s',[org,run,child]);
+ if(!rows.rows[0])return null;
+ const row=rows.rows[0];
+ const reservations=await tx.query('SELECT r.id,r.request_id,r.capacity_account_id,r.quantity::text,r.state,r.attempt_id,r.expires_at::text FROM hyperfide.hierarchy_child_reservations l JOIN hyperfide.reservations r ON r.organisation_id=l.organisation_id AND r.run_id=l.run_id AND r.id=l.reservation_id WHERE l.organisation_id=$1 AND l.run_id=$2 AND l.child_session_id=$3 ORDER BY r.capacity_account_id FOR SHARE OF r',[org,run,child]);
+ const released=await tx.query('SELECT observed_state,reason,released_by_credential_id,released_at::text FROM hyperfide.hierarchy_child_releases WHERE organisation_id=$1 AND run_id=$2 AND child_session_id=$3',[org,run,child]);
+ const charge=await inspectSandboxCharge(tx,{organisation_id:org,run_id:run,request_id:uuid(row.reservation_request_id)});
+ let refusal:[string,string]|null=null;
+ if(released.rows[0])refusal=['CHILD_RELEASED','The descendant was released and holds no execution authority'];
+ else if(!reservations.rowCount||reservations.rows.some(r=>!['PROVISIONING','ALLOCATED'].includes(String(r.state))))refusal=['CHILD_CAPACITY_RELEASED','The descendant no longer holds its charged resource dimensions'];
+ else if(!charge||charge.state!=='HELD'||charge.charge_id!==row.sandbox_charge_id||charge.job_kind!=='CHILD'||charge.attempt_id!==row.attempt_id||charge.sandbox_id!==row.sandbox_id||charge.slot_id!==row.slot_id||charge.sandbox_boot_generation!==row.sandbox_boot_generation)
+  refusal=['CHILD_SANDBOX_CAPACITY_UNAVAILABLE','The descendant lacks its exact held physical executor charge'];
+ return {row,reservations:reservations.rows,charge,release:released.rows[0]??null,refusal};
+}
 export async function childRegistration(tx:PrimaryTransaction,input:{organisation_id:string;run_id:string;child_session_id:string}):Promise<Record<string,unknown>>{
  assertPrimaryTransaction(tx);await schema(tx);
  const org=uuid(input.organisation_id),run=uuid(input.run_id),child=uuid(input.child_session_id);
- const rows=await tx.query('SELECT c.*,c.package_generation::text,c.attempt_generation::text,c.sandbox_boot_generation::text,s.native_session_id,s.state FROM hyperfide.hierarchy_child_registrations c JOIN hyperfide.agent_sessions s ON s.organisation_id=c.organisation_id AND s.run_id=c.run_id AND s.id=c.child_session_id WHERE c.organisation_id=$1 AND c.run_id=$2 AND c.child_session_id=$3 FOR SHARE OF s',[org,run,child]);
- if(!rows.rows[0])return refuse('CHILD_REGISTRATION_REQUIRED','No charged native descendant registration exists');
- const reservations=await tx.query('SELECT r.* FROM hyperfide.hierarchy_child_reservations l JOIN hyperfide.reservations r ON r.organisation_id=l.organisation_id AND r.run_id=l.run_id AND r.id=l.reservation_id WHERE l.organisation_id=$1 AND l.run_id=$2 AND l.child_session_id=$3 ORDER BY r.capacity_account_id FOR SHARE OF r',[org,run,child]);
- if(!reservations.rowCount||reservations.rows.some(r=>!['PROVISIONING','ALLOCATED'].includes(String(r.state))))return refuse('CHILD_CAPACITY_RELEASED','The descendant no longer holds its charged resource dimensions');
- const row=rows.rows[0],charge=await inspectSandboxCharge(tx,{organisation_id:org,run_id:run,request_id:uuid(row.reservation_request_id)});
- if(!charge||charge.state!=='HELD'||charge.charge_id!==row.sandbox_charge_id||charge.job_kind!=='CHILD'||charge.attempt_id!==row.attempt_id||charge.sandbox_id!==row.sandbox_id||charge.slot_id!==row.slot_id||charge.sandbox_boot_generation!==row.sandbox_boot_generation)
-  return refuse('CHILD_SANDBOX_CAPACITY_UNAVAILABLE','The descendant lacks its exact held physical executor charge');
- return {...row,reservations:reservations.rows,sandbox_charge:charge,launch_authority:false};
+ const found=await childState(tx,org,run,child);
+ if(!found)return refuse('CHILD_REGISTRATION_REQUIRED','No charged native descendant registration exists');
+ if(found.refusal)return refuse(...found.refusal);
+ return {...found.row,reservations:found.reservations,sandbox_charge:found.charge,launch_authority:false};
 }
+/** Keeps a descendant's charged capacity expiry no earlier than its parent's current compute lease. */
+export async function alignChildCapacity(tx:PrimaryTransaction,input:{organisation_id:string;run_id:string;child_session_id:string;lease_expires_at:string}):Promise<number>{
+ assertPrimaryTransaction(tx);
+ const updated=await tx.query("UPDATE hyperfide.reservations r SET expires_at=$4::timestamptz,state_version=r.state_version+1 FROM hyperfide.hierarchy_child_reservations l WHERE l.organisation_id=$1 AND l.run_id=$2 AND l.child_session_id=$3 AND r.organisation_id=l.organisation_id AND r.run_id=l.run_id AND r.id=l.reservation_id AND r.state IN ('PROVISIONING','ALLOCATED') AND r.expires_at<$4::timestamptz RETURNING r.id",
+  [uuid(input.organisation_id),uuid(input.run_id),uuid(input.child_session_id),text(input.lease_expires_at,64)]);
+ return updated.rows.length;
+}
+function childToken(row:Record<string,any>):ComputeToken{
+ return {organisation_id:row.organisation_id,run_id:row.run_id,task_id:row.task_id,attempt_id:row.attempt_id,attempt_generation:row.attempt_generation,authority_epoch:row.authority_epoch,sandbox_id:row.sandbox_id,slot_id:row.slot_id,sandbox_boot_generation:row.sandbox_boot_generation};
+}
+
+const LIVE=['REGISTERED','RUNNING','DISCONNECTED'];
+export interface Descendant {
+ session_id:string;kind:'WORKER'|'CHILD';parent_session_id:string|null;task_id:string;package_id:string;attempt_id:string;attempt_generation:string;
+ sandbox_id:string|null;slot_id:string|null;sandbox_boot_generation:string|null;state:string;native_session_id:string|null;
+ status:'ACCOUNTED'|'RELEASED'|'STALE'|'UNACCOUNTED';reason:string|null;
+}
+/** Every live worker seat attached to a package attempt, classified by the capacity that accounts for it. */
+async function liveDescendants(tx:PrimaryTransaction,scope:Scope,filter:{package_ids?:string[];session_id?:string}):Promise<Descendant[]>{
+ const rows=await tx.query("SELECT s.id AS session_id,s.parent_session_id,p.role AS parent_role,p.state AS parent_state,s.state,s.native_session_id,s.attempt_id,a.generation::text AS attempt_generation,a.compute_authority,a.sandbox_id AS attempt_sandbox_id,a.slot_id AS attempt_slot_id,a.sandbox_boot_generation::text AS attempt_boot,s.sandbox_id,s.slot_id,s.sandbox_boot_generation::text AS sandbox_boot_generation,t.id AS task_id,t.feature_package_id AS package_id,c.child_session_id IS NOT NULL AS registered FROM hyperfide.agent_sessions s JOIN hyperfide.attempts a ON a.organisation_id=s.organisation_id AND a.run_id=s.run_id AND a.id=s.attempt_id JOIN hyperfide.tasks t ON t.organisation_id=a.organisation_id AND t.run_id=a.run_id AND t.id=a.task_id LEFT JOIN hyperfide.agent_sessions p ON p.organisation_id=s.organisation_id AND p.run_id=s.run_id AND p.id=s.parent_session_id LEFT JOIN hyperfide.hierarchy_child_registrations c ON c.organisation_id=s.organisation_id AND c.run_id=s.run_id AND c.child_session_id=s.id WHERE s.organisation_id=$1 AND s.run_id=$2 AND s.role='WORKER' AND s.state=ANY($3::text[]) AND ($4::uuid[] IS NULL OR t.feature_package_id=ANY($4::uuid[])) AND ($5::uuid IS NULL OR s.id=$5) ORDER BY s.id LIMIT 1025 FOR SHARE OF s",
+  [scope.organisation_id,scope.run_id,LIVE,filter.package_ids??null,filter.session_id??null]);
+ if(rows.rows.length>1024)return refuse('DESCENDANTS_UNBOUNDED','Too many live descendants to account for in one adoption');
+ const result:Descendant[]=[];
+ for(const r of rows.rows){
+  const child=Boolean(r.registered)||r.parent_role==='WORKER';
+  let status:Descendant['status']='ACCOUNTED',reason:string|null=null;
+  if(child){
+   const found=r.registered?await childState(tx,scope.organisation_id,scope.run_id,r.session_id):null;
+   if(!found){status='UNACCOUNTED';reason='CHILD_REGISTRATION_REQUIRED';}
+   else if(found.release){status='RELEASED';reason='CHILD_RELEASED';}
+   else if(found.refusal){status='UNACCOUNTED';reason=found.refusal[0];}
+   else if(!LIVE.includes(String(r.parent_state))){status='UNACCOUNTED';reason='PARENT_NOT_LIVE';}
+  }else if(r.compute_authority!=='CURRENT'||r.sandbox_id!==r.attempt_sandbox_id||r.slot_id!==r.attempt_slot_id||r.sandbox_boot_generation!==r.attempt_boot){status='STALE';reason='STALE_COMPUTE';}
+  result.push({session_id:r.session_id,kind:child?'CHILD':'WORKER',parent_session_id:r.parent_session_id,task_id:r.task_id,package_id:r.package_id,attempt_id:r.attempt_id,attempt_generation:r.attempt_generation,
+   sandbox_id:r.sandbox_id,slot_id:r.slot_id,sandbox_boot_generation:r.sandbox_boot_generation,state:r.state,native_session_id:r.native_session_id,status,reason});
+ }
+ return result;
+}
+function requireAccounted(found:readonly Descendant[]):void{
+ const hidden=found.filter(d=>d.status==='UNACCOUNTED');
+ if(hidden.length)refuse('UNACCOUNTED_DESCENDANT','Live descendants lack charged registration and cannot be adopted: '+hidden.slice(0,8).map(d=>d.session_id).join(','));
+}
+/** Hook for native binders/handoff: refuses execution authority to any worker seat not accounted for by capacity. */
+export async function assertChildExecutionAuthority(tx:PrimaryTransaction,input:{organisation_id:string;run_id:string;session_id:string}):Promise<Descendant>{
+ assertPrimaryTransaction(tx);await schema(tx);
+ const scope={organisation_id:uuid(input.organisation_id),run_id:uuid(input.run_id)};
+ const [found]=await liveDescendants(tx,scope,{session_id:uuid(input.session_id)});
+ if(!found)return refuse('SESSION_NOT_LIVE','No live worker seat is attached to a package attempt');
+ if(found.status==='ACCOUNTED')return found;
+ if(found.status==='STALE')return refuse('STALE_COMPUTE','Worker compute authority is no longer current');
+ if(found.reason==='CHILD_RELEASED')return refuse('CHILD_RELEASED','The descendant was released and holds no execution authority');
+ return refuse(found.reason==='CHILD_REGISTRATION_REQUIRED'?'CHILD_REGISTRATION_REQUIRED':'CHILD_EXECUTION_UNACCOUNTED','Descendant execution is not accounted for by held capacity ('+found.reason+')');
+}
+function identity(d:Descendant){
+ return {session_id:d.session_id,kind:d.kind,parent_session_id:d.parent_session_id,task_id:d.task_id,attempt_id:d.attempt_id,attempt_generation:d.attempt_generation,sandbox_id:d.sandbox_id,slot_id:d.slot_id,sandbox_boot_generation:d.sandbox_boot_generation,native_session_id:d.native_session_id,state:d.state};
+}
+/** A descendant continues unchanged when its executor tuple is identical and a bound native identity never changed. */
+function continues(before:Record<string,any>,after:Descendant|undefined):boolean{
+ if(!after||after.status!=='ACCOUNTED')return false;
+ const now=identity(after);
+ return ['kind','parent_session_id','task_id','attempt_id','attempt_generation','sandbox_id','slot_id','sandbox_boot_generation'].every(k=>before[k]===now[k as keyof typeof now])&&(before.native_session_id===null||before.native_session_id===now.native_session_id);
+}
+async function childAuthority(tx:PrimaryTransaction,a:TrustedActor,childId:string,v:Record<string,unknown>){
+ const rows=await tx.query('SELECT package_id,parent_session_id FROM hyperfide.hierarchy_child_registrations WHERE organisation_id=$1 AND run_id=$2 AND child_session_id=$3',[a.organisation_id,a.run_id,childId]);
+ const row=rows.rows[0];if(!row)return refuse('CHILD_REGISTRATION_REQUIRED','No charged native descendant registration exists');
+ const auth=await requireAuthority(tx,{...a,leader_generation:decimal(v.leader_generation),package_id:row.package_id,package_generation:decimal(v.package_generation),roles:['LEADER','FEATURE_MANAGER','WORKER']});
+ if(auth.role==='WORKER'&&a.session_id!==row.parent_session_id)return refuse('PARENT_IDENTITY_MISMATCH','A worker may account only for its own descendants');
+ return auth;
+}
+const USAGE=['cpu_millis','memory_bytes','disk_bytes','model_input_tokens','model_output_tokens'] as const;
 
 /** Current supervisory identity witness; the caller separately proves the actual MAIN host/process. */
 export async function supervisorRegistration(tx:PrimaryTransaction,input:{organisation_id:string;run_id:string;session_id:string}){
@@ -70,7 +154,7 @@ export function createComponent(context:ComponentContext):Component{
  const claims=context.dependencies.require('5.1','scheduler.claims.v1',(v):v is {reserveCapacity:typeof reserveCapacity}=>object(v)&&typeof v.reserveCapacity==='function');
  const budget=context.dependencies.require('5.1','scheduler.sandbox-budget.v1',(v):v is {lockSandboxBudget:typeof lockSandboxBudget;reserveSandboxResources:typeof reserveSandboxResources}=>object(v)&&typeof v.lockSandboxBudget==='function'&&typeof v.reserveSandboxResources==='function');
  const handoff=context.dependencies.require('3.1','hierarchy.handoff.v1',(v):v is {propose:(input:unknown,ctx:ComponentContext)=>Promise<unknown>;acknowledge:(input:unknown,ctx:ComponentContext)=>Promise<unknown>}=>object(v)&&typeof v.propose==='function'&&typeof v.acknowledge==='function');
- return {apiVersion:1,capabilities:{'hierarchy.children.v1':Object.freeze({childRegistration}),'hierarchy.supervisor-registration.v1':Object.freeze({supervisorRegistration})},actions:{
+ return {apiVersion:1,capabilities:{'hierarchy.children.v1':Object.freeze({childRegistration,assertChildExecutionAuthority,alignChildCapacity}),'hierarchy.supervisor-registration.v1':Object.freeze({supervisorRegistration})},actions:{
  'hierarchy.supervisor.register':async(input,current)=>{
   const v=record(input,['idempotency_key','expected_leader_generation','session_id','role','connector','account_key']),a=trustedActor(current),expected=decimal(v.expected_leader_generation,true),sessionId=uuid(v.session_id);
   const role=v.role;if(role!=='LEADER'&&role!=='FEATURE_MANAGER')return refuse('ROLE_DENIED','Only supervisors may be registered on main');
@@ -169,15 +253,136 @@ export function createComponent(context:ComponentContext):Component{
    return {child_session_id:childId,parent_session_id:parentId,manager_session_id:manager,package_id:packageId,package_generation:auth.package_generation,attempt_id:token.attempt_id,reservation_ids:reservationIds,sandbox_charge_id:chargeId,state:'REGISTERED',native_session_id:null,launch_authority:false,credential_authority:false};
   });
  },
- 'hierarchy.adoption.propose':(input,current)=>handoff.propose(input,current),
- 'hierarchy.adoption.acknowledge':(input,current)=>handoff.acknowledge(input,current),
+ 'hierarchy.child.usage.observe':async(input,current)=>{
+  const v=record(input,['idempotency_key','leader_generation','package_generation','child_session_id','sample_id','usage']),a=trustedActor(current),childId=uuid(v.child_session_id),sampleId=uuid(v.sample_id);
+  const u=record(v.usage,USAGE),usage=Object.fromEntries(USAGE.map(k=>[k,decimal(u[k],true)])) as Record<typeof USAGE[number],string>;
+  return operation(g,a,'hierarchy.child.usage.observe',v,async tx=>{
+   await schema(tx);await childAuthority(tx,a,childId,v);
+   const child=await childRegistration(tx,{organisation_id:a.organisation_id,run_id:a.run_id,child_session_id:childId});
+   // Observation is the descendant heartbeat: parent compute must be current and child capacity follows its renewed lease.
+   const compute=await assertCurrentCompute(tx,childToken(child),{operation:'CHECKPOINT'});
+   const aligned=await alignChildCapacity(tx,{organisation_id:a.organisation_id,run_id:a.run_id,child_session_id:childId,lease_expires_at:compute.lease_expires_at});
+   const last=await tx.query('SELECT model_input_tokens::text,model_output_tokens::text FROM hyperfide.hierarchy_child_usage WHERE organisation_id=$1 AND run_id=$2 AND child_session_id=$3 ORDER BY observed_at DESC,sample_id LIMIT 1',[a.organisation_id,a.run_id,childId]);
+   if(last.rows[0]&&(BigInt(usage.model_input_tokens)<BigInt(last.rows[0].model_input_tokens)||BigInt(usage.model_output_tokens)<BigInt(last.rows[0].model_output_tokens)))return refuse('USAGE_REGRESSION','Cumulative model usage cannot decrease');
+   const charged=(child.sandbox_charge as {resources:Record<string,string>}).resources;
+   const within=(['cpu_millis','memory_bytes','disk_bytes'] as const).every(k=>BigInt(usage[k])<=BigInt(charged[k]!));
+   await tx.query('INSERT INTO hyperfide.hierarchy_child_usage(organisation_id,run_id,child_session_id,sample_id,cpu_millis,memory_bytes,disk_bytes,model_input_tokens,model_output_tokens,within_reservation,observed_by_credential_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+    [a.organisation_id,a.run_id,childId,sampleId,usage.cpu_millis,usage.memory_bytes,usage.disk_bytes,usage.model_input_tokens,usage.model_output_tokens,within,a.invocation.principal.credential_id]);
+   return {child_session_id:childId,sample_id:sampleId,usage,charged,within_reservation:within,parent_lease_expires_at:compute.lease_expires_at,capacity_reservations_extended:aligned,execution_authority:false};
+  });
+ },
+ 'hierarchy.child.release':async(input,current)=>{
+  const v=record(input,['idempotency_key','leader_generation','package_generation','child_session_id','observed_state','reason']),a=trustedActor(current),childId=uuid(v.child_session_id),reason=text(v.reason,4096);
+  const observed=v.observed_state;if(observed!=='UNBOUND'&&observed!=='STOPPED'&&observed!=='FAILED')return refuse('INVALID_REQUEST','Release requires an observed UNBOUND, STOPPED or FAILED descendant state');
+  return operation(g,a,'hierarchy.child.release',v,async tx=>{
+   await schema(tx);await childAuthority(tx,a,childId,v);
+   const sessions=await tx.query('SELECT state,native_session_id FROM hyperfide.agent_sessions WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE',[a.organisation_id,a.run_id,childId]);
+   const found=await childState(tx,a.organisation_id,a.run_id,childId),session=sessions.rows[0];
+   if(!found||!session)return refuse('CHILD_REGISTRATION_REQUIRED','No charged native descendant registration exists');
+   if(found.release)return refuse('CHILD_RELEASED','The descendant was already released');
+   if((session.native_session_id===null)!==(observed==='UNBOUND'))return refuse('CHILD_STATE_MISMATCH','Observed state must match whether a native identity was ever bound');
+   if(observed!=='UNBOUND'&&LIVE.includes(session.state))
+    await tx.query('UPDATE hyperfide.agent_sessions SET state=$4,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[a.organisation_id,a.run_id,childId,observed]);
+   // Logical release only: counters stay held until the scheduler records observed quiescence.
+   await markSandboxReleasePending(tx,{organisation_id:a.organisation_id,run_id:a.run_id,request_id:uuid(found.row.reservation_request_id)});
+   const pending=await tx.query("UPDATE hyperfide.reservations r SET state='RELEASE_PENDING',state_version=r.state_version+1 FROM hyperfide.hierarchy_child_reservations l WHERE l.organisation_id=$1 AND l.run_id=$2 AND l.child_session_id=$3 AND r.organisation_id=l.organisation_id AND r.run_id=l.run_id AND r.id=l.reservation_id AND r.state IN ('PROVISIONING','ALLOCATED') RETURNING r.id",[a.organisation_id,a.run_id,childId]);
+   await tx.query('INSERT INTO hyperfide.hierarchy_child_releases(organisation_id,run_id,child_session_id,observed_state,reason,released_by_credential_id) VALUES($1,$2,$3,$4,$5,$6)',[a.organisation_id,a.run_id,childId,observed,reason,a.invocation.principal.credential_id]);
+   return {child_session_id:childId,observed_state:observed,release_pending_reservation_ids:pending.rows.map(r=>r.id).sort(),sandbox_charge_state:'RELEASE_PENDING',resources_still_counted:true,execution_authority:false};
+  });
+ },
+ 'hierarchy.child.verify':async(input,current)=>{
+  const v=record(input,['leader_generation','package_generation','session_id']),a=trustedActor(current),sessionId=uuid(v.session_id);
+  return g.withPrimaryTransaction({timeoutMs:10000,guard:hierarchyReadGuard(a),signal:a.signal},async tx=>{
+   await schema(tx);
+   const rows=await tx.query('SELECT t.feature_package_id FROM hyperfide.agent_sessions s JOIN hyperfide.attempts x ON x.organisation_id=s.organisation_id AND x.run_id=s.run_id AND x.id=s.attempt_id JOIN hyperfide.tasks t ON t.organisation_id=x.organisation_id AND t.run_id=x.run_id AND t.id=x.task_id WHERE s.organisation_id=$1 AND s.run_id=$2 AND s.id=$3',[a.organisation_id,a.run_id,sessionId]);
+   if(!rows.rows[0])return refuse('SESSION_NOT_LIVE','No worker seat is attached to a package attempt');
+   await requireAuthority(tx,{...a,leader_generation:decimal(v.leader_generation),package_id:rows.rows[0].feature_package_id,package_generation:decimal(v.package_generation),roles:['LEADER','FEATURE_MANAGER']});
+   const found=await assertChildExecutionAuthority(tx,{organisation_id:a.organisation_id,run_id:a.run_id,session_id:sessionId});
+   return {...found,accounted:true,execution_authority:false};
+  });
+ },
+ 'hierarchy.adoption.propose':async(input,current)=>{
+  const v=record(input,['idempotency_key','leader_generation','package_ids','expected_generations','successor_id','context']),a=trustedActor(current),ids=strings(v.package_ids).map(uuid).sort();
+  // Refuse before any handoff exists so unaccounted descendants never reach a pending ownership change.
+  await g.withPrimaryTransaction({timeoutMs:10000,guard:hierarchyReadGuard(a),signal:a.signal},async tx=>{
+   await schema(tx);await requireAuthority(tx,{...a,leader_generation:decimal(v.leader_generation),roles:['LEADER']});
+   requireAccounted(await liveDescendants(tx,a,{package_ids:ids}));
+  });
+  const proposed=await handoff.propose(input,current);
+  if(!object(proposed))return refuse('HANDOFF_INVALID','Handoff proposal returned no record');
+  const handoffId=uuid(proposed.handoff_id);
+  const adoption=await g.withPrimaryTransaction({timeoutMs:10000,guard:hierarchyWriteGuard(a),signal:a.signal},async tx=>{
+   await schema(tx);
+   const old=await tx.query('SELECT descendants,descendants_digest FROM hyperfide.hierarchy_adoptions WHERE organisation_id=$1 AND run_id=$2 AND handoff_id=$3',[a.organisation_id,a.run_id,handoffId]);
+   if(old.rows[0])return {descendants:old.rows[0].descendants as Record<string,unknown>[],descendants_digest:String(old.rows[0].descendants_digest)};
+   const found=await liveDescendants(tx,a,{package_ids:ids});requireAccounted(found);
+   const descendants=found.map(d=>({...identity(d),status:d.status,reason:d.reason})),digestValue=hash(descendants);
+   await tx.query('INSERT INTO hyperfide.hierarchy_adoptions(organisation_id,run_id,handoff_id,predecessor_id,successor_id,package_ids,descendants,descendants_digest,proposed_by_credential_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+    [a.organisation_id,a.run_id,handoffId,uuid(proposed.predecessor_id),uuid(proposed.successor_id),JSON.stringify(ids),JSON.stringify(descendants),digestValue,a.invocation.principal.credential_id]);
+   return {descendants,descendants_digest:digestValue};
+  });
+  return {...proposed,...adoption,adoptable:adoption.descendants.filter(d=>d.status==='ACCOUNTED').map(d=>d.session_id)};
+ },
+ 'hierarchy.adoption.acknowledge':async(input,current)=>{
+  const v=record(input,['idempotency_key','leader_generation','handoff_id']),a=trustedActor(current),handoffId=uuid(v.handoff_id);
+  const load=async(tx:PrimaryTransaction)=>{
+   const rows=await tx.query('SELECT successor_id,package_ids,descendants FROM hyperfide.hierarchy_adoptions WHERE organisation_id=$1 AND run_id=$2 AND handoff_id=$3',[a.organisation_id,a.run_id,handoffId]);
+   const row=rows.rows[0];if(!row)return refuse('ADOPTION_REQUIRED','The handoff has no persisted descendant adoption record');
+   if(row.successor_id!==a.session_id)return refuse('HANDOFF_SUCCESSOR_MISMATCH','Only the recorded successor can adopt descendants');
+   const done=await tx.query('SELECT adopted,not_adopted,before_digest,after_digest,workers_restarted FROM hyperfide.hierarchy_adoption_acknowledgements WHERE organisation_id=$1 AND run_id=$2 AND handoff_id=$3',[a.organisation_id,a.run_id,handoffId]);
+   return {package_ids:(row.package_ids as string[]).map(uuid),snapshot:row.descendants as Record<string,any>[],done:done.rows[0] as Record<string,unknown>|undefined};
+  };
+  const before=await g.withPrimaryTransaction({timeoutMs:10000,guard:hierarchyReadGuard(a),signal:a.signal},async tx=>{
+   await schema(tx);const loaded=await load(tx);if(loaded.done)return loaded;
+   const found=await liveDescendants(tx,a,{package_ids:loaded.package_ids});requireAccounted(found);
+   for(const d of loaded.snapshot.filter(x=>x.status==='ACCOUNTED')){
+    const now=found.find(x=>x.session_id===d.session_id);
+    if(now&&now.status==='ACCOUNTED'&&!continues(d,now))return refuse('ADOPTION_DESCENDANT_CHANGED','A recorded descendant changed executor or identity; propose a fresh adoption');
+   }
+   return {...loaded,observed:found.filter(x=>x.status==='ACCOUNTED').map(identity)};
+  });
+  const acknowledged=await handoff.acknowledge(input,current);
+  if(!object(acknowledged))return refuse('HANDOFF_INVALID','Handoff acknowledgement returned no record');
+  const outcome=await g.withPrimaryTransaction({timeoutMs:10000,guard:hierarchyWriteGuard(a),signal:a.signal},async tx=>{
+   await schema(tx);const loaded=await load(tx);if(loaded.done)return loaded.done;
+   if(!('observed' in before))return refuse('ADOPTION_REQUIRED','The adoption pre-acknowledgement observation is absent');
+   const after=await liveDescendants(tx,a,{package_ids:loaded.package_ids});
+   const adopted:string[]=[],notAdopted:{session_id:string;reason:string}[]=[];let restarted=false;
+   for(const d of before.observed){
+    const now=after.find(x=>x.session_id===d.session_id);
+    if(continues(d,now)){adopted.push(d.session_id);continue;}
+    // A different live seat on the same task replacing a healthy one is a restart, not continuation.
+    const replacement=after.some(x=>x.task_id===d.task_id&&x.kind===d.kind&&x.session_id!==d.session_id&&!before.observed.some(y=>y.session_id===x.session_id));
+    restarted||=replacement;notAdopted.push({session_id:d.session_id,reason:replacement?'REPLACED':now?String(now.reason??'CHANGED'):'ENDED'});
+   }
+   for(const d of loaded.snapshot.filter(x=>x.status!=='ACCOUNTED'))notAdopted.push({session_id:d.session_id,reason:String(d.reason)});
+   const result={adopted:adopted.sort(),not_adopted:notAdopted.sort((x,y)=>x.session_id.localeCompare(y.session_id)),before_digest:hash(before.observed),after_digest:hash(after.map(identity)),workers_restarted:restarted};
+   await tx.query('INSERT INTO hyperfide.hierarchy_adoption_acknowledgements(organisation_id,run_id,handoff_id,successor_id,adopted,not_adopted,before_digest,after_digest,workers_restarted,acknowledged_by_credential_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
+    [a.organisation_id,a.run_id,handoffId,a.session_id,JSON.stringify(result.adopted),JSON.stringify(result.not_adopted),result.before_digest,result.after_digest,result.workers_restarted,a.invocation.principal.credential_id]);
+   return result;
+  });
+  const {workers_restarted:_literal,...handed}=acknowledged;
+  return {...handed,adopted_descendants:outcome.adopted,not_adopted:outcome.not_adopted,before_digest:outcome.before_digest,after_digest:outcome.after_digest,workers_restarted:outcome.workers_restarted};
+ },
  'hierarchy.adoption.inspect':async(input,current)=>{
   const v=record(input,['leader_generation','package_id','package_generation']),a=trustedActor(current),packageId=uuid(v.package_id);
   return g.withPrimaryTransaction({timeoutMs:10000,guard:hierarchyReadGuard(a),signal:a.signal},async tx=>{
    await schema(tx);
    const auth=await requireAuthority(tx,{...a,leader_generation:decimal(v.leader_generation),package_id:packageId,package_generation:decimal(v.package_generation),roles:['LEADER','FEATURE_MANAGER']});
    const sessions=await tx.query('SELECT s.id,s.parent_session_id,s.role,s.state,s.native_session_id,s.attempt_id,s.sandbox_id,s.slot_id,s.sandbox_boot_generation::text,t.id AS task_id,t.state AS task_state,a.compute_authority,a.execution_state FROM hyperfide.agent_sessions s JOIN hyperfide.attempts a ON a.organisation_id=s.organisation_id AND a.run_id=s.run_id AND a.id=s.attempt_id JOIN hyperfide.tasks t ON t.organisation_id=a.organisation_id AND t.run_id=a.run_id AND t.id=a.task_id WHERE t.organisation_id=$1 AND t.run_id=$2 AND t.feature_package_id=$3 ORDER BY s.id LIMIT 257',[a.organisation_id,a.run_id,packageId]);
-   return {package_id:packageId,package_generation:auth.package_generation,current_manager_session_id:await currentManager(tx,a,packageId),sessions:sessions.rows.slice(0,256),omitted_at_least:Math.max(0,sessions.rows.length-256),authority:'NONE',restart_required:false,ancestry:'IMMUTABLE; accountability follows current package ownership'};
+   const found=await liveDescendants(tx,a,{package_ids:[packageId]});
+   const registered=await tx.query("SELECT c.child_session_id,c.parent_session_id,c.manager_session_id AS registering_manager_session_id,c.task_id,c.attempt_id,c.attempt_generation::text,c.sandbox_id,c.slot_id,c.sandbox_boot_generation::text,c.reservation_request_id,c.created_at::text AS registered_at,s.state,s.native_session_id,x.state AS sandbox_charge_state,x.cpu_millis::text AS charged_cpu_millis,x.memory_bytes::text AS charged_memory_bytes,x.disk_bytes::text AS charged_disk_bytes,p.lease_expires_at::text AS parent_lease_expires_at,(SELECT min(r.expires_at) FROM hyperfide.hierarchy_child_reservations l JOIN hyperfide.reservations r ON r.organisation_id=l.organisation_id AND r.run_id=l.run_id AND r.id=l.reservation_id WHERE l.organisation_id=c.organisation_id AND l.run_id=c.run_id AND l.child_session_id=c.child_session_id AND r.state IN ('PROVISIONING','ALLOCATED'))::text AS capacity_expires_at,COALESCE((SELECT min(r.expires_at) FROM hyperfide.hierarchy_child_reservations l JOIN hyperfide.reservations r ON r.organisation_id=l.organisation_id AND r.run_id=l.run_id AND r.id=l.reservation_id WHERE l.organisation_id=c.organisation_id AND l.run_id=c.run_id AND l.child_session_id=c.child_session_id AND r.state IN ('PROVISIONING','ALLOCATED'))>=p.lease_expires_at,false) AS capacity_aligned,rel.observed_state AS released_observed_state,rel.released_at::text FROM hyperfide.hierarchy_child_registrations c JOIN hyperfide.agent_sessions s ON s.organisation_id=c.organisation_id AND s.run_id=c.run_id AND s.id=c.child_session_id JOIN hyperfide.sandbox_execution_charges x ON x.organisation_id=c.organisation_id AND x.run_id=c.run_id AND x.id=c.sandbox_charge_id JOIN hyperfide.attempts p ON p.organisation_id=c.organisation_id AND p.run_id=c.run_id AND p.id=c.attempt_id LEFT JOIN hyperfide.hierarchy_child_releases rel ON rel.organisation_id=c.organisation_id AND rel.run_id=c.run_id AND rel.child_session_id=c.child_session_id WHERE c.organisation_id=$1 AND c.run_id=$2 AND c.package_id=$3 ORDER BY c.child_session_id LIMIT 257",[a.organisation_id,a.run_id,packageId]);
+   const childIds=registered.rows.slice(0,256).map(r=>r.child_session_id);
+   const reservations=await tx.query('SELECT l.child_session_id,r.id,r.capacity_account_id,k.dimension,r.quantity::text,r.state,r.expires_at::text FROM hyperfide.hierarchy_child_reservations l JOIN hyperfide.reservations r ON r.organisation_id=l.organisation_id AND r.run_id=l.run_id AND r.id=l.reservation_id JOIN hyperfide.capacity_accounts k ON k.organisation_id=r.organisation_id AND k.id=r.capacity_account_id WHERE l.organisation_id=$1 AND l.run_id=$2 AND l.child_session_id=ANY($3::uuid[]) ORDER BY l.child_session_id,k.dimension',[a.organisation_id,a.run_id,childIds]);
+   const usage=await tx.query('SELECT child_session_id,count(*)::text AS samples,max(cpu_millis)::text AS peak_cpu_millis,max(memory_bytes)::text AS peak_memory_bytes,max(disk_bytes)::text AS peak_disk_bytes,max(model_input_tokens)::text AS model_input_tokens,max(model_output_tokens)::text AS model_output_tokens,bool_and(within_reservation) AS within_reservation,max(observed_at)::text AS last_observed_at FROM hyperfide.hierarchy_child_usage WHERE organisation_id=$1 AND run_id=$2 AND child_session_id=ANY($3::uuid[]) GROUP BY child_session_id',[a.organisation_id,a.run_id,childIds]);
+   const children=registered.rows.slice(0,256).map(c=>{
+    const {child_session_id:_r,...used}=usage.rows.find(u=>u.child_session_id===c.child_session_id)??{child_session_id:null,samples:'0'};
+    return {...c,reservations:reservations.rows.filter(r=>r.child_session_id===c.child_session_id).map(({child_session_id:_c,...r})=>r),usage:used,status:found.find(d=>d.session_id===c.child_session_id)?.status??(c.released_observed_state?'RELEASED':'ENDED')};
+   });
+   const adoptions=await tx.query('SELECT d.handoff_id,d.predecessor_id,d.successor_id,d.descendants_digest,d.created_at::text AS proposed_at,k.adopted,k.not_adopted,k.workers_restarted,k.created_at::text AS acknowledged_at FROM hyperfide.hierarchy_adoptions d LEFT JOIN hyperfide.hierarchy_adoption_acknowledgements k ON k.organisation_id=d.organisation_id AND k.run_id=d.run_id AND k.handoff_id=d.handoff_id WHERE d.organisation_id=$1 AND d.run_id=$2 AND d.package_ids ? $3 ORDER BY d.created_at DESC,d.handoff_id LIMIT 16',[a.organisation_id,a.run_id,packageId]);
+   const unaccounted=found.filter(d=>d.status==='UNACCOUNTED').map(d=>d.session_id);
+   return {package_id:packageId,package_generation:auth.package_generation,current_manager_session_id:await currentManager(tx,a,packageId),sessions:sessions.rows.slice(0,256),omitted_at_least:Math.max(0,sessions.rows.length-256),
+    descendants:found,children,children_omitted:registered.rows.length>256,unaccounted_descendants:unaccounted,adoptable:unaccounted.length===0,adoptions:adoptions.rows,authority:'NONE',ancestry:'IMMUTABLE; accountability follows current package ownership'};
   });
  }
  }};
