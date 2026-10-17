@@ -6,7 +6,7 @@ obtained only through the production packet/claim HTTPS actions. No SQL write
 manufactures CURRENT authority, RUNNING state, qualified custody or a PASS.
 """
 from __future__ import annotations
-import base64,hashlib,hmac,importlib.util,json,subprocess,sys
+import base64,hashlib,hmac,importlib.util,json,sqlite3,subprocess,sys,time
 from pathlib import Path
 spec=importlib.util.spec_from_file_location('finding_test_fixture',Path(__file__).with_name('18_1.py'));c=importlib.util.module_from_spec(spec);spec.loader.exec_module(c)
 spec=importlib.util.spec_from_file_location('finding_scheduler_fixture',Path(__file__).with_name('5_1.py'));scheduler=importlib.util.module_from_spec(spec);spec.loader.exec_module(scheduler)
@@ -26,8 +26,8 @@ reqs = ["18.4"]
 checks = ["finding-repaired"]
 [task.alpha.claim-a]
 wave = 1
-reqs = ["5.1"]
-acceptance_ids = ["V-002", "V-007"]
+reqs = ["18.4"]
+acceptance_ids = ["V-032"]
 requires = []
 touches = ["src/claim-a.ts"]
 [task.alpha.finding-origin]
@@ -60,13 +60,14 @@ def accepted_intent(f,criteria):
     f.sql("UPDATE hyperfide.runs SET spec_generation=$3,spec_revision_id=$2,state='PENDING_VALIDATION',state_version=state_version+1 WHERE id=$1",[i['run'],spec,f.spec_generation])
     claim=dict(repair['definition'],section=sections['task.alpha.claim-a']);f.definitions['a']=claim
     f.sql('UPDATE hyperfide.tasks SET spec_generation=$4,spec_revision_id=$2,definition=$3,state_version=state_version+1 WHERE id=$1',[i['task_a'],spec,json.dumps(claim),f.spec_generation])
-    revalidated=dict(prior,spec_revision_id=spec,spec_generation=f.spec_generation)
-    c.insert(f,'proof_registries',c.scoped(f,task_id=i['task_a'],spec_generation=f.spec_generation,spec_revision_id=spec,criteria_digest=repair['criteria_digest'],registry_digest=scheduler.identity(revalidated),policy=revalidated))
     definition={'schema_version':1,'section':sections['task.alpha.finding-origin'],'feature_key':'alpha','declared_wave':1,'runtime_wave_offset':0,'declared_status':None,'history_only':True}
     policy={'schema_version':1,'criteria_digest':criteria,'spec_revision_id':spec,'spec_generation':f.spec_generation,'repository_id':i['repository'],'source_object_id':c.OID,'rubric_digest':rubric,'checks':[check],'clauses':[{'id':'18.4','mode':'EXECUTABLE','acceptance_ids':['V-032'],'checks':['finding-repaired']}],'inputs':{name:c.sha(('fixture-'+name).encode()) for name in ('source','dependency','toolchain','configuration','graph','contract')},'contract_digests':[]}
+    c.insert(f,'proof_registries',c.scoped(f,task_id=i['task_a'],spec_generation=f.spec_generation,spec_revision_id=spec,criteria_digest=repair['criteria_digest'],registry_digest=scheduler.identity(policy),policy=policy))
     return spec,definition,policy,state
 def setup(f):
     c.record_database('18.4',f.database,str(f.path))
+    runner_spec=importlib.util.spec_from_file_location('repair_runner_fixture',Path(__file__).with_name('12_1.py'))
+    runner=importlib.util.module_from_spec(runner_spec);runner_spec.loader.exec_module(runner);runner.setup(f)
     f.env['HF_FINDING_REPAIR_MAX_ATTEMPTS']='2';f.env.update(HF_GITHUB_MARKER_SECRET=MARKER_SECRET,HF_GITHUB_WEBHOOK_SECRET=WEBHOOK_SECRET)
     for filename in ('0004-durability.sql','0017-review.sql','0018-findings.sql'):
         if callable(getattr(f,'apply_migration',None)):f.apply_migration(filename.removesuffix('.sql'))
@@ -111,6 +112,49 @@ def restart(f,limit):
 def claim(f,name='a'):
     # Ordinary production packet + signed claim, pinned to the accepted generation.
     request=f.prepare_claim(name);return f.claim(name,request=dict(request,run_spec_generation=f.spec_generation,spec_generation=f.spec_generation,spec_revision_id=f.accepted_spec))
+def native_start(f,token):
+    spec=importlib.util.spec_from_file_location('repair_native_fixture',Path(__file__).with_name('12_2.py'))
+    native=importlib.util.module_from_spec(spec);spec.loader.exec_module(native)
+    native.ctypes.CDLL(None,use_errno=True).prctl(36,1,0,0,0)
+    probe=native.Probe();f.native_probe=probe
+    # Keep the native ledger and slots inside the existing owned cleanup tree.
+    f.path.chmod(0o711);target=f.path/'native';probe.tmp.rename(target)
+    probe.tmp=target;probe.state=target/'state';probe.slots=target/'slots';probe.setup()
+    i=f.ids;scope={'organisation_id':i['organisation'],'run_id':i['run']}
+    native_id=f.sql('SELECT native_sandbox_id FROM hyperfide.sandboxes WHERE id=$1',[i['sandbox']])[0]['native_sandbox_id']
+    f.ok('identity.binding.observe',{'provisioning_intent_id':i['intent'],'sandbox_id':i['sandbox'],'boot_generation':'1','boot_id':i['boot'],'native_sandbox_id':native_id,'observation_digest':c.sha(b'repair-component-provider'),'expected_version':'1'},key='provisioner',component='14.1')
+    expect(f.issue(actions=f.actions)[1].get('ok') is True,'Runner grant issue failed')
+    enrolled=f.request(f.enrollment(),key='runner',endpoint='/v1/enroll',credential=f.grant)[1]
+    expect(enrolled.get('ok') is True,'Runner enrollment failed: '+str(enrolled))
+    i['runner']=enrolled['result']['credential_id'];consumer=uid()
+    f.ok('instructions.consumer.register',dict(scope,consumer_id=consumer),key='runner',component='6.3')
+    old=probe.slot['S1']['id'];slot=token['slot_id']
+    (probe.slots/old).rename(probe.slots/slot)
+    with sqlite3.connect(probe.slots/'.supervisor-slots.db') as db:
+        db.execute('UPDATE slots SET id=?,boot_id=? WHERE id=?',(slot,i['boot'],old))
+    plan_path=probe.tmp/'plan-S1.json'
+    plan=json.loads(plan_path.read_text())
+    for key in ('cwd','home','temp'):plan[key]=plan[key].replace(old,slot)
+    plan_path.write_bytes(native.canonical(plan))
+    transport=probe.tmp/'transport.json'
+    transport.write_text(json.dumps({'origin':f.origin,'ca_file':str(f.ca),'key_path':str(f.keys['runner']['path']),'credential_id':i['runner'],'timeout_ms':2000}))
+    config=Path(probe.slot['S1']['config']);body=json.loads(config.read_text())
+    body.update(organisation_id=i['organisation'],run_id=i['run'],sandbox_id=i['sandbox'],boot_id=i['boot'],consumer_id=consumer)
+    config.write_text(json.dumps(body))
+    request_id=uid()
+    dispatched=f.ok('scheduler.dispatch.ensure',{'token':token,'request_id':request_id,'leader_generation':'1','package_generation':'2'},key='manager',component='5.3')
+    f.ok('instructions.issue',dict(scope,id=dispatched['operation_id'],attempt_id=token['attempt_id'],attempt_generation=token['attempt_generation'],authority_epoch=token['authority_epoch'],sandbox_boot_generation=token['sandbox_boot_generation'],kind='START',body={'launch_id':uid(),'slot_id':slot,'agent_session_id':uid(),'connector_plan_digest':c.sha(plan_path.read_bytes())}),component='6.3')
+    probe.start_serve(seconds=120)
+    probe.serve.stdin=None
+    deadline=time.monotonic()+20
+    while time.monotonic()<deadline:
+        observed=f.ok('scheduler.dispatch.reconcile',dict(scope,request_id=request_id,authority_epoch=i['epoch'],leader_generation='1',package_generation='2',package_id=i['package']),key='manager',component='5.3')
+        if observed.get('authoritative') is True:return
+        if probe.serve.poll() is not None:break
+        time.sleep(.1)
+    with sqlite3.connect(probe.state/'launches.db') as db:
+        refused=db.execute('SELECT outcome FROM instructions WHERE state=\'REFUSED\'').fetchall()
+    raise AssertionError('Native START did not produce an authoritative execution receipt: '+str(refused))
 def reopen_after_change(f,call,fid):
     # Only a genuinely restored assurance can be withdrawn by a relevant change.
     resolved=call('finding.repair.inspect',{'finding_id':fid})
@@ -122,7 +166,7 @@ def reopen_after_change(f,call,fid):
     expect(reopened['reopened'] is True and after['phase']=='REOPENED' and after['resolution']['current'] is False and [r for r in after['repairs'] if r['repair_id']==prior['repair_id']][0]['resolution_evidence_ids']==prior['resolution_evidence_ids'])
 def main():
     if '--cleanup' in sys.argv:return c.cleanup('18.4')
-    f=scheduler.SchedulerFixture(extra_components=('18.1','18.2','18.3','18.4'),extra_setup=setup)
+    f=scheduler.SchedulerFixture(extra_components=('1.1','12.2','18.1','18.2','18.3','18.4'),extra_setup=setup)
     def call(action,payload):return c.call(f,action,payload,component='finding-remediation')
     def reject(action,payload,code=None):return c.reject(f,action,payload,code,component='finding-remediation')
     def finding_version(fid):return str(c.call(f,'finding.inspect',{'finding_id':fid})['finding']['registry_version'])
@@ -176,11 +220,15 @@ def main():
         check('findings.repair.unbounded-retry-policy-refused',lambda:reject('finding.repair.request',dict(retry,expected_state_version=finding_version(fid)),'REPAIR_POLICY_REQUIRED'))
         restart(f,'2')
         check('findings.repair.refused-retries-preserve-evidence-links',lambda:expect(f.sql('SELECT id,state,attempt_count,state_version::text,resolution_evidence_ids FROM hyperfide.finding_repairs ORDER BY id')==before and f.sql('SELECT count(*)::int AS n FROM hyperfide.finding_registry_reports WHERE finding_id=$1',[fid])[0]['n']==2 and call('finding.repair.inspect',{'finding_id':fid})['attempt_budget']['max_attempts']=='2'))
-        # These are genuine unresolved producer gates. Neither fixture SQL nor a
-        # caller-supplied outcome may turn them into execution/qualification.
-        check('findings.repair.genuine-execution-start-observed',lambda:expect(f.sql('SELECT execution_state FROM hyperfide.attempts WHERE id=$1',[token['attempt_id']])[0]['execution_state']=='RUNNING','Actual12/13 observed START receipt is not integrated'))
+        def execution_started():
+            native_start(f,token)
+            expect(f.sql('SELECT execution_state FROM hyperfide.attempts WHERE id=$1',[token['attempt_id']])[0]['execution_state']=='RUNNING','Native START receipt did not advance the current attempt')
+            call('finding.repair.attach',dict(attach,expected_state_version=repair_version(rid)))
+        check('findings.repair.genuine-execution-start-observed',execution_started)
         check('findings.repair.genuine-independent-resolution',lambda:expect(c.call(f,'finding.inspect',{'finding_id':fid})['finding']['phase']=='RESOLVED','Actual16/17 independent repair proof is not integrated'))
         check('findings.repair.reopen-after-relevant-change',lambda:reopen_after_change(f,call,fid))
-    finally:f.close()
+    finally:
+        if getattr(f,'native_probe',None):f.native_probe.cleanup()
+        f.close()
     return int(any(actual!='observed' for _,actual in c.RESULTS))
 if __name__=='__main__':raise SystemExit(main())
