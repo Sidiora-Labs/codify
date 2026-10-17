@@ -88,9 +88,12 @@ def check(name,callback):
  if TEST_TASK is not None:
   path=campaign_root()/"scheduler"/"observations.json";rows=json.loads(path.read_text()) if path.exists() else [];rows.append(record);write_json(path,rows)
 PARSE_JS="import{parseKvx}from'./services/hyperfide/dist/spec/import.js';let s='';for await(const c of process.stdin)s+=c;process.stdout.write(JSON.stringify(parseKvx(s)));"
+def next_spec_generation(f):
+ current=f.sql("SELECT spec_generation::text AS generation FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2",[f.ids["organisation"],f.ids["run"]])[0]["generation"]
+ return str(int(current)+1)
 def accept_scheduler_spec(f,tasks):
- """Trusted fixture: bind scheduler tasks to an actual parsed accepted spec revision (generation 2)."""
- i=f.ids;i["accepted_spec"]=uid();f.spec_generation="2";f.review_rubric=sha(b"scheduler-review-rubric")
+ """Trusted fixture: bind scheduler tasks to an actual parsed accepted spec revision at the next run generation."""
+ i=f.ids;i["accepted_spec"]=uid();f.spec_generation=next_spec_generation(f);f.review_rubric=sha(b"scheduler-review-rubric")
  source='[req.5]\ntitle = "Scheduling, reservations and fenced ownership"\nac_1 = "Claiming work SHALL atomically validate dependencies, wave policy, scope, role, run state and ownership and reserve eligible capacity."\n'
  source+='[acceptance.V-002]\nreqs = ["5.1"]\nscenario = "Concurrent claims and coordinator submission custody"\n[acceptance.V-007]\nreqs = ["5.1"]\nscenario = "Declared admission limits"\n'
  for name,feature,package_key,path,wave in tasks:
@@ -101,8 +104,8 @@ def accept_scheduler_spec(f,tasks):
  source_object=f.packet_proof["source_object_id"]
  document={"schema_version":1,"revision_digest":sha(b"scheduler-accepted-envelope"),"source_digest":sha(source.encode()),"repositories":[{"repository_id":i["repository"],"source_object_id":source_object,"integration_ref":"refs/heads/main"}],"allowed_actions":f.actions,"closure_policy":{"required_evidence":[],"required_review_roles":[],"publication":"AFTER_QUALIFICATION"},"provenance":None,"parsed":parsed,"runtime_wave_offset":0}
  f.sql("INSERT INTO hyperfide.spec_revisions(organisation_id,project_id,id,source_digest,source_content,document,schema_version,revision_digest) VALUES($1,$2,$3,$4,$5,$6,1,$7)",[i["organisation"],i["project"],i["accepted_spec"],sha(source.encode()),source,json.dumps(document),document["revision_digest"]])
- f.sql("INSERT INTO hyperfide.run_spec_revisions(organisation_id,run_id,spec_generation,spec_revision_id) VALUES($1,$2,2,$3)",[i["organisation"],i["run"],i["accepted_spec"]])
- f.sql("UPDATE hyperfide.runs SET spec_generation=2,spec_revision_id=$3,state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[i["organisation"],i["run"],i["accepted_spec"]])
+ f.sql("INSERT INTO hyperfide.run_spec_revisions(organisation_id,run_id,spec_generation,spec_revision_id) VALUES($1,$2,$4,$3)",[i["organisation"],i["run"],i["accepted_spec"],f.spec_generation])
+ f.sql("UPDATE hyperfide.runs SET spec_generation=$4,spec_revision_id=$3,state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[i["organisation"],i["run"],i["accepted_spec"],f.spec_generation])
 class SchedulerFixture(PacketFixture):
  def __init__(self,extra_components=(),extra_setup=None,agent_limit=2,bootstrap=True,sandbox_cpu_limit=8000,sandbox_cpu_headroom=1000,source_object_id=None,extra_env=None,extra_tasks=()):
   def setup(f):
@@ -207,7 +210,7 @@ def refused_unchanged(f,request,code,key="manager",message=None):
  return response
 def main():
  configure_cleanup("5.1")
- f=SchedulerFixture(extra_tasks=(("dep","alpha","package","src/claim-dep.ts",1),("later","alpha","package2","src/claim-later.ts",2)),extra_setup=lambda f:(allow_describe(f),f.sql("INSERT INTO hyperfide.task_dependencies(organisation_id,run_id,task_id,predecessor_run_id,predecessor_task_id,milestone,revision,binding_schema_version,predecessor_spec_generation,predecessor_spec_revision_id) VALUES($1,$2,$3,$2,$4,'QUALIFIED',2,1,2,$5)",[f.ids["organisation"],f.ids["run"],f.ids["task_dep"],f.ids["task_a"],f.ids["accepted_spec"]])));i=f.ids
+ f=SchedulerFixture(extra_tasks=(("dep","alpha","package","src/claim-dep.ts",1),("later","alpha","package2","src/claim-later.ts",2)),extra_setup=lambda f:(allow_describe(f),f.sql("INSERT INTO hyperfide.task_dependencies(organisation_id,run_id,task_id,predecessor_run_id,predecessor_task_id,milestone,revision,binding_schema_version,predecessor_spec_generation,predecessor_spec_revision_id) VALUES($1,$2,$3,$2,$4,'QUALIFIED',$6,1,$6,$5)",[f.ids["organisation"],f.ids["run"],f.ids["task_dep"],f.ids["task_a"],f.ids["accepted_spec"],f.spec_generation])));i=f.ids
  try:
   check("claim.fixture.no-seeded-authority",lambda:expect(f.sql("SELECT count(*)::int n FROM hyperfide.attempts")[0]["n"]==0,"Fixture fabricated compute authority"))
   a=f.prepare_claim("a")

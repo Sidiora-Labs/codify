@@ -6,22 +6,6 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[4]
 s=importlib.util.spec_from_file_location("hf_scheduler_fixture",ROOT/"tests/hyperfide/cases/tasks/5_1.py");m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
 expect=m.expect;check=m.check;uid=m.uid
-def field(key,value,line):return {"key":key,"raw":json.dumps(value),"value":value,"line":line}
-def accepted_intent(f):
- """Seed the accepted proof intent sections that spec/obligations.ts now requires
- (req/acceptance/proof sections plus task.section.fields.reqs). The shared 3.2/5.1
- fixtures predate that contract and write an empty document; repair it in the
- disposable database only, before any authority is derived from it."""
- i=f.ids;p=f.packet_proof;clause=p["clauses"][0];req,ac=clause["id"].rsplit(".",1)
- sections=[{"name":"req."+req,"line":1,"fields":{"ac_"+ac:field("ac_"+ac,"Fixture accepted criterion",2)}},
-  {"name":"acceptance."+clause["acceptance_ids"][0],"line":3,"fields":{"reqs":field("reqs",[clause["id"]],4)}},
-  {"name":"proof","line":5,"fields":{"rubric_digest":field("rubric_digest",p["rubric_digest"],6)}},
-  {"name":"proof.review."+clause["id"],"line":7,"fields":{"reviewers":field("reviewers",clause["reviewers"],8),"rubric_digest":field("rubric_digest",clause["rubric_digest"],9)}}]
- section={"name":"task.fixture","line":10,"fields":{"reqs":field("reqs",[clause["id"]],11)}}
- quote=lambda value:"'"+value.replace("'","''")+"'"
- f.sql("DO $do$ BEGIN SET LOCAL session_replication_role=replica;"
-  " UPDATE hyperfide.spec_revisions SET document=document||jsonb_build_object('parsed',"+quote(json.dumps({"sections":sections}))+"::jsonb) WHERE organisation_id="+quote(i["organisation"])+" AND id="+quote(i["spec"])+";"
-  " UPDATE hyperfide.tasks SET definition=definition||jsonb_build_object('section',"+quote(json.dumps(section))+"::jsonb) WHERE organisation_id="+quote(i["organisation"])+"; END $do$")
 def describe_access(f):
  """Let fixture principals read the loaded component registry (system.describe)."""
  config=json.loads(f.identity_config.read_text())
@@ -32,7 +16,6 @@ def describe_access(f):
  f.sql("UPDATE hyperfide.identity_principals SET allowed_actions=array_append(allowed_actions,'system.describe') WHERE NOT 'system.describe'=ANY(allowed_actions)")
 def fixture(describe=False,**kwargs):
  def setup(f):
-  accepted_intent(f)
   if describe:describe_access(f)
  return m.SchedulerFixture(extra_setup=setup,**kwargs)
 def registered(f):
@@ -105,7 +88,7 @@ def prepare_replacement(f,name,generation):
  f.sql("INSERT INTO hyperfide.worker_slots(organisation_id,id,sandbox_id,slot_key,boot_generation,capacity_kind,state) VALUES($1,$2,$3,$4,1,'AGENT','READY')",[i["organisation"],slot,i["sandbox"],"replacement-"+name+"-"+generation])
  request=f.packet_input(task_id=i["task_"+name],slot_id=slot,idempotency_key=uid(),attempt_generation=generation)
  packet=f.ok("hierarchy.packet.create",request,key="manager",component="3.2")
- return {"organisation_id":i["organisation"],"run_id":i["run"],"request_id":uid(),"task_id":request["task_id"],"attempt_id":request["attempt_id"],"attempt_generation":generation,"run_spec_generation":"1","spec_generation":"1","spec_revision_id":i["spec"],"authority_epoch":i["epoch"],"leader_generation":"1","package_generation":"2","sandbox_id":i["sandbox"],"slot_id":slot,"sandbox_boot_generation":"1","lease_ms":300000,"input_packet_digest":packet["digest"],"capacity":f.capacity()}
+ return {"organisation_id":i["organisation"],"run_id":i["run"],"request_id":uid(),"task_id":request["task_id"],"attempt_id":request["attempt_id"],"attempt_generation":generation,"run_spec_generation":f.spec_generation,"spec_generation":f.spec_generation,"spec_revision_id":i["accepted_spec"],"authority_epoch":i["epoch"],"leader_generation":"1","package_generation":"2","sandbox_id":i["sandbox"],"slot_id":slot,"sandbox_boot_generation":"1","lease_ms":300000,"input_packet_digest":packet["digest"],"capacity":f.capacity()}
 def cleanup():
  """Shared 5.1 cleanup observes DB/role/path/listener absence and writes scheduler/cleanup.json;
  report that observation as explicit absence evidence for the harness."""

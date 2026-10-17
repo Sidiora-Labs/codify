@@ -6,26 +6,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[4]
 s=importlib.util.spec_from_file_location("hf_scheduler_fixture",ROOT/"tests/hyperfide/cases/tasks/5_1.py");m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
 expect=m.expect;check=m.check;uid=m.uid
-REVIEWER=uid();RUBRIC=m.sha(b"explicit-review-rubric")
-def kvx(name,**fields):return {"name":name,"fields":{key:{"value":value} for key,value in fields.items()}}
-# Dependency-limited fixture adapter: the inherited 3.2 packet fixture seeds a flat
-# task definition and an empty spec document that the accepted 2.4 proof authority
-# refuses. Immutable rows are written compliant at INSERT time; no trigger is bypassed.
-ACCEPTED_DOCUMENT={"schema_version":1,"parsed":{"sections":[kvx("req.3.2",ac_1="Execution packets preserve accepted intent"),
- kvx("acceptance.packet-intent",reqs=["3.2.1"]),kvx("proof",rubric_digest=RUBRIC),kvx("proof.review.3.2.1",reviewers=[REVIEWER],rubric_digest=RUBRIC)]}}
-class SchedulerFixture(m.SchedulerFixture):
- def sql(self,sql,values=None,admin=False,serial=True):
-  if sql.startswith("INSERT INTO hyperfide.spec_revisions(") and sql.endswith("'fixture','{}',1)"):
-   sql=sql[:-len("'{}',1)")]+"$5,1)";values=list(values)+[json.dumps(ACCEPTED_DOCUMENT)]
-  elif sql.startswith("INSERT INTO hyperfide.tasks(organisation_id,run_id,id,task_key,feature_package_id,spec_revision_id,criteria_digest,definition,wave)"):
-   values=list(values);index=max(n for n,v in enumerate(values) if isinstance(v,str) and v.startswith("{"))
-   definition=json.loads(values[index]);definition["section"]={"name":"task.fixture","fields":{"reqs":{"value":["3.2.1"]}}};values[index]=json.dumps(definition)
-  elif sql.startswith("INSERT INTO hyperfide.proof_registries("):
-   values=list(values);policy=json.loads(values[7])
-   for clause in policy["clauses"]:
-    if clause["mode"]=="REVIEW":clause["reviewers"]=[REVIEWER]
-   values[6]=m.identity(policy);values[7]=json.dumps(policy)
-  return super().sql(sql,values,admin=admin,serial=serial)
+SchedulerFixture=m.SchedulerFixture
 FRAGMENT=json.loads((ROOT/"services/hyperfide/components/5.2.json").read_text())
 SPARE_SLOTS=12
 def lease_setup(f):
@@ -51,7 +32,7 @@ def reclaim(f,name,generation,lease_ms=300000):
  slot=f.spare_slots.pop(0);i=f.ids;key="manager2" if name=="b" else "manager"
  request=f.packet_input(task_id=i["task_"+name],slot_id=slot,idempotency_key=uid(),attempt_generation=str(generation))
  packet=f.ok("hierarchy.packet.create",request,key=key,component="3.2")
- claim={"organisation_id":i["organisation"],"run_id":i["run"],"request_id":uid(),"task_id":request["task_id"],"attempt_id":request["attempt_id"],"attempt_generation":request["attempt_generation"],"run_spec_generation":"1","spec_generation":"1","spec_revision_id":i["spec"],"authority_epoch":i["epoch"],"leader_generation":"1","package_generation":"2","sandbox_id":i["sandbox"],"slot_id":slot,"sandbox_boot_generation":"1","lease_ms":lease_ms,"input_packet_digest":packet["digest"],"capacity":f.capacity()}
+ claim={"organisation_id":i["organisation"],"run_id":i["run"],"request_id":uid(),"task_id":request["task_id"],"attempt_id":request["attempt_id"],"attempt_generation":request["attempt_generation"],"run_spec_generation":f.spec_generation,"spec_generation":f.spec_generation,"spec_revision_id":i["accepted_spec"],"authority_epoch":i["epoch"],"leader_generation":"1","package_generation":"2","sandbox_id":i["sandbox"],"slot_id":slot,"sandbox_boot_generation":"1","lease_ms":lease_ms,"input_packet_digest":packet["digest"],"capacity":f.capacity()}
  return claim
 def bootstrap_runner(f):
  """identity_fixture bootstrap_runner against the packet sandbox's actual provider identity and version."""
@@ -68,7 +49,7 @@ def try_reclaim(f,name,generation):
  packet=f.invoke("hierarchy.packet.create",request,key=key,component="3.2")[1]
  if packet.get("ok") is not True:return packet
  f.spare_slots.pop(0)
- claim={"organisation_id":i["organisation"],"run_id":i["run"],"request_id":uid(),"task_id":request["task_id"],"attempt_id":request["attempt_id"],"attempt_generation":request["attempt_generation"],"run_spec_generation":"1","spec_generation":"1","spec_revision_id":i["spec"],"authority_epoch":i["epoch"],"leader_generation":"1","package_generation":"2","sandbox_id":i["sandbox"],"slot_id":slot,"sandbox_boot_generation":"1","lease_ms":300000,"input_packet_digest":packet["result"]["digest"],"capacity":f.capacity()}
+ claim={"organisation_id":i["organisation"],"run_id":i["run"],"request_id":uid(),"task_id":request["task_id"],"attempt_id":request["attempt_id"],"attempt_generation":request["attempt_generation"],"run_spec_generation":f.spec_generation,"spec_generation":f.spec_generation,"spec_revision_id":i["accepted_spec"],"authority_epoch":i["epoch"],"leader_generation":"1","package_generation":"2","sandbox_id":i["sandbox"],"slot_id":slot,"sandbox_boot_generation":"1","lease_ms":300000,"input_packet_digest":packet["result"]["digest"],"capacity":f.capacity()}
  return f.invoke("scheduler.claim",claim,key=key,component="5.1")[1]
 def delegate_worker(f,token,name):
  """Actual runner delegation of a WORKER principal bound to the attempt, slot and boot."""

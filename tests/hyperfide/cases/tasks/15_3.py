@@ -16,38 +16,6 @@ scheduler=module('actual_checkpoint_scheduler',ROOT/'tests/hyperfide/cases/tasks
 native=module('actual_checkpoint_native',ROOT/'tests/hyperfide/cases/tasks/15_1.py')
 objects=module('actual_checkpoint_objects',ROOT/'tests/hyperfide/cases/tasks/15_2.py')
 RESULTS=[]
-# The shared 3.2 packet fixture predates task 2.4's accepted proof-intent gate:
-# it stores an empty accepted document and section-less task definitions, so
-# every packet create is refused. Supply the minimal accepted intent for its one
-# REVIEW clause at insert time (the document is immutable afterwards) without
-# editing another task's fixture. This grants no qualification authority.
-def accepted_intent():
- base=sys.modules['identity_fixture'].IdentityFixture
- if getattr(base,'_hf153_intent',False):return
- original=base.sql
- def field(key,value):return {'key':key,'raw':json.dumps(value),'value':value,'line':1}
- def section(name,**fields):return {'name':name,'line':1,'fields':{k:field(k,v) for k,v in fields.items()}}
- def sql(self,query,values=None,*args,**kwargs):
-  if query.startswith('INSERT INTO hyperfide.spec_revisions(') and "'fixture','{}',1)" in query:
-   self.hf153_reviewer=scheduler.uid();rubric=scheduler.sha(b'explicit-review-rubric')
-   document={'schema_version':1,'parsed':{'sections':[section('req.3.2',ac_1='Immutable execution input fixture'),section('acceptance.packet-intent',reqs=['3.2.1']),
-    section('proof',rubric_digest=rubric),section('proof.review.3.2.1',reviewers=[self.hf153_reviewer],rubric_digest=rubric)]}}
-   query=query.replace("'fixture','{}',1)","'fixture',$5,1)");values=list(values)+[json.dumps(document)]
-  elif query.startswith('INSERT INTO hyperfide.tasks(') and values and len(values)>7:
-   columns=query.split('(',1)[1].split(')',1)[0].split(',')
-   definition_index=columns.index('definition')
-   definition=json.loads(values[definition_index])
-   if 'section' not in definition:definition['section']={'name':'task.3.2','line':1,'fields':{'reqs':field('reqs',['3.2.1'])}}
-   values=list(values);values[definition_index]=json.dumps(definition)
-  elif query.startswith('INSERT INTO hyperfide.proof_registries(') and hasattr(self,'hf153_reviewer'):
-   columns=query.split('(',1)[1].split(')',1)[0].split(',')
-   policy_index=columns.index('policy');digest_index=columns.index('registry_digest')
-   policy=json.loads(values[policy_index])
-   for clause in policy.get('clauses',[]):
-    if clause.get('mode')=='REVIEW':clause['reviewers']=[self.hf153_reviewer]
-   values=list(values);values[digest_index]=scheduler.identity(policy);values[policy_index]=json.dumps(policy)
-  return original(self,query,values,*args,**kwargs)
- base.sql=sql;base._hf153_intent=True
 def sha(data):return 'sha256:'+hashlib.sha256(data).hexdigest()
 def canonical(value):return json.dumps(value,sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False).encode()
 def expect(value,message='Observed checkpoint assertion failed'):
@@ -144,7 +112,7 @@ def adoption(f,checkpoint_id):
  # replacement is claimed through an unpinned packet and must not be able to adopt.
  packet_input=svc.packet_input(task_id=i['task_a'],slot_id=i['slot_overlap'],idempotency_key=scheduler.uid(),attempt_id=scheduler.uid(),attempt_generation='2')
  created=svc.ok('hierarchy.packet.create',packet_input,key='manager',component='3.2')
- claim_request={'organisation_id':i['organisation'],'run_id':i['run'],'request_id':scheduler.uid(),'task_id':packet_input['task_id'],'attempt_id':packet_input['attempt_id'],'attempt_generation':'2','run_spec_generation':'1','spec_generation':'1','spec_revision_id':i['spec'],'authority_epoch':i['epoch'],'leader_generation':'1','package_generation':'2','sandbox_id':i['sandbox'],'slot_id':packet_input['slot_id'],'sandbox_boot_generation':'1','lease_ms':300000,'input_packet_digest':created['digest'],'capacity':svc.capacity()}
+ claim_request={'organisation_id':i['organisation'],'run_id':i['run'],'request_id':scheduler.uid(),'task_id':packet_input['task_id'],'attempt_id':packet_input['attempt_id'],'attempt_generation':'2','run_spec_generation':svc.spec_generation,'spec_generation':svc.spec_generation,'spec_revision_id':i['accepted_spec'],'authority_epoch':i['epoch'],'leader_generation':'1','package_generation':'2','sandbox_id':i['sandbox'],'slot_id':packet_input['slot_id'],'sandbox_boot_generation':'1','lease_ms':300000,'input_packet_digest':created['digest'],'capacity':svc.capacity()}
  new=svc.claim('replacement',request=claim_request)['token']
  target_before=svc.sql(CURRENT,[new['attempt_id']])[0]
  check('adoption.replacement-single-current',lambda:expect([row['id'] for row in svc.sql("SELECT id::text FROM hyperfide.attempts WHERE compute_authority='CURRENT'")]==[new['attempt_id']],'More than one current generation'))
@@ -190,7 +158,7 @@ def adoption(f,checkpoint_id):
   expect(svc.sql('SELECT count(*)::int n FROM hyperfide.checkpoints')[0]['n']==2,'Replay duplicated import')
  check('adoption.import.exact-replay',replay)
 def main():
- accepted_intent();scheduler.configure_cleanup('15.3');f=CheckpointFixture();state={}
+ scheduler.configure_cleanup('15.3');f=CheckpointFixture();state={}
  try:
   check('checkpoint.registration.actual-signed-claim',lambda:expect(f.service.sql("SELECT count(*)::int n FROM hyperfide.attempts WHERE compute_authority='CURRENT'")[0]['n']==1))
   check('checkpoint.registration.strict-input',lambda:f.reject(dict(f.request,durable=True),{'ADOPTION_INPUT_INVALID'}))
