@@ -1,9 +1,9 @@
 {
   "task": "13.3",
-  "commit": "d89ca66539e5560a128bcf2f3ddc9938f548bb44",
+  "commit": "12aa390190b3d3e360e079254378a381103fc236",
+  "requalified_on": "12aa390190b3d3e360e079254378a381103fc236",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-043 --manifest tests/hyperfide/manifests/tasks/13.3.json && python3 tests/hyperfide/qualify.py --case V-044 --manifest tests/hyperfide/manifests/tasks/13.3.json",
   "exit_code": 0,
-  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"6a189164-75cf-4a53-a82d-eb5618e7daae\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/13.3/campaigns/25864d0d5ce18b468cf74d14b2013ff4eb8b824f8871a8a133fbf47ddb115a3e\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"a270b668-1a34-4926-981b-677dcdc71bf9\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/13.3/campaigns/25864d0d5ce18b468cf74d14b2013ff4eb8b824f8871a8a133fbf47ddb115a3e\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
-  "ran_at": "2026-10-17T09:18:26Z",
-  "ran_as": "hf (uid 1500, repository owner) against PostgreSQL fixture /tmp/hyperfide/postgres; 22/22 assertions PASS per case receipt; full_case_status INCOMPLETE (task-component scope)"
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"03fa659d-c82e-4a3a-a114-a279e31d0dd4\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/13.3/campaigns/32e2b6ffc18ddc1d2962965336eabc3e3a26592e42ef686b7ef64d217dd7c3ce\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"0803b0c7-bb4e-446c-ac03-dc68d8d2a3a0\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/13.3/campaigns/32e2b6ffc18ddc1d2962965336eabc3e3a26592e42ef686b7ef64d217dd7c3ce\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T14:03:01.471Z"
 }
