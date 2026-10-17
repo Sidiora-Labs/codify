@@ -31,7 +31,7 @@ class GitHubFixture:
 def main():
     if '--cleanup' in sys.argv:return common.cleanup('18.2')
     github=GitHubFixture();secret='fixture-webhook-secret-with-32-bytes';env={'HF_GITHUB_REQUESTS_APPROVED':'true','HF_GITHUB_API_URL':'http://127.0.0.1:'+str(github.server.server_port)+'/','HF_GITHUB_ALLOW_LOOPBACK':'true','HF_GITHUB_TOKEN':'synthetic-local-token','HF_GITHUB_MARKER_SECRET':'synthetic-marker-secret-with-32-bytes','HF_GITHUB_WEBHOOK_SECRET':secret}
-    f=common.fixture('18.2',extra=('18.2',),env=env,after_seed=accepted_proof_intent)
+    f=common.fixture('18.2',extra=('18.2',),env=env)
     def call(action,payload):return common.call(f,action,payload,component='finding-github')
     def reject(action,payload,code=None):return common.reject(f,action,payload,code,component='finding-github')
     try:
