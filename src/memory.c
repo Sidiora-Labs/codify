@@ -11,6 +11,9 @@
  * bm25 rank) with recency as the tie-breaker.
  */
 #include "cg.h"
+/* 21.3 bounded decision assistance; defined in recap.c */
+extern int hf_decision_advice(int purpose, const char *observation, char **advice);
+extern int hf_advice_unit(const char *obj, const char *key, double *out);
 #include <ctype.h>
 #include <time.h>
 
@@ -639,6 +642,33 @@ static char *classify_state(const Memory *m) {
  * its own task. Fills m->cls / m->confidence; *reusable gets the noul (-1
  * when Jev did not answer it). -1 with the reason already on stderr. */
 static int classify_one(Cg *cg, Memory *m, double *reusable) {
+    /* distributed: the explicit HF_DECISION_MEMORY purpose path, never Jev.
+     * Without usable advice the memory stays unclassified, exactly as when
+     * Jev fails; the class is an opinion and grants nothing. */
+    char *state0 = classify_state(m), *advice = NULL;
+    int routed = hf_decision_advice(4 /* HF_DECISION_MEMORY */, state0, &advice);
+    free(state0);
+    if (routed >= 0) {
+        char *cls = routed ? json_get_string(advice, "class") : NULL;
+        double confidence = -1, reuse = -1;
+        int known = 0;
+        for (int i = 0; cls && i < NCLASSES; i++) known |= !strcmp(cls, CLASS_KEYS[i]);
+        bool ok = known && hf_advice_unit(advice, "confidence", &confidence);
+        char *raw = routed ? json_get_raw(advice, "reusable") : NULL;
+        if (ok && raw && strcmp(raw, "null") && !hf_advice_unit(advice, "reusable", &reuse)) ok = false;
+        free(raw); free(advice);
+        if (!ok) {
+            if (routed)
+                fprintf(stderr, "cg: memory advice for #%ld was malformed — left unclassified\n", m->id);
+            free(cls);
+            return -1;
+        }
+        free(m->cls);
+        m->cls = cls;
+        m->confidence = confidence;
+        *reusable = reuse;
+        return 0;
+    }
     JevQuestion qs[2];
     jev_question_choice(&qs[0], "class",
         "A coding agent wrote this note while working in a repository. "
