@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "13.4",
+  "task": "13.4",
+  "roles": [
+    "control"
+  ],
+  "module": "agents/admission.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "agent.admission.reserve",
+    "agent.admission.inspect",
+    "agent.admission.report",
+    "agent.admission.recovery-context"
+  ],
+  "requires": [
+    "13.2",
+    "14.3"
+  ]
+}

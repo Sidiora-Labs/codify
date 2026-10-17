@@ -1,0 +1,10 @@
+[component]
+schema_version = 1
+id = "25.3"
+source = "src/hyperfide/client.c"
+entry = "hf_component_25_3"
+actions = ["authority.mode"]
+requires = ["12.1"]
+support_sources = ["src/hyperfide/transport.c"]
+headers = ["src/hyperfide/transport.h"]
+libraries = ["curl", "crypto"]

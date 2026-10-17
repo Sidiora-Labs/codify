@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "variant": "task:26.1",
+  "task": "26.1",
+  "scope": "task-component",
+  "cases": [
+    "V-026",
+    "V-028"
+  ],
+  "assertion_ids": [
+    "branding.native.product",
+    "branding.native.development-version",
+    "branding.native.canonical-command",
+    "branding.native.legacy-command",
+    "branding.native.protocol-distinct",
+    "branding.inventory.history",
+    "branding.inventory.namespace",
+    "branding.inventory.compatibility-window",
+    "branding.inventory.config-aliases",
+    "branding.inventory.resource-aliases",
+    "branding.native.reject-unknown-action",
+    "branding.native.reject-unknown-input",
+    "branding.native.reject-array-input",
+    "branding.editor.display",
+    "branding.editor.preserve-package",
+    "branding.editor.preserve-command-identities",
+    "branding.editor.display-command-titles",
+    "branding.installer.display"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/26_1.py"
+  ],
+  "timeout_seconds": 60,
+  "required_env": [],
+  "fixtures": [
+    "build/hyperfide-native"
+  ],
+  "resources": [],
+  "source_files": [
+    "src/hyperfide/branding.c",
+    "src/hyperfide/components/26.1.kvx",
+    "src/cg.h",
+    "scripts/install.sh",
+    "scripts/release.sh",
+    "editors/vscode/package.json",
+    "src/hyperfide/component_main.c",
+    "src/hyperfide/components.h",
+    "scripts/hyperfide-native-components.py",
+    "build/hyperfide-native",
+    "build/hyperfide-native-registry.inc",
+    "tests/hyperfide/cases/tasks/26_1.py"
+  ],
+  "source_roots": [
+    "src/hyperfide/components"
+  ]
+}

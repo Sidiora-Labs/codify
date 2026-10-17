@@ -31,6 +31,137 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+/* Validate every explicit alias group before mutating the environment. */
+int hyperfide_environment_aliases(void) {
+    static const char *names[][3] = {
+        {"HYPERFIDE_AGENT","CG_AGENT",""},
+        {"HYPERFIDE_ATTEMPT","CG_ATTEMPT",""},
+        {"HYPERFIDE_BASE","CG_BASE",""},
+        {"HYPERFIDE_BINARY","CG_BINARY",""},
+        {"HYPERFIDE_BODY_FIRST","CG_BODY_FIRST",""},
+        {"HYPERFIDE_BRANCH","CG_BRANCH",""},
+        {"HYPERFIDE_BUSY_TIMEOUT_MS","CG_BUSY_TIMEOUT_MS",""},
+        {"HYPERFIDE_CHANGELOG_CURL","CG_CHANGELOG_CURL",""},
+        {"HYPERFIDE_CHANGELOG_ENDPOINT","CG_CHANGELOG_ENDPOINT",""},
+        {"HYPERFIDE_CHANGELOG_KEY","CG_CHANGELOG_KEY",""},
+        {"HYPERFIDE_CHANGELOG_MODEL","CG_CHANGELOG_MODEL",""},
+        {"HYPERFIDE_CLAUDE","CG_CLAUDE",""},
+        {"HYPERFIDE_COLOR","CG_COLOR",""},
+        {"HYPERFIDE_EVENTS_KEEP","CG_EVENTS_KEEP",""},
+        {"HYPERFIDE_FEATURE","CG_FEATURE",""},
+        {"HYPERFIDE_FENCE","CG_FENCE",""},
+        {"HYPERFIDE_GH","CG_GH",""},
+        {"HYPERFIDE_HOST","CG_HOST",""},
+        {"HYPERFIDE_INDEX_SLOTS","CG_INDEX_SLOTS",""},
+        {"HYPERFIDE_INDEX_WORKERS","CG_INDEX_WORKERS",""},
+        {"HYPERFIDE_INSPECT_REACH_LIMIT","CG_INSPECT_REACH_LIMIT",""},
+        {"HYPERFIDE_JEV_ATTEMPTS","CG_JEV_ATTEMPTS",""},
+        {"HYPERFIDE_JEV_BACKOFF_MS","CG_JEV_BACKOFF_MS",""},
+        {"HYPERFIDE_JEV_CURL","CG_JEV_CURL",""},
+        {"HYPERFIDE_JEV_ENDPOINT","CG_JEV_ENDPOINT",""},
+        {"HYPERFIDE_JEV_MODEL","CG_JEV_MODEL",""},
+        {"HYPERFIDE_JEV_TIMEOUT","CG_JEV_TIMEOUT",""},
+        {"HYPERFIDE_MERGE_LOCK_WAIT_MS","CG_MERGE_LOCK_WAIT_MS",""},
+        {"HYPERFIDE_PACKET_BUDGET","CG_PACKET_BUDGET",""},
+        {"HYPERFIDE_PARENT","CG_PARENT",""},
+        {"HYPERFIDE_PROGRESS","CG_PROGRESS",""},
+        {"HYPERFIDE_PROGRESS_ENFORCE","CG_PROGRESS_ENFORCE",""},
+        {"HYPERFIDE_RECAP_CHUNK","CG_RECAP_CHUNK",""},
+        {"HYPERFIDE_RECAP_CLAUDE_DIR","CG_RECAP_CLAUDE_DIR",""},
+        {"HYPERFIDE_RECAP_CODEX_DIR","CG_RECAP_CODEX_DIR",""},
+        {"HYPERFIDE_RECAP_DECIDE_ENDPOINT","CG_RECAP_DECIDE_ENDPOINT",""},
+        {"HYPERFIDE_RECAP_DECIDE_MODEL","CG_RECAP_DECIDE_MODEL",""},
+        {"HYPERFIDE_RECAP_MAX_SNIPPETS","CG_RECAP_MAX_SNIPPETS",""},
+        {"HYPERFIDE_RECAP_MODEL","CG_RECAP_MODEL",""},
+        {"HYPERFIDE_RECAP_PARALLEL","CG_RECAP_PARALLEL",""},
+        {"HYPERFIDE_ROLE","CG_ROLE",""},
+        {"HYPERFIDE_RUN","CG_RUN",""},
+        {"HYPERFIDE_SEM_FAIL_BEFORE_PUBLISH","CG_SEM_FAIL_BEFORE_PUBLISH",""},
+        {"HYPERFIDE_SESSION","CG_SESSION",""},
+        {"HYPERFIDE_SHELL_ADVICE","CG_SHELL_ADVICE",""},
+        {"HYPERFIDE_SLOT_DIR","CG_SLOT_DIR",""},
+        {"HYPERFIDE_SUPERVISOR_LOG","CG_SUPERVISOR_LOG",""},
+        {"HYPERFIDE_TASK","CG_TASK",""},
+        {"HYPERFIDE_WALK_THREADS","CG_WALK_THREADS",""},
+        {"HYPERFIDE_WATCH_POLL_MS","CG_WATCH_POLL_MS",""},
+        {"HYPERFIDE_WATCH_TEST_EVENT","CG_WATCH_TEST_EVENT",""},
+        {"HYPERFIDE_WATCH_TEST_REG_FAIL_ONCE","CG_WATCH_TEST_REG_FAIL_ONCE",""},
+        {"HYPERFIDE_WATCH_TEST_SYNC_FAIL_ONCE","CG_WATCH_TEST_SYNC_FAIL_ONCE",""},
+        {"HYPERFIDE_WAVE","CG_WAVE",""},
+        {"HYPERFIDE_ROOT","CODIFY_ROOT",""},
+        {"HYPERFIDE_AUTHORITY_URL","CG_AUTHORITY_URL","CODIFY_AUTHORITY_URL"},
+        {"HYPERFIDE_CREDENTIAL_FILE","CG_CREDENTIAL_FILE","CODIFY_CREDENTIAL_FILE"},
+        {"HYPERFIDE_AUTHORITY_DESCRIPTOR","CG_AUTHORITY_DESCRIPTOR","CODIFY_AUTHORITY_DESCRIPTOR"},
+        {"HYPERFIDE_TRANSPORT_CONFIG","CG_TRANSPORT_CONFIG","CODIFY_TRANSPORT_CONFIG"},
+        {"HYPERFIDE_MCP_TOOL_POLICY_FILE","CG_MCP_TOOL_POLICY_FILE","CODIFY_MCP_TOOL_POLICY_FILE"},
+        {"HYPERFIDE_MODE","CG_MODE","CODIFY_MODE"},
+        {"HYPERFIDE_INSTALL_DIR","CODIFY_INSTALL_DIR",""},
+        {"HYPERFIDE_BASE_URL","CODIFY_BASE_URL",""},
+    };
+    for (size_t i=0;i<sizeof names/sizeof names[0];i++) {
+        const char *value=NULL;
+        for(int j=0;j<3&&names[i][j][0];j++) {
+            const char *candidate=getenv(names[i][j]);
+            if(candidate && value && strcmp(candidate,value)) {
+                fprintf(stderr,"hyperfide: conflicting variable aliases for %s (values redacted)\n",names[i][0]);
+                return 2;
+            }
+            if(candidate)value=candidate;
+        }
+    }
+    for(size_t i=0;i<sizeof names/sizeof names[0];i++) {
+        char *value=NULL;
+        for(int j=0;j<3&&names[i][j][0];j++)if(getenv(names[i][j])){value=xstrdup(getenv(names[i][j]));break;}
+        if(!value)continue;
+        for(int j=0;j<3&&names[i][j][0];j++)if(setenv(names[i][j],value,1)){free(value);return 2;}
+        free(value);
+    }
+    return 0;
+}
+static char *names_metadata(const char *filename) {
+    struct stat st;
+    if(lstat(filename,&st)||!S_ISREG(st.st_mode)||st.st_size>1048576)return NULL;
+    return read_entire_file(filename,NULL);
+}
+static bool names_migration_selects_canonical(const char *root,const char *legacy) {
+    char pathname[4600];
+    snprintf(pathname,sizeof pathname,"%s/.hyperfide",root);
+    struct stat st;
+    if(lstat(pathname,&st)||!S_ISDIR(st.st_mode))return false;
+    snprintf(pathname,sizeof pathname,"%s/.hyperfide/names.json",root);
+    char *body=names_metadata(pathname);
+    if(!body)return false;
+    char *id=json_get_string(body,"migration_id"),*digest=json_get_string(body,"manifest_digest"),
+         *state=json_get_string(body,"state"),*raw=json_get_raw(body,"mappings");
+    bool valid=id&&strlen(id)==36&&digest&&strlen(digest)==71&&!strncmp(digest,"sha256:",7)&&state&&!strcmp(state,"APPLIED")&&json_get_int(body,"schema_version",0)==1;
+    if(valid)for(int i=0;i<36;i++)if((i==8||i==13||i==18||i==23)?id[i]!='-':!isxdigit((unsigned char)id[i]))valid=false;
+    bool mapping=false;
+    char **items=NULL;int count=raw?json_array_items(raw,&items):0;
+    for(int i=0;i<count;i++){
+        char *from=json_get_string(items[i],"legacy"),*to=json_get_string(items[i],"canonical"),*pin=json_get_string(items[i],"digest");
+        if(from&&to&&pin&&!strcmp(from,"codify.kvx")&&!strcmp(to,"hyperfide.kvx")){
+            size_t length=0;char *source=read_entire_file(legacy,&length);char actual[72]="sha256:";
+            if(source){sha256_hex(source,length,actual+7);mapping=!strcmp(pin,actual);free(source);}
+        }
+        free(from);free(to);free(pin);free(items[i]);
+    }
+    free(items);
+    /* The completed selection is portable; private rollback journals stay local. */
+    free(body);free(id);free(digest);free(state);free(raw);
+    return valid&&mapping;
+}
+static void config_selected_path(const char *root,char *out,size_t capacity) {
+    char canonical[4600],legacy[4600];struct stat a,b;
+    snprintf(canonical,sizeof canonical,"%s/hyperfide.kvx",root);
+    snprintf(legacy,sizeof legacy,"%s/codify.kvx",root);
+    bool has_new=stat(canonical,&a)==0,has_old=stat(legacy,&b)==0;
+    if(has_new&&has_old&&!names_migration_selects_canonical(root,legacy)) {
+        fprintf(stderr,"hyperfide: both hyperfide.kvx and codify.kvx exist without a matching completed names migration; resolve the configuration conflict explicitly\n");
+        exit(2);
+    }
+    snprintf(out,capacity,"%s",has_new?canonical:has_old?legacy:canonical);
+}
+
 typedef enum { CFG_BOOL, CFG_PATH, CFG_INT, CFG_STR, CFG_DUR,
                CFG_LIST, CFG_ENUM } CfgType;   /* codify-v15 3.1, 1.3 */
 
@@ -92,13 +223,13 @@ static const struct {
 };
 
 static const char CFG_TEMPLATE[] =
-"# codify.kvx — project configuration for Codify. Every key is optional.\n"
+"# hyperfide.kvx — project configuration for Hyperfide. Every key is optional.\n"
 "[sync]\n"
 "auto = true                 # implicit syncs: hooks, read-command freshness, MCP/LSP/serve/watch\n"
 "\n"
 "[paths]\n"
 "spec    = \"spec\"            # workflow.kvx, feature specs, rendered mirrors\n"
-"context = \".codify\"         # agent-context.md, recap.md\n"
+"context = \".hyperfide/context\"         # agent-context.md, recap.md\n"
 "skills  = \".agents/skills\"  # generated SKILL.md files\n"
 "codemap = \"CODEMAP.md\"      # written by cg codemap\n"
 "\n"
@@ -261,7 +392,7 @@ static char *cfg_slot(CgConfig *c, int i) {
 static void cfg_defaults(CgConfig *c, const char *root) {
     memset(c, 0, sizeof *c);
     snprintf(c->root, sizeof c->root, "%s", root);
-    snprintf(c->file, sizeof c->file, "%s/%s", root, CG_CONFIG_FILE);
+    config_selected_path(root,c->file,sizeof c->file);
     c->sync_auto = true;
     c->fleet_discover = true;                  /* codify-v15 2.4 */
     c->proj_steer = true;              /* codify-v15 3.2 */
@@ -276,6 +407,12 @@ static void cfg_defaults(CgConfig *c, const char *root) {
         char *s = cfg_slot(c, i);
         if (s) snprintf(s, sizeof c->spec, "%s", CFG_KEYS[i].dflt);
     }
+    /* New canonical configuration gets canonical context; explicit [paths]
+     * values still override this below. Legacy-only repositories keep defaults. */
+    char canonical[4600];struct stat selected;
+    snprintf(canonical,sizeof canonical,"%s/hyperfide.kvx",root);
+    if(!strcmp(c->file,canonical)&&stat(canonical,&selected)==0)
+        snprintf(c->context,sizeof c->context,".hyperfide/context");
 }
 
 /* Parse <root>/codify.kvx into c, every problem into is (may be NULL). */
@@ -736,7 +873,7 @@ static int cfg_list(const char *root, bool json) {
 
 static int cfg_init(const char *root) {
     char path[4600];
-    snprintf(path, sizeof path, "%s/%s", root, CG_CONFIG_FILE);
+    config_selected_path(root,path,sizeof path);
     struct stat st;
     if (stat(path, &st) == 0) {
         fprintf(stderr, "cg config: %s already exists — left alone (`cg "
@@ -846,7 +983,7 @@ static int cfg_set(const char *root, const char *dotted, const char *value) {
         }
     }
     char path[4600];
-    snprintf(path, sizeof path, "%s/%s", root, CG_CONFIG_FILE);
+    config_selected_path(root,path,sizeof path);
     struct stat st;
     if (stat(path, &st) != 0) {
         static const char head[] = "# codify.kvx — project configuration for "

@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "26.3",
+  "task": "26.3",
+  "roles": [
+    "control"
+  ],
+  "module": "migration/names.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "migration.names.plan",
+    "migration.names.apply",
+    "migration.names.rollback",
+    "migration.names.aliases"
+  ],
+  "requires": []
+}

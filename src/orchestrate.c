@@ -1,3 +1,5 @@
+#include <stdio.h>
+extern int hf_client_authority_guard(const char *operation, FILE *output);
 /*
  * cg spec run — the orchestrator that turns a parallel spec into running
  * agents. It loops the wave-1 primitives: claim-next picks a conflict-free
@@ -672,6 +674,7 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
                           const FleetRunOpts *ro);
 
 int cmd_spec_run(int argc, char **argv) {
+    { int authority_rc = hf_client_authority_guard("spec.run", stderr); if (authority_rc) return authority_rc; }
     int nflag = 0, maxfail = 2, maxrounds = 0;
     const char *driver_ov = NULL, *prefix = "run", *feature_ov = NULL;
     const char *run_id = NULL, *resume = NULL;

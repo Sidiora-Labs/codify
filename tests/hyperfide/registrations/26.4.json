@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "variant": "task:26.4",
+  "task": "26.4",
+  "scope": "task-component",
+  "cases": [
+    "V-026",
+    "V-055"
+  ],
+  "assertion_ids": [
+    "generated.actual-three-native-generators",
+    "generated.spec-owned-marker",
+    "generated.context-owned-marker",
+    "generated.codemap-owned-marker",
+    "generated.no-history-rewrite",
+    "generated.idempotent-real-regeneration",
+    "generated.legacy-owned-map-updated",
+    "generated.legacy-owned-map-exact-backup",
+    "generated.service-refuses-user-map",
+    "generated.native-refuses-user-map",
+    "generated.service-refuses-user-instructions",
+    "generated.native-refuses-user-instructions",
+    "generated.rejects-wrong-executable-pin",
+    "generated.rejects-main-placement",
+    "generated.rejects-duplicate-generator",
+    "generated.rejects-invented-generator",
+    "generated.inventory-only-no-file-contents",
+    "generated.unsafe-context-config-resolves-contained",
+    "generated.escape-created-no-outside-output",
+    "generated.preserves-custom-user-context",
+    "generated.rejects-ancestor-workflow-discovery",
+    "generated.native-refuses-adapter-path-escape",
+    "generated.adapter-escape-created-no-outside-output",
+    "generated.editor-actual-setting-alias-resolution",
+    "generated.legacy-mcp-server-preserved-without-duplicate",
+    "generated.new-mcp-config-canonical-name",
+    "generated.owned-hook-replaced-with-exact-private-backup",
+    "generated.one-portable-hook-namespace",
+    "generated.native-session-state-preserved",
+    "generated.duplicate-mcp-server-fails-conflict",
+    "generated.mcp-canonical-server-name",
+    "generated.mcp-legacy-resource-same-bytes",
+    "generated.command-alias-real-output-parity"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/26_4.py"
+  ],
+  "timeout_seconds": 240,
+  "required_env": [],
+  "fixtures": [
+    "services/hyperfide/dist/control.js",
+    "/usr/bin/flock",
+    "hyperfide",
+    "cg"
+  ],
+  "resources": [],
+  "source_files": [
+    "src/agent.c",
+    "src/codemap.c",
+    "src/spec.c",
+    "src/mcp.c",
+    "src/integrate.c",
+    "src/main.c",
+    "src/hyperfide/entrypoint.c",
+    "src/hyperfide/components/26.4.kvx",
+    "spec/workflow.kvx",
+    "editors/vscode/extension.js",
+    "editors/vscode/package.json",
+    "services/hyperfide/src/migration/generated.ts",
+    "services/hyperfide/components/26.4.json",
+    "services/hyperfide/dist/migration/generated.js",
+    "services/hyperfide/dist/control.js",
+    "tests/hyperfide/cases/tasks/26_4.py",
+    "hyperfide",
+    "cg"
+  ],
+  "source_roots": [
+    "services/hyperfide/src/migration"
+  ]
+}
