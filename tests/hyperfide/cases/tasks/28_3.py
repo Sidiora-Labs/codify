@@ -5,10 +5,14 @@ from pathlib import Path
 H=runpy.run_path(str(Path(__file__).with_name("28_2.py")))
 fixture=H["fixture"];call=H["call"];check=H["check"];require=H["require"];node=H["node"];FAILED=H["FAILED"]
 NODE_BASE="""
-import{loadReleaseContract}from'./services/hyperfide/dist/release/traceability.js';
 import{validateReadinessInventory,RELEASE_GATES}from'./services/hyperfide/dist/release/readiness.js';
 import{contentDigest}from'./services/hyperfide/dist/docs/closure.js';
-const{contract:live}=await loadReleaseContract();const c=structuredClone(live);
+// Controlled pack: a self-consistent fixture contract, independent of live spec drift.
+const c={clauses:['1.1','2.1','2.2'],
+ tasks:[{id:'1.1',reqs:['1.1'],acceptance_ids:['V-901'],requires:[],wave:1},{id:'2.1',reqs:['2.1','2.2'],acceptance_ids:['V-902','V-903'],requires:['1.1'],wave:2}],
+ cases:{'V-901':{},'V-902':{},'V-903':{}},native_case_requirements:{'V-901':['1.1'],'V-902':['2.1','2.2'],'V-903':['2.1','2.2']},
+ mappings:[{id:'1.1',task_ids:['1.1'],acceptance_ids:['V-901'],chapters:['requirements.md']},{id:'2.1',task_ids:['2.1'],acceptance_ids:['V-902','V-903'],chapters:['requirements.md']},{id:'2.2',task_ids:['2.1'],acceptance_ids:['V-902','V-903'],chapters:['verification.md']}],
+ source_pins:[]};
 for(const[k,v]of Object.entries(c.cases))v.full_assertion_ids=['synthetic.assertion.'+k];
 c.contract_digest=contentDigest({fixture_only:true,contract:c});
 const revision='f'.repeat(40),source=contentDigest('synthetic-source-manifest');
@@ -24,7 +28,7 @@ const p={schema_version:1,contract_digest:c.contract_digest,implementation_revis
  resource_ids:['fixture-resource'],unsupported_features:[]};
 """
 def controlled(change="",positive=False):
-    suffix=change+";let result;try{result=validateReadinessInventory(c,p,e)}catch(error){if("+str(positive).lower()+")throw error;process.exit(0)}if(result.complete!=="+str(positive).lower()+")throw Error('unexpected controlled result '+JSON.stringify(result));if("+str(positive).lower()+"&&(result.checker_result_is_release_authority!==false||result.seal_requires_self_digest!==false))throw Error('checker selftest claimed authority');"
+    suffix=change+";let result;try{result=validateReadinessInventory(c,p,e)}catch(error){if("+str(positive).lower()+")throw error;process.exit(0)}if(result.complete!=="+str(positive).lower()+")throw Error('unexpected controlled result '+JSON.stringify(result));if("+str(positive).lower()+"&&(result.reasons.length!==0||result.checker_result_is_release_authority!==false||result.seal_requires_self_digest!==false))throw Error('checker selftest claimed authority');"
     result=node(NODE_BASE+suffix);require(result.returncode==0,result.stderr)
 
 
@@ -64,7 +68,8 @@ def portable_cases():
     import os,tempfile,importlib.util,fcntl
     assets=Path(os.environ.get("HYPERFIDE_RELEASE_TEST_PROOF_ASSETS","tests/hyperfide")).resolve()
     require((assets/"test_inspect_proof.py").is_file(),"actual 27 proof assets must be installed; no fallback checker")
-    require(assets in {Path("tests/hyperfide").resolve(),Path("services/hyperfide/dist/release-proof-assets").resolve()},"proof assets must use a source-pinned test root")
+    # Proof assets are the manifest-pinned 27.1 sources themselves; no unpinned staged copy.
+    require(assets==Path("tests/hyperfide").resolve(),"proof assets must use the source-pinned test root")
     sys.path.insert(0,str(assets))
     spec=importlib.util.spec_from_file_location("actual27_release_probe",assets/"test_inspect_proof.py")
     supplier=importlib.util.module_from_spec(spec);spec.loader.exec_module(supplier)
@@ -73,12 +78,19 @@ def portable_cases():
     paths=[str(proof.fixture.root)]
     def record_paths():H["fixture_artifact"]("task-28.3-portable.json").write_text(json.dumps({"owner":"task:28.3","paths":paths,"observed_absent":all(not Path(p).exists()for p in paths)},sort_keys=True)+"\n")
     record_paths()
+    # Stage byte-identical copies of the pinned checker assets under a protected private root;
+    # the workspace ancestry may be owned by a third account and is never trusted as-is.
+    import shutil
+    qualified=Path(tempfile.mkdtemp(prefix="hyperfide-proof-staging-qualified-"));paths.append(str(qualified));record_paths()
+    for name in ("inspect-proof.py","check-evidence.py","proof_relocation.py","registry.json"):
+        shutil.copyfile(assets/name,qualified/name);(qualified/name).chmod(0o644)
+        require((qualified/name).read_bytes()==(assets/name).read_bytes(),"staged proof asset differs from pinned source: "+name)
     try:
         root,mapping=proof.portable()
         paths.append(str(root));record_paths()
         receipt=proof.request["receipt_id"]
         def inspect(expected=True,proof_assets=None):
-            request={"root":str(root),"campaign":str(root/"campaign"),"receipt":receipt,"assets":str(proof_assets or assets)}
+            request={"root":str(root),"campaign":str(root/"campaign"),"receipt":receipt,"assets":str(proof_assets or qualified)}
             script="import{checkReleaseCampaign}from'./services/hyperfide/dist/release/readiness.js';const p="+json.dumps(request)+";try{const r=await checkReleaseCampaign(p.root,p.campaign,p.receipt,{env:{HYPERFIDE_RELEASE_QUALIFIED_PROOF_ROOT:p.assets},signal:new AbortController().signal});if(!"+str(expected).lower()+"||r.scope!=='task-component'||r.full_case_status!=='INCOMPLETE')throw Error('scope or expected refusal mismatch')}catch(e){if("+str(expected).lower()+"||!e.code)throw e}"
             result=node(script)
             require(result.returncode==0,"portable readiness check failed: "+result.stderr)
@@ -101,7 +113,7 @@ def portable_cases():
                 os.environ.update(PATH="/nonexistent-release-probe",PYTHONHOME="/nonexistent-release-python",PYTHONPATH="/nonexistent-release-imports",
                                   GIT_CONFIG_COUNT="1",GIT_CONFIG_KEY_0="core.fsmonitor",GIT_CONFIG_VALUE_0="/nonexistent-release-helper")
                 # node() resolves its trusted runtime before these overrides below.
-                script="import{checkReleaseCampaign}from'./services/hyperfide/dist/release/readiness.js';const r=await checkReleaseCampaign("+json.dumps(str(root))+","+json.dumps(str(root/"campaign"))+","+json.dumps(receipt)+",{env:{HYPERFIDE_RELEASE_QUALIFIED_PROOF_ROOT:"+json.dumps(str(assets))+"},signal:new AbortController().signal});if(r.scope!=='task-component')throw Error('unexpected scope');"
+                script="import{checkReleaseCampaign}from'./services/hyperfide/dist/release/readiness.js';const r=await checkReleaseCampaign("+json.dumps(str(root))+","+json.dumps(str(root/"campaign"))+","+json.dumps(receipt)+",{env:{HYPERFIDE_RELEASE_QUALIFIED_PROOF_ROOT:"+json.dumps(str(qualified))+"},signal:new AbortController().signal});if(r.scope!=='task-component')throw Error('unexpected scope');"
                 import subprocess,shutil
                 result=subprocess.run([node_runtime,"--input-type=module","-e",script],cwd=Path.cwd(),text=True,capture_output=True,timeout=160)
                 require(result.returncode==0,"inherited environment affected checker: "+result.stderr)
@@ -151,7 +163,7 @@ def portable_cases():
         check("readiness.portable-anchored-receipt-unchanged",lambda:require(supplier.sha((root/"campaign"/"receipts"/(receipt+".json")).read_bytes())==proof.request["receipt_digest"],"sealed receipt changed during relocation"))
     finally:
         if proof.staging and str(Path(proof.staging.name))not in paths:paths.append(str(Path(proof.staging.name)))
-        proof.tearDown();record_paths()
+        proof.tearDown();shutil.rmtree(qualified,ignore_errors=True);record_paths()
     check("readiness.portable-temporary-sources-and-stage-removed",lambda:require(all(not Path(p).exists()for p in paths),"owned temporary source/stage remains"))
     with tempfile.TemporaryDirectory(prefix="hyperfide-release-index-")as folder:
         root=Path(folder);index=root/"admission.json"
@@ -200,6 +212,7 @@ def main():
       "missing-native-registration":"c.cases[names[0]].full_assertion_ids=[]",
       "force-override":"p.force=true",
       "recursive-seal-input":"p.seal_digest=contentDigest('self-reference')",
+      "unsupported-feature-claimed":"p.unsupported_features=[{feature:names[0],reason:'not qualified'}]",
     }
     for name,change in changes.items():check("readiness.reject-"+name,lambda change=change:controlled(change))
     check("readiness.explicit-current-retention",lambda:controlled("Object.assign(e.get(names[0]).resources[0],{state:'RETAINED',owner:'fixture-owner',expires_at:new Date(Date.now()+60000).toISOString(),retention_authorised:true})",True))
@@ -210,13 +223,13 @@ def main():
     check("readiness.exact-manifest-byte-binding",lambda:manifest_binding(False))
     check("readiness.reject-manifest-changed-after-checker",lambda:manifest_binding(True))
     portable_cases()
-    f=fixture(("15.2","28.4","28.3"))
+    # The trusted migration engine already applies 0028; do not re-apply it here.
+    f=fixture(("15.2","28.4","28.3"),migrate=False)
     try:
-        current=call(f,"release.traceability.contract",{},component="28.4")
-        live=current["contract"]
-        inventory={"schema_version":1,"contract_digest":live["contract_digest"],"implementation_revision":"f"*40,"source_manifest_digest":H["digest"]("synthetic-source"),
-          "clause_evidence":[{"clause":m["id"],"task_ids":m["task_ids"],"case_ids":m["acceptance_ids"],"evidence_refs":["unadmitted"]}for m in live["mappings"]],
-          "case_evidence":[{"case_id":name,"evidence_ref":"unadmitted"}for name in live["cases"]],
+        # A well-formed caller inventory; no caller field may substitute for admitted evidence.
+        inventory={"schema_version":1,"contract_digest":H["digest"]("caller-contract"),"implementation_revision":"f"*40,"source_manifest_digest":H["digest"]("synthetic-source"),
+          "clause_evidence":[{"clause":"1.1","task_ids":["1.1"],"case_ids":["V-901"],"evidence_refs":["unadmitted"]}],
+          "case_evidence":[{"case_id":"V-901","evidence_ref":"unadmitted"}],
           "gate_evidence":[{"kind":k,"evidence_refs":["unadmitted"]}for k in["task","candidate","programme","policy","docs","restore","rollback","cleanup","traceability","checker_selftest"]],
           "resource_ids":[],"unsupported_features":[]}
         def no_unadmitted():
