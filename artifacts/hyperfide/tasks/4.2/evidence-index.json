@@ -1,9 +1,9 @@
 {
   "task": "4.2",
-  "commit": "ff4632c9bc896057147975b600323af8f8b21f89",
-  "requalified_on": "ff4632c9bc896057147975b600323af8f8b21f89",
+  "commit": "a80cd7edbb1c3021b76c18c53fdc95d634a77a09",
+  "requalified_on": "a80cd7edbb1c3021b76c18c53fdc95d634a77a09",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-002 --manifest tests/hyperfide/manifests/tasks/4.2.json && python3 tests/hyperfide/qualify.py --case V-011 --manifest tests/hyperfide/manifests/tasks/4.2.json",
   "exit_code": 0,
-  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"2f3de7e1-abf4-4efc-9142-b8c5b6144738\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/4.2/campaigns/c75c6cec7aa1bb229c082c714af0fa644b66a9e4b513ce74afb0907b8fbf4d5f\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"dc9f88a3-731d-47f5-ad38-60e4c39839f2\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/4.2/campaigns/c75c6cec7aa1bb229c082c714af0fa644b66a9e4b513ce74afb0907b8fbf4d5f\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
-  "ran_at": "2026-10-17T18:52:38.152369+00:00"
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"554f1c34-ec60-4c3d-b855-ff7b022272d7\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/4.2/campaigns/dc7185b572553844a2b9650f7315ab41e75758bf22cec4be37e95d322dcbed00\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"35dcf42a-5754-41ac-b30c-35b169664726\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/4.2/campaigns/dc7185b572553844a2b9650f7315ab41e75758bf22cec4be37e95d322dcbed00\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T19:18:07.639032+00:00"
 }

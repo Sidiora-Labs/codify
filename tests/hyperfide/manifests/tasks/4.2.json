@@ -8,7 +8,7 @@
     ],
     "approved": true
   },
-  "campaign_id": "hyperfide-task-4.2-merged-durability-integration-v1-requal-ff4632c9bc89",
+  "campaign_id": "hyperfide-task-4.2-merged-durability-integration-v1-requal-ff4632c9bc89-requal-a80cd7edbb1c",
   "case_ids": [
     "V-002",
     "V-011"
@@ -200,13 +200,13 @@
     },
     {
       "path": "services/hyperfide/dist/providers/blaxel/images.js",
-      "sha256": "bfde63817f4a875e228c5e8b8b196443c14ea1498e7c868bfcf00efc8fff8cfa",
-      "size": 37891
+      "sha256": "e917b16b6dc7baab4db10c36cc3f3640ed58f9999f474560e3b927c709ea3abe",
+      "size": 37926
     },
     {
       "path": "services/hyperfide/dist/providers/blaxel/images.js.map",
-      "sha256": "9bde26102d9dd8ae92499ff17cc99ad6409e76aa92ef7e9fe56f9c5fc5fa720d",
-      "size": 34501
+      "sha256": "97de28dcf4323d992fcd66be890728064ebefc1900c67b36f46c7a6b6793db88",
+      "size": 34541
     },
     {
       "path": "services/hyperfide/dist/providers/contract.d.ts",
@@ -335,8 +335,8 @@
     },
     {
       "path": "services/hyperfide/src/providers/blaxel/images.ts",
-      "sha256": "ebc8ed106ab67e78cbe59a832f9bd9dbd047f54fc359655ff6773a2e87f20649",
-      "size": 36311
+      "sha256": "d464cb1f1d4aa1a77bf5505fe4f5f7fada0ff0e5dec320c5fe7d52c214c23ff3",
+      "size": 36342
     },
     {
       "path": "services/hyperfide/src/providers/contract.ts",
