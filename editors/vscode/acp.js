@@ -253,7 +253,7 @@ function normalizeCodexAdapterCommand(value) {
 
 /* ---------------- PANEL: everything below needs VS Code ---------------- */
 
-let deps;                    /* {cg, cgJson, refresh, workspaceRoot, startTerminal} */
+let deps;                    /* {cg, cgJson, binary, refresh, workspaceRoot, startTerminal} */
 let extensionCtx;            /* VS Code ExtensionContext for workspace history */
 const panels = new Map();    /* task id -> editor-panel session */
 let permitSeq = 0;
@@ -426,8 +426,7 @@ function rememberSession(sess, extra) {
 }
 
 function mcpServers() {
-    const binary = config().get('binaryPath') || 'cg';
-    return [{ name: 'codify', command: binary, args: ['mcp'], env: [] }];
+    return [{ name: 'codify', command: deps.binary(), args: ['mcp'], env: [] }];
 }
 
 /* The session's fs bridge: serve workspace files, refuse everything else.

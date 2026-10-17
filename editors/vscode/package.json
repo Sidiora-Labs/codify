@@ -89,7 +89,7 @@
     "viewsWelcome": [
       {
         "view": "codifyTasks",
-        "contents": "No Hyperfide spec found.\nA task board appears here when the workspace contains spec/workflow.kvx and the cg binary is on PATH (or set codify.binaryPath).\n[Create a feature spec](command:codify.newFeature)\n[Refresh](command:codify.refresh)"
+        "contents": "No Hyperfide spec found.\nA task board appears here when the workspace contains spec/workflow.kvx and the hyperfide binary is on PATH (or set hyperfide.binaryPath).\n[Create a feature spec](command:codify.newFeature)\n[Refresh](command:codify.refresh)"
       },
       {
         "view": "codifyMemories",
@@ -809,7 +809,7 @@
         "codify.binaryPath": {
           "type": "string",
           "default": "cg",
-          "description": "Path to the cg binary."
+          "description": "Deprecated: use hyperfide.binaryPath. An explicit value is honoured only when hyperfide.binaryPath is unset."
         },
         "codify.feature": {
           "type": "string",

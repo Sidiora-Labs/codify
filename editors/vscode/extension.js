@@ -315,7 +315,7 @@ async function cmdStart(arg) {
         ? ['spec', 'docs', 'start'] : ['spec', 'start', id]);
     show(r.stdout + r.stderr);
     if (r.code !== 0) {
-        vscode.window.showErrorMessage(`cg spec start ${id} refused — see the Codify output.`);
+        vscode.window.showErrorMessage(`hyperfide spec start ${id} refused — see the Hyperfide output.`);
     }
     afterMutation();
 }
@@ -344,7 +344,7 @@ async function cmdDone(arg) {
         /* The refusal is the feature. Offer the override, but name what it
          * means rather than presenting it as the obvious next click. */
         const pick = await vscode.window.showWarningMessage(
-            `Task ${id} did NOT qualify. See the Codify output for which check failed.`,
+            `Task ${id} did NOT qualify. See the Hyperfide output for which check failed.`,
             ...(id === '@docs' ? ['Show output'] : ['Show output', 'Force done anyway']));
         if (pick === 'Show output') out.show(true);
         if (pick === 'Force done anyway') {
@@ -366,7 +366,7 @@ async function cmdDocs(action) {
         openReport(`docs-${action}`, `Documentation ${action}`, fence(r.stdout + r.stderr));
     else show(r.stdout + r.stderr);
     if (r.code !== 0) vscode.window.showWarningMessage(
-        `Documentation ${action} did not pass — see the Codify output.`);
+        `Documentation ${action} did not pass — see the Hyperfide output.`);
     afterMutation();
 }
 
@@ -380,7 +380,7 @@ async function cmdClaim(arg) {
     if (!agent) return;
     const r = await cg(['spec', 'claim', id, '--agent', agent]);
     show(r.stdout + r.stderr);
-    if (r.code !== 0) vscode.window.showErrorMessage(`Claim refused — see the Codify output.`);
+    if (r.code !== 0) vscode.window.showErrorMessage(`Claim refused — see the Hyperfide output.`);
     afterMutation();
 }
 
@@ -425,9 +425,9 @@ async function cmdLint() {
     const r = await cg(['spec', 'lint']);
     show(r.stdout + r.stderr);
     if (r.code === 2) {
-        vscode.window.showErrorMessage('Spec lint found errors — see the Codify output.');
+        vscode.window.showErrorMessage('Spec lint found errors — see the Hyperfide output.');
     } else if (/warn/.test(r.stdout)) {
-        vscode.window.showWarningMessage('Spec lint found warnings — see the Codify output.');
+        vscode.window.showWarningMessage('Spec lint found warnings — see the Hyperfide output.');
     } else {
         vscode.window.showInformationMessage('Spec lint is clean.');
     }
@@ -625,7 +625,7 @@ async function cmdActions() {
     ];
     const pick = await vscode.window.showQuickPick(items, {
         placeHolder: s ? `${s.feature} — ${s.done}/${s.tasks} done (${s.mode} mode)`
-                       : 'Codify',
+                       : 'Hyperfide',
     });
     if (pick) vscode.commands.executeCommand(pick.cmd);
 }
@@ -633,7 +633,7 @@ async function cmdActions() {
 /* ---------------- activation ---------------- */
 
 async function activate(ctx) {
-    out = vscode.window.createOutputChannel('Codify');
+    out = vscode.window.createOutputChannel('Hyperfide');
     memories = new MemoryProvider();
     diagnostics = vscode.languages.createDiagnosticCollection('codify');
 
@@ -710,13 +710,13 @@ async function activate(ctx) {
 
     kvx.register(ctx, cgJson, workspaceRoot);
     agentApi = agents.register(ctx, {
-        cg, cgJson, workspaceRoot,
+        cg, cgJson, binary, workspaceRoot,
         refresh: () => afterMutation(),
         /* connected, sessions' progress arrives as events, not by polling */
         poll: () => serveConnected() ? Promise.resolve() : scheduleRefresh(),
     });
     acpApi = acp.register(ctx, {
-        cg, cgJson, refresh: () => afterMutation(), workspaceRoot,
+        cg, cgJson, binary, refresh: () => afterMutation(), workspaceRoot,
         startTerminal: agentApi.startTerminal,
         /* pushed events for the chat: attached transcripts, approvals,
          * escalations; absent until the serve connection is up */

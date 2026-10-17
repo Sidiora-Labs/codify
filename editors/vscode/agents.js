@@ -19,7 +19,7 @@ try { vscode = require('vscode'); } catch (_) { /* headless: chat core only */ }
 const fs = require('fs');
 const path = require('path');
 
-let deps;                    /* {cg, cgJson, refresh, poll, workspaceRoot} */
+let deps;                    /* {cg, cgJson, binary, refresh, poll, workspaceRoot} */
 const sessions = new Map();  /* key (task id or wave:N) -> {terminal?, execution?, agent, wave?} */
 let pollTimer;
 let seq = 0;                 /* agent-name counter for this window */
@@ -340,7 +340,7 @@ async function cmdRunWave() {
     });
     sessions.set(`wave:${++seq}`, { terminal: term, wave: true });
     term.show();
-    term.sendText(`${config().get('binaryPath') || 'cg'} spec run -n ${n} ` +
+    term.sendText(`${deps.binary()} spec run -n ${n} ` +
         `--driver ${driverName()}`, true);
     ensurePolling();
 }

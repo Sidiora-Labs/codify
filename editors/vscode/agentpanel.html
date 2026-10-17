@@ -9,7 +9,7 @@
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Codify agent</title>
+<title>Hyperfide agent</title>
 <style nonce="${nonce}">
   * { box-sizing: border-box; }
   html, body {
@@ -687,7 +687,7 @@
   <header id="ctxbar">
     <span class="dot" id="livedot"></span>
     <span id="ctxfeature">codify</span>
-    <span id="buildversion" title="Running Codify extension version"></span>
+    <span id="buildversion" title="Running Hyperfide extension version"></span>
     <button class="chip" id="taskchip" title="Attach a spec task to this chat">no task</button>
     <span class="pill" id="taskstatus"></span>
     <span class="pill attach" id="attachpill" title=""></span>
@@ -725,7 +725,7 @@
     <span id="nowline" class="hidden"></span>
   </div>
 
-  <div id="cgbar" role="toolbar" aria-label="Codify actions">
+  <div id="cgbar" role="toolbar" aria-label="Hyperfide actions">
     <span id="taskactions" class="hidden"></span>
   </div>
 
@@ -739,7 +739,7 @@
     <div id="slashmenu"></div>
     <div class="composer">
       <textarea id="input" rows="2"
-        placeholder="Ask the agent, or / for Codify commands"></textarea>
+        placeholder="Ask the agent, or / for Hyperfide commands"></textarea>
       <div class="crow">
         <span class="hint" id="hint"><kbd>/</kbd> commands · <kbd>Enter</kbd> send · <kbd>Esc</kbd> cancel</span>
         <span class="grow"></span>
@@ -1904,9 +1904,9 @@
     function welcome(subtitle) {
         var w = el('div', 'welcome');
         w.id = 'welcome';
-        w.appendChild(el('h2', null, 'Codify agent'));
+        w.appendChild(el('h2', null, 'Hyperfide agent'));
         var p = el('p', null, subtitle ||
-            'Chat with the agent in this workspace. It has Codify’s tools ' +
+            'Chat with the agent in this workspace. It has Hyperfide’s tools ' +
             'connected — code graph, spec board, and project memory — ' +
             'and starts on your first message.');
         w.appendChild(p);
@@ -1925,7 +1925,7 @@
     }
 
     function helpCard() {
-        var card = makeCard('cg collapsible', '?', 'Codify commands');
+        var card = makeCard('cg collapsible', '?', 'Hyperfide commands');
         var bodyEl = card.querySelector('.body');
         var lines = allCommands().map(function (c) {
             var name = ('/' + c.n + (c.a ? ' ' + c.a : ''));
@@ -2088,19 +2088,19 @@
      * next → review/check/guard → done) never needs the slash palette. Task
      * actions live in #taskactions and show only while a task is attached. */
     var CG_ACTIONS = [
-        { n: 'brief',   g: '◈', d: 'cg brief — session state into the chat' },
-        { n: 'next',    g: '▹', d: 'cg spec next — next eligible task' },
-        { n: 'status',  g: '☷', d: 'cg spec status — the board' },
-        { n: 'review',  g: '⚖', d: 'cg review — change vs acceptance criteria' },
-        { n: 'check',   g: '✔', d: 'cg check — the gate' },
-        { n: 'guard',   g: '⛨', d: 'cg guard — edits vs task scope' },
-        { n: 'changes', g: '◬', d: 'cg changes — blast radius of uncommitted edits' },
-        { n: 'remember', g: '✎', d: 'cg remember — save a decision', fill: true },
+        { n: 'brief',   g: '◈', d: 'hyperfide brief — session state into the chat' },
+        { n: 'next',    g: '▹', d: 'hyperfide spec next — next eligible task' },
+        { n: 'status',  g: '☷', d: 'hyperfide spec status — the board' },
+        { n: 'review',  g: '⚖', d: 'hyperfide review — change vs acceptance criteria' },
+        { n: 'check',   g: '✔', d: 'hyperfide check — the gate' },
+        { n: 'guard',   g: '⛨', d: 'hyperfide guard — edits vs task scope' },
+        { n: 'changes', g: '◬', d: 'hyperfide changes — blast radius of uncommitted edits' },
+        { n: 'remember', g: '✎', d: 'hyperfide remember — save a decision', fill: true },
         { n: 'implemented', g: '◐', task: true,
-            d: 'cg spec implemented — mark coded, qualification pending' },
+            d: 'hyperfide spec implemented — mark coded, qualification pending' },
         { n: 'done', g: '●', task: true, cls: 'done',
-            d: 'cg spec done — qualify: verify_cmd and graph checks must pass' },
-        { n: 'handoff', g: '⇥', task: true, d: 'cg handoff — record where you stopped' },
+            d: 'hyperfide spec done — qualify: verify_cmd and graph checks must pass' },
+        { n: 'handoff', g: '⇥', task: true, d: 'hyperfide handoff — record where you stopped' },
     ];
     CG_ACTIONS.forEach(function (a, i) {
         var b = el('button', 'cgbtn' + (a.cls ? ' ' + a.cls : ''));

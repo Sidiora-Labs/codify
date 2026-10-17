@@ -593,6 +593,13 @@ const activePoll = /ACTIVE_POLL_MS = (\d+)/.exec(ag);
 if (!activePoll || Number(activePoll[1]) < 10000) {
     throw new Error('agent poll is faster than 10 s');
 }
+// binary() in extension.js is the one place that resolves hyperfide.binaryPath
+// against the legacy codify.binaryPath; the agent modules must receive it
+for (const f of ['agents.js', 'acp.js']) {
+    if (/binaryPath/.test(fs.readFileSync(path.join(dir, f), 'utf8'))) {
+        throw new Error(`${f} reads binaryPath itself instead of deps.binary()`);
+    }
+}
 console.log('manifest coherent:', declared.length, 'commands');
 JS
 fi
