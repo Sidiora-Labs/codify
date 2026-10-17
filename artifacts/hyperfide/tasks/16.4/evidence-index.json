@@ -1,27 +1,9 @@
 {
   "task": "16.4",
-  "commit": "b6bdee47b3d7f93951b936da2e97e52d391e2157",
+  "commit": "12aa390190b3d3e360e079254378a381103fc236",
+  "requalified_on": "12aa390190b3d3e360e079254378a381103fc236",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-014 --manifest tests/hyperfide/manifests/tasks/16.4.json && python3 tests/hyperfide/qualify.py --case V-034 --manifest tests/hyperfide/manifests/tasks/16.4.json",
   "exit_code": 0,
-  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"a7ea895e-2d3d-4865-9d07-b7469582ee4f\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/16.4/campaigns/43f13dcc1ac43df73a5d0e5628d53af70bb54fa74d025eb60e0026f954d21ad9\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"29a3114f-620f-4b45-b941-30954d3681c4\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/16.4/campaigns/43f13dcc1ac43df73a5d0e5628d53af70bb54fa74d025eb60e0026f954d21ad9\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}",
-  "ran_at": "2026-10-17T09:23:38Z",
-  "receipts": [
-    {
-      "case": "V-014",
-      "receipt_id": "a7ea895e-2d3d-4865-9d07-b7469582ee4f",
-      "outcome": "PASS",
-      "assertions": 27,
-      "cleanup_events": 1,
-      "checker": "PASS"
-    },
-    {
-      "case": "V-034",
-      "receipt_id": "29a3114f-620f-4b45-b941-30954d3681c4",
-      "outcome": "PASS",
-      "assertions": 27,
-      "cleanup_events": 1,
-      "checker": "PASS"
-    }
-  ],
-  "execution_note": "Run as repository owner uid hf (checker's neutral safe_git rejects a root-run checkout owned by hf); node v24.22.0 copied to /usr/local/bin for that user. Scope task-component only; full-case status INCOMPLETE."
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"41565ef1-7e8b-42e8-9c56-9b7ccecf4d3c\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/16.4/campaigns/3a09013848e91fcea9917188844a295e5ae3b0199d3d78c07538424f79123058\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"d123a9e9-08f7-4a27-a99b-ecd2b2b3a372\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/16.4/campaigns/3a09013848e91fcea9917188844a295e5ae3b0199d3d78c07538424f79123058\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T14:10:27.212550+00:00"
 }
