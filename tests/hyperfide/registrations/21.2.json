@@ -17,18 +17,53 @@
     "recovery.forbidden-action",
     "recovery.no-authority-fields",
     "recovery.outage-fallback",
-    "recovery.fallback-advisory"
+    "recovery.fallback-advisory",
+    "recovery.repeat-preserves-receipt",
+    "recovery.triage-distributed-explicit",
+    "recovery.triage-legacy-local-refused",
+    "native21.same-primary-context",
+    "native21.policy-domains-distinct",
+    "native21.no-unproved-retry-or-profile",
+    "native21.unchanged-context-fresh",
+    "native21.changed-native-context-stale",
+    "native21.capacity-classified-not-stall",
+    "native21.repeat-preserves-prior-evidence",
+    "native21.repeat-identifies-change",
+    "native21.new-checkpoint-stale",
+    "native21.repeat-new-checkpoint-identified",
+    "native21.foreign-reservation-refused",
+    "native21.compute-authority-unchanged"
   ],
   "argv": [
     "python3",
     "tests/hyperfide/cases/tasks/21_2.py"
   ],
-  "timeout_seconds": 240,
-  "required_env": [],
-  "fixtures": [
-    "services/hyperfide/dist/decisions/audit.js"
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/21_2.py",
+    "--cleanup"
   ],
-  "resources": [],
+  "timeout_seconds": 240,
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
+  "fixtures": [
+    "services/hyperfide/dist/decisions/audit.js",
+    "services/hyperfide/dist/decisions/recovery.js",
+    "services/hyperfide/dist/control.js",
+    "tests/hyperfide/cases/tasks/13_2.py",
+    "tests/hyperfide/support/identity_fixture.py"
+  ],
+  "resources": [
+    {
+      "id": "domain21-native-admission-database",
+      "kind": "postgresql-database",
+      "scope": "task21.2-disposable"
+    }
+  ],
   "required_artifacts": [],
   "source_files": [
     "services/hyperfide/package.json",
@@ -40,7 +75,10 @@
     "tests/hyperfide/cases/tasks/4_1.py",
     "tests/hyperfide/cases/tasks/21_4.py",
     "tests/hyperfide/cases/tasks/21_2.py",
-    "tests/hyperfide/registrations/21.2.json"
+    "tests/hyperfide/registrations/21.2.json",
+    "src/spec.c",
+    "src/hyperfide/client.c",
+    "src/hyperfide/client.h"
   ],
   "source_roots": [
     "services/hyperfide/src",
