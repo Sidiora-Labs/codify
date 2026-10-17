@@ -65,6 +65,10 @@ async function authorize(pool:import('./candidates.js').DB,input:unknown):Promis
  const route=(await readCandidate(pool,s,id)).manifest;await authorizeGitRoute(route.repository_id,route.target_ref);
  return tx(pool,async db=>{
  const prior=(await db.query('SELECT * FROM hyperfide.publication_operations WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3',[...values(s),request])).rows[0];if(prior){if(prior.candidate_id!==id)fail('PUBLICATION_IDEMPOTENCY_CONFLICT','Request belongs to another candidate');return {operation_id:prior.id,state:prior.state,replayed:true};}
+ // An uncertain prior intent is never superseded: its actual Git outcome must
+ // be read back and settled before the target admits another publication.
+ const held=(await db.query('SELECT l.operation_id,p.state FROM hyperfide.publication_target_locks l JOIN hyperfide.publication_operations p ON p.organisation_id=l.organisation_id AND p.run_id=l.run_id AND p.id=l.operation_id WHERE l.organisation_id=$1 AND l.repository_id=$2 AND l.target_ref=$3 FOR UPDATE OF l',[s.organisation_id,route.repository_id,route.target_ref])).rows[0];
+ if(held)fail('PUBLICATION_RECONCILIATION_REQUIRED','Target publication '+held.operation_id+' is '+held.state+'; reconcile its actual Git outcome first');
  const {row,manifest:m}=await candidateReady(db,s,id);if(row.state!=='READY')fail('PUBLICATION_NOT_READY','Candidate must have been admitted');
  const intent=randomUUID(),op=randomUUID();await db.query("INSERT INTO hyperfide.publication_intents(organisation_id,run_id,id,candidate_id,intent_digest) VALUES($1,$2,$3,$4,$5)",[...values(s),intent,id,hash(canonical({candidate_id:id,input_digest:row.input_manifest_digest,request_id:request}))]);
  await db.query("INSERT INTO hyperfide.publication_operations(organisation_id,run_id,id,publication_intent_id,candidate_id,branch_authority_id,branch_generation,authority_epoch,repository_id,expected_old_head,candidate_head,request_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",[...values(s),op,intent,id,m.branch_authority_id,m.branch_generation,m.authority_epoch,m.repository_id,m.expected_old_head,m.candidate_head,request]);
@@ -118,6 +122,11 @@ export async function reconcilePublication(pool:import('./candidates.js').DB,cfg
  return {operation_id:id,state:'OUTCOME_UNKNOWN',observed_head:actual,expected_head_still_present:actual===current.expected_old_head,requires_reconciliation:true};
  });
 }
+async function headChanged(pool:import('./candidates.js').DB,s:Scope,id:string,intent:string):Promise<never>{
+ // Nothing was sent, so the outcome is known: settle without touching the target.
+ await tx(pool,async db=>{await db.query("UPDATE hyperfide.publication_operations SET state='FAILED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND state IN ('PENDING','RUNNING')",[...values(s),id]);await db.query("UPDATE hyperfide.publication_intents SET state='FAILED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[...values(s),intent]);await db.query('DELETE FROM hyperfide.publication_target_locks WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3',[...values(s),id]);});
+ return fail('PUBLICATION_HEAD_CHANGED','Protected target changed; build a fresh candidate');
+}
 async function executePublication(pool:import('./candidates.js').DB,cfg:IntegrationConfig,env:Readonly<NodeJS.ProcessEnv>,input:unknown):Promise<unknown>{
  const v=obj(input);keys(v,['organisation_id','run_id','operation_id']);const s=scope(v),id=uuid(v.operation_id);
  if(env.HYPERFIDE_INTEGRATION_ROLE!=='PUBLICATION_GATEWAY')fail('PUBLICATION_ROLE_DENIED','Only the isolated publication gateway may write protected refs');
@@ -130,6 +139,9 @@ async function executePublication(pool:import('./candidates.js').DB,cfg:Integrat
  if(!hookInfo.isFile()||hookInfo.isSymbolicLink()||(hookInfo.mode&0o022)!==0||hash(await fs.readFile(hook))!==env.HYPERFIDE_GATEWAY_HOOK_DIGEST)fail('PUBLICATION_ENFORCEMENT_UNAVAILABLE','Operator-pinned receive hook is absent or changed');
  const effectiveHooks=(await exec('git',['--git-dir='+target.receive_path,'config','--get','core.hooksPath'],{encoding:'utf8',env:{PATH:env.PATH,HOME:'/nonexistent',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'}})).stdout.trim();
  if(effectiveHooks!==path.join(target.receive_path,'hooks'))fail('PUBLICATION_ENFORCEMENT_UNAVAILABLE','Effective receive hook path differs from pinned gateway');
+ // Compare-and-swap precheck: a target advanced since qualification refuses
+ // the intent before admission. The receive hook and lease re-check at push.
+ if(initial.state==='PENDING'&&await git(target.receive_path,['rev-parse','--verify',target.target_ref])!==initial.expected_old_head)await headChanged(pool,s,id,initial.publication_intent_id);
  const prepared=await tx(pool,async db=>{
  const op=(await db.query('SELECT * FROM hyperfide.publication_operations WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE',[...values(s),id])).rows[0];if(!op)fail('PUBLICATION_UNKNOWN','Unknown operation');
  if(op.state!=='PENDING')return {op,send:false,manifest:(await readCandidate(db,s,op.candidate_id)).manifest,input:''};
@@ -138,7 +150,7 @@ async function executePublication(pool:import('./candidates.js').DB,cfg:Integrat
  if(!prepared.send)return reconcilePublication(pool,cfg,s,id);
  const m=prepared.manifest,r=repository(cfg,m.repository_id);
  if(!r.receive_path)fail('PUBLICATION_ENFORCEMENT_UNAVAILABLE','Configured target has no qualified managed receive hook');
- const actual=await git(r.receive_path,['rev-parse','--verify',r.target_ref]);if(actual!==m.expected_old_head){await tx(pool,async db=>{await db.query("UPDATE hyperfide.publication_operations SET state='FAILED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[...values(s),id]);await db.query('DELETE FROM hyperfide.publication_target_locks WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3',[...values(s),id]);});fail('PUBLICATION_HEAD_CHANGED','Protected target changed; build a fresh candidate');}
+ const actual=await git(r.receive_path,['rev-parse','--verify',r.target_ref]);if(actual!==m.expected_old_head)await headChanged(pool,s,id,prepared.op.publication_intent_id);
  await git(r.path,['merge-base','--is-ancestor',m.expected_old_head,m.candidate_head]);
  const permit:Permit={version:1,organisation_id:s.organisation_id,run_id:s.run_id,operation_id:id,generation:String(prepared.op.operation_generation),repository_id:m.repository_id,ref:r.target_ref,old:m.expected_old_head,next:m.candidate_head,input_digest:prepared.input};
  let transportSettled=false;
@@ -251,5 +263,5 @@ if(process.argv[2]==='--receive-hook'){
  let lines='';for await(const chunk of process.stdin){lines+=chunk.toString();if(lines.length>1024)fail('PUBLICATION_PERMIT_INVALID','One protected update only');}
  const runtime='../storage/runtime.js';const ResourceContainer=(await import(runtime)).ResourceContainer;const resources=new ResourceContainer('control',env,new AbortController().signal);try{await receivePermit(null,key,process.env.GIT_PUSH_OPTION_0.slice(10),lines,await fs.realpath(process.cwd()),cfg,resources.gateway);}finally{await resources.close();}
  process.exit(0);
- }catch{process.stderr.write('Hyperfide publication gateway rejected protected update\n');process.exit(1);}
+ }catch(error){const code=error instanceof FoundationError?error.code:'PUBLICATION_GATEWAY_ERROR';process.stderr.write('Hyperfide publication gateway rejected protected update: '+code+'\n');process.exit(1);}
 }
