@@ -7,7 +7,7 @@ def artifacts():
  p=Path(os.environ.get("HYPERFIDE_CAMPAIGN_DIR","/tmp/hyperfide/domain25-client-tests"))/"client";p.mkdir(parents=True,exist_ok=True);return p
 def cleanup():
  file=artifacts()/"cleanup.json";records=json.loads(file.read_text()) if file.is_file() else []
- complete=len(records)==4 and all(r.get("observed_absent") is True for r in records)
+ complete=len(records)==5 and all(r.get("observed_absent") is True for r in records)
  print(json.dumps({"type":"cleanup","complete":complete,"resources":[{"id":r["id"],"status":"deleted" if r["observed_absent"] else "unknown","observed_absent":r["observed_absent"],"evidence_artifact":"client/cleanup.json"} for r in records]}));return 0 if complete else 1
 def close_fixture(f,resource):
  import socket
@@ -62,11 +62,26 @@ def main():
  network_checks()
  mapping_checks()
  business_unknown_checks()
- check('client.cleanup.actual-absence',lambda:expect(len(CLEANUP)==4 and all(r['observed_absent'] for r in CLEANUP),'native fixture cleanup incomplete'))
+ workflow_checks()
+ check('client.cleanup.actual-absence',lambda:expect(len(CLEANUP)==5 and all(r['observed_absent'] for r in CLEANUP),'native fixture cleanup incomplete'))
  (artifacts()/'cleanup.json').write_text(json.dumps(CLEANUP,sort_keys=True))
  (artifacts()/'observations.json').write_text(json.dumps({'scope':'task-component','assertion_ids':IDS,'failed_ids':FAILED,'full_cases_qualified':False},sort_keys=True))
  return 1 if FAILED else 0
 
+
+def workflow_checks():
+ # Registered 25.3-workflow TS component: forward each observed outcome of the
+ # signed HTTPS/PostgreSQL work.open/update/handoff/projection probe.
+ out=artifacts()/"workflow";env=os.environ.copy();env["HYPERFIDE_CAMPAIGN_DIR"]=str(out)
+ try:p=subprocess.run([sys.executable,str(ROOT/"tests/hyperfide/cases/tasks/25_3_workflow.py")],cwd=ROOT,env=env,capture_output=True,text=True,timeout=300);lines=p.stdout.splitlines()
+ except subprocess.TimeoutExpired:p=None;lines=[]
+ events=[json.loads(line) for line in lines if line.startswith("{")]
+ for event in events:
+  if event.get("type")=="assertion":
+   check(event["id"],lambda event=event:expect(event.get("actual")=="observed",str(event.get("actual"))))
+ check("workflow.probe.exit-zero",lambda:expect(p is not None and p.returncode==0 and any(e.get("type")=="cleanup" for e in events),"workflow probe failed or timed out: "+(p.stderr[-800:] if p else "timeout")))
+ file=out/"workflow-cleanup.json";record=json.loads(file.read_text()) if file.is_file() else {}
+ CLEANUP.append({"id":"hf-task25.3-workflow","observed_absent":bool(record) and all(v is True for v in record.values()),"database_observed_absent":record.get("database_absent") is True,"https_observed_absent":record.get("https_listener_absent") is True,"private_root_observed_absent":record.get("private_root_absent") is True})
 
 def protected_reader_checks():
  import shutil
