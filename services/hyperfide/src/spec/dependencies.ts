@@ -203,14 +203,18 @@ export async function validateProposedDependencies(tx:Tx,scope:DependencyScope,i
 export async function validateDependencies(tx:Tx,scope:DependencyScope,input:PlanPins):Promise<DependencyReport>{
  return validateGraph(tx,scope,input);
 }
-export async function admitDependencies(tx:Tx,scope:DependencyScope,input:PlanPins):Promise<Omit<DependencyReport,'edges'>&{admitted:boolean}>{
+// Amendment admission (2.3) may exempt retired task identities, which keep no
+// dispatchable intent, from proof loading; ordinary admission passes none.
+export interface AdmissionOptions {exempt_task_ids?:readonly string[]}
+export async function admitDependencies(tx:Tx,scope:DependencyScope,input:PlanPins,options:AdmissionOptions={}):Promise<Omit<DependencyReport,'edges'>&{admitted:boolean}>{
  assertPrimaryTransaction(tx);await writeSemanticDisposition(tx,scope);
  const request=scopeInput(scope,input,['spec_revision_id','spec_generation','state_version']);
  const current=await snapshot(tx,scope,scope.run_id,true);assertPins(current.run,request);
  if(current.run.state!=='PENDING_VALIDATION')fail('SPEC_ADMISSION_STATE','Only a pending-validation generation can be admitted');
  const report=await validateDependencies(tx,scope,input);
  if(report.status!=='STRUCTURALLY_VALID'){const {edges,...publicReport}=report;return {...publicReport,admitted:false};}
- for(const task of current.tasks)await loadProofObligations(tx,{...scope,task_id:task.id,spec_generation:task.spec_generation,spec_revision_id:task.spec_revision_id});
+ const exempt=new Set(options.exempt_task_ids??[]);
+ for(const task of current.tasks)if(!exempt.has(task.id))await loadProofObligations(tx,{...scope,task_id:task.id,spec_generation:task.spec_generation,spec_revision_id:task.spec_revision_id});
  for(const edge of report.edges)await tx.query(
  'INSERT INTO hyperfide.task_dependencies(organisation_id,run_id,task_id,predecessor_run_id,predecessor_task_id,milestone,revision,binding_schema_version,predecessor_spec_generation,predecessor_spec_revision_id,predecessor_repository_id,integration_ref) VALUES($1,$2,$3,$4,$5,$6,$7,1,$8,$9,$10,$11) ON CONFLICT(organisation_id,run_id,task_id,predecessor_run_id,predecessor_task_id,milestone,revision) DO UPDATE SET binding_schema_version=EXCLUDED.binding_schema_version,predecessor_spec_generation=EXCLUDED.predecessor_spec_generation,predecessor_spec_revision_id=EXCLUDED.predecessor_spec_revision_id,predecessor_repository_id=EXCLUDED.predecessor_repository_id,integration_ref=EXCLUDED.integration_ref',
  [scope.organisation_id,scope.run_id,edge.task_id,edge.predecessor_run_id,edge.predecessor_task_id,edge.milestone,edge.source_spec_generation,

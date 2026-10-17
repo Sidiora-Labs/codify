@@ -10,11 +10,14 @@
   "api_version": 1,
   "actions": [
     "spec.amendment.check",
-    "spec.amendment.propose"
+    "spec.amendment.propose",
+    "spec.amendment.admit"
   ],
   "requires": [
     "spec-import",
     "spec-dependencies",
+    "spec-obligations",
+    "16.4",
     "4.2",
     "14.1"
   ]
