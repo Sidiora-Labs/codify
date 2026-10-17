@@ -180,7 +180,8 @@ int hf_runner_job_execute(const char *request,FILE *out){
  /* Preparation jobs execute only against the privileged immutable stage for this exact claim. */
  HfPreparationStage stage;memset(&stage,0,sizeof stage);
  if(preparing&&!hf_runner_stage_preparation(config,job,result,&stage)){hf_http_response_free(&response);free(job);return hf_native_error(out,"PREPARATION_STAGE_FAILED");}
- int root=open(workspace,O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW),cwd=-1;struct stat st;if(root>=0&&!fstat(root,&st)&&st.st_uid==(uid_t)uid&&!(st.st_mode&077))cwd=!strcmp(relative_cwd,".")?dup(root):open_beneath(root,relative_cwd,1);
+ /* Preparation creates its absent target beneath the staged slot-owned parent. */
+ int root=open(preparing?stage.workspace_parent:workspace,O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW),cwd=-1;struct stat st;if(root>=0&&!fstat(root,&st)&&st.st_uid==(uid_t)uid&&!(st.st_mode&077))cwd=!strcmp(relative_cwd,".")?dup(root):open_beneath(root,relative_cwd,1);
  int array=hf_json_field(job,plan,"argv");char **argv=NULL;int argc=0,binary=-1;char executable[65],environment_digest[65];EnvEntry env[64]={0};int env_count=0;
  ok=cwd>=0&&array>=0&&job->tokens[array].type=='['&&job->tokens[array].count>0&&job->tokens[array].count<=256;
  if(ok){argv=calloc((size_t)job->tokens[array].count+1,sizeof *argv);ok=argv!=NULL;}
@@ -225,6 +226,8 @@ int hf_runner_job_execute(const char *request,FILE *out){
  if(!ok||mono()>=deadline||write(gate[1],"G",1)!=1){if(child>0)kill(child,SIGKILL);close(gate[1]);close(dropped[0]);close(attach_gate[1]);terminate_uid((uid_t)uid);if(budget_status==HF_BUDGET_READY)hf_budget_release(&charge_budget);sqlite3_close(db);return hf_native_error(out,"DURABLE_START_FAILED");}close(gate[1]);
  {char ready=0;struct pollfd wait_ready={dropped[0],POLLIN,0};int polled=poll(&wait_ready,1,(int)((deadline-mono())/1000000LL>10000?10000:(deadline-mono())/1000000LL));
   HfProcessIdentity dropped_identity;ok=polled==1&&read(dropped[0],&ready,1)==1&&ready=='R'&&hf_process_identity(child,&dropped_identity)&&dropped_identity.start_time==identity.start_time;
+  if(ok)ok=dropped_identity.uid==(uid_t)uid&&dropped_identity.pgid==child&&!strcmp(dropped_identity.os_boot_id,identity.os_boot_id);
+  if(ok)identity=dropped_identity;
   if(ok&&budget_status==HF_BUDGET_READY)ok=(budget_attached=hf_budget_attach(&charge_budget,&dropped_identity))==HF_BUDGET_READY;
   if(!ok||write(attach_gate[1],"B",1)!=1){kill(child,SIGKILL);close(dropped[0]);close(attach_gate[1]);terminate_uid((uid_t)uid);hf_slot_watchdog_finish(watchdog,&watch_writer);while(waitpid(-1,NULL,WNOHANG)>0){}if(budget_status==HF_BUDGET_READY)hf_budget_release(&charge_budget);sqlite3_close(db);return hf_native_error(out,budget_status==HF_BUDGET_READY?"BUDGET_ATTACH_FAILED":"PRIVILEGE_DROP_FAILED");}
   close(dropped[0]);close(attach_gate[1]);}
