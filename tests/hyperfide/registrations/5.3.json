@@ -57,7 +57,11 @@
     "dispatch.reconcile.terminal-states",
     "dispatch.reconcile.terminal-replay",
     "dispatch.reconcile.terminal-no-release",
-    "dispatch.reconcile.cleanup.observed"
+    "dispatch.reconcile.cleanup.observed",
+    "dispatch.native-reader.missing-is-unknown",
+    "dispatch.native-reader.accepted-is-unknown",
+    "dispatch.native-reader.signed-executing-after-restart",
+    "dispatch.native-reader.terminal-without-kind-is-unknown"
   ],
   "cases": [
     "V-004",

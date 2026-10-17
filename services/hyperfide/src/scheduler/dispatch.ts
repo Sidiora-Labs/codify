@@ -137,8 +137,12 @@ export async function consumeDispatchEvent(tx:PrimaryTransaction,input:Scheduler
   return {effect:'DURABLE_DISPATCH_INTENT',dispatch:await ensureDispatch(tx,token,existing.rows[0]?.request_id??request,input.native_recipients),execution_granted:false};
  });
 }
-export function createComponent(_startup:ComponentContext):Component{
+export function createComponent(startup:ComponentContext):Component{
  const reconciler=new DispatchReconciler();
+ const receipts=startup.dependencies.require('6.3','events.instructions.v1',
+  (value:unknown):value is {readDispatchReceipt:NativeReceiptReader}=>
+   typeof value==='object'&&value!==null&&'readDispatchReceipt' in value&&typeof value.readDispatchReceipt==='function');
+ reconciler.registerReceiptReader(receipts.readDispatchReceipt);
  return {apiVersion:1,capabilities:{'scheduler.dispatch.v1':Object.freeze({
   registerReceiptReader:reconciler.registerReceiptReader.bind(reconciler),reconcile:reconciler.reconcile.bind(reconciler),ensureDispatch,consumeDispatchEvent})},
   close:()=>reconciler.close(),actions:{

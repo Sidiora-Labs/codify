@@ -8,6 +8,7 @@ import type { Component, ComponentContext } from '../components/registry.js';
 import type { PrimaryTransaction } from '../storage/transactions.js';
 import { assertPrimaryTransaction } from '../storage/transactions.js';
 import { fields,scope,uuid,integer,bounded,canonical,digest,eventDigest,event,fail,gateway,run,lockRun,enqueue,authorizedRun,lookupNativeLaunch,registerConsumer,requireInvocation } from './outbox.js';
+import type {NativeReceiptReader} from '../scheduler/dispatch.js';
 import type { Scope,OutboxEvent } from './outbox.js';
 import { receive } from './inbox.js';
 export { lookupNativeLaunch } from './outbox.js';
@@ -356,9 +357,51 @@ async function issueAuthority(tx:PrimaryTransaction,input:unknown,invocation:Inv
   await requireAuthority(tx,{...i,authority_epoch:principal.deployment_epoch,session_id:principal.actor_id,
     leader_generation:current.leader_generation,...owner,roles:['LEADER','FEATURE_MANAGER']});
 }
+export const readDispatchReceipt:NativeReceiptReader=async(tx,input)=>{
+  assertPrimaryTransaction(tx);
+  const rows=await tx.query(`SELECT e.*,i.id AS receipt_id,i.request_digest AS event_digest,i.result AS observation
+    FROM hyperfide.outbox_events e JOIN hyperfide.command_inbox i
+      ON i.organisation_id=e.organisation_id AND i.run_id=e.run_id
+      AND i.operation='instruction.runner-state' AND i.idempotency_key=e.id::text
+      AND i.principal_scope='runner:'||(e.payload->>'sandbox_id')||':'||(e.payload->>'boot_id')
+      AND i.state='COMPLETED'
+    WHERE e.organisation_id=$1 AND e.run_id=$2 AND e.id=$3
+      AND e.aggregate_type='attempt.instructions' AND e.event_type='instruction.start'`,
+    [input.organisation_id,input.run_id,input.operation_id]);
+  if(!rows.rows.length)return null;
+  const row=rows.rows[0]!,p=row.payload,o=row.observation,t=input.token;
+  const committed=event({organisation_id:input.organisation_id,run_id:input.run_id,id:row.id,aggregate_type:row.aggregate_type,aggregate_id:row.aggregate_id,
+    aggregate_version:row.aggregate_version,event_type:row.event_type,payload:p});
+  if(row.event_digest!==eventDigest(committed)||p.instruction_id!==input.operation_id||p.kind!=='START'||
+    row.aggregate_id!==t.attempt_id||p.body.slot_id!==t.slot_id||o.command_id!==input.operation_id||
+    o.operation_id!==input.operation_id||o.organisation_id!==input.organisation_id||o.run_id!==input.run_id||
+    o.payload_digest!==digest(p.body)||o.sequence!==row.aggregate_version||
+    ['attempt_id','attempt_generation','authority_epoch','sandbox_id','sandbox_boot_generation'].some(key=>
+      p[key]!==t[key as keyof typeof t]||o[key]!==p[key])||o.boot_id!==p.boot_id)
+    fail('NATIVE_RECEIPT_MISMATCH','Admitted native receipt differs from the committed START and compute tuple');
+  uuid(o.ledger_receipt_id);integer(o.ledger_version);
+  for(const process of [o.observed_process,o.pinned_process??null])if(process!==null){
+    const value=fields(process,['os_boot_id','pid','start_time','pgid']);
+    uuid(value.os_boot_id);bounded(value.pid,1,2147483647);integer(value.start_time,true);bounded(value.pgid,1,2147483647);
+  }
+  if(o.state==='EXECUTING'&&o.observed_process===null||o.state==='ACCEPTED'&&o.observed_process!==null||
+    o.pinned_process!=null&&o.observed_process!==null&&canonical(o.pinned_process)!==canonical(o.observed_process))
+    fail('NATIVE_RECEIPT_MISMATCH','Native state contradicts its retained process identity');
+  const credential=await tx.query(`SELECT 1 FROM hyperfide.identity_principals WHERE organisation_id=$1 AND run_id=$2
+    AND credential_id=$3 AND role='RUNNER' AND sandbox_id=$4 AND boot_id=$5 AND boot_generation=$6
+    AND (attempt_id IS NULL OR attempt_id=$7) AND (attempt_generation IS NULL OR attempt_generation=$8)`,
+    [input.organisation_id,input.run_id,uuid(o.credential_id),t.sandbox_id,p.boot_id,t.sandbox_boot_generation,t.attempt_id,t.attempt_generation]);
+  if(credential.rowCount!==1)fail('NATIVE_RECEIPT_MISMATCH','Native observation lost its authenticated runner binding');
+  // The acknowledgement protocol has no terminal outcome kind. Preserve uncertainty
+  // until a producer supplies evidence that distinguishes stopped, absent and completed.
+  const state=o.state==='TERMINAL'?'UNCERTAIN':o.state;
+  if(!['ACCEPTED','EXECUTING','UNCERTAIN'].includes(state))fail('NATIVE_RECEIPT_INCOMPLETE','Unknown native observation state');
+  return {central_receipt_id:row.receipt_id,command_id:input.operation_id,token:t,
+    payload_digest:input.payload_digest,state};
+};
 export function createComponent(context:ComponentContext):Component {
   const g=gateway(context);
-  const component={apiVersion:1 as const,capabilities:{'events.instructions.v1':Object.freeze({issue,acceptInstruction,handoff,replayInstructions,recordRunnerAcknowledgement,lookupNativeLaunch,registerRunnerConsumer,resolveRunnerConsumer})},actions:{
+  const component={apiVersion:1 as const,capabilities:{'events.instructions.v1':Object.freeze({issue,acceptInstruction,handoff,replayInstructions,recordRunnerAcknowledgement,lookupNativeLaunch,registerRunnerConsumer,resolveRunnerConsumer,readDispatchReceipt})},actions:{
     'instructions.describe':()=>({schema_version:1,kinds:['START','STEER','CANCEL'],identity:'stable-command-UUID',
       bounds:{body_bytes:65536,outstanding:256,runner_event_bytes:RUNNER_EVENT_BOUNDS.payload_bytes,runner_events_per_stream:RUNNER_EVENT_BOUNDS.events_per_stream},execution:'native-connector-required',full_case_status:'INCOMPLETE'}),
     'instructions.issue':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','LEADER','FEATURE_MANAGER','COORDINATOR'],async(tx,invocation)=>{await issueAuthority(tx,input,invocation);return issue(tx,input);}),
