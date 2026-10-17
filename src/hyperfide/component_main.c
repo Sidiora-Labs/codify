@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <poll.h>
+#include <unistd.h>
 
 #define HF_JSON_LIMIT (1024U * 1024U)
 #include "hyperfide-native-registry.inc"
@@ -112,12 +114,29 @@ static int failure(const char *code, const char *message) {
     return 2;
 }
 
+static int request_decode(const char *encoded,char *out,size_t *length) {
+    size_t n=strlen(encoded);unsigned accumulator=0,bits=0;*length=0;
+    if(!n||n%4==1||n>((HF_JSON_LIMIT+2)/3)*4) return 0;
+    for(size_t i=0;i<n;++i) {
+        unsigned char ch=(unsigned char)encoded[i];unsigned value;
+        if(ch>='A'&&ch<='Z') value=ch-'A';
+        else if(ch>='a'&&ch<='z') value=ch-'a'+26;
+        else if(ch>='0'&&ch<='9') value=ch-'0'+52;
+        else if(ch=='-') value=62;else if(ch=='_') value=63;else return 0;
+        accumulator=(accumulator<<6)|value;bits+=6;
+        if(bits>=8){bits-=8;if(*length==HF_JSON_LIMIT)return 0;out[(*length)++]=(char)((accumulator>>bits)&255);}
+        accumulator&=(1U<<bits)-1;
+    }
+    return accumulator==0;
+}
+
 int main(int argc, char **argv) {
-    const char *component = NULL, *action = NULL;
+    const char *component = NULL, *action = NULL, *encoded = NULL;
     for (int i = 1; i < argc; i += 2) {
         if (i + 1 >= argc) return failure("INVALID_ARGUMENT", "Expected component and action");
         if (!strcmp(argv[i], "--component") && !component) component = argv[i + 1];
         else if (!strcmp(argv[i], "--action") && !action) action = argv[i + 1];
+        else if (!strcmp(argv[i], "--request-base64") && !encoded) encoded = argv[i + 1];
         else return failure("INVALID_ARGUMENT", "Unknown or duplicate argument");
     }
     if (!component || !action) return failure("INVALID_ARGUMENT", "Expected component and action");
@@ -132,8 +151,17 @@ int main(int argc, char **argv) {
     if (!entry) return failure(found ? "UNKNOWN_ACTION" : "UNKNOWN_COMPONENT", "No registered action");
     char *request = malloc(HF_JSON_LIMIT + 2);
     if (!request) return failure("RESOURCE_LIMIT", "Cannot allocate request");
-    size_t length = fread(request, 1, HF_JSON_LIMIT + 1, stdin);
-    if (ferror(stdin) || length > HF_JSON_LIMIT) {
+    size_t length=0;
+    if(encoded) {
+        struct pollfd input={STDIN_FILENO,POLLIN,0};char extra;
+        if(poll(&input,1,0)>0&&(input.revents&POLLIN)&&read(STDIN_FILENO,&extra,1)>0) {
+            free(request);return failure("INPUT_CONFLICT","Encoded input and stdin are mutually exclusive");
+        }
+        if(!request_decode(encoded,request,&length)) {
+            free(request);return failure("INVALID_ENCODING","Canonical bounded unpadded base64url required");
+        }
+    } else length=fread(request,1,HF_JSON_LIMIT+1,stdin);
+    if ((!encoded&&ferror(stdin)) || length > HF_JSON_LIMIT) {
         free(request);
         return failure("REQUEST_LIMIT", "Request exceeds input limit");
     }
@@ -141,6 +169,11 @@ int main(int argc, char **argv) {
     if (!object_valid(request, length)) {
         free(request);
         return failure("INVALID_JSON", "Expected one JSON object");
+    }
+    /* This registered lifetime service emits advisory JSONL while running.
+     * Finite component actions retain their single bounded result envelope. */
+    if (!strcmp(component,"12.1")&&!strcmp(action,"supervisor.serve")) {
+        int result=entry(action,request,stdout);free(request);return result;
     }
     char *output = NULL;
     size_t output_length = 0;

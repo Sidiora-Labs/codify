@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "variant": "task:17.4",
+  "task": "17.4",
+  "scope": "task-component",
+  "cases": [
+    "V-029",
+    "V-030",
+    "V-052"
+  ],
+  "assertion_ids": [
+    "review.remote.component-producer-pass",
+    "review.remote.component-consumer-pass",
+    "review.remote.integrated-behaviour-fails",
+    "review.remote.repaired-behaviour-passes",
+    "review.reproduction.actual-registry-plan",
+    "review.reproduction.result-source-not-baseline",
+    "review.reproduction.exact-request-replay",
+    "review.reproduction.conflicting-retry-refused",
+    "review.reproduction.caller-command-refused",
+    "review.reproduction.unregistered-check-refused",
+    "review.reproduction.candidate-input-mismatch-refused",
+    "review.reproduction.source-custody-missing",
+    "review.reproduction.immutable-job-inputs",
+    "review.reproduction.unrun-never-proof",
+    "review.reproduction.non-verifier-assignment-refused",
+    "review.reproduction.capacity-required",
+    "review.reproduction.unassigned-execution-refused",
+    "review.reproduction.cross-run-refused",
+    "review.reproduction.no-physical-execution-inferred",
+    "review.reproduction.exact-registry-inspector",
+    "review.reproduction.current-source-unrun-causal-refused",
+    "review.reproduction.current-source-caller-head-refused",
+    "review.reproduction.registered-seventy-two-hour-timeout",
+    "review.reproduction.inspector-exact-custody-lineage",
+    "review.audit.closed-run-reproduction-read-only",
+    "review.audit.closed-run-reproduction-write-denied",
+    "review.inputs.reader-rejects-raw-client",
+    "review.inputs.reader-rejects-forged-invocation",
+    "review.audit.closed-run-nonprivileged-read-denied",
+    "review.reproduction.independent-allocation-and-slot-generations",
+    "review.reproduction.dispatched-slot-pin-immutable",
+    "review.reproduction.unassigned-renewal-refused"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/17_4.py"
+  ],
+  "timeout_seconds": 300,
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
+  "fixtures": [
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/review/reproductions.js"
+  ],
+  "resources": [
+    {
+      "id": "hf-review-17.4-database",
+      "kind": "postgresql-database",
+      "scope": "task17.4-disposable"
+    }
+  ],
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop"
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/17_4.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "required_artifacts": [
+    "review/database-absence.json",
+    "review/observations.json",
+    "review/closed-run-audit-read.json",
+    "review/closed-run-audit-write.json",
+    "review/input-reader-boundary.json",
+    "review/generation-storage-boundary.json",
+    "review/remote-fixture-observations.json"
+  ],
+  "source_files": [
+    "tests/hyperfide/cases/tasks/17_4.py",
+    "tests/hyperfide/cases/tasks/17_1.py",
+    "tests/hyperfide/support/identity_fixture.py",
+    "services/hyperfide/src/review/reproductions.ts",
+    "services/hyperfide/src/review/coverage.ts",
+    "services/hyperfide/migrations/0017-review.sql",
+    "services/hyperfide/components/17.4.json",
+    "services/hyperfide/package.json",
+    "services/hyperfide/package-lock.json",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/check-evidence.py"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ]
+}

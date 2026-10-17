@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "6.2",
+  "task": "6.2",
+  "roles": [
+    "control",
+    "dispatch",
+    "provisioner"
+  ],
+  "module": "events/inbox.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "inbox.describe",
+    "inbox.receive",
+    "inbox.replay"
+  ],
+  "requires": [
+    "4.2",
+    "6.1"
+  ]
+}

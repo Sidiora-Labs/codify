@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "id": "6.1",
+  "task": "6.1",
+  "roles": [
+    "control",
+    "provisioner",
+    "dispatch"
+  ],
+  "module": "events/outbox.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "outbox.describe",
+    "outbox.consumer.register",
+    "outbox.enqueue",
+    "outbox.claim",
+    "outbox.acknowledge",
+    "outbox.retry",
+    "outbox.consumer.bind-session",
+    "outbox.consumer.resolve-session"
+  ],
+  "requires": [
+    "4.2",
+    "14.1"
+  ]
+}

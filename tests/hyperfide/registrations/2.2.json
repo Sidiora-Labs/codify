@@ -1,0 +1,132 @@
+{
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/2_2.py"
+  ],
+  "assertion_ids": [
+    "dependencies.valid.actual-service",
+    "dependencies.check.readonly",
+    "dependencies.resolve.exact-logical-key",
+    "dependencies.resolve.unknown",
+    "dependencies.resolve.strict-type",
+    "dependencies.resolve.scope",
+    "dependencies.frontier.discovery-only",
+    "dependencies.frontier.strict-limit",
+    "dependencies.input.unknown-key",
+    "dependencies.input.numeric-generation",
+    "dependencies.pin.stale-generation",
+    "dependencies.pin.stale-state",
+    "dependencies.admit.requires-proof",
+    "dependencies.admit.no-partial-edges",
+    "dependencies.proof.actual-registries",
+    "dependencies.transaction.late-failure-rollback",
+    "dependencies.admit.atomic-ready",
+    "dependencies.admit.concurrent-cas",
+    "dependencies.storage.exact-pins",
+    "dependencies.admit.stale-replay",
+    "dependencies.admit.wrong-state",
+    "dependencies.storage.immutable-binding",
+    "dependencies.storage.repeatable-read-refused",
+    "dependencies.restart.durable-plan",
+    "dependencies.status-not-qualification",
+    "dependencies.binding.legacy-refused",
+    "dependencies.binding.undeclared-refused",
+    "dependencies.binding.stale-predecessor-refused",
+    "dependencies.invalid.undispatchable",
+    "dependencies.invalid.self",
+    "dependencies.invalid.unknown",
+    "dependencies.invalid.later-wave",
+    "dependencies.invalid.cycle",
+    "dependencies.invalid.duplicate",
+    "dependencies.invalid.requires-type",
+    "dependencies.invalid.reference-type",
+    "dependencies.invalid.unknown-run",
+    "dependencies.invalid.descriptor-scope",
+    "dependencies.invalid.touches",
+    "dependencies.invalid.wave",
+    "dependencies.invalid.owner",
+    "dependencies.invalid.prose-warning",
+    "dependencies.invalid.source-locations",
+    "dependencies.invalid.concrete-cycle",
+    "dependencies.invalid.atomic-refusal",
+    "dependencies.scale.large-graph",
+    "dependencies.scale.iterative-traversal"
+  ],
+  "cases": [
+    "V-001",
+    "V-024"
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/2_2.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "fixtures": [
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/spec/dependencies.js",
+    "services/hyperfide/dist/spec/obligations.js"
+  ],
+  "required_artifacts": [
+    "proofs/observations.json",
+    "storage/database-absence.json"
+  ],
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
+  "resources": [
+    {
+      "id": "hf-task-2.2-database",
+      "kind": "postgresql-database",
+      "scope": "task2.2-disposable"
+    }
+  ],
+  "schema_version": 1,
+  "scope": "task-component",
+  "source_files": [
+    "services/hyperfide/components/14.1.json",
+    "services/hyperfide/components/2.2.json",
+    "services/hyperfide/components/2.4.json",
+    "services/hyperfide/components/4.2.json",
+    "services/hyperfide/migrations/0001-authority.sql",
+    "services/hyperfide/migrations/0002-spec.sql",
+    "services/hyperfide/migrations/0014-enrollment.sql",
+    "services/hyperfide/migrations/0202-spec-dependencies.sql",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/package.json",
+    "services/hyperfide/src/components/registry.ts",
+    "services/hyperfide/src/components/service.ts",
+    "services/hyperfide/src/identity/enrollment.ts",
+    "services/hyperfide/src/policy/programme.ts",
+    "services/hyperfide/src/spec/dependencies.ts",
+    "services/hyperfide/src/spec/import.ts",
+    "services/hyperfide/src/spec/obligations.ts",
+    "services/hyperfide/src/storage/schema.ts",
+    "services/hyperfide/src/transport/protocol.ts",
+    "services/hyperfide/tsconfig.json",
+    "tests/hyperfide/cases/tasks/2_1.py",
+    "tests/hyperfide/cases/tasks/2_2.py",
+    "tests/hyperfide/cases/tasks/2_4.py",
+    "tests/hyperfide/cases/tasks/4_1.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/support/identity_fixture.py"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "task": "2.2",
+  "timeout_seconds": 600,
+  "variant": "task:2.2"
+}

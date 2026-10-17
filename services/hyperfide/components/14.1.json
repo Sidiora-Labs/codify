@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "id": "14.1",
+  "task": "14.1",
+  "roles": [
+    "control",
+    "provisioner",
+    "dispatch"
+  ],
+  "module": "identity/enrollment.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "identity.describe",
+    "identity.binding.observe",
+    "identity.grant.issue",
+    "identity.principal.revoke",
+    "identity.runner.register",
+    "identity.runner.heartbeat",
+    "identity.principal.delegate",
+    "identity.principal.renew",
+    "identity.service.issue",
+    "identity.main.issue"
+  ],
+  "requires": [
+    "4.2",
+    "4.4"
+  ]
+}

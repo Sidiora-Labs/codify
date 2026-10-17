@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "spec-import",
+  "task": "2.1",
+  "roles": [
+    "control"
+  ],
+  "module": "spec/import.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "spec.import",
+    "spec.inspect",
+    "spec.export",
+    "spec.projection.check"
+  ],
+  "requires": [
+    "4.1",
+    "4.2",
+    "14.1"
+  ]
+}

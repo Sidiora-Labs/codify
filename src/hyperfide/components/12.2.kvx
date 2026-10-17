@@ -1,0 +1,9 @@
+[component]
+schema_version = 1
+id = "12.2"
+source = "src/hyperfide/launch.c"
+entry = "hf_component_12_2"
+actions = ["launch.start", "launch.instruction"]
+requires = ["12.1"]
+headers = ["src/hyperfide/supervisor.h"]
+libraries = ["crypto"]

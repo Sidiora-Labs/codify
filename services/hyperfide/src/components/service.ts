@@ -4,6 +4,10 @@ import { fileURLToPath } from 'node:url';
 import { FoundationError, object, validatePolicy } from '../policy/programme.js';
 import type { ServiceRole } from '../policy/programme.js';
 import { ComponentRegistry } from './registry.js';
+import {startHttpTransport} from '../transport/http.js';
+import type {HttpTransport} from '../transport/http.js';
+import type {InvocationContext} from '../transport/protocol.js';
+import {isIdentityAuthority} from '../identity/enrollment.js';
 
 const MAX_BYTES = 1024 * 1024;
 const HARD_PROTOCOL_BYTES = 64 * 1024 * 1024;
@@ -27,7 +31,7 @@ function options(args: string[]): Record<string,string> {
   const result: Record<string,string> = {};
   for (let index = 0; index < args.length; index += 2) {
     const flag = args[index], value = args[index + 1];
-    if (!flag || !['--policy','--spec-revision','--components','--module-root'].includes(flag) ||
+    if (!flag || !['--policy','--spec-revision','--components','--module-root','--mode','--host','--port','--tls-cert','--tls-key'].includes(flag) ||
         !value || value.startsWith('--') || Object.hasOwn(result, flag))
       throw new FoundationError('INVALID_ARGS', 'Use --policy FILE --spec-revision REV [--components DIR] [--module-root DIR]');
     result[flag] = value;
@@ -40,7 +44,7 @@ export type ProtocolResponse =
   | { id: string | number; ok: true; result: unknown }
   | { id: string | number | null; ok: false; error: { code: string; message: string } };
 // Shared internal dispatcher: later authenticated transports reuse these exact admission checks.
-export async function handleRequest(registry: ComponentRegistry, request: unknown, responseLimit = MAX_BYTES): Promise<ProtocolResponse> {
+export async function handleRequest(registry: ComponentRegistry, request: unknown, responseLimit = MAX_BYTES, invocation?:InvocationContext): Promise<ProtocolResponse> {
   let id: string | number | null = null;
   try {
     if (!Number.isSafeInteger(responseLimit) || responseLimit < 256 || responseLimit > HARD_PROTOCOL_BYTES)
@@ -52,7 +56,7 @@ export async function handleRequest(registry: ComponentRegistry, request: unknow
       throw new FoundationError('INVALID_REQUEST', 'Request requires bounded id, component, action and input');
     id = request.id as string | number;
     const result = request.component === 'system' && request.action === 'system.describe' ? registry.describe() :
-      await registry.invoke(request.component, request.action, request.input);
+      await registry.invoke(request.component, request.action, request.input, invocation);
     const response = { id, ok: true as const, result };
     const encoded = JSON.stringify(response, (_key, value: unknown) => {
       if (['undefined','function','symbol','bigint'].includes(typeof value) ||
@@ -71,12 +75,14 @@ export async function handleRequest(registry: ComponentRegistry, request: unknow
 }
 export async function runService(role: ServiceRole, args = process.argv.slice(2)): Promise<void> {
   let registry: ComponentRegistry | undefined;
+  let transport:HttpTransport|undefined;
   const controller = new AbortController();
   let stopping = false;
   let cleanup: Promise<void> | undefined;
   let terminationDeadline: ReturnType<typeof setTimeout> | undefined;
   const close = (): Promise<void> => cleanup ??= (async () => {
     stopping = true; controller.abort();
+    if(transport)await transport.close();
     if (registry) await registry.close();
   })();
   const terminate = (): void => {
@@ -90,6 +96,7 @@ export async function runService(role: ServiceRole, args = process.argv.slice(2)
     // Operator-owned startup configuration is frozen before policy reads or component factories run.
     const limits = protocolLimits();
     const config = options(args);
+    if(config['--mode']==='https'&&process.env.HYPERFIDE_MIGRATION_JOB==='1')throw new FoundationError('TRANSPORT_CONFIG','A migration job cannot expose an HTTPS listener');
     const policyFile = config['--policy']!;
     let stat;
     try { stat = await fs.stat(policyFile); }
@@ -103,6 +110,32 @@ export async function runService(role: ServiceRole, args = process.argv.slice(2)
     const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
     registry = new ComponentRegistry(Object.freeze({ role, policy, signal: controller.signal, env: Object.freeze({ ...process.env }) }));
     await registry.load(config['--components'] ?? path.join(packageRoot, 'components'), config['--module-root'] ?? path.join(packageRoot, 'dist'));
+    const mode=config['--mode']??'stdio';
+    if(!['stdio','https','daemon'].includes(mode))throw new FoundationError('INVALID_ARGS','Mode must be stdio, https or daemon');
+    let identity;
+    if(registry.hasComponent('14.1')) {
+      identity=registry.resolveCapability('14.1','identity.transport',isIdentityAuthority);
+      identity.sealTrustedRegistrations();
+      let extra:((invocation:InvocationContext)=>Promise<void>)|undefined;
+      if(registry.hasComponent('14.4')) {
+        const authorization=registry.resolveCapability('14.4','identity.authorization',(value:unknown):value is {authorize:(invocation:InvocationContext)=>Promise<void>}=>object(value)&&typeof value.authorize==='function');
+        extra=authorization.authorize.bind(authorization);
+      }
+      registry.installInvocationAuthorizer(async invocation=>{await identity!.authorize(invocation);if(extra)await extra(invocation);});
+    }
+    if(mode==='https') {
+      if(!identity)throw new FoundationError('AUTH_REQUIRED','HTTPS mode requires initialized identity authority');
+      const port=Number(config['--port']);
+      transport=await startHttpTransport({origin:identity.origin,host:config['--host']??'127.0.0.1',port,
+        certificate:config['--tls-cert']??'',privateKey:config['--tls-key']??'',signal:controller.signal,identity,
+        requestLimit:Math.min(limits.request,1024*1024),responseLimit:Math.min(limits.response,1024*1024),
+        dispatch:invocation=>handleRequest(registry!,{id:invocation.operation.operation_id,component:invocation.payload.component,action:invocation.payload.action,input:invocation.payload.input},limits.response,invocation)});
+    }
+    if(mode!=='stdio') {
+      process.stderr.write(JSON.stringify({event:'ready',role,mode})+'\n');
+      if(!controller.signal.aborted)await new Promise<void>(resolve=>controller.signal.addEventListener('abort',()=>resolve(),{once:true}));
+      return;
+    }
     const reply = async (line: string): Promise<void> => {
       let request: unknown;
       try { request = JSON.parse(line); } catch { request = undefined; }

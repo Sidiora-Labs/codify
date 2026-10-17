@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "17.2",
+  "task": "17.2",
+  "roles": [
+    "control"
+  ],
+  "module": "review/contracts.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "review.contract.publish",
+    "review.contract.impact",
+    "review.contract.coverage"
+  ],
+  "requires": [
+    "17.1",
+    "7.4"
+  ]
+}

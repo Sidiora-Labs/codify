@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "variant": "task:16.3",
+  "task": "16.3",
+  "scope": "task-component",
+  "cases": [
+    "V-013",
+    "V-034"
+  ],
+  "assertion_ids": [
+    "assurance.16.3.auth.absent.qualification.coverage.inspect",
+    "assurance.16.3.auth.forged.qualification.coverage.inspect",
+    "assurance.16.3.auth.absent.qualification.review.record",
+    "assurance.16.3.auth.forged.qualification.review.record",
+    "assurance.16.3.auth.absent.qualification.accept",
+    "assurance.16.3.auth.forged.qualification.accept",
+    "assurance.16.3.primary.unbranded-denied",
+    "assurance.16.3.https.signed-missing",
+    "assurance.16.3.https.cross-scope",
+    "assurance.16.3.https.wrong-role",
+    "assurance.16.3.https.no-authority"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/16_3.py"
+  ],
+  "timeout_seconds": 300,
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
+  "fixtures": [
+    "services/hyperfide/dist/assurance/submission.js",
+    "services/hyperfide/dist/assurance/executor.js",
+    "services/hyperfide/dist/assurance/coverage.js",
+    "services/hyperfide/dist/assurance/validity.js",
+    "services/hyperfide/dist/storage/transactions.js",
+    "services/hyperfide/dist/transport/protocol.js",
+    "services/hyperfide/dist/storage/dispositions.js"
+  ],
+  "resources": [
+    {
+      "id": "hf-task-16.3-signed-database",
+      "kind": "postgresql-database",
+      "scope": "task16.3-signed-disposable"
+    },
+    {
+      "id": "hf-task-16.3-signed-service",
+      "kind": "https-service",
+      "scope": "task16.3-signed-disposable"
+    }
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/16_3.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "required_artifacts": [
+    "assurance/observations-16.3.json",
+    "assurance/signed-absence-16.3.json"
+  ],
+  "source_files": [
+    "services/hyperfide/src/assurance/submission.ts",
+    "services/hyperfide/src/assurance/executor.ts",
+    "services/hyperfide/src/assurance/coverage.ts",
+    "services/hyperfide/src/assurance/validity.ts",
+    "services/hyperfide/components/16.1.json",
+    "services/hyperfide/components/16.2.json",
+    "services/hyperfide/components/16.3.json",
+    "services/hyperfide/components/16.4.json",
+    "services/hyperfide/migrations/0001-authority.sql",
+    "services/hyperfide/migrations/0016-qualification.sql",
+    "services/hyperfide/package.json",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/tsconfig.json",
+    "tests/hyperfide/cases/tasks/16_1.py",
+    "tests/hyperfide/cases/tasks/16_2.py",
+    "tests/hyperfide/cases/tasks/16_3.py",
+    "tests/hyperfide/cases/tasks/16_4.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/support/identity_fixture.py"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "https.fixture.start",
+    "https.fixture.stop"
+  ]
+}
