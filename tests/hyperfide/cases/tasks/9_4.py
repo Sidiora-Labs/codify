@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Task9.4 actual adapter code against explicitly simulated scoped provider APIs."""
-import importlib,json,subprocess,sys,tempfile
+import importlib,io,json,subprocess,sys,tempfile
 from pathlib import Path
 c=importlib.import_module("9_1")
 IDS=[
@@ -17,8 +17,28 @@ IDS=[
  "railway.isolation.wrong-native-id-unknown","railway.isolation.pure-live-construction",
  "railway.adapter.restore-source-id-is-unknown",
  "railway.factory.durable-intent-before-sdk","railway.factory.actual-early-id","railway.factory.trusted-placement-and-vars",
- "railway.factory.no-provider-readiness","railway.factory.no-duplicate-create","railway.factory.private-policy-pin"
+ "railway.factory.no-provider-readiness","railway.factory.no-duplicate-create","railway.factory.private-policy-pin",
+ "railway.quota.registered-provider-api","railway.quota.labelled-simulated","railway.quota.scope-mismatch-rejected",
+ "railway.quota.live-unqualified","railway.qualification.all-unqualified","railway.qualification.rejects-injected-evidence",
+ "railway.qualification.rejects-invalid-inputs","railway.qualification.idle-policy-pin"
 ]
+
+def simulate_quota(fixture):
+ """Answer the declared quota query on the simulated fixture; SDK3.16.0 pins no live quota API."""
+ handler=fixture.server.RequestHandlerClass;original=handler.do_POST
+ def do_POST(self):
+  body=self.rfile.read(int(self.headers["content-length"]));raw=json.loads(body)
+  if "sandboxQuota" not in raw["query"]:
+   self.rfile=io.BytesIO(body);return original(self)
+  fixture.requests.append(raw)
+  account=fixture.config["account_id"] if fixture.state["mode"]!="quota-wrong-account" else "account-other"
+  data={"sandboxQuota":{"accountId":account,"environmentId":raw["variables"]["environmentId"],"limits":[
+   {"scope":"ACCOUNT","dimension":"SANDBOX","limit":"50"},{"scope":"ENVIRONMENT","dimension":"SANDBOX","limit":"20"},
+   {"scope":"ENVIRONMENT","dimension":"CPU_MILLIS","limit":"64000"},{"scope":"ENVIRONMENT","dimension":"MEMORY_BYTES","limit":"137438953472"}]}}
+  out=json.dumps({"data":data}).encode()
+  self.send_response(200);self.send_header("content-type","application/json");self.send_header("content-length",str(len(out)))
+  self.end_headers();self.wfile.write(out)
+ handler.do_POST=do_POST
 
 def actual_factory_checks(fixture,folder):
  """Genuine08/05/14 transaction/identity hooks; only the external cloud HTTP API is simulated."""
@@ -78,6 +98,28 @@ def actual_factory_checks(fixture,folder):
   count=len(creates);again=invoke("provider.intents.execute",{"intent_id":intent["id"]},key="provisioner")
   c.check(IDS[36],lambda:c.expect(again.get("executed") is False and
      len([row for row in fixture.requests[before:] if "sandboxCreate" in row["query"]])==count,"same actual durable operation was blindly replayed"))
+  quota_rows=lambda:f.sql("SELECT scope_kind,scope_key,dimension,quota_limit::text AS quota_limit,basis,evidence_reference FROM hyperfide.provider_quota_observations "
+     "WHERE organisation_id=$1 AND pool_id=$2 AND evidence_reference LIKE 'simulated:railway-component-fixture:%' ORDER BY scope_kind,dimension",
+     [f.ids["organisation"],f.pool])
+  queries=lambda:len([row for row in fixture.requests if "sandboxQuota" in row["query"]])
+  asked=queries();observed_capacity=invoke("provider.pools.observe",{"pool_id":f.pool},"8.2",key="provisioner");rows=quota_rows()
+  c.check(IDS[38],lambda:c.expect(queries()==asked+1 and isinstance(observed_capacity,dict) and len(rows)==4 and
+     all(r["basis"]=="PROVIDER_API" for r in rows) and
+     {(r["scope_kind"],r["scope_key"],r["dimension"],r["quota_limit"]) for r in rows}=={("ACCOUNT","fixture-account","SANDBOX","50"),
+      ("ENVIRONMENT","fixture-env","SANDBOX","20"),("ENVIRONMENT","fixture-env","CPU_MILLIS","64000"),
+      ("ENVIRONMENT","fixture-env","MEMORY_BYTES","137438953472")},"registered Railway quota observer did not record PROVIDER_API observations: "+json.dumps(rows)))
+  c.check(IDS[39],lambda:c.expect(all(r["evidence_reference"].startswith("simulated:railway-component-fixture:sha256:") for r in rows),
+     "simulated quota observation was not labelled simulated"))
+  fixture.state["mode"]="quota-wrong-account";status,response=f.invoke("provider.pools.observe",{"pool_id":f.pool},component="8.2",key="provisioner")
+  fixture.state["mode"]="normal"
+  c.check(IDS[40],lambda:c.expect((status>=400 or response.get("ok") is False) and len(quota_rows())==4,
+     "quota observation for another account was accepted: "+json.dumps(response)))
+  qualify=lambda idle:f.invoke("railway.qualification.evaluate",{"scope":scope,"network_isolation":"ISOLATED","idle_timeout_minutes":idle,
+     "lifecycle_hours":72},component="9.4",key="provisioner")
+  pinned,mismatch=qualify(0),qualify(30)
+  c.check(IDS[45],lambda:c.expect(pinned[0]==200 and pinned[1].get("ok") is True and
+     pinned[1]["result"]["checks"]["idle_policy"]["status"]=="UNQUALIFIED" and
+     (mismatch[0]>=400 or mismatch[1].get("ok") is False),"idle input not pinned to trusted runtime policy: "+json.dumps([pinned,mismatch])))
   f.stop();original=runtime.read_bytes();runtime.write_bytes(original+b" ")
   rejected=False
   try:f.start()
@@ -96,7 +138,7 @@ def main():
  if sys.argv[1:]==["--inventory"]:print(json.dumps(IDS[:19]+IDS[24:25]+IDS[19:24]+IDS[25:]));return 0
  complete=False
  with tempfile.TemporaryDirectory(prefix="hyperfide-railway94-") as folder:
-  fixture=c.Fixture(folder);service=c.Service(folder,fixture)
+  fixture=c.Fixture(folder);simulate_quota(fixture);service=c.Service(folder,fixture)
   try:
    inventory=lambda limit:c.result(service.call("9.4","railway.inventory.list",{"scope":c.SCOPE,"max_pages":limit}))
    fixture.state["pages"]=30
@@ -240,6 +282,29 @@ process.stdout.write(JSON.stringify({constructed:typeof transport.destroy==='fun
       cwd=c.ROOT,capture_output=True,text=True,timeout=20)
    c.check(IDS[30],lambda:c.expect(pure.returncode==0 and json.loads(pure.stdout)=={"constructed":True,"denied":True} and
       len(fixture.requests)==before,"pure live construction usedPG/provider effects or accepted another scope: "+pure.stderr))
+   live_quota_js=r"""
+import {configuredClient} from './services/hyperfide/dist/providers/railway/preparation.js';
+import {observeRailwayQuota} from './services/hyperfide/dist/providers/railway/reconciliation.js';
+const client=configuredClient({env:{HF_RAILWAY_CONFIG:process.argv[1],HF_RAILWAY_FIXTURE_TOKEN:'not-real'}});
+let message='accepted';try{await observeRailwayQuota(client,JSON.parse(process.argv[2]));}catch(error){message=String(error.message);}
+process.stdout.write(JSON.stringify({message}));
+"""
+   before=len(fixture.requests)
+   live_quota=subprocess.run(["node","--input-type=module","-e",live_quota_js,str(pure_path),json.dumps(c.SCOPE)],
+      cwd=c.ROOT,capture_output=True,text=True,timeout=20)
+   c.check(IDS[41],lambda:c.expect(live_quota.returncode==0 and json.loads(live_quota.stdout)["message"].startswith("QUOTA_UNQUALIFIED") and
+      len(fixture.requests)==before,"live quota was not fail-closed UNQUALIFIED: "+live_quota.stdout+live_quota.stderr))
+   probe={"scope":c.SCOPE,"network_isolation":"PRIVATE","idle_timeout_minutes":60,"lifecycle_hours":72}
+   evaluate=lambda p:service.call("9.4","railway.qualification.evaluate",p)
+   before=len(fixture.requests);qualified=c.result(evaluate(probe))
+   c.check(IDS[42],lambda:c.expect(all(qualified["checks"][k]["status"]=="UNQUALIFIED" for k in ("network","quota","idle_policy","lifecycle")) and
+      qualified["checks"]["lifecycle"]["reason"]=="LIVE_72H_ENDURANCE_CAMPAIGN_REQUIRED" and qualified["full_scale_use"]=="BLOCKED" and
+      qualified["create_replay"]=="NEVER" and qualified["simulated"] is True and qualified["mode"]=="component-fixture" and
+      qualified["authority"]=="NONE" and len(fixture.requests)==before,"profile inputs reported qualified without live evidence: "+json.dumps(qualified)))
+   c.check(IDS[43],lambda:[c.reject(evaluate(probe|extra)) for extra in
+      ({"qualified":True},{"evidence":{"campaign_id":"forged","mode":"live"}})])
+   c.check(IDS[44],lambda:[c.reject(evaluate(probe|bad)) for bad in
+      ({"network_isolation":"PUBLIC"},{"lifecycle_hours":73},{"idle_timeout_minutes":-1},{"scope":c.SCOPE|{"region":"region-other"}})])
    original_observed=c.observed
    try:
     c.observed=lambda:original_observed()|{"id":params["base"]["source_native_sandbox_id"]}
