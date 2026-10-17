@@ -29,13 +29,13 @@ IDS={
 "19.1":["candidate.registered-wire","candidate.strict-input","candidate.scope-denied","candidate.real-merge","candidate.deterministic-objects","candidate.conflict-refused","candidate.typed-generations","candidate.immutable-request","candidate.empty-targets-refused","candidate.authenticated-run-bound"],
 "19.2":["publication.registered-wire","publication.strict-input","publication.role-denied","publication.unsigned-push-denied","publication.target-unchanged","publication.immutable-admission","publication.target-lock-exclusive","publication.effective-hook-path-pinned","publication.github-configured-boundary","publication.github-sole-publisher","publication.github-worker-bypass-refused","publication.github-force-bypass-refused","publication.github-unknown-bypass-refused","publication.client-hook-suppressed","publication.server-hook-still-enforced","publication.token-persist-failure-revokes","publication.askpass-failure-revokes","publication.orphan-remains-unknown","publication.custody-preflight-no-mint","publication.source-url-rewrite-isolated","publication.https-source-config-isolated","publication.invalid-token-response-revokes"],
 "19.3":["closure.registered-wire","closure.level-required","closure.wave-required","closure.programme-cannot-narrow","closure.policy-requires-gates","closure.policy-requires-acceptance","closure.evaluation-immutable","closure.unregistered-assertions-refused","closure.declared-coverage-bound","closure.policy-valid-shape"],
-"19.4":["release.registered-wire","release.strict-input","release.empty-set-refused","release.caller-cannot-claim-published","release.immutable-manifest","release.partial-remains-explicit"]
+"19.4":["release.registered-wire","release.strict-input","release.empty-set-refused","release.caller-cannot-claim-published","release.immutable-manifest","release.partial-remains-explicit","release.interrupted-unknown-reconciles","release.interrupted-partial-explicit","release.recovery-follows-recorded-policy","release.advance-successor-manifest","release.successor-releases-after-completion","release.audit-history-preserved","release.compensation-required","release.compensation-direct-push-refused","release.compensation-through-gateway"]
 }
 ACTIONS={
 "19.1":["integration.candidate.create","integration.candidate.inspect","integration.candidate.verify","integration.candidate.admit"],
 "19.2":["integration.publication.capabilities","integration.publication.authorize","integration.publication.execute","integration.publication.reconcile","integration.publication.inspect"],
 "19.3":["integration.closure.evaluate","integration.closure.verify","integration.closure.inspect"],
-"19.4":["integration.release.create","integration.release.inspect","integration.release.evaluate"]
+"19.4":["integration.release.create","integration.release.inspect","integration.release.evaluate","integration.release.recover"]
 }
 def expect(condition,message):
     if not condition:raise AssertionError(message)
@@ -61,7 +61,7 @@ def sql(statement,*,database=DATABASE,allow_error=False):
     return result
 def node(source,args=None,env=None):
     return run(["node","--input-type=module","-e",source,*[str(x) for x in (args or [])]],env=env or db_env())
-def cleanup():
+def cleanup(emit=True):
     sql("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='"+DATABASE+"' AND pid<>pg_backend_pid()",database="postgres")
     sql('DROP DATABASE IF EXISTS "'+DATABASE+'";',database="postgres")
     absent=not sql("SELECT datname FROM pg_database WHERE datname='"+DATABASE+"'",database="postgres").stdout.strip()
@@ -74,7 +74,7 @@ def cleanup():
         proof=json.loads(authartifact.read_text())
         authabsent=proof.get("observed_absent") is True and isinstance(proof.get("database"),str) and re.fullmatch(r"hf_integration_identity_[a-z0-9_]{1,55}",proof["database"]) is not None and not sql("SELECT datname FROM pg_database WHERE datname='"+proof["database"]+"'",database="postgres").stdout.strip()
     resources=[{"id":"integration-"+TASK+"-database","status":"deleted" if absent else "unknown","observed_absent":absent,"evidence_artifact":"integration/database-absence.json"},{"id":"integration-"+TASK+"-identity-database","status":"deleted" if authabsent else "unknown","observed_absent":authabsent,"evidence_artifact":"integration/identity-database-absence.json"}]
-    print(json.dumps({"type":"cleanup","complete":absent and authabsent,"resources":resources}),flush=True)
+    if emit:print(json.dumps({"type":"cleanup","complete":absent and authabsent,"resources":resources}),flush=True)
 def bootstrap():
     sql('CREATE DATABASE "'+DATABASE+'";',database="postgres")
     sql((ROOT/"services/hyperfide/migrations/0001-authority.sql").read_text())
@@ -100,6 +100,7 @@ class Fixture:
         self.g(["checkout","-q","main"])
         self.gate={"id":"actual-test","kind":"test","argv":["python3","-c","import json;print(json.dumps({'type':'assertion','id':'actual','expected':1,'actual':1}))"],"timeout_ms":3000,"proof":{"manifest_path":"tests/hyperfide/manifests/tasks/19.1.json","manifest_digest":D,"registry_path":"tests/hyperfide/registry.json","registry_digest":D,"expected_assertion_ids":["fixture.actual-assertion"],"case_ids":["V-034"]}}
         self.cfg={"version":1,"organisation_id":U(1),"root":str(base),"repositories":[{"repository_id":U(3),"path":str(self.repository),"target_ref":"refs/heads/main","receive_path":str(self.receive),"gates":[self.gate],"review_policy_digest":D,"review_rubrics":[D],"required_graph":True}],"closure":{"wave_gates":[{**self.gate,"covers":["V-034"]}],"programme_gates":[{**self.gate,"covers":["V-034"]}],"required_acceptance_ids":["V-034"],"required_docs":False}}
+        if TASK=="19.4":self.cfg["repositories"]+=release_repositories(self)
         self.config=base/"integration.json";self.config.write_text(json.dumps(self.cfg))
         self.key=base/"gateway.key";self.key.write_bytes(os.urandom(32));self.key.chmod(0o600)
         self.env={**db_env(),"HYPERFIDE_INTEGRATION_CONFIG":str(self.config),"HYPERFIDE_GATEWAY_KEY_FILE":str(self.key),"HYPERFIDE_INTEGRATION_EXECUTOR_ID":U(200)}
@@ -294,6 +295,77 @@ def closure_cases(f):
         node("import {closurePolicy} from "+json.dumps(module)+";let denied=false;try{closurePolicy(JSON.parse(process.argv[1]))}catch(e){denied=e.code==='CLOSURE_POLICY_INVALID'}if(!denied)throw Error('Unrelated registered full case claimed coverage');",[json.dumps(wrong)])
     check(IDS[TASK][8],mismatch)
     check(IDS[TASK][9],lambda:node("import {closurePolicy} from "+json.dumps(module)+";closurePolicy(JSON.parse(process.argv[1]));",[json.dumps(f.cfg)]))
+RA,RB=U(601),U(602)
+ADVANCE,COMPENSATE="ADVANCE_COMPATIBLE_MANIFEST","EXPLICIT_COMPENSATING_REVISION"
+def release_repositories(f):
+    """Two real repositories, each with its own bare receive target."""
+    f.release={};entries=[]
+    for name,rid in (("a",RA),("b",RB)):
+        work=f.base/("release-"+name);work.mkdir()
+        g=lambda args,work=work:run(["git","-c","core.hooksPath=/dev/null","-c","gc.auto=0",*args],cwd=work,env=f.gitenv)
+        g(["init","-q","-b","main"]);(work/"base.txt").write_text(name+" base\n");g(["add","base.txt"]);g(["commit","-qm","base"])
+        receive=f.base/("release-"+name+".git");run(["git","clone","--bare","-q",work,receive],env=f.gitenv)
+        for key,value in (("maintenance.auto","false"),("receive.autogc","false")):run(["git","--git-dir="+str(receive),"config",key,value],env=f.gitenv)
+        f.release[rid]={"work":work,"receive":receive,"g":g,"base":g(["rev-parse","HEAD"]).stdout.strip()}
+        entries.append({**f.cfg["repositories"][0],"repository_id":rid,"path":str(work),"receive_path":str(receive)})
+    return entries
+def release_commit(f,rid,parent,label):
+    r=f.release[rid];r["g"](["checkout","-q","--detach",parent]);(r["work"]/"change.txt").write_text(label+"\n");r["g"](["add","change.txt"]);r["g"](["commit","-qm",label])
+    return r["g"](["rev-parse","HEAD"]).stdout.strip()
+def release_ref(f,rid):return run(["git","--git-dir="+str(f.release[rid]["receive"]),"rev-parse","refs/heads/main"]).stdout.strip()
+def q(value):return "NULL" if value is None else "'"+str(value).replace("'","''")+"'"
+def adb(f,statement,allow_error=False):return sql(statement,database=f.auth.database,allow_error=allow_error)
+def precondition(f,statements):
+    # Fixture preconditions stand in for the 19.1/19.2 qualification chain;
+    # every barrier decision below is made by the registered service.
+    adb(f,"BEGIN;SET LOCAL session_replication_role=replica;"+statements+"COMMIT;")
+def release_context(f):
+    org,run_id=f.auth.ids["organisation"],f.auth.ids["run"]
+    spec,epoch,policy=adb(f,"SELECT spec_revision_id||' '||authority_epoch||' '||policy_digest FROM hyperfide.runs WHERE organisation_id="+q(org)+" AND id="+q(run_id)).stdout.strip().split(" ")
+    expect(adb(f,"SELECT count(*) FROM hyperfide.run_repositories WHERE run_id="+q(run_id)).stdout.strip()=="0","Fixture run already pins repositories")
+    precondition(f,"INSERT INTO hyperfide.run_repositories(organisation_id,run_id,repository_id,source_object_id,integration_ref) VALUES"+",".join("("+",".join(map(q,[org,run_id,rid,f.release[rid]["base"],"refs/heads/main"]))+")" for rid in (RA,RB))+";")
+    return {"org":org,"run":run_id,"spec":spec,"epoch":epoch,"policy":policy}
+def commit_set(*entries):return sorted([{"repository_id":rid,"candidate_head":head,"expected_old_head":old} for rid,old,head in entries],key=lambda x:x["repository_id"])
+def seed_candidate(f,ctx,n,rid,old,head,pinned):
+    cid=U(n)
+    manifest={"version":1,"request_id":U(n+5000),"run_id":ctx["run"],"spec_revision_id":ctx["spec"],"spec_generation":"1","policy_digest":ctx["policy"],"authority_epoch":ctx["epoch"],"repository_id":rid,"branch_authority_id":U(n+6000),"branch_generation":"1","target_ref":"refs/heads/main","expected_old_head":old,"candidate_head":head,"commit_set":pinned}
+    digest="sha256:"+hashlib.sha256(json.dumps(manifest,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()
+    precondition(f,"INSERT INTO hyperfide.integration_candidates(organisation_id,run_id,id,task_id,custody_id,custody_generation,repository_id,branch_authority_id,branch_generation,expected_old_head,candidate_head,input_manifest_digest,request_id,state) VALUES("+",".join(map(q,[ctx["org"],ctx["run"],cid,U(n+7000),U(n+8000),1,rid,U(n+6000),1,old,head,digest,U(n+5000),"READY"]))+");"
+        "INSERT INTO hyperfide.integration_candidate_manifests(organisation_id,run_id,candidate_id,manifest) VALUES("+",".join(map(q,[ctx["org"],ctx["run"],cid,json.dumps(manifest)]))+"::jsonb);")
+    return {"id":cid,"n":n,"repository_id":rid,"old":old,"head":head}
+def seed_operation(f,ctx,n,candidate,state,observed=None,admitted=False):
+    """Gateway-authorized publication operation (integration.publication.authorize shape)."""
+    op=U(n);intent={"PENDING":"PENDING","RUNNING":"EXECUTING"}.get(state,state)
+    statements="INSERT INTO hyperfide.publication_intents(organisation_id,run_id,id,candidate_id,intent_digest,state) VALUES("+",".join(map(q,[ctx["org"],ctx["run"],U(n+1000),candidate["id"],D,intent]))+");"
+    statements+="INSERT INTO hyperfide.publication_operations(organisation_id,run_id,id,publication_intent_id,candidate_id,branch_authority_id,branch_generation,authority_epoch,repository_id,expected_old_head,candidate_head,request_id,state,observed_head) VALUES("+",".join(map(q,[ctx["org"],ctx["run"],op,U(n+1000),candidate["id"],U(candidate["n"]+6000),1,ctx["epoch"],candidate["repository_id"],candidate["old"],candidate["head"],U(n+2000),state,observed]))+");"
+    if admitted:statements+="INSERT INTO hyperfide.publication_gateway_admissions(organisation_id,run_id,operation_id,permit_digest) VALUES("+",".join(map(q,[ctx["org"],ctx["run"],op,D]))+");"
+    precondition(f,statements);return op
+def gateway_record(ctx,op,candidate,state,observed=None):
+    """SQL the gateway commits after reading the real target ref back."""
+    w=" WHERE organisation_id="+q(ctx["org"])+" AND run_id="+q(ctx["run"])
+    s="UPDATE hyperfide.publication_operations SET state="+q(state)+",observed_head="+q(observed)+",state_version=state_version+1"+w+" AND id="+q(op)+";"
+    s+="UPDATE hyperfide.publication_intents SET state="+q({"RUNNING":"EXECUTING"}.get(state,state))+",state_version=state_version+1"+w+" AND id=(SELECT publication_intent_id FROM hyperfide.publication_operations"+w+" AND id="+q(op)+");"
+    if state=="PUBLISHED":
+        s+="INSERT INTO hyperfide.publication_gateway_admissions(organisation_id,run_id,operation_id,permit_digest) VALUES("+",".join(map(q,[ctx["org"],ctx["run"],op,D]))+") ON CONFLICT DO NOTHING;"
+        s+="UPDATE hyperfide.integration_candidates SET state='PUBLISHED',state_version=state_version+1"+w+" AND id="+q(candidate["id"])+";"
+    return s
+def gateway_publish(f,ctx,op,candidate):
+    precondition(f,gateway_record(ctx,op,candidate,"RUNNING"))
+    run(["git","-c","core.hooksPath=/dev/null","push","-q",f.release[candidate["repository_id"]]["receive"],candidate["head"]+":refs/heads/main"],cwd=f.release[candidate["repository_id"]]["work"],env=f.gitenv)
+    precondition(f,gateway_record(ctx,op,candidate,"PUBLISHED",release_ref(f,candidate["repository_id"])))
+def interrupted_publisher(f,ctx,first,first_op,second,second_op=None):
+    """One publisher process: ordinary push to repository A, record it, then
+    die by SIGKILL before the ordinary push to repository B."""
+    record="BEGIN;SET LOCAL session_replication_role=replica;"+gateway_record(ctx,first_op,first,"PUBLISHED",first["head"])+(gateway_record(ctx,second_op,second,"RUNNING") if second_op else "")+"COMMIT;"
+    script='set -e\ngit -c core.hooksPath=/dev/null push -q "$1" "$2:refs/heads/main"\npsql -X -q -v ON_ERROR_STOP=1 -c "$3" >/dev/null\nkill -9 $$\ngit -c core.hooksPath=/dev/null push -q "$4" "$5:refs/heads/main"\n'
+    env={**db_env(f.auth.database),**{k:v for k,v in f.gitenv.items() if k.startswith("GIT_")}}
+    result=subprocess.run(["bash","-c",script,"publisher",str(f.release[first["repository_id"]]["receive"]),first["head"],record,str(f.release[second["repository_id"]]["receive"]),second["head"]],cwd=f.release[first["repository_id"]]["work"],env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=60)
+    expect(result.returncode==-9,"Publisher was not killed between pushes: "+result.stderr[-500:])
+    expect(release_ref(f,first["repository_id"])==first["head"] and release_ref(f,second["repository_id"])==second["old"],"Interrupted publication did not leave a real partial commit set")
+def ok(f,action,value):
+    row=f.invoke(TASK,action,value);expect(row.get("ok") is True,"Release action failed: "+json.dumps(row)[:800])
+    return row.get("result",row.get("output",{}))
+def by_repo(result):return {o["repository_id"]:o for o in result["outcomes"]}
 def release_cases(f):
     check(IDS[TASK][0],f.wire)
     check(IDS[TASK][1],lambda:f.reject(TASK,"integration.release.create",{**SCOPE,"done":True},"INTEGRATION_INVALID"))
@@ -304,6 +376,110 @@ def release_cases(f):
         expect(sql("UPDATE hyperfide.integration_release_barriers SET manifest='{\"atomic_across_repositories\":true}',state_version=state_version+1;",allow_error=True).returncode!=0,"Partial release manifest rewritten")
     check(IDS[TASK][4],immutable)
     check(IDS[TASK][5],lambda:expect(sql("SELECT state FROM hyperfide.integration_release_barriers WHERE id='"+U(501)+"';").stdout.strip()=="PARTIAL","Partial publication disappeared"))
+    state={}
+    def interrupted_unknown():
+        ctx=state["ctx"]=release_context(f);a0,b0=f.release[RA]["base"],f.release[RB]["base"]
+        a1,b1,b2=release_commit(f,RA,a0,"a1"),release_commit(f,RB,b0,"b1"),release_commit(f,RB,b0,"b2");state.update(a1=a1,b2=b2)
+        pinned=commit_set((RA,a0,a1),(RB,b0,b1))
+        ca1,cb1=seed_candidate(f,ctx,701,RA,a0,a1,pinned),seed_candidate(f,ctx,702,RB,b0,b1,pinned);state.update(ca1=ca1,cb1=cb1)
+        created=ok(f,"integration.release.create",{**SCOPE,"request_id":U(710),"candidate_ids":[ca1["id"],cb1["id"]],"recovery_policy":ADVANCE})
+        expect(created["state"]=="HELD" and created["atomic_across_repositories"] is False and created["downstream_release_allowed"] is False,"Barrier creation claimed release")
+        y=state["y"]=created["barrier_id"]
+        opa1=seed_operation(f,ctx,721,ca1,"RUNNING");state["opb1"]=opb1=seed_operation(f,ctx,722,cb1,"PENDING")
+        interrupted_publisher(f,ctx,ca1,opa1,cb1,opb1)
+        f.auth.stop();f.auth.start()
+        seen=ok(f,"integration.release.inspect",{**SCOPE,"barrier_id":y});o=by_repo(seen)
+        expect(seen["state"]=="RECONCILING" and o[RA]["outcome"]=="PUBLISHED" and o[RB]["outcome"]=="UNKNOWN" and seen["reconciliation_required"] is True,"Lost publication response did not force reconciliation: "+json.dumps(seen))
+        expect(seen["downstream_release_allowed"] is False and seen["atomic_across_repositories"] is False,"Uncertain set exposed as release")
+        judged=ok(f,"integration.release.evaluate",{**SCOPE,"barrier_id":y})
+        expect(judged["state"]!="RELEASED" and judged["downstream_release_allowed"] is False,"Release decided before read-back")
+        f.reject(TASK,"integration.release.recover",{**SCOPE,"barrier_id":y,"request_id":U(711),"candidate_ids":[U(703)]},"RELEASE_RECONCILIATION_REQUIRED")
+    check(IDS[TASK][6],interrupted_unknown)
+    def interrupted_partial():
+        ctx=state["ctx"];y=state["y"]
+        expect(release_ref(f,RB)==f.release[RB]["base"],"Repository B moved")
+        precondition(f,gateway_record(ctx,state["opb1"],state["cb1"],"FAILED",f.release[RB]["base"]))
+        seen=ok(f,"integration.release.inspect",{**SCOPE,"barrier_id":y});o=by_repo(seen)
+        expect(seen["state"]=="PARTIAL" and o[RA]["outcome"]=="PUBLISHED" and o[RA]["observed_head"]==state["a1"] and o[RB]["outcome"]=="FAILED" and o[RB]["observed_head"]==f.release[RB]["base"],"Partial commit set not explicit: "+json.dumps(seen))
+        expect(seen["all_published"] is False and seen["downstream_release_allowed"] is False and seen["atomic_across_repositories"] is False,"Partial set claimed release or atomicity")
+        judged=ok(f,"integration.release.evaluate",{**SCOPE,"barrier_id":y})
+        expect(judged["state"]=="PARTIAL" and judged["downstream_release_allowed"] is False,"Partial set approved as release")
+        expect(adb(f,"SELECT manifest->>'atomic_across_repositories' FROM hyperfide.integration_release_barriers WHERE id="+q(y)).stdout.strip()=="false","Manifest claims atomic multi-repository transaction")
+    check(IDS[TASK][7],interrupted_partial)
+    def recorded_policy():
+        y=state["y"]
+        f.reject(TASK,"integration.release.recover",{**SCOPE,"barrier_id":y,"request_id":U(711),"compensations":[{"repository_id":RA,"operation_id":U(721)}]},"RELEASE_RECOVERY_POLICY_MISMATCH")
+        f.reject(TASK,"integration.release.recover",{**SCOPE,"barrier_id":y,"request_id":U(711),"candidate_ids":[state["cb1"]["id"]]},"RELEASE_RECOVERY_INVALID")
+        f.reject(TASK,"integration.release.recover",{**SCOPE,"barrier_id":y,"request_id":U(711),"candidate_ids":[state["ca1"]["id"]]},"RELEASE_SET_INCOMPLETE")
+    check(IDS[TASK][8],recorded_policy)
+    def advance():
+        ctx,y=state["ctx"],state["y"];a0,b0=f.release[RA]["base"],f.release[RB]["base"]
+        cb2=state["cb2"]=seed_candidate(f,ctx,703,RB,b0,state["b2"],commit_set((RA,a0,state["a1"]),(RB,b0,state["b2"])))
+        recovered=ok(f,"integration.release.recover",{**SCOPE,"barrier_id":y,"request_id":U(711),"candidate_ids":[cb2["id"]]})
+        expect(recovered["recovery_policy"]==ADVANCE and recovered["downstream_release_allowed"] is False and recovered["atomic_across_repositories"] is False,"Advance recovery claimed release")
+        z=state["z"]=recovered["successor_barrier_id"]
+        manifest=json.loads(adb(f,"SELECT manifest FROM hyperfide.integration_release_barriers WHERE id="+q(z)).stdout.strip());t={x["repository_id"]:x for x in manifest["targets"]}
+        expect(manifest["supersedes"]["barrier_id"]==y and manifest["recovery_policy"]==ADVANCE and manifest["atomic_across_repositories"] is False,"Successor manifest lost predecessor")
+        expect(t[RA]["reused_published"] is True and t[RA]["candidate_head"]==state["a1"] and t[RB]["candidate_id"]==cb2["id"] and t[RB]["reused_published"] is False,"Successor did not pin compatible commit set")
+        again=ok(f,"integration.release.recover",{**SCOPE,"barrier_id":y,"request_id":U(711),"candidate_ids":[cb2["id"]]})
+        expect(again["replayed"] is True and again["recovery_id"]==recovered["recovery_id"],"Recovery replay not idempotent")
+        f.reject(TASK,"integration.release.recover",{**SCOPE,"barrier_id":y,"request_id":U(715),"candidate_ids":[cb2["id"]]},"RELEASE_RECOVERY_CONFLICT")
+        seen=ok(f,"integration.release.inspect",{**SCOPE,"barrier_id":y})
+        expect(seen["state"]=="PARTIAL" and seen["recovery"]["status"]=="SUPERSEDED" and seen["recovery"]["successor_barrier_id"]==z and seen["downstream_release_allowed"] is False,"Predecessor not retained as superseded partial")
+    check(IDS[TASK][9],advance)
+    def successor_release():
+        ctx,y,z=state["ctx"],state["y"],state["z"]
+        before=ok(f,"integration.release.inspect",{**SCOPE,"barrier_id":z})
+        expect(before["state"]=="PARTIAL" and before["downstream_release_allowed"] is False,"Successor released before repository B published")
+        gateway_publish(f,ctx,seed_operation(f,ctx,723,state["cb2"],"PENDING"),state["cb2"])
+        released=ok(f,"integration.release.evaluate",{**SCOPE,"barrier_id":z})
+        expect(released["state"]=="RELEASED" and released["downstream_release_allowed"] is True and released["atomic_across_repositories"] is False,"Complete successor set not released: "+json.dumps(released)[:600])
+        old=ok(f,"integration.release.evaluate",{**SCOPE,"barrier_id":y})
+        expect(old["state"]=="PARTIAL" and old["downstream_release_allowed"] is False,"Predecessor partial set became release")
+    check(IDS[TASK][10],successor_release)
+    def audit():
+        y=state["y"]
+        expect(adb(f,"SELECT count(*) FROM hyperfide.integration_release_outcomes WHERE barrier_id="+q(y)+" AND outcome='PENDING' AND operation_id IS NULL AND observed_head IS NULL").stdout.strip()=="2","Pinned outcome rows were rewritten")
+        history=adb(f,"SELECT string_agg(outcome,',' ORDER BY sequence) FROM hyperfide.integration_release_observations WHERE barrier_id="+q(y)+" AND repository_id="+q(RB)).stdout.strip()
+        expect(history=="UNKNOWN,FAILED","Observation history lost: "+history)
+        for statement in ["UPDATE hyperfide.integration_release_observations SET outcome='PUBLISHED' WHERE barrier_id="+q(y),"DELETE FROM hyperfide.integration_release_observations WHERE barrier_id="+q(y),"UPDATE hyperfide.integration_release_outcomes SET outcome='PUBLISHED' WHERE barrier_id="+q(y),"DELETE FROM hyperfide.integration_release_outcomes WHERE barrier_id="+q(y),"UPDATE hyperfide.integration_release_recoveries SET successor_barrier_id=NULL","DELETE FROM hyperfide.integration_release_recoveries"]:
+            expect(adb(f,statement,allow_error=True).returncode!=0,"Audit history mutable: "+statement)
+    check(IDS[TASK][11],audit)
+    def compensation_required():
+        ctx=state["ctx"];a1,b2=state["a1"],state["b2"]
+        a3,b3=release_commit(f,RA,a1,"a3"),release_commit(f,RB,b2,"b3");pinned=commit_set((RA,a1,a3),(RB,b2,b3))
+        ca3,cb3=seed_candidate(f,ctx,704,RA,a1,a3,pinned),seed_candidate(f,ctx,705,RB,b2,b3,pinned);state.update(a3=a3,ca3=ca3,cb3=cb3)
+        w=state["w"]=ok(f,"integration.release.create",{**SCOPE,"request_id":U(712),"candidate_ids":[ca3["id"],cb3["id"]],"recovery_policy":COMPENSATE})["barrier_id"]
+        interrupted_publisher(f,ctx,ca3,seed_operation(f,ctx,724,ca3,"RUNNING"),cb3)
+        f.auth.stop();f.auth.start()
+        seen=ok(f,"integration.release.inspect",{**SCOPE,"barrier_id":w});o=by_repo(seen)
+        expect(seen["state"]=="PARTIAL" and o[RA]["outcome"]=="PUBLISHED" and o[RB]["outcome"]=="PENDING" and seen["downstream_release_allowed"] is False and seen["atomic_across_repositories"] is False,"Crash before second push not explicit partial: "+json.dumps(seen))
+        f.reject(TASK,"integration.release.recover",{**SCOPE,"barrier_id":w,"request_id":U(713),"compensations":[]},"RELEASE_COMPENSATION_REQUIRED")
+        f.reject(TASK,"integration.release.recover",{**SCOPE,"barrier_id":w,"request_id":U(713),"candidate_ids":[cb3["id"]]},"RELEASE_RECOVERY_POLICY_MISMATCH")
+    check(IDS[TASK][12],compensation_required)
+    def direct_push_refused():
+        ctx,a3=state["ctx"],state["a3"];r=f.release[RA]
+        r["g"](["checkout","-q","--detach",a3]);r["g"](["revert","--no-edit",a3]);a4=r["g"](["rev-parse","HEAD"]).stdout.strip()
+        ca4=state["ca4"]=seed_candidate(f,ctx,706,RA,a3,a4,commit_set((RA,a3,a4)))
+        ungated=seed_operation(f,ctx,725,seed_candidate(f,ctx,707,RA,a3,a4,commit_set((RA,a3,a4))),"PUBLISHED",a4)
+        f.reject(TASK,"integration.release.recover",{**SCOPE,"barrier_id":state["w"],"request_id":U(713),"compensations":[{"repository_id":RA,"operation_id":ungated}]},"RELEASE_COMPENSATION_UNGATED")
+        expect(adb(f,"SELECT count(*) FROM hyperfide.integration_release_recoveries WHERE barrier_id="+q(state["w"])).stdout.strip()=="0","Ungated compensation recorded")
+    check(IDS[TASK][13],direct_push_refused)
+    def through_gateway():
+        ctx,w,ca4=state["ctx"],state["w"],state["ca4"]
+        op=seed_operation(f,ctx,726,ca4,"PENDING")
+        recorded=ok(f,"integration.release.recover",{**SCOPE,"barrier_id":w,"request_id":U(714),"compensations":[{"repository_id":RA,"operation_id":op}]})
+        expect(recorded["recovery_policy"]==COMPENSATE and recorded["compensations"][0]["compensated_head"]==state["a3"] and recorded["downstream_release_allowed"] is False,"Compensation not recorded against published head")
+        pending=ok(f,"integration.release.inspect",{**SCOPE,"barrier_id":w})
+        expect(pending["recovery"]["status"]=="COMPENSATING" and pending["state"]=="PARTIAL","Compensation claimed before gateway publication")
+        gateway_publish(f,ctx,op,ca4)
+        done=ok(f,"integration.release.inspect",{**SCOPE,"barrier_id":w})
+        expect(done["recovery"]["status"]=="COMPENSATED" and done["recovery"]["compensations"][0]["gateway_admitted"] is True and done["recovery"]["compensations"][0]["observed_head"]==ca4["head"],"Gateway compensation not observed: "+json.dumps(done)[:600])
+        expect(done["state"]=="PARTIAL" and done["downstream_release_allowed"] is False and done["atomic_across_repositories"] is False,"Compensated partial set exposed as release")
+        judged=ok(f,"integration.release.evaluate",{**SCOPE,"barrier_id":w})
+        expect(judged["downstream_release_allowed"] is False,"Compensated barrier released")
+        expect(adb(f,"SELECT count(*) FROM hyperfide.integration_release_outcomes WHERE barrier_id="+q(w)+" AND outcome='PENDING'").stdout.strip()=="2","Compensation rewrote pinned outcomes")
+    check(IDS[TASK][14],through_gateway)
 def main():
     if "--cleanup" in sys.argv:
         cleanup();return 0
@@ -314,5 +490,5 @@ def main():
             try:{"19.1":candidate_cases,"19.2":publication_cases,"19.3":closure_cases,"19.4":release_cases}[TASK](fixture)
             finally:fixture.close()
         return 1 if FAILED else 0
-    finally:cleanup()
+    finally:cleanup(emit=False)
 if __name__=="__main__":raise SystemExit(main())
