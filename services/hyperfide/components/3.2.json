@@ -12,7 +12,8 @@
     "hierarchy.packet.describe",
     "hierarchy.packet.create",
     "hierarchy.packet.inspect",
-    "hierarchy.packet.validate"
+    "hierarchy.packet.validate",
+    "hierarchy.packet.derive"
   ],
   "requires": [
     "3.1",

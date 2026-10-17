@@ -21,10 +21,37 @@
     "packet.role-denied",
     "packet.scope-spoof-denied",
     "packet.inspect.exact",
+    "packet.inputs.validate.signed",
+    "packet.prepared-roles.explicit-new-manifest",
+    "packet.inputs.validate.scope-owner",
     "packet.immutable-row",
     "packet.repeatable-read-write-refused",
     "packet.optional-trim-only",
-    "packet.cleanup.observed"
+    "packet.mandatory-digest.optional-invariant",
+    "packet.optional-digest-verified",
+    "packet.budget-too-small-refused",
+    "packet.missing.scope-refused",
+    "packet.missing.proof-registry-refused",
+    "packet.missing.contract-refused",
+    "packet.missing.graph-policy-refused",
+    "packet.missing.dependency-refused",
+    "packet.missing.environment-profile-refused",
+    "packet.environment-source-mismatch-refused",
+    "packet.change.baseline-current",
+    "packet.change.irrelevant-input-reused",
+    "packet.change.dependency-stale",
+    "packet.change.contract-stale",
+    "packet.amendment.stale-and-history-preserved",
+    "packet.mandatory-digest.constraint-sensitive",
+    "packet.change.source-stale",
+    "packet.missing.source-inputs-refused",
+    "packet.cleanup.observed",
+    "packet.graph.native-published-input",
+    "packet.graph.exact-required-coverage",
+    "packet.graph.current-inputs-valid",
+    "packet.graph.quarantine-admission-refused",
+    "packet.graph.history-preserved",
+    "packet.graph.cleanup.observed"
   ],
   "cases": [
     "V-001",
@@ -38,7 +65,12 @@
   "cleanup_timeout_seconds": 60,
   "fixtures": [
     "services/hyperfide/dist/control.js",
-    "services/hyperfide/dist/hierarchy/packets.js"
+    "services/hyperfide/dist/hierarchy/packets.js",
+    "cg",
+    "services/hyperfide/dist/graph/extraction.js",
+    "services/hyperfide/dist/graph/ingestion.js",
+    "services/hyperfide/dist/graph/publication.js",
+    "services/hyperfide/dist/spec/import.js"
   ],
   "required_artifacts": [],
   "required_env": [
@@ -60,7 +92,11 @@
     "tests/hyperfide/qualify.py",
     "services/hyperfide/package.json",
     "services/hyperfide/package-lock.json",
-    "services/hyperfide/tsconfig.json"
+    "services/hyperfide/tsconfig.json",
+    "services/hyperfide/components/2.4.json",
+    "services/hyperfide/components/7.1.json",
+    "services/hyperfide/components/7.2.json",
+    "services/hyperfide/components/7.3.json"
   ],
   "source_roots": [
     "services/hyperfide/src",
