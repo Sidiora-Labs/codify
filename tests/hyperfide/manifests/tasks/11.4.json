@@ -3,7 +3,7 @@
     "allowed_actions": [],
     "approved": true
   },
-  "campaign_id": "hyperfide-task-11.4-remote-prewarm-component-v1-requal-12aa390190b3-requal-6a91b0130b1d",
+  "campaign_id": "hyperfide-task-11.4-remote-prewarm-component-v1-requal-12aa390190b3-requal-6a91b0130b1d-requal-ff4632c9bc89",
   "case_ids": [
     "V-007",
     "V-038"
@@ -448,7 +448,7 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/11_2.py",
-      "sha256": "e1f1c3e15850122fcd59b33e5f0c15e761e0bebe356db9a73550675766a3f9a5",
+      "sha256": "d36b12f6f4997426626c4a7037344012224e29230811c43ead9593f3ee291fb4",
       "size": 24497
     },
     {
