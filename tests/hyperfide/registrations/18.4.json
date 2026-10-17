@@ -37,6 +37,7 @@
     "findings.repair.unbounded-retry-policy-refused",
     "findings.repair.refused-retries-preserve-evidence-links",
     "findings.repair.genuine-execution-start-observed",
+    "findings.repair.genuine-submission-admitted",
     "findings.repair.genuine-independent-resolution",
     "findings.repair.reopen-after-relevant-change"
   ],

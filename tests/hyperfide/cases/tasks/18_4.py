@@ -166,14 +166,22 @@ def reopen_after_change(f,call,fid):
     expect(reopened['reopened'] is True and after['phase']=='REOPENED' and after['resolution']['current'] is False and [r for r in after['repairs'] if r['repair_id']==prior['repair_id']][0]['resolution_evidence_ids']==prior['resolution_evidence_ids'])
 def main():
     if '--cleanup' in sys.argv:return c.cleanup('18.4')
-    f=scheduler.SchedulerFixture(extra_components=('1.1','12.2','18.1','18.2','18.3','18.4'),extra_setup=setup)
+    spec=importlib.util.spec_from_file_location('repair_submission_fixture',Path(__file__).parents[1]/'support/repair_submission.py')
+    submission=importlib.util.module_from_spec(spec);spec.loader.exec_module(submission)
+    driver=submission.RepairSubmission(c.ROOT);c.OID=driver.baseline
+    def prepare(f):
+        driver.setup(f);setup(f)
+    try:
+        f=scheduler.SchedulerFixture(extra_components=('1.1','12.2','16.1','16.2','16.3','16.4','18.1','18.2','18.3','18.4'),extra_setup=prepare,source_object_id=driver.baseline)
+    except BaseException:
+        driver.close();raise
     def call(action,payload):return c.call(f,action,payload,component='finding-remediation')
     def reject(action,payload,code=None):return c.reject(f,action,payload,code,component='finding-remediation')
     def finding_version(fid):return str(c.call(f,'finding.inspect',{'finding_id':fid})['finding']['registry_version'])
     def repair_version(rid):return str(f.sql('SELECT state_version::text AS version FROM hyperfide.finding_repairs WHERE id=$1',[rid])[0]['version'])
     try:
         check('findings.repair.no-seeded-compute-authority',lambda:expect(f.sql("SELECT count(*)::int AS n FROM hyperfide.attempts WHERE compute_authority='CURRENT'")[0]['n']==0))
-        fid=c.call(f,'finding.report',{'observation_id':c.observation(f),'resolution_condition':f.condition})['finding_id']
+        fid=c.call(f,'finding.report',{'observation_id':c.observation(f,source=c.OID),'resolution_condition':f.condition})['finding_id']
         packet={'finding_id':fid,'request_id':uid(),'repair_task_id':f.ids['task_a'],'expected_state_version':finding_version(fid)}
         check('findings.repair.requires-current-route',lambda:reject('finding.repair.request',packet,'ROUTING_REQUIRED'))
         routed=c.call(f,'finding.route',{'finding_id':fid,'request_id':uid(),'expected_state_version':finding_version(fid)},component='finding-routing')['route']
@@ -211,7 +219,7 @@ def main():
         check('findings.repair.external-close-not-resolution',lambda:expect(closed['resolution']['current'] is False and closed['phase']=='REPAIRING' and c.call(f,'finding.inspect',{'finding_id':fid})['finding']['phase']!='RESOLVED' and c.call(f,'finding.blockers.inspect',{})['clear'] is False))
         check('findings.repair.external-close-no-repair-change',lambda:expect(f.sql('SELECT id,state,attempt_count,state_version::text,resolution_evidence_ids FROM hyperfide.finding_repairs ORDER BY id')==before and f.sql("SELECT count(*)::int AS n FROM hyperfide.outbox_events WHERE aggregate_id=$1 AND event_type IN ('finding.resolved','finding.repair-requested')",[fid])[0]['n']==1))
         check('findings.repair.recheck-requires-resolution',lambda:reject('finding.repair.recheck',{'finding_id':fid,'expected_state_version':finding_version(fid)},'FINDING_NOT_RESOLVED'))
-        again=c.call(f,'finding.report',{'observation_id':c.observation(f),'resolution_condition':f.condition})
+        again=c.call(f,'finding.report',{'observation_id':c.observation(f,source=c.OID),'resolution_condition':f.condition})
         check('findings.repair.matching-observation-no-duplicate-dispatch',lambda:expect(again['finding_id']==fid and call('finding.repair.inspect',{'finding_id':fid})['phase']=='REPAIRING' and f.sql('SELECT count(*)::int AS n FROM hyperfide.finding_repairs')[0]['n']==1))
         retry=dict(packet,request_id=uid())
         restart(f,'3')
@@ -225,10 +233,22 @@ def main():
             expect(f.sql('SELECT execution_state FROM hyperfide.attempts WHERE id=$1',[token['attempt_id']])[0]['execution_state']=='RUNNING','Native START receipt did not advance the current attempt')
             call('finding.repair.attach',dict(attach,expected_state_version=repair_version(rid)))
         check('findings.repair.genuine-execution-start-observed',execution_started)
+        def submit_repair():
+            admitted=driver.submit(f,token,c);f.repair_submission=admitted
+            custody=admitted['submission']
+            call('finding.repair.submit',{'repair_id':rid,'custody_id':custody['id'],
+                 'custody_generation':custody['custody_generation'],'intended_source_object_id':driver.head,
+                 'expected_state_version':repair_version(rid)})
+            attempt=f.sql('SELECT execution_state,compute_authority FROM hyperfide.attempts WHERE id=$1',[token['attempt_id']])[0]
+            expect(attempt=={'execution_state':'SUBMITTED','compute_authority':'RELEASED'} and admitted['qualification']=='PENDING')
+        check('findings.repair.genuine-submission-admitted',submit_repair)
         check('findings.repair.genuine-independent-resolution',lambda:expect(c.call(f,'finding.inspect',{'finding_id':fid})['finding']['phase']=='RESOLVED','Actual16/17 independent repair proof is not integrated'))
         check('findings.repair.reopen-after-relevant-change',lambda:reopen_after_change(f,call,fid))
     finally:
-        if getattr(f,'native_probe',None):f.native_probe.cleanup()
-        f.close()
+        try:
+            if getattr(f,'native_probe',None):f.native_probe.cleanup()
+        finally:
+            try:f.close()
+            finally:driver.close()
     return int(any(actual!='observed' for _,actual in c.RESULTS))
 if __name__=='__main__':raise SystemExit(main())
