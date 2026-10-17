@@ -22,6 +22,15 @@ export async function invalidateAcceptedSpec(db:Queryable,s:CoverageScope,taskId
  }
  return count;
 }
+/** Per-input reuse rule: each evidence class is invalidated only by inputs its registered checks consume. */
+function evidenceReuse(checks:Data[],changed:string[]):Data[]{
+ return INPUT_KEYS.map(input=>{
+  const consumers=checks.filter(check=>check.input_keys.includes(input)).map(check=>String(check.id));
+  const disposition=!changed.includes(input)?'UNCHANGED':consumers.length?'INVALIDATES':'REUSED';
+  return {input,changed:changed.includes(input),consumers:disposition==='INVALIDATES'?consumers:[],registered_consumers:consumers,disposition,
+   reason:disposition==='UNCHANGED'?'INPUT_UNCHANGED':disposition==='INVALIDATES'?'CONSUMED_BY_REGISTERED_CHECKS':'NO_REGISTERED_CHECK_CONSUMES_INPUT'};
+ });
+}
 async function publication(db:Queryable,s:CoverageScope,custody:Data):Promise<Data>{
  try{
   const name='../integration/publication.js',module=await import(name) as Data;
@@ -37,8 +46,10 @@ export async function inspectValidity(db:PrimaryClient,s:CoverageScope,id:string
  const c=await custodyLock(db,[s.organisation_id,s.run_id],uuid(id));
  const coverage=await inspectCoverage(db,s,id);
  const history=await db.query('SELECT count(*)::text AS count FROM hyperfide.assurance_job_receipts p JOIN hyperfide.qualification_jobs q ON q.organisation_id=p.organisation_id AND q.run_id=p.run_id AND q.id=p.job_id WHERE q.organisation_id=$1 AND q.run_id=$2 AND q.custody_id=$3',[s.organisation_id,s.run_id,id]);
+ const recorded=(await db.query('SELECT applicability,reasons FROM hyperfide.assurance_applicability WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3',[s.organisation_id,s.run_id,id])).rows[0];
  const integrated=c.authority==='RELEASED'?await publication(db,s,c):{status:'MISSING'};
  return {...coverage,implementation_progress:c.task.state,historical_receipt_count:history.rows[0].count,
+  recorded_applicability:recorded?.applicability??'MISSING',applicability_reasons:recorded?.reasons??[],
   current_integrated_assurance:c.authority==='RELEASED'&&coverage.applicability==='CURRENT'&&coverage.proof_complete&&
    c.qualification_outcome==='PASS'&&integrated.status==='PUBLISHED'&&integrated.lineage_status==='VERIFIED_PUBLISHED_CHAIN'&&coverage.proof_registry_current===true&&
    integrated.current_source?.source_object_id===integrated.latest_repository_head&&coverage.proof_source_object_id===integrated.current_source?.source_object_id&&
@@ -111,20 +122,24 @@ async function invalidate(ctx:ComponentContext,raw:unknown):Promise<Data>{
   const saved=(await db.query('SELECT manifest,policy FROM hyperfide.assurance_submissions WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3',[...s,id])).rows[0];
   const changed=Object.keys(v.changes).filter(key=>INPUT_KEYS.includes(key as any)&&v.changes[key]!==applicable.input_manifest[key]);
   const after={...applicable.input_manifest};for(const key of changed)after[key]=v.changes[key];
-  let affected=saved.policy.checks.filter((check:Data)=>check.input_keys.some((key:string)=>changed.includes(key))).map((check:Data)=>check.id);
+  const reuse=evidenceReuse(saved.policy.checks,changed);
+  const affected=saved.policy.checks.filter((check:Data)=>check.input_keys.some((key:string)=>changed.includes(key))).map((check:Data)=>check.id);
+  const ignored=Object.keys(v.changes).filter(key=>!INPUT_KEYS.includes(key as any)).sort().map(input=>({input,disposition:'IGNORED',reason:'NOT_AN_ASSURANCE_INPUT'}));
   const operation:null=null,blocked:null=null;
-  const needsRequalification=changed.length>0||applicable.applicability==='STALE'&&v.input_packet_digest!==undefined;
+  // A change no registered check consumes cannot alter any evidence class: the evidence is reused, not invalidated.
+  const needsRequalification=affected.length>0||applicable.applicability==='STALE'&&v.input_packet_digest!==undefined;
   if(needsRequalification){
    // Invalidation commits even when a fresh registry/packet/environment is not yet available.
    await db.query("UPDATE hyperfide.assurance_applicability SET applicability='STALE',input_manifest=$4,reasons=$5,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3",
-    [...s,id,after,JSON.stringify(changed.map(key=>({input:key,before:applicable.input_manifest[key],after:after[key]})))]);
+    [...s,id,after,JSON.stringify(changed.map(key=>({input:key,before:applicable.input_manifest[key],after:after[key],
+     affected_checks:reuse.find(row=>row.input===key)!.consumers,disposition:reuse.find(row=>row.input===key)!.disposition})))]);
    if(c.authority==='ACTIVE')await db.query("UPDATE hyperfide.tasks SET state='STALE',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[...s,c.task_id]);
    await db.query("UPDATE hyperfide.qualification_jobs SET state='CANCELLED',lease_generation=lease_generation+1,lease_owner=NULL,lease_expires_at=NULL,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3 AND state IN ('PENDING','RUNNING')",[...s,id]);
    await db.query("UPDATE hyperfide.requalification_operations SET state='CANCELLED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3 AND state IN ('PENDING','RUNNING')",[...s,id]);
 
   }
   await db.query('INSERT INTO hyperfide.assurance_invalidations(organisation_id,run_id,request_id,custody_id,request_digest,before_inputs,after_inputs,affected_checks,requalification_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',[...s,requestId,id,requestDigest,applicable.input_manifest,after,JSON.stringify(affected),operation]);
-  return {replayed:false,applicability:needsRequalification?'STALE':applicable.applicability,affected_checks:affected,
+  return {replayed:false,applicability:needsRequalification?'STALE':applicable.applicability,affected_checks:affected,evidence_reuse:reuse,ignored_inputs:ignored,
    requalification_id:operation,requalification_blocked_reason:blocked,historical_receipts_preserved:true,
    custody_authority:c.authority,compute_authority_restored:false,state_version:(BigInt(version)+(needsRequalification?1n:0n)).toString()};
  });
@@ -137,7 +152,7 @@ async function invalidate(ctx:ComponentContext,raw:unknown):Promise<Data>{
    const existing=(await db.query('SELECT id,state FROM hyperfide.requalification_operations WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3',[...s,requestId])).rows[0];
    if(existing)return {requalification_id:existing.id,scheduling_outcome:'RECORDED',requalification_state:existing.state};
    const app=(await db.query('SELECT * FROM hyperfide.assurance_applicability WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3 FOR UPDATE',[...s,id])).rows[0];
-   if(canonical(recorded.before_inputs)===canonical(recorded.after_inputs)&&v.input_packet_digest===undefined)
+   if((canonical(recorded.before_inputs)===canonical(recorded.after_inputs)||!recorded.affected_checks.length)&&v.input_packet_digest===undefined)
     return {requalification_id:null,scheduling_outcome:'NOT_REQUIRED'};
    if(!app||app.applicability!=='STALE'||String(app.state_version)!==(BigInt(version)+1n).toString()||
     canonical(app.input_manifest)!==canonical(recorded.after_inputs))
