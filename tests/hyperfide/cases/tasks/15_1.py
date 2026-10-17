@@ -305,14 +305,63 @@ def cleanup(emit=True):
             print(json.dumps({"type":"cleanup","complete":False,"resources":[
                 {"id":RESOURCE,"status":"unknown"}]}),flush=True)
         return 1
+class AuthenticatedArtifactAdapter:
+    """Actual15.2 Service/ObjectFixture over the actual14 identity fixture.
+
+    The identity fixture seeds principal rows before extra_setup; the 15.2 setup
+    then widens/extends config principals, which actual14 bootstrap refuses to
+    overwrite. Re-issue the test-only principal rows from the final config so
+    the real HTTPS service starts with matching identities (no service bypass)."""
+    def __init__(self,objects,base,database,resource_id):
+        spec=importlib.util.spec_from_file_location("hyperfide_identity_15_1",ROOT/"tests/hyperfide/support/identity_fixture.py")
+        identity=importlib.util.module_from_spec(spec);spec.loader.exec_module(identity)
+        self.objects=objects.ObjectFixture()
+        service=object.__new__(objects.Service)
+        service.fixture=self.objects;service.closed=False;service.identity_module=identity
+        service.second_credential=None;service.scope=None
+        def setup(i):
+            objects.ORG,objects.RUN=i.ids["organisation"],i.ids["run"]
+            objects.RUN2=identity.uid();objects.SCOPE={"organisation_id":objects.ORG,"run_id":objects.RUN}
+            objects.DATABASE=i.database;objects.RESOURCE=resource_id
+            service.scope=dict(objects.SCOPE)
+            (objects.output_dir()/"database-target.json").write_text(json.dumps({"database":i.database,"resource_id":resource_id})+"\n")
+            i.sql("INSERT INTO hyperfide.runs(organisation_id,id,project_id,spec_revision_id,policy_digest,authority_epoch,state) VALUES($1,$2,$3,$4,$5,$6,'RUNNING')",
+                  [objects.ORG,objects.RUN2,i.ids["project"],i.ids["spec"],objects.digest(b"artifact-fixture-policy"),i.ids["epoch"]])
+            i.env.update({"HF_ARTIFACT_S3_ENDPOINT":self.objects.endpoint,"HF_ARTIFACT_ALLOW_LOOPBACK_HTTP":"1",
+                          "HF_ARTIFACT_S3_REGION":objects.REGION,"HF_ARTIFACT_S3_BUCKET":objects.BUCKET,
+                          "HF_ARTIFACT_S3_ACCESS_KEY_ID":objects.KEY,"HF_ARTIFACT_S3_SECRET_ACCESS_KEY":objects.SECRET,
+                          "HF_ARTIFACT_S3_SESSION_TOKEN":objects.TOKEN,"HF_ARTIFACT_ORGANISATION_ID":objects.ORG,
+                          "HF_ARTIFACT_ALLOWED_RUN_IDS":json.dumps([objects.RUN,objects.RUN2])})
+            config=json.loads(i.identity_config.read_text())
+            for principal in config["principals"]:
+                principal["allowed_actions"].append("system.describe")
+                i.sql("DELETE FROM hyperfide.identity_principals WHERE credential_id=$1",[principal["credential_id"]])
+                i.seed_fixture_principal(principal)
+            service.second_credential=identity.uid()
+            second=dict(config["principals"][0],credential_id=service.second_credential,actor_id=identity.uid(),run_id=objects.RUN2)
+            i.seed_fixture_principal(second)
+            config["principals"].append(second)
+            i.identity_config.write_text(json.dumps(config))
+            policy=json.loads(i.policy.read_text());policy["allowed_actions"].append("system.describe")
+            i.policy.write_text(json.dumps(policy))
+        try:
+            service.auth=identity.IdentityFixture(extra_components=("15.2",),extra_setup=setup,database=database)
+        except BaseException:
+            self.objects.stop();raise
+        service.env=service.auth.env;service.policy=service.auth.policy;service.components=service.auth.components
+        self.service=service;self.scope=dict(service.scope);self.database=service.auth.database
+    def close(self):
+        try:self.service.close()
+        finally:self.objects.stop()
 def durable_suite(f):
     """Real authenticated HTTPS service; native receives filesystem inputs only."""
     module_path=ROOT/"tests/hyperfide/cases/tasks/15_2.py"
     expect(module_path.is_file(),"actual task15.2 fixture missing; adopt its published source")
     spec=importlib.util.spec_from_file_location("hyperfide_objects_15_1",module_path)
     objects=importlib.util.module_from_spec(spec);spec.loader.exec_module(objects)
-    factory=getattr(objects,"createAuthenticatedFixture",None)
-    expect(callable(factory),"actual14 authenticated artifact fixture is not available")
+    expect(callable(getattr(objects,"createAuthenticatedFixture",None)) and isinstance(getattr(objects,"Service",None),type),
+           "actual14 authenticated artifact fixture is not available")
+    factory=lambda base,database,resource:AuthenticatedArtifactAdapter(objects,base,database,resource)
     base=f.base/"durable";base.mkdir()
     supervisor_base=f.base/"supervisor";supervisor_base.mkdir()
     setup=None
@@ -408,7 +457,7 @@ def pin_manifest():
         expect(path.is_file() and not path.is_symlink(),"missing or unsafe pinned input")
         data=path.read_bytes()
         inputs.append({"path":str(path.relative_to(ROOT)),"sha256":hashlib.sha256(data).hexdigest(),"size":len(data)})
-    manifest={"schema_version":1,"campaign_id":"hyperfide-task-15.1-native-checkpoint-v1",
+    manifest={"schema_version":1,"campaign_id":"hyperfide-task-15.1-native-checkpoint-v4",
               "registered_variant":"task:15.1","scope":"task-component","case_ids":registration["cases"],
               "expected_assertion_ids":registration["assertion_ids"],
               "approval":{"approved":True,"allowed_actions":registration["actions"]},
