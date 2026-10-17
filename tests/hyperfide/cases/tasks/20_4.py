@@ -15,7 +15,8 @@ IDS=["decision.jobs.authenticated-submit","decision.jobs.no-wire-authority","dec
 "decision.jobs.stale-admission","decision.jobs.stale-completion","decision.jobs.cancel-queued",
 "decision.jobs.cancel-running","decision.jobs.restart-queued","decision.jobs.expired-queue",
 "decision.jobs.synthetic-receipt","decision.jobs.no-authority-effects","decision.jobs.completed-audit-freshness",
-"decision.jobs.revision-unknown-rejected","decision.jobs.slow-freshness-zero-send","decision.jobs.restart-inflight","decision.jobs.idempotency-conflict","decision.jobs.replay-after-revision-change","decision.jobs.retained-request-replay","decision.jobs.shared-account-quota","decision.jobs.completion-deadline","decision.jobs.admission-deadline","decision.jobs.semantic-lock-order","decision.jobs.business-version-preserved","decision.jobs.insert-freshness","decision.jobs.isolation-guard"]
+"decision.jobs.revision-unknown-rejected","decision.jobs.slow-freshness-zero-send","decision.jobs.restart-inflight","decision.jobs.idempotency-conflict","decision.jobs.replay-after-revision-change","decision.jobs.retained-request-replay","decision.jobs.shared-account-quota","decision.jobs.completion-deadline","decision.jobs.admission-deadline","decision.jobs.semantic-lock-order","decision.jobs.business-version-preserved","decision.jobs.insert-freshness","decision.jobs.isolation-guard",
+"decision.jobs.core-loop-provider-timeout","decision.jobs.core-loop-provider-removed"]
 def expect(v,msg):
  if not v:raise AssertionError(msg)
 def uid():return str(uuid.uuid4())
@@ -153,6 +154,43 @@ class Fixture(identity.IdentityFixture):
  def process(self,id):return self.call("decision.jobs.process",{"decision_id":id})
  def status(self,id):return self.call("decision.jobs.status",{"decision_id":id})
  def advance(self):self.sql("UPDATE hyperfide.runs SET state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[self.ids["organisation"],self.ids["run"]])
+def core_loop_setup(f):
+ """Register an independent critical consumer and an enrolled runner before any run event exists."""
+ core=uid()
+ f.call("outbox.consumer.register",{"organisation_id":f.ids["organisation"],"run_id":f.ids["run"],"id":core,"consumer_key":"core-loop-fixture","critical":True,"state":"ACTIVE"},component="6.1")
+ f.bootstrap_runner()
+ _,r=f.invoke("identity.runner.register",{"preparation_digest":f.preparation,"inventory":[]},key="runner")
+ expect(r.get("ok")is True and r["result"]["state_version"]=="1","runner registration failed: "+json.dumps(r))
+ return core
+def core_cycle(f,core,version,budget=1.5):
+ """One actual core-loop turn: signed runner heartbeat, then 6.1 enqueue/claim, 6.2 receive and 6.1 acknowledge."""
+ s={"organisation_id":f.ids["organisation"],"run_id":f.ids["run"]}
+ def timed(action,input,component,key="operator"):
+  started=time.monotonic();status,r=f.invoke(action,input,component=component,key=key);elapsed=time.monotonic()-started
+  expect(r.get("ok")is True,f"core-loop {action} failed: HTTP{status} {r}")
+  expect(elapsed<budget,f"core-loop {action} exceeded bounded {budget}s: {elapsed:.3f}s")
+  return r["result"]
+ beat=timed("identity.runner.heartbeat",{"expected_version":str(version)},"14.1","runner")
+ expect(beat["heartbeat"]is True and beat["state_version"]==str(version+1),"heartbeat did not advance exactly once: "+json.dumps(beat))
+ event=uid()
+ timed("outbox.enqueue",{**s,"id":event,"aggregate_type":"core.loop","aggregate_id":uid(),"aggregate_version":"1","event_type":"core.tick","payload":{"tick":version}},"6.1")
+ claims=timed("outbox.claim",{**s,"consumer_id":core,"limit":64,"lease_ms":30000},"6.1")
+ expect([c["id"]for c in claims]==[event],"core consumer claimed foreign/advisory work: "+json.dumps(claims))
+ received=timed("inbox.receive",{**s,"event_id":event,"consumer_id":core},"6.2")
+ expect(received["status"]=="APPLIED","core receive not applied: "+json.dumps(received))
+ acked=timed("outbox.acknowledge",{**s,"event_id":event,"consumer_id":core,"attempt_count":claims[0]["attempt_count"],"inbox_id":received["inbox_id"]},"6.1")
+ expect(acked["acknowledged"]is True and acked["replayed"]is False,"core acknowledgement failed: "+json.dumps(acked))
+ return event
+def core_state(f,core):
+ run=f.sql("SELECT state,state_version::text FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2",[f.ids["organisation"],f.ids["run"]])[0]
+ deliveries=f.sql("SELECT d.state,e.aggregate_type FROM hyperfide.event_deliveries d JOIN hyperfide.outbox_events e ON(e.organisation_id=d.organisation_id AND e.run_id=d.run_id AND e.id=d.event_id) WHERE d.organisation_id=$1 AND d.run_id=$2 AND d.consumer_id=$3 ORDER BY d.created_at",[f.ids["organisation"],f.ids["run"],core])
+ runner=f.sql("SELECT state_version::text FROM hyperfide.identity_runner_status WHERE credential_id=$1",[f.ids["runner"]])[0]["state_version"]
+ return {"run":run,"deliveries":deliveries,"runner_version":runner}
+def deterministic(v,providers):
+ payload=(v.get("result")or{}).get("payload")or{}
+ expect(v["state"]in("COMPLETED","EXPIRED")and payload.get("status")in("expired","unavailable","abstained")and payload.get("authority")=="NONE"
+  and(payload.get("fallback")or{}).get("policy")=="deterministic"and payload["interpretation"]["answers"]=={},"provider outage did not end in deterministic abstention: "+json.dumps(v))
+ return payload
 def main():
  failed=[];observations={};cleanup_complete=True
  def check(i,fn):
@@ -244,7 +282,7 @@ def main():
  # Remaining cases are collected before output so assertion order remains exact.
  def scenario(index,fn,mode="valid",delay=0,settings=None,second=None):
   nonlocal cleanup_complete
-  provider=Provider(mode,delay);other=Provider(second)if second else None;f=None;error=None;cleanup=[]
+  provider=Provider(mode,delay);other=Provider(second,delay)if second else None;f=None;error=None;cleanup=[]
   try:f=Fixture(provider,other,settings);fn(f,provider,other)
   except Exception as e:error=f"{type(e).__name__}: {e}"
   finally:
@@ -362,13 +400,51 @@ finally{await r.close();}"""
   if until_next<6:time.sleep(until_next+.05)
   f.process(f.submit(mode="background",deadline_ms=10000));v=f.process(f.submit(route_ids=["jev-native"],mode="background",deadline_ms=10000))
   expect(len(p.received)==1 and not o.received and v["result"]["payload"]["rejection_reason"]=="DECISION_RATE_LIMIT","routes sharing one account bypassed its global quota: "+json.dumps({"first_sends":len(p.received),"second_sends":len(o.received),"result":v["result"]}))
+ def core_timeout(f,p,o):
+  # Every configured decision route hangs beyond the online deadline while the core loop runs.
+  core=core_loop_setup(f);before=core_state(f,core)
+  id=f.submit(route_ids=["span-native","jev-native"]);box=[]
+  t=threading.Thread(target=lambda:box.append(f.process(id)));t.start()
+  expect(p.arrived.wait(5),"decision provider never received the advisory call")
+  core_cycle(f,core,1)
+  t.join(6);expect(not t.is_alive()and box,"hung providers escaped the total decision deadline")
+  deterministic(box[0],(p,o));expect(1<=len(p.received)+len(o.received)<=2,"attempt bound exceeded")
+  core_cycle(f,core,2)
+  # Core events fanned out to the advisory consumer must not wedge later decision dispatch.
+  second=f.process(f.submit(route_ids=["span-native","jev-native"]));deterministic(second,(p,o))
+  pending=f.sql("SELECT count(*)::int n FROM hyperfide.event_deliveries WHERE organisation_id=$1 AND run_id=$2 AND consumer_id=$3 AND state<>'ACKNOWLEDGED'",[f.ids["organisation"],f.ids["run"],f.consumer])[0]["n"]
+  expect(pending==0,"advisory consumer left core-loop deliveries unacknowledged")
+  after=core_state(f,core)
+  expect(after["run"]==before["run"]and after["run"]["state"]=="RUNNING","provider outage changed core run authority: "+json.dumps([before,after]))
+  expect(after["deliveries"]==[{"state":"ACKNOWLEDGED","aggregate_type":"core.loop"}]*2,"core deliveries inconsistent: "+json.dumps(after["deliveries"]))
+  expect(after["runner_version"]=="3","heartbeat lost or duplicated: "+after["runner_version"])
+ def core_removed(f,p,o):
+  core=core_loop_setup(f);before=core_state(f,core)
+  queued=f.submit(mode="background",deadline_ms=30000)
+  # (a) The 20.4 component, and the fixture component that depends on it, are absent from the registry directory.
+  held=f.path/"removed-components";held.mkdir();f.stop()
+  for name in("20.4.json","99.20.json"):(f.components/name).rename(held/name)
+  f.start();core_cycle(f,core,1)
+  f.reject("decision.jobs.process",{"decision_id":queued})
+  expect(f.sql("SELECT state FROM hyperfide.decision_jobs WHERE id=$1",[queued])[0]["state"]=="QUEUED"and not p.received,"removed decision component still dispatched work")
+  # (b) The component returns but every decision route configuration is removed.
+  f.stop()
+  for name in("20.4.json","99.20.json"):(held/name).rename(f.components/name)
+  f.env["HYPERFIDE_DECISION_ROUTES"]="{}";f.start();core_cycle(f,core,2)
+  v=f.process(queued);payload=deterministic(v,(p,))
+  expect(v["state"]=="COMPLETED"and payload["status"]=="abstained"and not v["attempts"]and not p.received,"unconfigured routes sent or recorded an attempt: "+json.dumps(v))
+  core_cycle(f,core,3)
+  after=core_state(f,core)
+  expect(after["run"]==before["run"]and after["run"]["state"]=="RUNNING","provider removal changed core run authority: "+json.dumps([before,after]))
+  expect(after["deliveries"]==[{"state":"ACKNOWLEDGED","aggregate_type":"core.loop"}]*3,"core deliveries inconsistent: "+json.dumps(after["deliveries"]))
+  expect(after["runner_version"]=="4","heartbeat lost or duplicated: "+after["runner_version"])
  cases=[(12,auth,"auth",0,None,None),(13,invalid,"invalid",0,None,None),(14,fallback,"overload",0,None,"valid"),
  (15,deadline,"valid",120,None,None),(16,responsive,"valid",120,None,None),(17,queue,"valid",0,{"max_queued":1},None),
  (18,active,"valid",120,{"max_active":1},None),(19,budget,"valid",0,{"max_job_cost_microusd":0},None),
  (20,rate,"valid",0,{"requests_per_minute":1},None),(21,circuit,"overload",0,{"circuit_failures":1},None),
  (22,stale_admission,"valid",0,None,None),(23,stale_completion,"held",0,None,None),
  (24,cancel_queued,"valid",0,None,None),(25,cancel_running,"valid",120,None,None),
- (26,restart,"valid",0,None,None),(27,expired,"valid",0,None,None),(32,slow_freshness,"valid",0,None,None),(33,restart_inflight,"valid",120,None,None),(37,account_quota,"valid",0,{"requests_per_minute":1},"valid"),(38,completion_deadline,"valid",0,None,None),(39,admission_deadline,"valid",0,None,None),(40,semantic_lock_order,"valid",0,None,None)]
+ (26,restart,"valid",0,None,None),(27,expired,"valid",0,None,None),(32,slow_freshness,"valid",0,None,None),(33,restart_inflight,"valid",120,None,None),(37,account_quota,"valid",0,{"requests_per_minute":1},"valid"),(38,completion_deadline,"valid",0,None,None),(39,admission_deadline,"valid",0,None,None),(40,semantic_lock_order,"valid",0,None,None),(44,core_timeout,"valid",120,None,"valid"),(45,core_removed,"valid",0,None,None)]
  # basic emitted nonsequential supplemental assertions; caller canonicalises recorded observations below.
  for index,fn,mode,delay,settings,second in cases:
   error=scenario(index,fn,mode,delay,settings,second)
