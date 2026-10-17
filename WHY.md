@@ -1,7 +1,7 @@
-# Why Codify exists
+# Why Hyperfide exists
 
 
-**Codify is the infrastructure that made our approach to building software possible.**
+**Hyperfide, released as Codify through 1.x, is the infrastructure that made our approach to building software possible.**
 
 
 *At Sidiora Labs, we used AI agents to build our current flagship agent and a highly complex project approaching seven million lines of code. Codify was central to making that work. It gave our agents the
@@ -36,10 +36,10 @@ could conflict before they reached a merge.*
 
 *None of these capabilities began as features added to fill out a product page. Each addressed a constraint we encountered while building. Each became part of the foundation for the next stage of work.*
 
-*Over time, the simple indexing graph became a production-grade, agent-centric development system. It connected understanding the code with planning the work, executing it, preserving state, and verifying the
+*Over time, the simple indexing graph became an agent-centric development system we relied on every day. It connected understanding the code with planning the work, executing it, preserving state, and verifying the
 result. That connection is what allowed our AI agents to contribute across sustained development efforts and increasingly complex systems.*
 
-*The practical loop remains straightforward: identify the next task, gather the right context, implement, checkpoint, verify, and trace the result. Through MCP, AI agents can use Codify throughout that loop. As
+*The practical loop remains straightforward: identify the next task, gather the right context, implement, checkpoint, verify, and trace the result. Through MCP, AI agents can use Hyperfide throughout that loop. As
 projects grow, the infrastructure carries more of the coordination and continuity that would otherwise fall back on the team.*
 
 *For us, that translated into building our flagship agent and a project approaching seven million lines of code. Codify evolved with that workload because it was part of how the workload became possible in the
@@ -48,12 +48,16 @@ first place.*
 *We kept the core practical: C, a single binary, and SQLite. The graph, memory, snapshots, and core task workflow run locally without API keys, with optional remote features available separately. The goal was
 infrastructure we could depend on every day and other developers could put to work without assembling an entire platform around it.*
 
-*We open sourced Codify because the problems it solved were bigger than our own projects. Anyone building seriously with AI agents eventually needs a dependable way to preserve context, coordinate work, and
+*The next constraint was scale itself. Hyperfide 2.0, now in development, keeps that local core and its `cg` command as a compatibility alias of `hyperfide`, and adds an
+optional distributed control plane: TypeScript services with PostgreSQL as the authority for fleet ownership, and engineering work executed in isolated remote sandboxes. It is not
+released, and its fleet scale is a planning target, not a measured result.*
+
+*We open sourced Codify, now Hyperfide, because the problems it solved were bigger than our own projects. Anyone building seriously with AI agents eventually needs a dependable way to preserve context, coordinate work, and
 establish what has actually been completed.*
 
-**Codify is our answer, developed through the systems we built with it. It began with an internal necessity and became one of the foundations of our engineering work. Every stage of its evolution has helped us
+**Hyperfide is our answer, developed through the systems we built with it. It began with an internal necessity and became one of the foundations of our engineering work. Every stage of its evolution has helped us
 build further.**
-# How Codify evolved
+# How Codify evolved into Hyperfide
 
 **Its earliest graph-first development happened internally. The public history begins after several foundational capabilities had already come together. These milestones trace its continued growth, including the
 v1.1–v1.5 development cycle:**
@@ -67,3 +71,5 @@ v1.1–v1.5 development cycle:**
 - October 6 · v1.3 — Graph-generated code maps, configurable project paths, and portable memory make project knowledge easier to discover and carry between environments. Release
 - October 7 · v1.4 development milestone — Indexing progress, configurable workers, and queued lifecycle writes improve visibility and operation under heavier workloads. Implementation
 - October 13 · v1.5 — Indexed search, parallel indexing, cross-branch conflict projections, and coordinated waves of managers and task workers extend Codify’s ability to support development at scale. Release
+- October 15 · v1.6 — Embedded native syntax-tree adapters across language families, with labelled extraction coverage, deepen what the graph records about code. Release
+- 2.0.0-dev, in development — Codify becomes Hyperfide: `hyperfide` is the canonical command, `cg` a deprecated compatibility alias, and a distributed control plane with PostgreSQL authority and remote sandbox execution is being built and qualified task by task. Not a release.
