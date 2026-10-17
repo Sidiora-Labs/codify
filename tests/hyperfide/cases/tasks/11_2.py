@@ -11,7 +11,7 @@ def check(identity,callback):
     except Exception as error:actual=type(error).__name__+": "+str(error);FAILED.append(identity)
     print(json.dumps({"type":"assertion","id":"bootstrap."+identity,"expected":"observed","actual":actual}),flush=True)
 def git(root,*args):
-    result=subprocess.run(["git","-C",str(root),*args],text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=True)
+    result=subprocess.run(["git","-C",str(root),"-c","maintenance.auto=false","-c","gc.auto=0",*args],text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=True)
     return result.stdout.strip()
 class Fixture:
     def __init__(self,base):
@@ -60,6 +60,21 @@ def main():
                 path=f.workspaces/"slot-fixture"/repo["id"]
                 expect(git(path,"rev-parse","HEAD")==repo["commit"],"source differs from pinned commit")
         case("source.exact-multi-repository",exact)
+        def partial_download(f):
+            # alpha transfers completely; beta's pack is cut mid-object, as an interrupted transfer leaves it
+            beta=f.sources/"beta";(beta/"payload.bin").write_bytes(os.urandom(1<<20));git(beta,"add","payload.bin");git(beta,"commit","-qm","payload")
+            f.repositories[1]["commit"]=git(beta,"rev-parse","HEAD");git(beta,"gc","-q","--prune=now")
+            packs=list((beta/".git/objects/pack").glob("*.pack"));expect(len(packs)==1 and not [p for p in (beta/".git/objects").glob("??/*")],"fixture objects not packed")
+            with open(packs[0],"r+b") as pack:pack.truncate(pack.seek(0,2)//2)
+            f.request["cache_paths"]=[{"repository":"alpha","path":"dependency.bin"}]
+            f.request["commands"]=[{"repository":"alpha","argv":["/bin/sh","-c","printf cached > dependency.bin"],"timeout_seconds":5}]
+            row,result=f.invoke()
+            expect(result.returncode==0 and row.get("ok") and row["result"]["state"]=="FAILED" and row["result"]["reason"]=="SOURCE_FETCH_FAILED","partial download not refused: "+json.dumps(row))
+            expect(row["result"]["authority_granted"] is False and "cache_key" not in row["result"],"partial download published a receipt")
+            expect([p.name for p in f.workspaces.iterdir()]==[row["result"]["quarantine_workspace"]],"partial download left more than the quarantine workspace")
+            expect(not (f.workspaces/"slot-fixture").exists(),"partial download published final workspace")
+            expect(not [p for p in f.cache.rglob("*")],"partial download published a cache entry")
+        case("source.partial-download",partial_download)
 
         def submodule(f,nested=False):
             child=f.sources/"child";child.mkdir();git(child,"init","-q");git(child,"config","user.name","Fixture");git(child,"config","user.email","fixture@example.invalid")

@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "variant": "task:11.2",
+  "task": "11.2",
+  "scope": "task-component",
+  "cases": [
+    "V-038",
+    "V-039"
+  ],
+  "assertion_ids": [
+    "bootstrap.source.exact-multi-repository",
+    "bootstrap.source.partial-download",
+    "bootstrap.submodule.actual-pinned-materialization",
+    "bootstrap.submodule.mismatched-pin",
+    "bootstrap.submodule.undeclared-module",
+    "bootstrap.submodule.unapproved-source",
+    "bootstrap.submodule.nested-pinned-graph",
+    "bootstrap.lfs.actual-object-materialization",
+    "bootstrap.lfs.corrupt-object-denied",
+    "bootstrap.dependency.actual-command",
+    "bootstrap.dependency.large-artifact-file",
+    "bootstrap.dependency.bounded-diagnostic-pipe",
+    "bootstrap.dependency.empty-and-multiline-arguments",
+    "bootstrap.dependency.nonzero-quarantine",
+    "bootstrap.source.dependency-hook-mutation",
+    "bootstrap.source.index-flag-mutation",
+    "bootstrap.dependency.timeout",
+    "bootstrap.input.workspace-traversal",
+    "bootstrap.input.workspace-absolute",
+    "bootstrap.input.unknown-field",
+    "bootstrap.input.boolean-schema",
+    "bootstrap.input.duplicate-repository",
+    "bootstrap.input.invalid-commit",
+    "bootstrap.input.missing-commit",
+    "bootstrap.input.stale-lock",
+    "bootstrap.input.host-supervisory",
+    "bootstrap.input.missing-root",
+    "bootstrap.input.outside-source",
+    "bootstrap.cache.actual-restore-and-command",
+    "bootstrap.cache.configuration-invalidation",
+    "bootstrap.cache.payload-corruption",
+    "bootstrap.cache.tracked-source-denied",
+    "bootstrap.cache.missing-payload",
+    "bootstrap.cache.credential-path-denied",
+    "bootstrap.input.escaped-duplicate",
+    "bootstrap.workspace.no-overwrite",
+    "bootstrap.workspace.symlink-root"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/11_2.py"
+  ],
+  "timeout_seconds": 300,
+  "required_env": [],
+  "fixtures": [
+    "build/hyperfide-native"
+  ],
+  "resources": [],
+  "source_files": [
+    "Makefile",
+    "src/cg.h",
+    "src/sha256.c",
+    "scripts/hyperfide-native-components.py",
+    "src/hyperfide/bootstrap.c",
+    "src/hyperfide/preparation_support.h",
+    "src/hyperfide/component_main.c",
+    "src/hyperfide/components.h",
+    "src/hyperfide/components/schema.kvx",
+    "src/hyperfide/components/11.2.kvx",
+    "build/hyperfide-native",
+    "build/hyperfide-native-registry.inc",
+    "tests/hyperfide/cases/tasks/11_2.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py"
+  ],
+  "source_roots": [
+    "src/hyperfide"
+  ]
+}
