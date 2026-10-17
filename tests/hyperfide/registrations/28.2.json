@@ -1,0 +1,102 @@
+{
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "https.fixture.listen",
+    "git.fixture.create"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/28_2.py"
+  ],
+  "assertion_ids": [
+    "docs.authority.missing-inputs-held",
+    "docs.authority.stale-spec-refused",
+    "docs.authority.no-request-policy-bypass",
+    "docs.authority.connector-exit-not-closure",
+    "docs.authority.absent-checker-refused",
+    "docs.authority.requires-branded-primary",
+    "docs.authority.all-isolation-guards",
+    "docs.authority.packet-immutable",
+    "docs.authority.repeatable-write-refused",
+    "docs.authority.restart-does-not-promote-packet",
+    "docs.authority.no-handler-ddl",
+    "docs.persistence.actual-manual-packet",
+    "docs.persistence.unknown-cleanup-not-closure",
+    "docs.persistence.failed-check-refused",
+    "docs.persistence.baseline-failure-not-closure",
+    "docs.persistence.atomic-baseline-roundtrip",
+    "docs.persistence.closed-baseline-survives-restart",
+    "docs.persistence.changed-publication-held"
+  ],
+  "cases": [
+    "V-035"
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/28_2.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 90,
+  "fixtures": [
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/docs/closure.js"
+  ],
+  "required_artifacts": [
+    "docs/task-28.2-cleanup.json",
+    "docs/task-28.2-databases.json"
+  ],
+  "required_env": [
+    "DATABASE_URL"
+  ],
+  "resources": [
+    {
+      "id": "task28.2-fixture-resources",
+      "kind": "fixture-resource-set",
+      "scope": "task28.2-disposable"
+    }
+  ],
+  "schema_version": 1,
+  "scope": "task-component",
+  "source_files": [
+    "docs/hyperfide/operations.md",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/package.json",
+    "services/hyperfide/tsconfig.json",
+    "spec/hyperfide/assurance.md",
+    "spec/hyperfide/decision-models.md",
+    "spec/hyperfide/decisions.md",
+    "spec/hyperfide/design.body.md",
+    "spec/hyperfide/evidence/task-catalog.json",
+    "spec/hyperfide/evidence/traceability.json",
+    "spec/hyperfide/execution-contract.md",
+    "spec/hyperfide/identity-security.md",
+    "spec/hyperfide/implementation-plan.md",
+    "spec/hyperfide/migration.md",
+    "spec/hyperfide/providers/blaxel.md",
+    "spec/hyperfide/providers/railway.md",
+    "spec/hyperfide/repository-baseline.md",
+    "spec/hyperfide/requirements.md",
+    "spec/hyperfide/reviews/README.md",
+    "spec/hyperfide/schematics.md",
+    "spec/hyperfide/spec.kvx",
+    "spec/hyperfide/storage.md",
+    "spec/hyperfide/traceability.md",
+    "spec/hyperfide/verification.md",
+    "tests/hyperfide/cases/tasks/28_2.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/registry.json",
+    "tests/hyperfide/support/identity_fixture.py"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "task": "28.2",
+  "timeout_seconds": 300,
+  "variant": "task:28.2"
+}

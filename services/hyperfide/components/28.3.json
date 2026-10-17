@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "28.3",
+  "task": "28.3",
+  "roles": [
+    "control"
+  ],
+  "module": "release/readiness.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "release.readiness.assess",
+    "release.readiness.seal"
+  ],
+  "requires": [
+    "28.4",
+    "15.2",
+    "4.2",
+    "14.1"
+  ]
+}

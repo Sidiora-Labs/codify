@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "28.4",
+  "task": "28.4",
+  "roles": [
+    "control"
+  ],
+  "module": "release/traceability.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "release.traceability.contract",
+    "release.traceability.validate",
+    "release.traceability.archive"
+  ],
+  "requires": [
+    "15.2"
+  ]
+}

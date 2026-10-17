@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "28.2",
+  "task": "28.2",
+  "roles": [
+    "control"
+  ],
+  "module": "docs/closure.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "docs.packet",
+    "docs.inspect",
+    "docs.close",
+    "docs.check"
+  ],
+  "requires": [
+    "4.2",
+    "14.1",
+    "5.1",
+    "12.4"
+  ]
+}
