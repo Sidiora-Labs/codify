@@ -1,0 +1,348 @@
+{
+  "approval": {
+    "allowed_actions": [
+      "postgresql.fixture.create",
+      "postgresql.fixture.drop",
+      "https.fixture.listen"
+    ],
+    "approved": true
+  },
+  "campaign_id": "hyperfide-task-26.4-guidance-parity-launchers-v1",
+  "case_ids": [
+    "V-026",
+    "V-027"
+  ],
+  "expected_assertion_ids": [
+    "generated.actual-three-native-generators",
+    "generated.spec-owned-marker",
+    "generated.context-owned-marker",
+    "generated.codemap-owned-marker",
+    "generated.no-history-rewrite",
+    "generated.idempotent-real-regeneration",
+    "generated.legacy-owned-map-updated",
+    "generated.legacy-owned-map-exact-backup",
+    "generated.service-refuses-user-map",
+    "generated.native-refuses-user-map",
+    "generated.service-refuses-user-instructions",
+    "generated.native-refuses-user-instructions",
+    "generated.rejects-wrong-executable-pin",
+    "generated.rejects-main-placement",
+    "generated.rejects-duplicate-generator",
+    "generated.rejects-invented-generator",
+    "generated.inventory-only-no-file-contents",
+    "generated.unsafe-context-config-resolves-contained",
+    "generated.escape-created-no-outside-output",
+    "generated.preserves-custom-user-context",
+    "generated.rejects-ancestor-workflow-discovery",
+    "generated.native-refuses-adapter-path-escape",
+    "generated.adapter-escape-created-no-outside-output",
+    "generated.editor-actual-setting-alias-resolution",
+    "generated.legacy-mcp-server-preserved-without-duplicate",
+    "generated.new-mcp-config-canonical-name",
+    "generated.owned-hook-replaced-with-exact-private-backup",
+    "generated.one-portable-hook-namespace",
+    "generated.native-session-state-preserved",
+    "generated.duplicate-mcp-server-fails-conflict",
+    "generated.mcp-canonical-server-name",
+    "generated.mcp-legacy-resource-same-bytes",
+    "generated.command-alias-real-output-parity",
+    "generated.agent-context-canonical-cheatsheet",
+    "generated.editor-old-new-command-one-handler",
+    "generated.repo-guidance-rendered-from-owning-workflow",
+    "generated.repo-codemap-regenerated-by-owner",
+    "watcher.component-registered-describe",
+    "watcher.plan-baseline-cadence",
+    "watcher.rejects-cadence-change-without-amendment",
+    "watcher.amended-cadence-is-explicit",
+    "watcher.rejects-duplicate-repository",
+    "watcher.rejects-unknown-config-field",
+    "watcher.supervisory-host-validate-supervisory-only",
+    "watcher.supervisory-host-rejects-shared-control-uid",
+    "watcher.unregistered-action-refused",
+    "watcher.local-mode-fails-clearly",
+    "watcher.public-config-refused",
+    "watcher.signed-pass-confirmed",
+    "watcher.pass-calls-exact-actions",
+    "watcher.every-request-signed-by-watcher-key",
+    "watcher.remote-refusal-never-reconciled",
+    "watcher.unwatched-repository-delivery-refused",
+    "watcher.non-coordinator-principal-refused",
+    "watcher.control-unavailable-unconfirmed-no-local-state",
+    "launchers.native-component-describes-all-launchers",
+    "launchers.unit-execstart-served",
+    "launchers.issue-watcher-execs-packaged-module",
+    "launchers.cg-alias-issue-watcher-parity",
+    "launchers.issue-watcher-config-validated",
+    "launchers.supervisory-host-refuses-model-credentials",
+    "launchers.supervisory-host-refuses-authority-database",
+    "launchers.supervisory-host-no-path-python-fallback",
+    "launchers.supervisory-host-public-config-refused",
+    "launchers.supervisory-host-rejects-placement-authority",
+    "launchers.supervisory-host-real-start-pinned-config",
+    "launchers.supervisory-host-sigterm-clean-exit",
+    "launchers.missing-packaged-runtime-no-path-fallback",
+    "offline.network-disabled-without-postgres-or-model-credentials",
+    "offline.local-mode-identified",
+    "offline.local-core-workflow-works",
+    "offline.cg-alias-local-parity",
+    "offline.distributed-client-identifies-offline",
+    "offline.distributed-ownership-fails-clearly",
+    "offline.reconnected-unavailable-authority-fails-clearly",
+    "offline.local-store-cannot-overwrite-fleet-authority",
+    "offline.local-mode-cannot-issue-authority",
+    "bootstrap.initial-grant-cannot-exceed-accepted-capabilities",
+    "bootstrap.denied-grant-creates-no-principal-or-issuance",
+    "bootstrap.concurrent-first-issuance-exactly-once",
+    "bootstrap.real-import-accepted-pending-validation",
+    "bootstrap.actual-first-operator-bound-to-accepted-revision",
+    "bootstrap.no-private-key-or-service-activation-claim",
+    "bootstrap.history-done-does-not-create-runtime-completion",
+    "bootstrap.exact-durable-bootstrap-replay",
+    "bootstrap.one-durable-initial-issuance",
+    "bootstrap.different-first-operator-refused",
+    "bootstrap.offline-observation-cannot-issue",
+    "bootstrap.public-input-file-refused",
+    "bootstrap.database-alone-cannot-issue-after-journal-loss",
+    "bootstrap.revoked-initial-operator-never-reactivated",
+    "bootstrap.actual-revoked-row-preserved",
+    "recovery.exact-migration-applied",
+    "recovery.widened-grant-refused-without-writes",
+    "recovery.offline-mode-cannot-recover",
+    "recovery.existing-credential-adoption-refused",
+    "recovery.lost-operator-replaced",
+    "recovery.replaced-operator-revoked-in-same-transaction",
+    "recovery.exact-replay-idempotent",
+    "recovery.recovery-identity-reuse-refused",
+    "recovery.stale-operator-cannot-be-replaced-again",
+    "recovery.chain-advances-from-current-head",
+    "recovery.initial-bootstrap-replay-cannot-reactivate",
+    "recovery.run-without-initial-issuance-refused",
+    "recovery.recovery-history-append-only"
+  ],
+  "inputs": [
+    {
+      "path": "/usr/bin/flock",
+      "sha256": "85a6c65e142a5eb6b4a7009e648875e62392880519265b7aa5b08fd18f2c5eaf",
+      "size": 27200
+    },
+    {
+      "path": "CODEMAP.md",
+      "sha256": "82e0aad4548d4e61d5fe8d63bb903ee08e64a76abeb1d1917a010e255dc2633b",
+      "size": 31992
+    },
+    {
+      "path": "build/hyperfide-native",
+      "sha256": "e7c5947901a7e5d1041173bd4927f7fa07ff7c94cbd1c9be1bfd4cfc86bb08a9",
+      "size": 396328
+    },
+    {
+      "path": "cg",
+      "sha256": "610fea7c8417ef9660a24302b0afecb78b6208f9386ef378d78296c81c0d7964",
+      "size": 69086576
+    },
+    {
+      "path": "deploy/hyperfide/issue-watcher.service",
+      "sha256": "51268926f3a5c85099cd5c981ea2e5058a2f4540e6e8fc7d82cb688b1c8e499d",
+      "size": 711
+    },
+    {
+      "path": "deploy/hyperfide/supervisory-host.service",
+      "sha256": "8628dd2f2f106f4193c851cdd1f32fc7ec9d9d0e8913a149218838782f87550f",
+      "size": 890
+    },
+    {
+      "path": "editors/vscode/extension.js",
+      "sha256": "29d84d3a44f7fd741c93534223dc7567eeeff6e8e9f911e2d4226433140474db",
+      "size": 33372
+    },
+    {
+      "path": "editors/vscode/package.json",
+      "sha256": "e4fe4e2abb33181b2419bd68f0be57de24dce3f9b230a392fc72f769b9992e29",
+      "size": 27511
+    },
+    {
+      "path": "hyperfide",
+      "sha256": "610fea7c8417ef9660a24302b0afecb78b6208f9386ef378d78296c81c0d7964",
+      "size": 69086576
+    },
+    {
+      "path": "runtime/supervisory_host.py",
+      "sha256": "6e2cd65f60f781497538b95e72c11445d0b9db919b4728fc91377d36611cf728",
+      "size": 38981
+    },
+    {
+      "path": "services/hyperfide/components/26.4-watcher.json",
+      "sha256": "68859b15d78345b4f7235b96b7ad77c4ebf1964440779f562dedc6938488ffe2",
+      "size": 308
+    },
+    {
+      "path": "services/hyperfide/components/26.4.json",
+      "sha256": "f997665f098f00c051efcbff390a7e16daf5ba243e29152a51ac74fe569e1326",
+      "size": 297
+    },
+    {
+      "path": "services/hyperfide/dist/bootstrap.js",
+      "sha256": "71274cde4b98a0496b9db2d34d6d066531ddbffaabfefb20b2dc67f31730e941",
+      "size": 8095
+    },
+    {
+      "path": "services/hyperfide/dist/bootstrap_identity.js",
+      "sha256": "52e57d1851b1a0ba36b199499ead06f67c398e29beeeeb84310a597b2cdc3eed",
+      "size": 10148
+    },
+    {
+      "path": "services/hyperfide/dist/bootstrap_recovery.js",
+      "sha256": "598f9bb96a88d1c944383a6bceb52057e19c34e9bcfcbb71541abf392837c3a1",
+      "size": 10826
+    },
+    {
+      "path": "services/hyperfide/dist/control.js",
+      "sha256": "1383288f00472de29607207d1d318e257c6e80c0fb2c05ca9fb2d974040e8032",
+      "size": 118
+    },
+    {
+      "path": "services/hyperfide/dist/issue-watcher.js",
+      "sha256": "6983cf1f09e2393ea7037171b77244bedf4d7d608a684e7b20ea448a7172c456",
+      "size": 18567
+    },
+    {
+      "path": "services/hyperfide/dist/migration/generated.js",
+      "sha256": "96166cdd9eea3b854c215f1451a65c799bcc004746a6358988a8178b78c59940",
+      "size": 9206
+    },
+    {
+      "path": "services/hyperfide/dist/supervisory-host.js",
+      "sha256": "097142132cdcaf6d423de9c940768d3bf6c314029fffd34b1f6740a7cda6932e",
+      "size": 8753
+    },
+    {
+      "path": "services/hyperfide/migrations/0026-bootstrap.sql",
+      "sha256": "da615d36ac6f4193284f5807cae5ed79b39084646adc202099fd992cee2afd8e",
+      "size": 1169
+    },
+    {
+      "path": "services/hyperfide/migrations/0041-bootstrap-recovery.sql",
+      "sha256": "a98324da3c9bb7bda0993bfd02faaf8cdea42d30594c8ed393008758723c5559",
+      "size": 1896
+    },
+    {
+      "path": "services/hyperfide/src/bootstrap.ts",
+      "sha256": "36bbce29de0f530f0e9682744917956c3f4bdfd36efd33bf33a43a32fc3f95ae",
+      "size": 7211
+    },
+    {
+      "path": "services/hyperfide/src/bootstrap_identity.ts",
+      "sha256": "e5000385f4b2e206402f0f3be3364daf486bdb1d4994bee6aec3306837d80e7f",
+      "size": 10141
+    },
+    {
+      "path": "services/hyperfide/src/bootstrap_recovery.ts",
+      "sha256": "88fcfa8635b8fce43859306a649e038d16776ece873c4341cf16388e6e79a227",
+      "size": 10618
+    },
+    {
+      "path": "services/hyperfide/src/issue-watcher.ts",
+      "sha256": "e6420ea84ddcc40d74ba73fba5e6eaf22d608e9d11527d570307be1c48103bc8",
+      "size": 16821
+    },
+    {
+      "path": "services/hyperfide/src/migration/generated.ts",
+      "sha256": "74b93e962e259a3917c4aa4bce4c33f2afe677770129aaa522cc7bb81785103b",
+      "size": 7379
+    },
+    {
+      "path": "services/hyperfide/src/supervisory-host.ts",
+      "sha256": "e98218b4dba0af3a2e6131e6b0fb17e36b4cf3e1790f7ecf5e999cd21c9818ae",
+      "size": 8169
+    },
+    {
+      "path": "spec/workflow.kvx",
+      "sha256": "6d26106a55cd7729ab8e13b418a7abe56c7ff2673b61ba1baeed71c28b7c5941",
+      "size": 5090
+    },
+    {
+      "path": "src/agent.c",
+      "sha256": "3f6753724f0267b038237b714795a701658300f2e87b584d9df3e20dba957eb7",
+      "size": 16830
+    },
+    {
+      "path": "src/codemap.c",
+      "sha256": "632fc69f6788ce12959cc6c3b411ab5118f487c621c8479054e0052411263987",
+      "size": 92984
+    },
+    {
+      "path": "src/hyperfide/components/26.4.kvx",
+      "sha256": "80bf1755c8e996a0046a5ebf8e923afbc33f20dbbc6df61a58954aac7f2f7d7b",
+      "size": 187
+    },
+    {
+      "path": "src/hyperfide/entrypoint.c",
+      "sha256": "b7af9820c2a8c39c841879969d814dd2b1f85e1e31cfcdad63682ca32d2b71bd",
+      "size": 3145
+    },
+    {
+      "path": "src/integrate.c",
+      "sha256": "9f70a83479710b2c0f71cabea8fb75f5c0839b0dc74665b9068753525d4d6d12",
+      "size": 33515
+    },
+    {
+      "path": "src/main.c",
+      "sha256": "0608c434dcf49b89d1a5ffe3a074b0663495d01af860a515ef150b505e4da943",
+      "size": 35178
+    },
+    {
+      "path": "src/mcp.c",
+      "sha256": "7d650ff8dd96ecffd9e078720e8f2da0514384ddc4ec67c09a28bdb31c65dba5",
+      "size": 84272
+    },
+    {
+      "path": "src/spec.c",
+      "sha256": "5d9ab70fd4c5f4c03a0ee327d319b34073b77f5854476503fbb8b026bd8a79bc",
+      "size": 177438
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/26_4.py",
+      "sha256": "5aeb6cb4e2f056fff8256f27d27bc2ecbd5e04a97fff7fa919f5fd9b92290ad9",
+      "size": 16506
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/26_4_bootstrap.py",
+      "sha256": "287354f54078ba3e27ba8c4c2238f8d63ff45e30f498d99746772686f764b705",
+      "size": 7422
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/26_4_launchers.py",
+      "sha256": "9e02360898403e6c819e627ec1d9bd521488b148696152d5971bf91675069b97",
+      "size": 13274
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/26_4_recovery.py",
+      "sha256": "3d6a261fc9ffc33efc19d6b0ea28d0459550e8f78a0a7cb782c1dbdb32f39b1d",
+      "size": 8048
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/26_4_watcher.py",
+      "sha256": "3e3bae96af67c24470d51bd22fef5f6d20a89c4220f09ddecc122cd4e87812e1",
+      "size": 13686
+    },
+    {
+      "path": "tests/hyperfide/support/identity_fixture.py",
+      "sha256": "2b992fd5eab4d903909a4dd621b2ce3c7278fa932e163cbad8f33cf2b65efe0a",
+      "size": 29318
+    }
+  ],
+  "policy": {
+    "cloud_provisioning": false,
+    "component_only": true,
+    "frontier_calls": false,
+    "full_case_status": "INCOMPLETE",
+    "network": "loopback-fixtures-only",
+    "private_records_used": false,
+    "production_deployment_qualified": false
+  },
+  "registered_variant": "task:26.4",
+  "resources": [],
+  "schema_version": 1,
+  "scope": "task-component",
+  "seed": 1
+}

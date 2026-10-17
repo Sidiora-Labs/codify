@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "id": "26.4-watcher",
+  "task": "26.4",
+  "roles": [
+    "control"
+  ],
+  "module": "issue-watcher.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "issue.watcher.describe",
+    "issue.watcher.plan",
+    "supervisory.host.validate"
+  ],
+  "requires": []
+}
