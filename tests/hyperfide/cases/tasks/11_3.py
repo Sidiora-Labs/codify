@@ -14,8 +14,33 @@ def check(identity,callback):
     try:callback();actual="observed"
     except Exception as error:actual=type(error).__name__+": "+str(error);FAILED.append(identity)
     print(json.dumps({"type":"assertion","id":"readiness."+identity,"expected":"observed","actual":actual}),flush=True)
+def cleanup():
+    # Every fixture lives in a TemporaryDirectory; no external resource survives the run.
+    print(json.dumps({"type":"cleanup","resources":[],"complete":True}),flush=True)
+def package_manager(name):
+    # HF_TEST_<NAME> overrides PATH; version managers' shims are refused because the native
+    # probe resolves the executable and would hash the shim dispatcher instead of the tool.
+    override=os.environ.get("HF_TEST_"+name.upper())
+    candidate=override or shutil.which(name)
+    expect(candidate,name+" is not on PATH; set HF_TEST_"+name.upper()+" to the installed executable")
+    resolved=Path(candidate).resolve()
+    expect(Path(candidate).is_absolute() and resolved.is_file() and os.access(resolved,os.X_OK),"HF_TEST_"+name.upper()+" is not an absolute executable: "+candidate)
+    expect(resolved.name not in ("mise","asdf","volta","corepack"),name+" resolves to a version-manager shim ("+str(resolved)+"); set HF_TEST_"+name.upper())
+    return str(Path(candidate).absolute())
+# Command-line settings keep fixture repository config untouched; detached auto-maintenance would orphan git daemons.
+GIT_QUIET=["-c","maintenance.auto=false","-c","gc.auto=0"]
+def tool_invocation(resolved):
+    # Native probes run with a fixed PATH, so an "env node" script binds its resolved interpreter explicitly.
+    with open(resolved,"rb") as stream:line=stream.readline(256)
+    words=line[2:].decode(errors="replace").split() if line.startswith(b"#!") else []
+    if words and Path(words[0]).name=="env":
+        words=[word for word in words[1:] if word!="-S"]
+        expect(words==["node"],"unsupported package-manager interpreter: "+line.decode(errors="replace").strip())
+        node=shutil.which("node");expect(node,"package manager needs node, which is not on PATH")
+        return str(Path(node).resolve()),[str(Path(resolved).resolve()),"--version"]
+    return resolved,["--version"]
 def git(path,*args):
-    return subprocess.run(["git","-C",str(path),*args],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,check=True).stdout.strip()
+    return subprocess.run(["git",*GIT_QUIET,"-C",str(path),*args],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,check=True).stdout.strip()
 class Fixture:
     def __init__(self,base):
         self.base=base
@@ -111,14 +136,18 @@ def main():
             check(identity,run)
 
         def package_readiness(f,manager,mutation=None):
+            resolved=package_manager(manager)
+            # The fixture installer runs the bare command name; make it the probed executable.
+            directory=os.path.dirname(resolved);path=os.environ.get("PATH","")
+            if path.split(os.pathsep)[0]!=directory:os.environ["PATH"]=directory+os.pathsep+path
             installed=prep.install_local_package(f.repo,manager)
             git(f.repo,"add","package.json","local-pkg",installed["lock"]);git(f.repo,"commit","-qm","actual local package installation")
             f.prep.profile["repositories"][0]["commit"]=git(f.repo,"rev-parse","HEAD")
             relative="fixture/"+installed["lock"];target=f.prep.candidate/relative;target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(f.repo/installed["lock"],target)
             f.prep.profile["package_managers"]=[{"name":manager,"version":installed["version"],"locks":[f.prep.pin(relative)]}]
-            resolved=subprocess.check_output(["mise","which",manager],text=True).strip()
-            version_bytes=subprocess.check_output([resolved,"--version"])
-            f.bindings["bindings"].append({"name":manager,"version":installed["version"],"executable":resolved,"argv":["--version"],"output_digest":digest(version_bytes)})
+            executable,argv=tool_invocation(resolved)
+            version_bytes=subprocess.check_output([executable,*argv])
+            f.bindings["bindings"].append({"name":manager,"version":installed["version"],"executable":executable,"argv":argv,"output_digest":digest(version_bytes)})
             f.bindingsfile.write_text(json.dumps(f.bindings));f.publish()
             inventory=json.loads(Path(f.env["HF_READINESS_WORKSPACE_MANIFEST_FILE"]).read_text())
             expect(inventory["schema_version"]==2 and len(inventory["symlinks"])>0,"actual installed package links not measured")
@@ -176,7 +205,7 @@ def main():
         case("source-only.worktree-include-config-refused",lambda f:worktree_config(f,"[include]\\n path = ignored-local-config\\n"))
 
         if "--source" in sys.argv:
-            print(json.dumps({"type":"cleanup","status":"complete"}),flush=True)
+            cleanup()
             return bool(FAILED)
 
         case("packages.actual-npm-native-verification",lambda f:package_readiness(f,"npm"))
@@ -184,7 +213,7 @@ def main():
         case("packages.actual-npm-link-drift",lambda f:package_readiness(f,"npm","link"))
         case("packages.actual-pnpm-hardlink-drift",lambda f:package_readiness(f,"pnpm","hardlink"))
         if "--packages" in sys.argv:
-            print(json.dumps({"type":"cleanup","status":"complete"}),flush=True)
+            cleanup()
             return bool(FAILED)
 
         case("actual-base-source-tools-network",lambda f:f.ready())
@@ -274,6 +303,6 @@ def main():
         case("module.wrong-content-pin",lambda f:(f.env.update(HF_READINESS_MODULE_DIGEST="sha256:"+"0"*64),f.refused("PREPARATION_MANIFEST_INVALID")))
         case("node.wrong-content-pin",lambda f:(f.env.update(HF_READINESS_NODE_DIGEST="sha256:"+"0"*64),f.refused("PREPARATION_MANIFEST_INVALID")))
         case("host.supervisory",lambda f:(f.env.update(HF_EXECUTION_HOST_CLASS="supervisory"),f.refused("READINESS_CONFIG_INVALID")))
-    print(json.dumps({"type":"cleanup","status":"complete"}),flush=True)
+    cleanup()
     return bool(FAILED)
 if __name__=="__main__":raise SystemExit(main())

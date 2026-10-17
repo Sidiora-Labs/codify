@@ -1,0 +1,345 @@
+{
+  "approval": {
+    "allowed_actions": [],
+    "approved": true
+  },
+  "campaign_id": "hyperfide-task-11.3-native-readiness-v1",
+  "case_ids": [
+    "V-036",
+    "V-038",
+    "V-039"
+  ],
+  "expected_assertion_ids": [
+    "readiness.source-only.actual-committed-source",
+    "readiness.source-only.no-runtime-probe-authority",
+    "readiness.source-only.forged-commit-object",
+    "readiness.source-only.forged-nested-tree-object",
+    "readiness.source-only.repository-fsck-override-denied",
+    "readiness.source-only.worktree-fsck-config-refused",
+    "readiness.source-only.worktree-include-config-refused",
+    "readiness.packages.actual-npm-native-verification",
+    "readiness.packages.actual-pnpm-native-verification",
+    "readiness.packages.actual-npm-link-drift",
+    "readiness.packages.actual-pnpm-hardlink-drift",
+    "readiness.actual-base-source-tools-network",
+    "readiness.workspace.inventory-mandatory",
+    "readiness.source.actual-index-flag-bypass",
+    "readiness.source.republished-inventory-assume-unchanged",
+    "readiness.source.republished-inventory-skip-worktree",
+    "readiness.source.unapproved-eol-transformation",
+    "readiness.source.tracked-internal-symlink",
+    "readiness.source.republished-tracked-symlink-drift",
+    "readiness.source.ancestor-config-denied",
+    "readiness.source.profile-head-disagreement",
+    "readiness.capability.actual-linux-subreaper",
+    "readiness.base.actual-byte-drift",
+    "readiness.base.actual-canary",
+    "readiness.identity.boot-mismatch",
+    "readiness.identity.profile-mismatch",
+    "readiness.identity.preparation-mismatch",
+    "readiness.source.untracked-config-denied",
+    "readiness.source.ignored-dependency-denied",
+    "readiness.source.complete-workspace-inventory",
+    "readiness.source.covered-dependency-byte-drift",
+    "readiness.source.tracked-byte-mutation",
+    "readiness.source.wrong-head",
+    "readiness.tools.actual-output-drift",
+    "readiness.credential.missing",
+    "readiness.credential.expired",
+    "readiness.credential.revoked",
+    "readiness.credential.auth_blocked",
+    "readiness.credential.noncanonical-expiration",
+    "readiness.credential.expiration-past",
+    "readiness.credential.wrong-scope",
+    "readiness.credential.unknown-field",
+    "readiness.credential.duplicate-reference",
+    "readiness.storage.bytes",
+    "readiness.storage.inodes",
+    "readiness.network.actual-refusal",
+    "readiness.capability.unsupported",
+    "readiness.os.actual-mismatch",
+    "readiness.module.wrong-content-pin",
+    "readiness.node.wrong-content-pin",
+    "readiness.host.supervisory"
+  ],
+  "inputs": [
+    {
+      "path": "Makefile",
+      "sha256": "15a4ba0d37f9282fe0eb7b77de54de1f3c3bc5246cd283afe7fc54ad6d0f5e8b",
+      "size": 4205
+    },
+    {
+      "path": "build/hyperfide-native",
+      "sha256": "25648b3af546495a255eae77f130a053072ff8a9b04883a0a8c1737fb8f90155",
+      "size": 396328
+    },
+    {
+      "path": "build/hyperfide-native-registry.inc",
+      "sha256": "281b423c9b11c4dfa42b66a2634bd0159e423364d196f147c09f56d4d4eaafe1",
+      "size": 2838
+    },
+    {
+      "path": "scripts/hyperfide-native-components.py",
+      "sha256": "5eb01214a3a91430cf2b66b2f15b40b91d06db8a87a00d88a11aca90985a23c2",
+      "size": 9165
+    },
+    {
+      "path": "services/hyperfide/components/1.4.json",
+      "sha256": "bad91dd5fb9ed7e60aaad3dfd43510a848ee86a5f95c5bb682082f029c8f1f26",
+      "size": 274
+    },
+    {
+      "path": "services/hyperfide/components/11.1.json",
+      "sha256": "4ec8f4eab9f301fe163a3de17b2599eb78db279af45490e1d4864b8ae4948afd",
+      "size": 293
+    },
+    {
+      "path": "services/hyperfide/components/schema.json",
+      "sha256": "8895f135cc1ce6aad30858d5e15d0810157e49a8fa266cbd2c1ae385f76f8961",
+      "size": 1439
+    },
+    {
+      "path": "services/hyperfide/dist/components/registry.d.ts",
+      "sha256": "abee72243fc2c759634a1d50b3f3bb116bc023532bfd17083fe9998d49a1903b",
+      "size": 1855
+    },
+    {
+      "path": "services/hyperfide/dist/components/registry.js",
+      "sha256": "26ca887afe59391f275c422cf06b9ba56eb8de4dfcf9bcb1a8b2ff852f95a9d1",
+      "size": 12283
+    },
+    {
+      "path": "services/hyperfide/dist/components/registry.js.map",
+      "sha256": "fd1c4c307aa01c5ef300ee3f5e4373535b30c2d90d31d609cff397edd950a406",
+      "size": 12119
+    },
+    {
+      "path": "services/hyperfide/dist/components/service.d.ts",
+      "sha256": "3debec060cff344d124844455ba1cfd67f7098d5ba52eb2ee42f3618598977fc",
+      "size": 649
+    },
+    {
+      "path": "services/hyperfide/dist/components/service.js",
+      "sha256": "d48dba209b9803a09a9b09326803142e28bf416bf2dbf14d99aba69d57b35677",
+      "size": 11025
+    },
+    {
+      "path": "services/hyperfide/dist/components/service.js.map",
+      "sha256": "54b57229c4acbfa8cd3d753968da6b8e01e01e5c21dfdbc499b23cef16905c93",
+      "size": 11052
+    },
+    {
+      "path": "services/hyperfide/dist/control.d.ts",
+      "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+      "size": 11
+    },
+    {
+      "path": "services/hyperfide/dist/control.js",
+      "sha256": "1383288f00472de29607207d1d318e257c6e80c0fb2c05ca9fb2d974040e8032",
+      "size": 118
+    },
+    {
+      "path": "services/hyperfide/dist/control.js.map",
+      "sha256": "48349cca9de2de36e81e287513d65b9d7112d94f02e116fe52cde8a33ceac76f",
+      "size": 183
+    },
+    {
+      "path": "services/hyperfide/dist/dispatch.d.ts",
+      "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+      "size": 11
+    },
+    {
+      "path": "services/hyperfide/dist/dispatch.js",
+      "sha256": "993b2fcdb5f4599e9475a27d29d15f861794bea9b611e85968b4d9a37cfc8216",
+      "size": 120
+    },
+    {
+      "path": "services/hyperfide/dist/dispatch.js.map",
+      "sha256": "657b88f6e4c3cf5371864771b82cd7e29e42aad56b78c5c3e13ea06f508491cd",
+      "size": 185
+    },
+    {
+      "path": "services/hyperfide/dist/policy/programme.d.ts",
+      "sha256": "8386faed4722998f9e3fb9b3413c6b0e7e56879a0bb497a4a19d654d11c44e86",
+      "size": 1076
+    },
+    {
+      "path": "services/hyperfide/dist/policy/programme.js",
+      "sha256": "2f9b0745664f79b55492989112528b423decdf553fb303778425c4f9685fa6a5",
+      "size": 4611
+    },
+    {
+      "path": "services/hyperfide/dist/policy/programme.js.map",
+      "sha256": "1d0832f8dbf790abd212afdfde928b6093ca4689a292315f60f1e3ab13813f38",
+      "size": 4311
+    },
+    {
+      "path": "services/hyperfide/dist/preparation/manifests.d.ts",
+      "sha256": "1e4f3459b633e7d5a0f83871e6c232c1d8c3a4a7b4fc2800f4752060268e5ddd",
+      "size": 3709
+    },
+    {
+      "path": "services/hyperfide/dist/preparation/manifests.js",
+      "sha256": "79e44720f35f0451aa8f1e5a9641c0365be17932d593d8007550aa50858981a1",
+      "size": 42340
+    },
+    {
+      "path": "services/hyperfide/dist/preparation/manifests.js.map",
+      "sha256": "d4ff4cfb8636cf31d81968199761f133f6c936b37ca1498684d55c675ffcc086",
+      "size": 46987
+    },
+    {
+      "path": "services/hyperfide/dist/provisioner.d.ts",
+      "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+      "size": 11
+    },
+    {
+      "path": "services/hyperfide/dist/provisioner.js",
+      "sha256": "0747f45b91ff8319ea22f6ced47d0af9c812f502d8240b543d06c7f1ba0d030a",
+      "size": 126
+    },
+    {
+      "path": "services/hyperfide/dist/provisioner.js.map",
+      "sha256": "ce33225f34728722e868c0c125f9c8ccac69df9b08573c2388fa580707d4bc0e",
+      "size": 191
+    },
+    {
+      "path": "services/hyperfide/package-lock.json",
+      "sha256": "101f5bc9fbb5864f227051eb2d0388449925df88c0fdd0e5755b40b808a4cfbb",
+      "size": 128778
+    },
+    {
+      "path": "services/hyperfide/package.json",
+      "sha256": "51c686f08fdfa47386af869cd6cdb63f1d2553f99366741239ded92dfe0d4398",
+      "size": 766
+    },
+    {
+      "path": "services/hyperfide/src/components/registry.ts",
+      "sha256": "070480a8b924f1e7b3c0400a6a8adf1b8b49253623189efe09fede9c987e97d8",
+      "size": 12721
+    },
+    {
+      "path": "services/hyperfide/src/components/service.ts",
+      "sha256": "9bc9b235ca40944692bae091e2028715330d52930fcf2051ddf9e0c05a2736a1",
+      "size": 10773
+    },
+    {
+      "path": "services/hyperfide/src/control.ts",
+      "sha256": "576b9b5b40fc508edf560682bc4de73f850ec590a996ad94d951f44a1c4d5cbf",
+      "size": 83
+    },
+    {
+      "path": "services/hyperfide/src/dispatch.ts",
+      "sha256": "924dc43a3711361ebb60168ae0556d1a212d10f5507bf372e4ace17c398448a6",
+      "size": 84
+    },
+    {
+      "path": "services/hyperfide/src/policy/programme.ts",
+      "sha256": "64addcffe3ccc4b106982123688e07abf19b7656ffbceaebcd7e2d581343692e",
+      "size": 5089
+    },
+    {
+      "path": "services/hyperfide/src/preparation/manifests.ts",
+      "sha256": "a6be34770efd0a8b639f62179e3cfcfc304e258ff9ec48df7f7b2aff02ca73d4",
+      "size": 42115
+    },
+    {
+      "path": "services/hyperfide/src/provisioner.ts",
+      "sha256": "56d68c3c582bac9ed6ab73c70fa566072a48126b49111033ee70b1e6567aadb7",
+      "size": 87
+    },
+    {
+      "path": "services/hyperfide/tsconfig.json",
+      "sha256": "2b45e09325652f23d0bf4ec53439e4552cf4c2854d7288ce40186d4074f894bb",
+      "size": 487
+    },
+    {
+      "path": "src/cg.h",
+      "sha256": "6c58363f66c65e4e7f91960845596626a41abbbf966ea75e0f70523c1635cb3d",
+      "size": 93626
+    },
+    {
+      "path": "src/hyperfide/bootstrap.c",
+      "sha256": "85dac01111c87c797894f99b401d91012d84add505eb745f6ea42225b2339da4",
+      "size": 40195
+    },
+    {
+      "path": "src/hyperfide/component_main.c",
+      "sha256": "cb3b9f726346ac2724ca0d61f44845180074f2347f33a7c22d53b723e476223b",
+      "size": 7574
+    },
+    {
+      "path": "src/hyperfide/components.h",
+      "sha256": "0c89648b865492dca5a15f7b17c5cd6609ce37efffcab780cad870e77dd3eac3",
+      "size": 538
+    },
+    {
+      "path": "src/hyperfide/components/11.2.kvx",
+      "sha256": "4ceaea25f04e64302c2e3ac34f10bfbf25a824f9f851e8f8eea8018137c220c1",
+      "size": 232
+    },
+    {
+      "path": "src/hyperfide/components/11.3.kvx",
+      "sha256": "d5673d26953323a3ef6f6151a056735ecd73ffdf46b3b57ebf64217777bfee45",
+      "size": 267
+    },
+    {
+      "path": "src/hyperfide/components/schema.kvx",
+      "sha256": "d93d9aa1d266794445bf1f236674319947f9f74437b5ce1528e83bbebfbf3fa1",
+      "size": 328
+    },
+    {
+      "path": "src/hyperfide/preparation_support.h",
+      "sha256": "2cefe682d6873e19a5502b861cb77a5fb06590e8b74a6a6019bacc0504f02706",
+      "size": 17402
+    },
+    {
+      "path": "src/hyperfide/readiness.c",
+      "sha256": "3a89b563e4acb123ad0a9c34a10ddd26293bc8b914d4e3e6c33091c9fbe54191",
+      "size": 56362
+    },
+    {
+      "path": "src/sha256.c",
+      "sha256": "eb8d406b26fb5ebdd835a88ed4e9033e211ba37e6cd25c8cc725a01ab74a536e",
+      "size": 2917
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/11_1.py",
+      "sha256": "1d9ae232c409ca1f4d67a7e14a40aeb67f393948a6967ff9f7a8537ea9f2dc0a",
+      "size": 42797
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/11_3.py",
+      "sha256": "427e9900d8d43a63acc6f44fdfb413769cebeb4119413362d1f27abb5695849b",
+      "size": 24500
+    },
+    {
+      "path": "tests/hyperfide/check-evidence.py",
+      "sha256": "cc8de56fb25bea153490b4143a231f1ff6f4dac758baaea4bf90fb7d9ba236a0",
+      "size": 30633
+    },
+    {
+      "path": "tests/hyperfide/manifest.schema.json",
+      "sha256": "3407092d7e6e452bb288e996f840bd5bab22d6c0f494a49bf944cd73c18078b8",
+      "size": 3216
+    },
+    {
+      "path": "tests/hyperfide/qualify.py",
+      "sha256": "8aa17f5e2572c8557f15353f7267e98600547fb0f2693486c0e0f2fc1abce8c2",
+      "size": 37538
+    }
+  ],
+  "policy": {
+    "cloud_provisioning": false,
+    "component_only": true,
+    "execution": "remote-only",
+    "frontier_calls": false,
+    "full_case_status": "INCOMPLETE",
+    "native_authority": "NONE"
+  },
+  "registered_variant": "task:11.3",
+  "resources": [],
+  "schema_version": 1,
+  "scope": "task-component",
+  "seed": 1
+}
