@@ -48,9 +48,8 @@ def main():
     backend=B.ObjectFixture()
     H["fixture_artifact"]("task-28.4-object-store.json").write_text(json.dumps({"ports":[backend.port,backend.sink.server_port],"owner":"task:28.4","observed_absent":False})+"\n")
     def setup_archive(f,pack_root=None):
-        # Fixture databases may already carry the pinned 0028 migration; verify it instead of re-applying.
-        if f.sql("SELECT 1 FROM hyperfide.schema_migrations WHERE version=28"):H["closure_factory"](f);f.apply_migration("0028-documentation")
-        else:H["setup"](f)
+        # The integrated fixture applies migrations; setup verifies the exact 0028 pin.
+        H["setup"](f)
         if pack_root:f.env["HF_TRACEABILITY_PACK_ROOT"]=pack_root
         f.env.update({"HF_ARTIFACT_S3_ENDPOINT":backend.endpoint,"HF_ARTIFACT_ALLOW_LOOPBACK_HTTP":"1","HF_ARTIFACT_S3_REGION":B.REGION,"HF_ARTIFACT_S3_BUCKET":B.BUCKET,"HF_ARTIFACT_S3_ACCESS_KEY_ID":B.KEY,"HF_ARTIFACT_S3_SECRET_ACCESS_KEY":B.SECRET,"HF_ARTIFACT_S3_SESSION_TOKEN":B.TOKEN,"HF_ARTIFACT_ORGANISATION_ID":f.ids["organisation"],"HF_ARTIFACT_ALLOWED_RUN_IDS":json.dumps([f.ids["run"]])})
     real=independent_view(ROOT)
