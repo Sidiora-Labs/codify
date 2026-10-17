@@ -18,7 +18,7 @@ The local CLI is pure C11: one binary, one SQLite database, no telemetry.
 </div>
 <div align="center">
 
-[English](README.md)  [简体中文](docs/i18n/README.zh-CN.md) · [Español](docs/i18n/README.es.md) · [हिन्दी](docs/i18n/README.hi.md) · [العربية](docs/i18n/README.ar.md) · [Français](docs/i18n/README.fr.md) · [Português (BR)](docs/i18n/README.pt-BR.md)
+[English](README.md) · [简体中文](docs/i18n/README.zh-CN.md) · [Español](docs/i18n/README.es.md) · [हिन्दी](docs/i18n/README.hi.md) · [العربية](docs/i18n/README.ar.md) · [Français](docs/i18n/README.fr.md) · [Português (BR)](docs/i18n/README.pt-BR.md)
 </div>
 
 ---
@@ -534,7 +534,7 @@ The full flow, supervision, approvals, briefings, and a worked example are in [d
 A fleet works on many branches in many worktrees of one repository, and Hyperfide indexes all of them into one `.codegraph/`. A linked worktree resolves to the shared project through git's common directory, so `hyperfide init` there **joins** rather than demanding a second database:
 
 ```sh
-$ cd .codegraph/worktrees/wave-fleet-1 && cg init
+$ cd .codegraph/worktrees/wave-fleet-1 && hyperfide init
 joined /path/proj as worktree /path/proj/.codegraph/worktrees/wave-fleet-1 on branch wave/fleet/1
 
 $ hyperfide branches
