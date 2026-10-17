@@ -90,6 +90,8 @@ CREATE TABLE attempts(attempt_id TEXT PRIMARY KEY,task TEXT,fence INTEGER,state 
 CREATE TABLE branches(id INTEGER PRIMARY KEY,name TEXT);
 CREATE TABLE files(id INTEGER PRIMARY KEY,branch_id INTEGER,path TEXT);
 CREATE TABLE events(seq INTEGER PRIMARY KEY,kind TEXT);
+CREATE TABLE leases(task TEXT PRIMARY KEY,holder TEXT,fence INTEGER,expires_at INTEGER);
+INSERT INTO leases VALUES('feature/1','old-worker',7,9999999999);
 CREATE TABLE custom_shape(a TEXT,b TEXT,PRIMARY KEY(a,b)) WITHOUT ROWID;
 CREATE TABLE typed_history(id INTEGER PRIMARY KEY,body BLOB);
 CREATE TABLE typed_keys(k PRIMARY KEY,body TEXT);
@@ -112,8 +114,44 @@ INSERT INTO symbol_fts VALUES('name_test');
   c.execute("INSERT INTO memories VALUES(?,?,?,?,?)",(1,"nul\x00text",b"\x00\xff",9007199254740993,"forced_done"));c.commit()
   before_schema=c.execute("SELECT name,sql FROM sqlite_master ORDER BY name").fetchall()
   c.execute("INSERT INTO memories VALUES(?,?,?,?,?)",(2,"uncommitted",b"",0,"done"))
-  profiles=[{"id":"fixture","source_id":"10000000-0000-0000-0000-000000000001","repository_id":"20000000-0000-0000-0000-000000000001","organisation_id":"30000000-0000-0000-0000-000000000001","root":str(source),"database":"graph.db","external":[{"label":"missing-docs","path":"missing.json","kind":"documentation"},{"label":"session","path":"credentials","kind":"native_session","sensitive":True}]}]
+  kvx_text='[task.1.1]\ntitle = "historical done"\nstatus = "done"\nacceptance_ids = ["V-900"]\n\n[task.1.2]\ntitle = "forced claim"\nstatus = "in_progress"\nacceptance_ids = ["V-901"]\n\n[acceptance.V-900]\nqualification = "UNRUN"\n\n[acceptance.V-901]\nqualification = "QUALIFIED"\n'
+  (source/"spec.kvx").write_text(kvx_text)
+  journal_bytes=b'{"seq":1,"kind":"applied"}\n';(source/"journal.jsonl").write_bytes(journal_bytes)
+  config_bytes=b'{"schema_version":18,"mode":"local"}\n';(source/"config.json").write_bytes(config_bytes)
+  profiles=[{"id":"fixture","source_id":"10000000-0000-0000-0000-000000000001","repository_id":"20000000-0000-0000-0000-000000000001","organisation_id":"30000000-0000-0000-0000-000000000001","root":str(source),"database":"graph.db","external":[{"label":"missing-docs","path":"missing.json","kind":"documentation"},{"label":"session","path":"credentials","kind":"native_session","sensitive":True},{"label":"journal","path":"journal.jsonl","kind":"journal"},{"label":"config","path":"config.json","kind":"configuration"}],"kvx":[{"label":"plan","path":"spec.kvx"}]}]
   pf=base/"sources.json";pf.write_text(json.dumps(profiles))
+  legacy_absent={}
+  legacy=IdentityFixture(service_role="provisioner",extra_components=['legacy-writer-isolation'])
+  try:
+   def legacy_describe():
+    status,r=legacy.invoke('legacy.writer.describe',{},component='legacy-writer-isolation',key='provisioner')
+    expect(status==200 and r.get('ok') is True,'provisioner service refused legacy describe: '+json.dumps(r)[:300])
+    v=r['result'];expect(v['service_role']=='provisioner' and v['server_only'] is True and v['whole_host_authority'] is False and v['authority']=='NONE','legacy describe claimed authority or wrong role')
+   check("migration.legacy.describe-provisioner-entrypoint",legacy_describe)
+   def legacy_capability():
+    status,r=legacy.invoke('legacy.writer.describe',{},component='legacy-writer-isolation',key='provisioner')
+    caps={c['name']:c for c in r['result']['capabilities']}
+    c=caps.get('migration.legacy-writers.v1')
+    expect(c is not None and c['implementation']=='LegacyWriterAdmission' and c['methods']==['disableAdmission','observeIsolation'] and c['request_invocable'] is False,'exported legacy writer capability absent or request-invocable')
+   check("migration.legacy.capability-exported",legacy_capability)
+   def legacy_input():
+    status,r=legacy.invoke('legacy.writer.describe',{'deployment_id':uid()},component='legacy-writer-isolation',key='provisioner')
+    expect(r.get('ok') is False and r.get('error',{}).get('code')=='LEGACY_FENCE_INPUT','non-empty legacy describe input accepted')
+   check("migration.legacy.describe-input-refused",legacy_input)
+   def legacy_unsigned():
+    import http.client,ssl
+    connection=http.client.HTTPSConnection('localhost',legacy.port,context=ssl.create_default_context(cafile=str(legacy.ca)))
+    try:
+     connection.request('POST','/v1/invoke',json.dumps(legacy.operation('legacy-writer-isolation','legacy.writer.describe',{})),{'Content-Type':'application/json'})
+     response=connection.getresponse();data=json.loads(response.read())
+     expect(response.status in (401,403) and data.get('ok') is False,'unsigned legacy describe accepted')
+    finally:connection.close()
+   check("migration.legacy.unsigned-refused",legacy_unsigned)
+  finally:
+   legacy_database=legacy.database;legacy_role=legacy.runtime_role;legacy.close()
+   legacy_absent['database']=not legacy.sql('SELECT datname FROM pg_database WHERE datname=$1',[legacy_database],admin=True)
+   legacy_absent['role']=not legacy.sql('SELECT rolname FROM pg_roles WHERE rolname=$1',[legacy_role],admin=True)
+   legacy_absent['root']=not legacy.path.exists()
   import importlib.util
   spec=importlib.util.spec_from_file_location("artifact_fixture",ROOT/"tests/hyperfide/cases/tasks/15_2.py")
   artifact_module=importlib.util.module_from_spec(spec);spec.loader.exec_module(artifact_module)
@@ -129,7 +167,7 @@ INSERT INTO symbol_fts VALUES('name_test');
    fixture.sql("INSERT INTO hyperfide.repositories(organisation_id,id,project_id,name,url) VALUES($1,$2,$3,'legacy','fixture:legacy')",[i['organisation'],repository,i['project']])
    fixture.sql("INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id) VALUES($1,$2,$3)",[i['organisation'],repository,'1'*40])
    fixture.sql("INSERT INTO hyperfide.run_repositories(organisation_id,run_id,repository_id,source_object_id,integration_ref) VALUES($1,$2,$3,$4,'refs/heads/main')",[i['organisation'],i['run'],repository,'1'*40])
-  FIXTURE=IdentityFixture(extra_components=['15.2','25.1'],extra_env={'HF_MIGRATION_SOURCES_FILE':str(pf),'HF_MIGRATION_ARCHIVE_ROOT':str(archive)},extra_setup=setup)
+  FIXTURE=IdentityFixture(extra_components=['15.2','25.1','legacy-writer-isolation'],extra_env={'HF_MIGRATION_SOURCES_FILE':str(pf),'HF_MIGRATION_ARCHIVE_ROOT':str(archive)},extra_setup=setup)
   # The owner14 fixture runs the real4.4 migration engine and a least-privilege
   # runtime role. History lives in its own non-authoritative schema.
   FIXTURE.sql('GRANT USAGE ON SCHEMA hyperfide_history TO "'+FIXTURE.runtime_role+'"; GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA hyperfide_history TO "'+FIXTURE.runtime_role+'"')
@@ -164,6 +202,26 @@ INSERT INTO symbol_fts VALUES('name_test');
    try:reject('snapshot',{'source':'fixture'},'MIGRATION_SCOPE')
    finally:profiles[0]['organisation_id']=original;pf.write_text(json.dumps(profiles))
   check("migration.auth.cross-organisation-refused",wrong_scope)
+  def legacy_role_scoped():
+   status,r=FIXTURE.invoke('legacy.writer.describe',{},component='legacy-writer-isolation')
+   expect(r.get('ok') is False and r.get('error',{}).get('code')=='UNKNOWN_COMPONENT','provisioner-only legacy fragment loaded in control role: '+json.dumps(r)[:300])
+  check("migration.legacy.control-role-not-loaded",legacy_role_scoped)
+  def schema_absent():
+   # Trusted test setup hides the owned 0025 objects and receipt; the service must
+   # refuse every action rather than create schema from a request handler.
+   receipt=FIXTURE.sql("SELECT row_to_json(m)::text AS r FROM hyperfide.schema_migrations m WHERE version=25")
+   expect(len(receipt)==1,"0025 receipt absent before negative setup")
+   FIXTURE.sql("ALTER SCHEMA hyperfide_history RENAME TO hyperfide_history_hidden; DELETE FROM hyperfide.schema_migrations WHERE version=25")
+   try:
+    fake=str(uuid.uuid4())
+    for action,value in [("describe",{}),("snapshot",{"source":"fixture"}),("inventory",{"source":"fixture","import_id":fake}),("archive",{"source":"fixture","import_id":fake}),("import",{"source":"fixture","import_id":fake,"table":"memories","offset":"0","limit":1}),("status",{"source":"fixture","import_id":fake})]:
+     r=request(action,value);expect(r.get("ok") is False and r.get("error",{}).get("code")=="MIGRATION_SCHEMA_REQUIRED",action+" did not refuse without 0025: "+json.dumps(r)[:200])
+    expect(not FIXTURE.sql("SELECT nspname FROM pg_namespace WHERE nspname='hyperfide_history'"),"request handler created history schema")
+   finally:
+    FIXTURE.sql("ALTER SCHEMA hyperfide_history_hidden RENAME TO hyperfide_history")
+    FIXTURE.sql("INSERT INTO hyperfide.schema_migrations SELECT * FROM json_populate_record(NULL::hyperfide.schema_migrations,$1::json)",[receipt[0]["r"]])
+   expect(ok("describe",{})["authority"]=="NONE","restored 0025 receipt not accepted")
+  check("migration.schema.absent-refused",schema_absent)
 
   snap=ok("snapshot",{"source":"fixture"});iid=snap["import_id"];dg=snap["snapshot_digest"]
   frozen=sqlite3.connect(archive/(dg[7:]+".db"))
@@ -209,6 +267,23 @@ INSERT INTO symbol_fts VALUES('name_test');
   check("migration.inventory.trigger",lambda:expect(any(t["name"]=="local_only" and t["type"]=="trigger" for t in snap["inventory"]["objects"]),"source trigger omitted"))
   check("migration.external.unavailable",lambda:expect(any(x["label"]=="missing-docs" and x["availability"]=="UNAVAILABLE" for x in snap["external_inventory"]),"missing evidence became available"))
   check("migration.external.session-excluded",lambda:expect(any(x["label"]=="session" and x["availability"]=="EXCLUDED_SENSITIVE" and "digest" not in x for x in snap["external_inventory"]),"sensitive session hashed/copied"))
+  def external_observed():
+   seen={x["label"]:x for x in snap["external_inventory"]}
+   for label,data,kind in (("journal",journal_bytes,"journal"),("config",config_bytes,"configuration")):
+    x=seen.get(label,{})
+    expect(x.get("availability")=="OBSERVED" and x.get("kind")==kind and x.get("digest")=="sha256:"+hashlib.sha256(data).hexdigest() and x.get("size_bytes")==str(len(data)),"readable "+label+" evidence not observed exactly")
+  check("migration.external.journal-config-observed",external_observed)
+  def kvx_unqualified():
+   stored=ok("inventory",{"source":"fixture","import_id":iid})["inventory"]["task_status_history"]
+   plan=[x for x in stored if x["label"]=="plan"]
+   expect(len(plan)==1 and plan[0]["availability"]=="OBSERVED" and plan[0]["digest"]=="sha256:"+hashlib.sha256(kvx_text.encode()).hexdigest(),"KVX planning source not inventoried durably")
+   tasks={t["task"]:t for t in plan[0]["tasks"]}
+   done=tasks.get("1.1",{})
+   expect(done.get("declared_status")=="done" and done.get("declared_acceptance")=={"V-900":"UNRUN"} and done.get("qualification")=="UNQUALIFIED" and done.get("ownership")=="NONE" and done.get("claim")=="HISTORICAL_DECLARATION","done/UNRUN task promoted beyond historical declaration")
+   forced=tasks.get("1.2",{})
+   expect(forced.get("declared_acceptance")=={"V-901":"QUALIFIED"} and forced.get("qualification")=="UNQUALIFIED" and plan[0]["acceptances"]["V-901"]["qualification"]=="UNQUALIFIED","declared QUALIFIED claim became a qualification")
+   expect(sql("SELECT count(*) FROM hyperfide.attempts;")=="0","KVX status created task ownership")
+  check("migration.kvx.done-unrun-unqualified",kvx_unqualified)
   for table in ["memories","attempts","custom_shape","events","branches","files","memory_superseded"]:
    v={"source":"fixture","import_id":iid,"table":table,"offset":"0","limit":50}
    check("migration.import."+table,lambda v=v:expect(ok("import",v)["outcome"]=="SUCCEEDED","batch did not commit"))
@@ -240,6 +315,14 @@ INSERT INTO symbol_fts VALUES('name_test');
   check("migration.import.exact-blob",lambda:expect("AP8=" in sql("SELECT payload::text FROM hyperfide_history.rows WHERE table_name='memories';"),"blob changed"))
   check("migration.import.unqualified",lambda:expect(sql("SELECT count(*) FROM hyperfide_history.imports WHERE authority<>'NONE' OR qualification<>'UNQUALIFIED';")=="0","historical import qualified"))
   check("migration.import.reconciliation",lambda:expect(sql("SELECT disposition FROM hyperfide_history.rows WHERE table_name='attempts';")=="REQUIRES_RECONCILIATION","old attempt gained live ownership"))
+  def lease_reconciliation():
+   live=lambda:sql("SELECT (SELECT count(*) FROM hyperfide.compute_leases)::text||','||(SELECT count(*) FROM hyperfide.hierarchy_domain_owners)::text||','||(SELECT count(*) FROM hyperfide.attempts)::text;")
+   before=live()
+   r=ok("import",{"source":"fixture","import_id":iid,"table":"leases","offset":"0","limit":50})
+   expect(r["outcome"]=="SUCCEEDED" and r["authority"]=="NONE" and r["qualification"]=="UNQUALIFIED","lease batch claimed authority")
+   expect(sql("SELECT disposition FROM hyperfide_history.rows WHERE table_name='leases';")=="REQUIRES_RECONCILIATION","old lease not held for reconciliation")
+   expect(live()==before,"imported legacy lease became a distributed owner")
+  check("migration.import.lease-requires-reconciliation",lease_reconciliation)
   check("migration.import.no-authority-tables",lambda:expect(sql("SELECT count(*) FROM hyperfide.attempts;")=="0","import created live authority"))
   v={"source":"fixture","import_id":iid,"table":"memories","offset":"0","limit":50}
   check("migration.replay.restart",lambda:expect(ok("import",v)["replayed"] is True and sql("SELECT count(*) FROM hyperfide_history.rows WHERE table_name='memories';")=="1","service restart duplicated history"))
@@ -329,8 +412,9 @@ INSERT INTO symbol_fts VALUES('name_test');
   database_absent=not FIXTURE.sql('SELECT datname FROM pg_database WHERE datname=$1',[database],admin=True)
   role_absent=not FIXTURE.sql('SELECT rolname FROM pg_roles WHERE rolname=$1',[FIXTURE.runtime_role],admin=True)
   with socket.socket() as sock:sock.settimeout(1);https_absent=sock.connect_ex(("127.0.0.1",FIXTURE.port))!=0
-  absent=database_absent and role_absent and https_absent and backend_absent and proxy_absent and not FIXTURE.path.exists()
-  (artifacts()/"cleanup.json").write_text(json.dumps({"observed_absent":absent,"database":database,"observer":"actual PostgreSQL catalogue and closed listeners/private roots after fixture close","database_observed_absent":database_absent,"role_observed_absent":role_absent,"https_observed_absent":https_absent,"object_backend_observed_absent":backend_absent,"commit_proxy_observed_absent":proxy_absent}))
+  legacy_fixture_absent=all(legacy_absent.values()) and len(legacy_absent)==3
+  absent=database_absent and role_absent and https_absent and backend_absent and proxy_absent and legacy_fixture_absent and not FIXTURE.path.exists()
+  (artifacts()/"cleanup.json").write_text(json.dumps({"observed_absent":absent,"database":database,"observer":"actual PostgreSQL catalogue and closed listeners/private roots after fixture close","database_observed_absent":database_absent,"role_observed_absent":role_absent,"https_observed_absent":https_absent,"object_backend_observed_absent":backend_absent,"commit_proxy_observed_absent":proxy_absent,"legacy_provisioner_fixture_observed_absent":legacy_fixture_absent}))
   check("migration.cleanup.actual-absence",lambda:expect(absent,"synthetic database still exists"))
  (artifacts()/"observations.json").write_text(json.dumps({"scope":"task-component","assertion_ids":IDS,"failed_ids":FAILED,"private_records_used":False,"full_cases_qualified":False},sort_keys=True))
  return 1 if FAILED else 0

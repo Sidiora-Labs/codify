@@ -177,9 +177,15 @@ export class LegacyWriterAdmission {
 export function createLegacyWriterAdmission(env:Readonly<NodeJS.ProcessEnv>):LegacyWriterAdmission{return new LegacyWriterAdmission(env);}
 
 export function createLegacyComponent(ctx:ComponentContext):Component {
- return {apiVersion:1,capabilities:{'migration.legacy-writers.v1':createLegacyWriterAdmission(ctx.env)},actions:{
- 'legacy.writer.describe':async(raw:unknown)=>{
+ const capabilities={'migration.legacy-writers.v1':createLegacyWriterAdmission(ctx.env)};
+ // Description reports the instance actually exported to dependants, so the
+ // capability contract is observable through the service rather than by import.
+ const exported=Object.entries(capabilities).map(([name,value])=>({name,implementation:value instanceof LegacyWriterAdmission?'LegacyWriterAdmission':'UNKNOWN',
+  methods:(['disableAdmission','observeIsolation'] as const).filter(m=>typeof value[m]==='function'),request_invocable:false}));
+ return {apiVersion:1,capabilities,actions:{
+ 'legacy.writer.describe':async(raw:unknown,context:ComponentContext)=>{
  if(!object(raw)||Object.keys(raw).length)fail('LEGACY_FENCE_INPUT','Description takes empty input');
- return {server_only:true,proof_visibility:'CONFIGURED_PID_NAMESPACE',whole_host_authority:false,request_fence_registration:false};
+ return {server_only:true,service_role:context.role,proof_visibility:'CONFIGURED_PID_NAMESPACE',whole_host_authority:false,request_fence_registration:false,
+  topology_configured:Boolean(context.env.HF_LEGACY_WRITER_CONFIG_FILE),capabilities:exported,authority:'NONE'};
  }}};
 }
