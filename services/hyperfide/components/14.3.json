@@ -10,7 +10,10 @@
   "api_version": 1,
   "actions": [
     "native.auth.snapshot",
-    "native.auth.probe"
+    "native.auth.probe",
+    "native.auth.qualify",
+    "native.auth.qualification.inspect",
+    "native.auth.refresh.commit"
   ],
   "requires": [
     "14.2"

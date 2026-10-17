@@ -11,6 +11,7 @@ import {gatewayOf,invocationOf} from './enrollment.js';
 import {assertPrimaryTransaction} from '../storage/transactions.js';
 import type {PrimaryTransaction} from '../storage/transactions.js';
 import {isCredentialAuthority} from './credentials.js';
+import {createQualificationStore,qualificationReady} from './qualification.js';
 export interface AuthProfileSnapshot {
  schema_version:1;profile_id:string;profile_revision:string;profile_digest:string;connector:'codex'|'claude';
  auth_mode:'account_session'|'api_credential';binary:{path:string;digest:string;version:string};
@@ -73,7 +74,8 @@ async function run(profile:Profile,args:string[],signal:AbortSignal):Promise<{ex
  });
 }
 export async function createComponent(ctx:ComponentContext):Promise<Component>{
- const inventory=await profiles(ctx),gateway=gatewayOf(ctx),credentials=ctx.dependencies.require('14.2','identity.credentials',isCredentialAuthority);
+ const inventory=await profiles(ctx),gateway=gatewayOf(ctx),credentials=ctx.dependencies.require('14.2','identity.credentials',isCredentialAuthority);await qualificationReady(gateway);
+ const qualification=createQualificationStore(ctx,gateway,new Map([...inventory].map(([id,p])=>[id,p.snapshot])));
  const resolve=(id:string):AuthProfileSnapshot=>{const p=inventory.get(id);if(!p)fail('NATIVE_AUTH_PROFILE_UNKNOWN','Unknown configured authentication profile');return p.snapshot;};
  const privateRuntimeInTransaction:NativeAuthAuthority['privateRuntimeInTransaction']=async(tx,i,id)=>{
   assertInvocation(i);await i.guard(tx);const profile=inventory.get(id);if(!profile)fail('NATIVE_AUTH_PROFILE_UNKNOWN','Unknown configured authentication profile');
@@ -100,6 +102,10 @@ export async function createComponent(ctx:ComponentContext):Promise<Component>{
  const input=(v:unknown):string=>{exact(v,['profile_id']);if(typeof v.profile_id!=='string')fail('INVALID_REQUEST','Configured profile identity required');return v.profile_id;};
  return {apiVersion:1,capabilities:{'identity.native-auth':authority},actions:{
   'native.auth.snapshot':async(v,context)=>{const i=invocationOf(context);return gateway.withPrimaryTransaction({timeoutMs:5000,signal:i.signal,guard:i.guard},async()=>resolve(input(v)));},
-  'native.auth.probe':async(v,context)=>probe(invocationOf(context),input(v))
+  'native.auth.probe':async(v,context)=>probe(invocationOf(context),input(v)),
+  // Account-session and API-credential modes are qualified and recorded separately per connector.
+  'native.auth.qualify':async(v,context)=>{const i=invocationOf(context),id=input(v);return qualification.qualify(i,resolve(id),async()=>probe(i,id) as Promise<{native_authentication:string}>);},
+  'native.auth.qualification.inspect':async(v,context)=>{exact(v,['connector']);return qualification.inspect(invocationOf(context),v.connector);},
+  'native.auth.refresh.commit':async(v,context)=>qualification.commitRefresh(invocationOf(context),v)
  }};
 }
