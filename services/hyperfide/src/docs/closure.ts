@@ -45,6 +45,17 @@ interface RepositorySnapshot{repository_id:string;commit:string;tree:string;file
 export interface DocumentationPacket{
  schema_version:1;scope:Scope;pins:DocumentationPins;authority_epoch:string;policy:DocumentationPolicy;
  repositories:RepositoryVersion[];snapshot:{repositories:RepositorySnapshot[]};snapshot_digest:string;previous_baseline_digest:string|null;
+ incremental?:DocumentationReload;
+}
+export interface DocumentationReload{previous_baseline_digest:string|null;changed:{repository_id:string;path:string}[];removed:{repository_id:string;path:string}[];unchanged:number}
+// Incremental reload: only targets whose exact blob differs from the last durable baseline are reported as changed.
+export function documentationReload(previous:unknown,files:{repositories:RepositorySnapshot[]},previousDigest:string|null):DocumentationReload{
+ const prior=new Map<string,string>();
+ if(object(previous)&&object(previous.snapshot)&&Array.isArray(previous.snapshot.repositories))for(const r of previous.snapshot.repositories)if(object(r)&&Array.isArray(r.files))for(const f of r.files)if(object(f))prior.set(String(r.repository_id)+'\0'+String(f.path),String(f.digest));
+ const changed:{repository_id:string;path:string}[]=[],seen=new Set<string>();let unchanged=0;
+ for(const r of files.repositories)for(const f of r.files){const key=r.repository_id+'\0'+f.path;seen.add(key);if(prior.get(key)===f.digest)unchanged++;else changed.push({repository_id:r.repository_id,path:f.path});}
+ const removed=[...prior.keys()].filter(k=>!seen.has(k)).sort().map(k=>{const [repository_id,path]=k.split('\0') as [string,string];return {repository_id,path};});
+ return {previous_baseline_digest:previousDigest,changed,removed,unchanged};
 }
 function safeRelative(value:unknown):string{
  const s=boundedText(value,4096);if(path.isAbsolute(s)||s.includes('\\')||s.split('/').some(x=>x==='..'||x==='.'||x===''))invalid('Unsafe documentation path');return s;
@@ -149,13 +160,14 @@ export async function packetDocumentation(input:unknown,context:ComponentContext
  const files=await snapshot(context,scope,selected.versions,selected.policy);
  return context.resources.gateway.withPrimaryTransaction({signal:i.signal,guard:tx=>i.guard(tx)},async tx=>{
  await assertCurrent(tx,scope,p,selected.authority_epoch);
- const previous=await tx.query("SELECT baseline_digest FROM hyperfide.documentation_baselines WHERE organisation_id=$1 AND run_id=$2 ORDER BY created_at DESC,id DESC LIMIT 1",[scope.organisation_id,scope.run_id]);
- const packet:DocumentationPacket={schema_version:1,scope,pins:p,authority_epoch:selected.authority_epoch,policy:selected.policy,repositories:selected.versions,snapshot:files,snapshot_digest:contentDigest(files),previous_baseline_digest:previous.rows[0]?.baseline_digest??null};
+ const previous=await tx.query("SELECT b.baseline_digest,b.payload FROM hyperfide.documentation_baselines b JOIN hyperfide.documentation_closures c ON c.organisation_id=b.organisation_id AND c.run_id=b.run_id AND c.baseline_id=b.id AND c.baseline_digest=b.baseline_digest WHERE b.organisation_id=$1 AND b.run_id=$2 ORDER BY b.created_at DESC,b.id DESC LIMIT 1",[scope.organisation_id,scope.run_id]);
+ const previousDigest=previous.rows[0]?.baseline_digest??null,reload=documentationReload(previous.rows[0]?.payload,files,previousDigest);
+ const packet:DocumentationPacket={schema_version:1,scope,pins:p,authority_epoch:selected.authority_epoch,policy:selected.policy,repositories:selected.versions,snapshot:files,snapshot_digest:contentDigest(files),previous_baseline_digest:previousDigest,incremental:reload};
  const bytes=canonical(packet),hash=sha256(bytes);
  const existing=await tx.query("SELECT id,packet_digest,payload FROM hyperfide.documentation_packets WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3",[scope.organisation_id,scope.run_id,i.operation.idempotency_key]);
- if(existing.rows.length){const old=existing.rows[0]!.payload as DocumentationPacket;if(canonical(old.pins)!==canonical(p)||old.authority_epoch!==packet.authority_epoch||old.snapshot_digest!==packet.snapshot_digest||canonical(old.policy)!==canonical(packet.policy))invalid('Documentation request identity was reused with changed inputs');return {packet_id:existing.rows[0]!.id,packet_digest:existing.rows[0]!.packet_digest,snapshot_digest:old.snapshot_digest,replayed:true};}
+ if(existing.rows.length){const old=existing.rows[0]!.payload as DocumentationPacket;if(canonical(old.pins)!==canonical(p)||old.authority_epoch!==packet.authority_epoch||old.snapshot_digest!==packet.snapshot_digest||canonical(old.policy)!==canonical(packet.policy))invalid('Documentation request identity was reused with changed inputs');return {packet_id:existing.rows[0]!.id,packet_digest:existing.rows[0]!.packet_digest,snapshot_digest:old.snapshot_digest,previous_baseline_digest:old.previous_baseline_digest,incremental:old.incremental??null,virtual_role:'@docs',closed:false,dispatches_new_run:false,replayed:true};}
  const id=randomUUID();await tx.query("INSERT INTO hyperfide.documentation_packets(organisation_id,run_id,id,request_id,spec_revision_id,spec_generation,authority_epoch,source_manifest_digest,programme_manifest_digest,packet_digest,canonical_content,payload)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)",[scope.organisation_id,scope.run_id,id,i.operation.idempotency_key,p.spec_revision_id,p.spec_generation,selected.authority_epoch,p.source_manifest_digest,p.programme_manifest_digest,hash,bytes,bytes]);
- return {packet_id:id,packet_digest:hash,snapshot_digest:packet.snapshot_digest,previous_baseline_digest:packet.previous_baseline_digest,virtual_role:'@docs',closed:false,dispatches_new_run:false};
+ return {packet_id:id,packet_digest:hash,snapshot_digest:packet.snapshot_digest,previous_baseline_digest:packet.previous_baseline_digest,incremental:reload,virtual_role:'@docs',closed:false,dispatches_new_run:false};
  });
 }
 export async function closeDocumentation(input:unknown,context:ComponentContext):Promise<unknown>{
