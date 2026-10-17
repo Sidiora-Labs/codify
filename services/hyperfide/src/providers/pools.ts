@@ -475,7 +475,8 @@ export function runtimeReadinessDigest(value:Record<string,unknown>):string {
  const identity:Record<string,unknown>={};
  for(const key of readinessIdentityFields){
   if(!Object.hasOwn(value,key))fail('RUNTIME_OBSERVATION_INVALID','Complete immutable readiness envelope required');
-  identity[key]=['observed_at','expires_at'].includes(key)?new Date(String(value[key])).toISOString():key==='boot_generation'?String(value[key]):value[key];
+  const timestamp=value[key];
+  identity[key]=['observed_at','expires_at'].includes(key)?(timestamp instanceof Date?timestamp:new Date(String(timestamp))).toISOString():key==='boot_generation'?String(value[key]):value[key];
  }
  return digestDocument({schema_version:1,kind:'RUNTIME_READINESS_PUBLICATION',identity});
 }
