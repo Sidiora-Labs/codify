@@ -6,7 +6,7 @@ actions carry no SQL or DDL. Full migration, replica, ranking and scale campaign
 remain independent obligations.
 """
 from __future__ import annotations
-import concurrent.futures,copy,hashlib,importlib.util,json,os,re,sqlite3,subprocess,sys,tempfile,uuid
+import concurrent.futures,copy,hashlib,importlib.util,json,os,re,sqlite3,subprocess,sys,tempfile,time,uuid
 from pathlib import Path
 from urllib.parse import urlsplit,urlunsplit
 ROOT=Path(__file__).resolve().parents[4]
@@ -49,7 +49,7 @@ class Fixture:
     def __init__(self,base):
         global DATABASE
         (base/"native").mkdir()
-        self.native=native.Service(base/"native",extra_components=("7.2","7.3","7.4"),database=DATABASE,graph_schema=True)
+        self.native=native.Service(base/"native",extra_components=("7.2","7.3","7.4"),database=DATABASE)
         self.fixture=self.native.fixture
         DATABASE=self.fixture.database
         SCOPE.update(organisation_id=self.fixture.ids["organisation"],run_id=self.fixture.ids["run"],authority_epoch=self.fixture.ids["epoch"])
@@ -151,6 +151,140 @@ def ingestion(f):
         try:f.reject("7.2","graph.ingest.create",f.scoped(bundles=[f.manifest]),"GRAPH_ARTIFACT_UNAVAILABLE")
         finally:artifact_status(b,"COMPLETE")
     check("graph.ingestion.reject-quarantined-build-replay",unavailable_replay)
+    branch=branch_commit(f)
+    check("graph.ingestion.bounded-network-amplification",lambda:network_amplification(f,branch))
+    check("graph.ingestion.typed-graph-overload-preserves-coordination",lambda:graph_saturation(f,b))
+    check("graph.ingestion.concurrent-branch-race-isolated",lambda:branch_race(f,branch))
+
+SYMBOLS=400
+def branch_commit(f):
+    """A second commit of the same repository whose symbol count dwarfs the batch count."""
+    source=f.native.repo;base=dict(commit=f.native.commit,tree=f.native.tree)
+    (source/"many.py").write_text("".join("def branch_symbol_%d(value):\n    return branch_symbol_%d(value)\n\n"%(i,max(i-1,0)) for i in range(SYMBOLS)))
+    native.process(["git","add","many.py"],source);native.process(["git","commit","-qm","branch fixture with many symbols"],source)
+    commit=native.process(["git","rev-parse","HEAD"],source);tree=native.process(["git","rev-parse","HEAD^{tree}"],source)
+    f.fixture.sql("INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id) VALUES($1,$2,$3)",[SCOPE["organisation_id"],native.UUIDS["repository_id"],commit])
+    return {"base":base,"branch":dict(commit=commit,tree=tree)}
+def extract_at(f,source,generation):
+    return f.native.ok("graph.extract.create",dict(f.native.input,generation=generation,**source))
+def drive(f,manifest,chunks,limit):
+    """Full ingestion of one bundle; returns build id and per-action HTTPS operation counts."""
+    calls={"create":0,"chunk":0,"seal":0,"resolve":0};rows=[]
+    build=f.create(manifest)["build_id"];calls["create"]+=1
+    for chunk in chunks:f.ok("7.2","graph.ingest.chunk",f.scoped(build_id=build,bundle_digest=manifest["bundle_digest"],chunk=chunk));calls["chunk"]+=1
+    f.ok("7.2","graph.ingest.seal",f.scoped(build_id=build));calls["seal"]+=1
+    for _ in range(1000):
+        r=f.ok("7.2","graph.ingest.resolve",f.scoped(build_id=build,limit=limit));calls["resolve"]+=1;rows.append([r["phase"],r["rows"]])
+        if r["state"]=="READY":return build,calls,rows
+    raise AssertionError("bounded resolution did not finish")
+def committed_transactions():
+    # Cumulative statistics flush lazily from idle backends (<=10 s); wait past that window.
+    time.sleep(11)
+    return int(sql("SELECT xact_commit FROM pg_stat_database WHERE datname='"+DATABASE+"'").stdout.strip())
+def network_amplification(f,branch):
+    manifest=extract_at(f,branch["branch"],"20");chunks=f.native.chunks(manifest);counts=manifest["counts"];limit=256
+    expect(counts["symbols"]>=SYMBOLS and counts["refs"]>=SYMBOLS,"branch fixture did not produce a per-symbol-heavy bundle")
+    before=committed_transactions()
+    build,calls,rows=drive(f,manifest,chunks,limit)
+    after=committed_transactions()
+    operations=sum(calls.values());per_symbol=counts["symbols"]+counts["refs"]
+    # Resolution is one set-based statement page per <=limit rows, one transaction per body file, one per phase transition.
+    resolve_bound=sum(-(-counts.get(family,0)//limit) for family in ("files","symbols","refs","semantic_edges"))+counts.get("source_bodies",0)+5
+    # Each authenticated HTTPS operation costs a constant number of primary transactions (authenticate, authorize, action, bounded retry).
+    per_operation=6;transactions=after-before
+    OBS.append({"observation":"network-amplification","build_id":build,"symbols":counts["symbols"],"refs":counts["refs"],"chunks":len(chunks),
+        "https_operations":calls,"resolution_pages":rows,"resolve_bound":resolve_bound,"xact_commit_delta":transactions,"per_operation_transaction_bound":per_operation})
+    expect(calls["chunk"]==len(chunks)==len(manifest["chunks"]),"staging issued more than one round trip per COPY chunk")
+    expect(calls["resolve"]<=resolve_bound,"resolution round trips exceed O(batches): %d>%d"%(calls["resolve"],resolve_bound))
+    expect(any(phase in ("symbols","refs") and n>1 for phase,n in rows),"resolution did not resolve symbols/references set-based")
+    expect(operations*4<per_symbol,"HTTPS round trips scale with symbols: %d operations for %d symbols+refs"%(operations,per_symbol))
+    expect(0<transactions<=per_operation*operations+8,"database transactions exceed O(chunks+batches): %d for %d operations"%(transactions,operations))
+    expect(transactions*2<per_symbol,"database transactions scale with symbols: %d for %d symbols+refs"%(transactions,per_symbol))
+    expect(sql("SELECT count(*) FROM hyperfide.graph_symbols WHERE graph_id='"+build+"'").stdout.strip()==str(counts["symbols"]),"bulk resolution lost symbols")
+LIMITS={"HYPERFIDE_GRAPH_MAX_ACTIVE":"1","HYPERFIDE_GRAPH_MAX_QUEUED":"1","HYPERFIDE_GRAPH_QUEUE_WAIT_MS":"1000","HYPERFIDE_PG_LOCK_TIMEOUT_MS":"8000"}
+def graph_saturation(f,build):
+    def restart(env):
+        f.fixture.stop()
+        for key in LIMITS:f.fixture.env.pop(key,None)
+        f.fixture.env.update(env);f.fixture.start()
+    def poll(statement,predicate,message,seconds=4):
+        deadline=time.monotonic()+seconds
+        while time.monotonic()<deadline:
+            value=sql(statement).stdout.strip()
+            if predicate(value):return value
+            time.sleep(0.05)
+        raise AssertionError(message)
+    role=f.fixture.runtime_role;lock_waiters="SELECT count(*) FROM pg_stat_activity WHERE datname='"+DATABASE+"' AND usename='"+role+"' AND wait_event_type='Lock'"
+    restart(LIMITS);holder=None
+    try:
+        admission=f.ok("7.2","graph.ingest.describe",{})["admission"]
+        expect(admission["max_active"]==1 and admission["max_queued"]==1 and admission["max_active"]<admission["primary_pool_max"],"trusted graph admission limits not applied below pool maximum: "+encoded(admission))
+        # An operator session holds the build row, so the admitted graph transaction keeps its connection while blocked.
+        env=os.environ.copy();env["PGDATABASE"]=DATABASE
+        holder=subprocess.Popen(["psql","-X","-q","-v","ON_ERROR_STOP=1","-d",DATABASE],env=env,stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True)
+        holder.stdin.write("BEGIN;\nSELECT 1 FROM hyperfide.graph_builds WHERE id='"+build+"' FOR UPDATE;\nSELECT pg_sleep(4);\nCOMMIT;\n");holder.stdin.close()
+        poll("SELECT count(*) FROM pg_stat_activity WHERE datname='"+DATABASE+"' AND wait_event='PgSleep'",lambda v:v=="1","operator lock holder did not start")
+        resolve=f.scoped(build_id=build,limit=1)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+            admitted=pool.submit(f.request,"7.2","graph.ingest.resolve",resolve)
+            poll(lock_waiters,lambda v:v=="1","admitted graph transaction did not block on the held row")
+            queued=pool.submit(f.request,"7.2","graph.ingest.resolve",resolve)
+            poll("SELECT 1",lambda _:f.ok("7.2","graph.ingest.describe",{})["admission"]["queued"]==1,"second graph request was not queued")
+            started=time.monotonic();status,response=f.request("7.2","graph.ingest.inspect",f.scoped(build_id=build));full_refusal=time.monotonic()-started
+            expect(response.get("ok") is False and response["error"]["code"]=="GRAPH_OVERLOADED","full graph queue did not return typed overload: "+encoded(response))
+            # Coordination traffic (authenticated identity/authorization transactions) proceeds while graph admission is saturated.
+            def coordination():
+                started=time.monotonic();status,response=f.request("14.1","identity.describe",{})
+                return status,response,time.monotonic()-started
+            coordinated=[item.result() for item in [pool.submit(coordination) for _ in range(3)]]
+            saturated=f.ok("7.2","graph.ingest.describe",{})["admission"]
+            waiting=int(sql(lock_waiters).stdout.strip())
+            queued_status,queued_response=queued.result(timeout=10)
+            admitted_status,admitted_response=admitted.result(timeout=15)
+        holder.wait(timeout=10);expect(holder.returncode==0,"operator lock holder failed: "+holder.stderr.read()[:500]);holder=None
+        after=f.ok("7.2","graph.ingest.describe",{})["admission"]
+        OBS.append({"observation":"graph-admission-saturation","limits":LIMITS,"full_queue_refusal_seconds":round(full_refusal,3),
+            "coordination_seconds":[round(c[2],3) for c in coordinated],"saturated_admission":saturated,"graph_backends_waiting_on_lock":waiting,
+            "queued_code":queued_response.get("error",{}).get("code"),"admitted_ok":admitted_response.get("ok"),"after_admission":after})
+        expect(full_refusal<1.0,"full graph queue refusal waited instead of failing fast")
+        expect(all(c[0]==200 and c[1].get("ok") is True and c[2]<2.0 for c in coordinated),"coordination traffic starved behind graph work: "+encoded([[c[0],c[1].get("error"),c[2]] for c in coordinated]))
+        expect(saturated["active"]==1 and saturated["queued"]==1 and saturated["refused"]>=1,"admission metrics do not expose graph pressure: "+encoded(saturated))
+        expect(waiting==1,"graph work occupied more primary connections than its admission bound: %d"%waiting)
+        expect(queued_response.get("ok") is False and queued_response["error"]["code"]=="GRAPH_OVERLOADED","expired graph admission wait was not a typed overload: "+encoded(queued_response))
+        expect(admitted_response.get("ok") is True and admitted_response["result"]["state"]=="READY","admitted graph work did not complete after the lock was released: "+encoded(admitted_response))
+        expect(after["active"]==0 and after["queued"]==0 and after["refused"]>=2,"graph admission permits leaked: "+encoded(after))
+    finally:
+        if holder:holder.kill();holder.wait()
+        restart({})
+def branch_race(f,branch):
+    sources={"base":extract_at(f,branch["base"],"21"),"branch":extract_at(f,branch["branch"],"22")}
+    chunks={name:f.native.chunks(m) for name,m in sources.items()}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        futures={name:pool.submit(drive,f,sources[name],chunks[name],64) for name in sources}
+        builds={name:future.result()[0] for name,future in futures.items()}
+    expect(builds["base"]!=builds["branch"],"different revisions shared one graph build")
+    observed={}
+    for name,build in builds.items():
+        m=sources[name];commit=branch[name]["commit"]
+        q=lambda statement:sql(statement.replace("$g","'"+build+"'")).stdout.strip()
+        # Retrying an already-staged chunk after the race neither duplicates facts nor changes the build.
+        replay=f.ok("7.2","graph.ingest.chunk",f.scoped(build_id=build,bundle_digest=m["bundle_digest"],chunk=chunks[name][0]))
+        observed[name]={"build_id":build,"commit":commit,
+            "fact_bundles":q("SELECT string_agg(DISTINCT bundle_digest::text,',') FROM hyperfide.graph_fact_rows WHERE graph_id=$g"),
+            "facts":int(q("SELECT count(*) FROM hyperfide.graph_fact_rows WHERE graph_id=$g")),
+            "file_commits":q("SELECT string_agg(DISTINCT source_object_id,',') FROM hyperfide.graph_files WHERE graph_id=$g"),
+            "has_branch_file":q("SELECT count(*) FROM hyperfide.graph_files WHERE graph_id=$g AND path='many.py'")=="1",
+            "symbols":int(q("SELECT count(*) FROM hyperfide.graph_symbols WHERE graph_id=$g")),
+            "foreign_symbol_files":int(q("SELECT count(*) FROM hyperfide.graph_symbols s LEFT JOIN hyperfide.graph_files f ON f.id=s.file_id AND f.graph_id=s.graph_id WHERE s.graph_id=$g AND f.id IS NULL")),
+            "foreign_reference_targets":int(q("SELECT count(*) FROM hyperfide.graph_references r JOIN hyperfide.graph_symbols t ON t.id=r.target_symbol_id WHERE r.graph_id=$g AND t.graph_id<>r.graph_id")),
+            "replayed":replay["replayed"]}
+        o=observed[name]
+        expect(o["fact_bundles"]==m["bundle_digest"] and o["facts"]==sum(m["counts"].values()),"facts mixed or duplicated across racing branch builds: "+encoded(o))
+        expect(o["file_commits"]==commit and o["symbols"]==m["counts"]["symbols"],"projection mixed source revisions: "+encoded(o))
+        expect(o["foreign_symbol_files"]==0 and o["foreign_reference_targets"]==0 and o["replayed"] is True,"cross-build resolution or chunk retry leaked: "+encoded(o))
+    expect(observed["branch"]["has_branch_file"] and not observed["base"]["has_branch_file"],"branch-only source appeared in the base revision graph")
+    expect(observed["branch"]["symbols"]>=observed["base"]["symbols"]+SYMBOLS,"branch symbol projection incomplete")
+    OBS.append({"observation":"concurrent-branch-race","builds":observed})
 
 
 def artifact_status(build,status):

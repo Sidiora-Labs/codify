@@ -29,7 +29,10 @@
     "graph.ingestion.no-publication-side-effect",
     "graph.ingestion.concurrent-exact-build-replay",
     "graph.ingestion.reject-incomplete-manifest-artifact-reuse",
-    "graph.ingestion.reject-quarantined-build-replay"
+    "graph.ingestion.reject-quarantined-build-replay",
+    "graph.ingestion.bounded-network-amplification",
+    "graph.ingestion.typed-graph-overload-preserves-coordination",
+    "graph.ingestion.concurrent-branch-race-isolated"
   ],
   "argv": [
     "python3",
