@@ -51,17 +51,25 @@ async function profiles(ctx:ComponentContext):Promise<Map<string,Profile>>{
  return result;
 }
 async function run(profile:Profile,args:string[],signal:AbortSignal):Promise<{exit_code:number|null;stdout:string;stderr:string}>{
- const s=profile.snapshot,identity=await binaryIdentity(s.binary.path);if(identity.digest!==s.binary.digest)fail('NATIVE_BINARY_DRIFT','Pinned runtime changed before execution');
- const executable=s.binary.path,argv=args;
+ signal.throwIfAborted();const s=profile.snapshot,identity=await binaryIdentity(s.binary.path);signal.throwIfAborted();
+ if(identity.digest!==s.binary.digest)fail('NATIVE_BINARY_DRIFT','Pinned runtime changed before execution');
  return new Promise((resolve,reject)=>{
-  const child=spawn(executable,argv,{shell:false,stdio:['ignore','pipe','pipe'],uid:profile.target_uid,gid:profile.target_uid,
-    env:{PATH:path.dirname(process.execPath)+':/usr/bin:/bin',HOME:profile.runtime_home,XDG_CONFIG_HOME:path.join(profile.runtime_home,'.config'),LANG:'C.UTF-8'},signal});
-  const out:Buffer[]=[],err:Buffer[]=[];let size=0,settled=false;
-  const timer=setTimeout(()=>child.kill('SIGKILL'),10000);
-  const data=(target:Buffer[])=> (chunk:Buffer):void=>{size+=chunk.length;if(size>65536){child.kill('SIGKILL');return;}target.push(chunk);};
+  const child=spawn(s.binary.path,args,{shell:false,stdio:['ignore','pipe','pipe'],uid:profile.target_uid,gid:profile.target_uid,
+   env:{PATH:path.dirname(process.execPath)+':/usr/bin:/bin',HOME:profile.runtime_home,XDG_CONFIG_HOME:path.join(profile.runtime_home,'.config'),LANG:'C.UTF-8'}});
+  const out:Buffer[]=[],err:Buffer[]=[];let size=0,failed=false,spawnError=false;
+  const terminate=():void=>{failed=true;child.kill('SIGKILL');};
+  const timer=setTimeout(terminate,10000);
+  signal.addEventListener('abort',terminate,{once:true});
+  const data=(target:Buffer[]) => (chunk:Buffer):void=>{size+=chunk.length;if(size>65536){terminate();return;}target.push(chunk);};
   child.stdout.on('data',data(out));child.stderr.on('data',data(err));
-  child.once('error',()=>{if(!settled){settled=true;clearTimeout(timer);reject(new Error('Pinned native authentication probe could not start'));}});
-  child.once('close',(code,termination)=>{if(settled)return;settled=true;clearTimeout(timer);if(size>65536||termination)reject(new Error('Pinned native authentication probe exceeded bounds'));else resolve({exit_code:code,stdout:Buffer.concat(out).toString('utf8'),stderr:Buffer.concat(err).toString('utf8')});});
+  // Failed spawn and abort must not release process ownership before actual close.
+  child.once('error',()=>{spawnError=true;terminate();});
+  child.once('close',(code,termination)=>{
+   clearTimeout(timer);signal.removeEventListener('abort',terminate);
+   if(failed||spawnError||signal.aborted||size>65536||termination)reject(new Error('Pinned native authentication probe did not complete safely'));
+   else resolve({exit_code:code,stdout:Buffer.concat(out).toString('utf8'),stderr:Buffer.concat(err).toString('utf8')});
+  });
+  if(signal.aborted)terminate();
  });
 }
 export async function createComponent(ctx:ComponentContext):Promise<Component>{

@@ -12,9 +12,9 @@ def main():
     repo=uid();otherrepo=uid();taskref='refs/heads/task/bounded';protected='refs/heads/main';destination='https://models.example.test'
     def setup(f):
         work=f.path/'git-repository';work.mkdir()
-        subprocess.run(['git','init','--quiet',str(work)],check=True)
-        subprocess.run(['git','-C',str(work),'-c','user.name=Component Fixture','-c','user.email=fixture@example.invalid','commit','--quiet','--allow-empty','-m','Owned authorization fixture'],check=True)
-        oid=subprocess.check_output(['git','-C',str(work),'rev-parse','HEAD'],text=True).strip()
+        subprocess.run(['git','-c','maintenance.auto=false','-c','gc.auto=0','init','--quiet',str(work)],check=True)
+        subprocess.run(['git','-c','maintenance.auto=false','-c','gc.auto=0','-C',str(work),'-c','user.name=Component Fixture','-c','user.email=fixture@example.invalid','commit','--quiet','--allow-empty','-m','Owned authorization fixture'],check=True)
+        oid=subprocess.check_output(['git','-c','maintenance.auto=false','-c','gc.auto=0','-C',str(work),'rev-parse','HEAD'],text=True).strip()
         for id,name in [(repo,'bound-repo'),(otherrepo,'not-bound-repo')]:
             f.sql("INSERT INTO hyperfide.repositories(organisation_id,id,project_id,name,url) VALUES($1,$2,$3,$4,'https://example.invalid/fixture.git')",[f.ids['organisation'],id,f.ids['project'],name])
             f.sql("INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id) VALUES($1,$2,$3)",[f.ids['organisation'],id,oid])

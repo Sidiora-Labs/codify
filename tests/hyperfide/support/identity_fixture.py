@@ -172,7 +172,8 @@ class IdentityFixture:
         return operation or {"protocol_version":1,"operation_id":uid(),"idempotency_key":uid(),"payload_digest":sha(payload),"correlation_id":uid(),"causation_id":None,"payload_b64":b64(payload)}
     def sign(self,key,message):
         return subprocess.check_output(["node","--input-type=commonjs","-e",SIGN_JS,str(self.keys[key]["path"])],input=message,cwd=ROOT).decode()
-    def request(self,body,key="operator",endpoint="/v1/invoke",credential=None,nonce=None,seconds=None,headers=None,ca=None):
+    def request(self,body,key="operator",endpoint="/v1/invoke",credential=None,nonce=None,seconds=None,headers=None,ca=None,timeout_seconds=10):
+        if not isinstance(timeout_seconds,(int,float)) or isinstance(timeout_seconds,bool) or not 0<timeout_seconds<=120:raise ValueError("Bounded request timeout required")
         raw=body if isinstance(body,bytes) else canonical(body)
         ident=credential or self.ids[key];seconds=seconds or str(int(time.time()));nonce=nonce or uid()
         domain="HYPERFIDE-ENROLL-V1" if endpoint=="/v1/enroll" else "HYPERFIDE-REQUEST-V1"
@@ -182,7 +183,7 @@ class IdentityFixture:
         else:proof["HF-Credential-Id"]=ident
         if headers:proof.update(headers)
         context=ssl.create_default_context(cafile=str(ca or self.ca))
-        conn=http.client.HTTPSConnection("localhost",self.port,context=context,timeout=10)
+        conn=http.client.HTTPSConnection("localhost",self.port,context=context,timeout=timeout_seconds)
         try:conn.request("POST",endpoint,raw,proof);response=conn.getresponse();data=response.read();return response.status,json.loads(data)
         finally:conn.close()
     def invoke(self,action,input,component="14.1",key="operator",authority=None,**kwargs):

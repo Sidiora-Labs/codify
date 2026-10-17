@@ -35,7 +35,7 @@ def main():
             check('native.'+name+'.no-invented-live-qualification',lambda s=snapshot:expect(s['qualification']=={'state':'UNQUALIFIED','live_qualified':False,'receipt_digest':None},'Version pin promoted live qualification'))
             check('native.'+name+'.unknown-observed-identity',lambda s=snapshot:expect(s['observed_model_id'] is None and s['observed_provider_id'] is None and s['configured_model_alias']!=s['requested_model_id'],'Configured labels became observed identity'))
             check('native.'+name+'.public-no-private-runtime',lambda s=snapshot:expect('runtime_home' not in s and 'target_uid' not in s and canary not in json.dumps(s),'Private native material leaked'))
-            result=f.invoke('native.auth.probe',{'profile_id':name+'-profile'},component='14.3')[1]
+            result=f.invoke('native.auth.probe',{'profile_id':name+'-profile'},component='14.3',timeout_seconds=20)[1]
             check('native.'+name+'.real-clean-home-version-auth-probe',lambda r=result:expect(r.get('ok') is True and r['result']['runtime_version_verified'] is True and r['result']['native_authentication']=='AUTH_BLOCKED','Actual clean-home CLI probe failed: '+json.dumps(r)))
             check('native.'+name+'.probe-does-not-qualify-vendor',lambda r=result:expect(r['result']['live_qualified'] is False and r['result']['refresh_qualified'] is False and r['result']['endurance_72h_qualified'] is False and canary not in json.dumps(r),'Probe invented qualification or leaked secret'))
         check('native.claude.large-installed-binary',lambda:expect(Path(profiles['claude']['binary']['path']).stat().st_size>128*1024*1024,'Test did not exercise real >128MiB Claude payload'))
@@ -54,6 +54,27 @@ def main():
         expect(p.returncode==0,'Actual private native runtime getter failed: '+p.stderr[:500]);private=json.loads(p.stdout)
         check('native.private-runtime.current-reference-positive',lambda:expect(private['runtimeAvailable'] and not private['missing'],'Current native private binding unavailable'))
         check('native.private-runtime-does-not-return-secret-bytes',lambda:expect(canary not in p.stdout,'Private runtime getter exposed credential bytes'))
+        import signal
+        abort_body=f.operation('14.3','native.auth.probe',{'profile_id':'claude-profile'});abort_raw=canonical(abort_body);abort_seconds=str(int(time.time()));abort_nonce=uid()
+        abort_args={'components':str(f.components),'policy':str(f.policy),'body':b64(abort_raw),'headers':['HF-Credential-Id',f.ids['operator'],'HF-Request-Time',abort_seconds,'HF-Request-Nonce',abort_nonce,'HF-Request-Signature',f.sign('operator',('\n'.join(('HYPERFIDE-REQUEST-V1','POST','/v1/invoke',f.origin,f.ids['operator'],abort_seconds,abort_nonce,sha(abort_raw),''))).encode())]}
+        abort_script="import fs from 'node:fs';import {ComponentRegistry} from './services/hyperfide/dist/components/registry.js';import {validatePolicy} from './services/hyperfide/dist/policy/programme.js';const a=JSON.parse(fs.readFileSync(0,'utf8')),c=new AbortController();process.once('SIGUSR2',()=>c.abort());const policy=validatePolicy(JSON.parse(fs.readFileSync(a.policy,'utf8')),'fixture-identity-v1','control'),r=new ComponentRegistry({role:'control',env:process.env,signal:c.signal,policy});let refused=false;try{await r.load(a.components,process.cwd()+'/services/hyperfide/dist');const auth=r.resolveCapability('14.1','identity.authority',v=>typeof v.authenticate==='function'),i=await auth.authenticate(Buffer.from(a.body,'base64url'),a.headers,c.signal),native=r.resolveCapability('14.3','identity.native-auth',v=>typeof v.probe==='function');try{await native.probe(i,'claude-profile')}catch{refused=true}process.stdout.write(JSON.stringify({refused,aborted:c.signal.aborted,remaining_children:fs.readFileSync('/proc/self/task/'+process.pid+'/children','utf8').trim()}));}finally{await r.close()}"
+        owned=subprocess.Popen(['node','--input-type=module','-e',abort_script],cwd=ROOT,env=f.env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+        seen=[];owned.stdin.write(json.dumps(abort_args));owned.stdin.close();owned.stdin=None
+        try:
+            deadline=time.monotonic()+15
+            while time.monotonic()<deadline and owned.poll() is None:
+                children=Path('/proc/'+str(owned.pid)+'/task/'+str(owned.pid)+'/children')
+                if children.exists():seen=[int(pid) for pid in children.read_text().split()]
+                if seen:
+                    owned.send_signal(signal.SIGUSR2);break
+                time.sleep(0.01)
+            expect(bool(seen),'Actual pinned native child was never observed for abort test')
+            stdout,stderr=owned.communicate(timeout=20)
+            expect(owned.returncode==0,'Actual native abort fixture failed: '+stderr[:700]);aborted=json.loads(stdout)
+            check('native.abort.refuses-incomplete-probe',lambda:expect(aborted['refused'] and aborted['aborted'],'Native cancellation reported a completed probe'))
+            check('native.abort.waits-for-actual-child-close',lambda:expect(aborted['remaining_children']=='' and all(not Path('/proc/'+str(pid)).exists() for pid in seen),'Native probe released ownership before actual child close'))
+        finally:
+            if owned.poll() is None:owned.kill();owned.communicate(timeout=5)
         target=Path(profiles['claude']['binary']['path'])
         with target.open('r+b') as stream:first=stream.read(1);stream.seek(0);stream.write(b'X')
         try:
