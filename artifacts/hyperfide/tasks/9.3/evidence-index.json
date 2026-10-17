@@ -1,9 +1,9 @@
 {
   "task": "9.3",
-  "commit": "bcfa3f1e4d9491b91842413c9dd481da488cb786",
+  "commit": "12aa390190b3d3e360e079254378a381103fc236",
+  "requalified_on": "12aa390190b3d3e360e079254378a381103fc236",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-039 --manifest tests/hyperfide/manifests/tasks/9.3.json && python3 tests/hyperfide/qualify.py --case V-041 --manifest tests/hyperfide/manifests/tasks/9.3.json",
   "exit_code": 0,
-  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"d7ec71fb-f118-476b-971c-ff323f828041\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/9.3/campaigns/7d7d1f95c0fc3395839e929e913c296ac1239b479fff003a66ddd718d24a277c\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"b591cb6b-f10c-4d3b-9164-c205d66e2137\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/9.3/campaigns/7d7d1f95c0fc3395839e929e913c296ac1239b479fff003a66ddd718d24a277c\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
-  "ran_at": "2026-10-17T09:13:36Z",
-  "notes": "Run as repository owner uid hf (checker's isolated git rejects root on a hf-owned checkout as dubious ownership) with PostgreSQL fixture env and local HF_CREDENTIAL_CONFIG_FILE fixture. provider_fixture=simulated; not provider acceptance."
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"22764e90-2be6-4ddc-8900-96e09b2f939e\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/9.3/campaigns/cdef429012df89265d5ee12abd8a59c1805b5d114c6baffeb898ccae06679356\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"6e184e7e-3241-4f7b-8ac3-8803f8d2d2af\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/9.3/campaigns/cdef429012df89265d5ee12abd8a59c1805b5d114c6baffeb898ccae06679356\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T14:03:24.106970+00:00"
 }
