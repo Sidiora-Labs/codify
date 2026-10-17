@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "id": "25.1",
+  "task": "25.1",
+  "roles": [
+    "control"
+  ],
+  "module": "migration/sqlite.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "migration.sqlite.describe",
+    "migration.sqlite.snapshot",
+    "migration.sqlite.inventory",
+    "migration.sqlite.archive",
+    "migration.sqlite.import",
+    "migration.sqlite.status"
+  ],
+  "requires": [
+    "4.2",
+    "14.1",
+    "15.2"
+  ]
+}

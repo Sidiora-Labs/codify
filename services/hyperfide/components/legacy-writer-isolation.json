@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "legacy-writer-isolation",
+  "task": "25.1",
+  "roles": [
+    "provisioner"
+  ],
+  "module": "migration/legacy.js",
+  "entry": "createLegacyComponent",
+  "api_version": 1,
+  "actions": [
+    "legacy.writer.describe"
+  ],
+  "requires": []
+}

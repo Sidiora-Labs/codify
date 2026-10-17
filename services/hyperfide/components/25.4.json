@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "25.4",
+  "task": "25.4",
+  "roles": [
+    "control"
+  ],
+  "module": "deployment/releases.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "release.inspect",
+    "release.compatibility",
+    "release.plan"
+  ],
+  "requires": [
+    "4.2",
+    "14.1"
+  ]
+}

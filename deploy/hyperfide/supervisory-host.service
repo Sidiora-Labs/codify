@@ -1,0 +1,29 @@
+[Unit]
+Description=Hyperfide restricted MAIN supervisory host
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+[Service]
+Type=exec
+User=root
+Group=root
+WorkingDirectory=/opt/hyperfide/current
+EnvironmentFile=/etc/hyperfide/supervisory-host.env
+Environment=HYPERFIDE_MAIN_BUDGET_FILE=/etc/hyperfide/main-budget.json
+Environment=HYPERFIDE_SUPERVISOR_PYTHON=/opt/hyperfide/current/runtime/python/bin/python3
+Environment=LD_LIBRARY_PATH=/opt/hyperfide/current/lib/hyperfide
+ExecStart=/opt/hyperfide/current/bin/hyperfide supervisory-host --config /etc/hyperfide/supervisory-host.json
+Restart=on-failure
+RestartSec=10
+RestartPreventExitStatus=78
+KillMode=control-group
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/hyperfide
+UMask=0077
+[Install]
+WantedBy=multi-user.target

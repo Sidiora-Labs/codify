@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "id": "25.2",
+  "task": "25.2",
+  "roles": [
+    "control"
+  ],
+  "module": "migration/cutover.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "cutover.describe",
+    "cutover.inspect",
+    "cutover.prepare",
+    "cutover.validate",
+    "cutover.activate",
+    "cutover.rollback",
+    "cutover.recovery"
+  ],
+  "requires": [
+    "25.1",
+    "24.3",
+    "4.4",
+    "4.2",
+    "14.1",
+    "3.1"
+  ]
+}

@@ -1,0 +1,155 @@
+{
+  "schema_version": 1,
+  "variant": "task:25.3",
+  "task": "25.3",
+  "scope": "task-component",
+  "cases": [
+    "V-019",
+    "V-027",
+    "V-028"
+  ],
+  "assertion_ids": [
+    "client.local.version",
+    "client.local.help",
+    "client.offline.local-version",
+    "client.offline.local-spec",
+    "client.distributed.init",
+    "client.distributed.spec-claim",
+    "client.distributed.spec-done",
+    "client.distributed.spec-run",
+    "client.distributed.mcp",
+    "client.distributed.hook-post-edit",
+    "client.distributed.work-legacy-update",
+    "client.distributed.docs-legacy-close",
+    "client.distributed.projection",
+    "client.distributed.serve",
+    "client.distributed.fleet-up",
+    "client.offline.remote-denied",
+    "client.downgrade-denied",
+    "client.bad-mode",
+    "client.distributed-without-descriptor",
+    "client.explicit-root-denied",
+    "client.explicit-descriptor",
+    "client.public-descriptor-denied",
+    "client.duplicate-descriptor-denied",
+    "client.symlink-descriptor-denied",
+    "client.protected.nonroot-primary-gid",
+    "client.protected.private-state-remains-private",
+    "client.protected.foreign-gid-refused",
+    "client.protected.supplementary-gid-refused",
+    "client.protected.writable-parent-refused",
+    "client.protected.child-owned-parent-refused",
+    "client.protected.symlink-parent-refused",
+    "client.protected.hardlinked-file-refused",
+    "client.protected.transport-config-nonroot",
+    "client.protected.signing-key-nonroot",
+    "client.protected.signing-key-write-refused",
+    "client.protected.owner-private-preserved",
+    "client.protected.mcp-nonroot-root-policy",
+    "client.https.real-principal",
+    "client.https.real-database-mutation",
+    "client.https.idempotent-replay",
+    "client.https.origin-conflict",
+    "client.mcp.real-signed-authority",
+    "client.https.accepted-ack-loss-unknown",
+    "client.https.revoked-principal",
+    "client.mapping.fleet-status-real-primary",
+    "client.mapping.mcp-fleet-status-real-primary",
+    "client.mcp.trusted-finite-tool-policy",
+    "client.mcp.public-tool-policy-refused",
+    "client.mcp.unknown-tool-policy-refused",
+    "client.mcp.duplicate-tool-policy-refused",
+    "client.mcp.bootstrap-generic-escape-refused",
+    "client.mcp.bootstrap-catalog-then-real-credential-attach",
+    "client.mcp.wrong-supervisor-credential-refused",
+    "client.protected.mcp-nonroot-signed-primary",
+    "client.https.business-unknown-exit75-real-pending",
+    "client.mcp.business-unknown-error-real-pending",
+    "client.cleanup.actual-absence"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/25_3.py"
+  ],
+  "timeout_seconds": 600,
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
+  "fixtures": [
+    "cg",
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/observability/views.js"
+  ],
+  "resources": [
+    {
+      "id": "hf-task25.3-network",
+      "kind": "isolated-postgresql-tls-fixture",
+      "scope": "task25.3-disposable"
+    },
+    {
+      "id": "hf-task25.3-mapping",
+      "kind": "isolated-postgresql-tls-fixture",
+      "scope": "task25.3-disposable"
+    },
+    {
+      "id": "hf-task25.3-business",
+      "kind": "isolated-postgresql-tls-fixture",
+      "scope": "task25.3-disposable"
+    },
+    {
+      "id": "hf-task25.3-object-backend",
+      "kind": "owned-byte-backend",
+      "scope": "task25.3-disposable"
+    }
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/25_3.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "required_artifacts": [
+    "client/cleanup.json",
+    "client/observations.json"
+  ],
+  "source_files": [
+    "Makefile",
+    "cg",
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/observability/views.js",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/package.json",
+    "services/hyperfide/tsconfig.json",
+    "src/govern.c",
+    "src/integrate.c",
+    "src/main.c",
+    "src/mcp.c",
+    "src/orchestrate.c",
+    "src/spec.c",
+    "tests/hyperfide/cases/tasks/15_2.py",
+    "tests/hyperfide/cases/tasks/25_3.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/registrations/25.3.json",
+    "tests/hyperfide/registry.json",
+    "tests/hyperfide/support/identity_fixture.py"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations",
+    "src/hyperfide",
+    "tests/hyperfide/support"
+  ],
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "https.fixture.listen",
+    "object.fixture.listen"
+  ]
+}
