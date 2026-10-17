@@ -1,0 +1,407 @@
+{
+  "schema_version": 1,
+  "campaign_id": "hyperfide-task-12.4-native-component-v1",
+  "registered_variant": "task:12.4",
+  "scope": "task-component",
+  "case_ids": [
+    "V-006",
+    "V-017"
+  ],
+  "expected_assertion_ids": [
+    "control.authority.transport-required",
+    "control.authority.unissued-command-refused",
+    "control.authority.unreachable-coordinator-refused",
+    "service.control.issue-requires-coordinator",
+    "control.pause.freezes-tree-keeps-processes-fences-input",
+    "control.observe.reports-control-phase",
+    "control.resume.thaws-and-reopens-admission",
+    "control.drain.in-flight-work-continues",
+    "control.drain.repeat-reevaluates-while-in-flight",
+    "control.drain.completes-after-in-flight-work",
+    "control.drain.deadline-policy-terminates",
+    "service.cancel.publication-fenced-before-native-delivery",
+    "service.control.terminating-launch-blocks-pause",
+    "control.cancel.kills-tree-without-grace",
+    "control.cancel.credentials-revoked",
+    "control.cancel.required-outputs-durable-in-artifact-store",
+    "control.cancel.reports-confirmed-cleanup",
+    "control.repeat.cancel-returns-recorded-outcome",
+    "control.repeat.conflicting-command-refused",
+    "control.ack.lost-report-redelivered-idempotently",
+    "control.ordering.superseded-command-refused",
+    "service.control.stale-attempt-generation-refused",
+    "control.authority.generation-mismatch-refused",
+    "control.stop.graceful-term-then-confirmed",
+    "control.slot.reuse-refused-with-process-residue",
+    "control.slot.reuse-refused-with-credential-residue",
+    "control.slot.reused-only-after-verified-cleanup",
+    "control.stop.unresolved-termination-reported-never-complete",
+    "control.restart.reconcile-completes-in-progress-stop",
+    "control.repeat.stop-after-restart-returns-recorded-outcome",
+    "control.cancel.before-launch-acknowledgement-fenced",
+    "control.cancel.after-reconnect-terminates-late-launch",
+    "control.restart.disconnected-job-cancelled-live-job-untouched",
+    "control.provisioner-validator-checks-native-receipts",
+    "service.report.contradiction-and-unproven-cleanup-refused",
+    "service.control.resume-requires-paused-or-drained",
+    "service.preparation-receipt.verified-persisted-and-conflicts-refused",
+    "subprobe.preparation-receipt-verifier",
+    "subprobe.preparation-stage-through-native-action",
+    "subprobe.runner-budget-kernel-enforcement",
+    "executor.actual-authenticated-provisioner-start",
+    "executor.invalid-readiness-no-sdk",
+    "executor.uncertain-claim-not-replayed",
+    "executor.genuine-configured-status",
+    "executor.actual-nonce-replay-refused",
+    "executor.forged-native-brand-refused",
+    "executor.operator-native-denied",
+    "executor.native-stop-command-required",
+    "executor.native-action-allowlist",
+    "executor.native-unregistered-target-refused",
+    "executor.placement-forged-brand-refused",
+    "executor.placement-wrong-source-label-refused",
+    "executor.placement-operator-denied",
+    "executor.placement-operation-mismatch-refused",
+    "executor.placement-invalid-identity-refused",
+    "executor.retained-launch-invalid-identity-refused",
+    "executor.retained-target-prerequisites-refused",
+    "executor.metadata-coherence-is-not-full-cleanup",
+    "executor.hostile-metadata-stopped-with-process",
+    "executor.hostile-metadata-stopped-with-descendant",
+    "executor.hostile-metadata-stopped-with-open-ipc",
+    "executor.hostile-metadata-inconsistent-descendant-count",
+    "executor.hostile-metadata-mismatched-target-boot",
+    "executor.hostile-metadata-invalid-kernel-process",
+    "executor.config-mode-refused",
+    "executor.config-symlink-refused",
+    "executor.config-duplicate-principal-refused",
+    "executor.config-concurrency-zero-refused",
+    "executor.config-concurrency-excess-refused",
+    "executor.config-wrong-key-refused",
+    "executor.config-wrong-role-refused",
+    "executor.job-plan-immutable",
+    "executor.job-principal-immutable",
+    "executor.job-epoch-immutable",
+    "executor.job-job-class-immutable",
+    "executor.claim-custody-immutable",
+    "executor.unknown-never-readmitted",
+    "executor.inline-result-bytes-refused",
+    "executor.result-cross-scope-refused",
+    "executor.insert-inline-result-refused",
+    "executor.insert-preclaimed-intent-refused",
+    "executor.unreferenced-intent-delete-refused",
+    "executor.actual15-capture-reference",
+    "executor.forged-artifact-brand-refused",
+    "executor.artifact-cross-scope-refused",
+    "executor.actual15-scoped-retention-link",
+    "executor.retention-wrong-digest-refused",
+    "executor.retention-cross-scope-refused",
+    "executor.retention-binding-immutable",
+    "executor.retention-link-delete-refused",
+    "executor.retention-original-reference-preserved",
+    "executor.runtime-reader-rechecks-actual-backend",
+    "executor.runtime-object-reader-actual-bytes",
+    "executor.storage-complete-preserves-capture-incomplete",
+    "executor.runtime-object-reader-digest-refused",
+    "executor.runtime-object-reader-size-refused",
+    "executor.runtime-object-reader-missing-refused",
+    "executor.actual15-manifest-for-runtime-reader",
+    "executor.runtime-manifest-reader-actual-bytes",
+    "executor.runtime-manifest-reader-parent-refused",
+    "executor.runtime-manifest-reader-content-refused",
+    "executor.runtime-object-corrupt-backend-refused",
+    "executor.runtime-manifest-corrupt-child-refused",
+    "executor.actual-provisioner-metadata-signature",
+    "executor.signature-result-tamper-refused",
+    "executor.signature-operation-tamper-refused",
+    "executor.signature-plan-tamper-refused",
+    "executor.restart-uncertain-not-replayed",
+    "executor.owned-database-absent",
+    "subprobe.executor-boundary-complete",
+    "control.cleanup.no-slot-processes-remain"
+  ],
+  "approval": {
+    "approved": true,
+    "allowed_actions": [
+      "postgresql.fixture.create",
+      "postgresql.fixture.drop",
+      "artifact.fixture.http.listen",
+      "identity.fixture.https.listen",
+      "identity.fixture.keys.generate",
+      "native.slot-uid.processes.spawn",
+      "cgroup.v2.child.delegate"
+    ]
+  },
+  "inputs": [
+    {
+      "path": "Makefile",
+      "sha256": "15a4ba0d37f9282fe0eb7b77de54de1f3c3bc5246cd283afe7fc54ad6d0f5e8b",
+      "size": 4205
+    },
+    {
+      "path": "build/hyperfide-native",
+      "sha256": "9374de9c6ce610ab34d7fe4d0d964d343ef0b80504543246edad94808357f9be",
+      "size": 468704
+    },
+    {
+      "path": "scripts/hyperfide-native-components.py",
+      "sha256": "5eb01214a3a91430cf2b66b2f15b40b91d06db8a87a00d88a11aca90985a23c2",
+      "size": 9165
+    },
+    {
+      "path": "src/hyperfide/component_main.c",
+      "sha256": "cb3b9f726346ac2724ca0d61f44845180074f2347f33a7c22d53b723e476223b",
+      "size": 7574
+    },
+    {
+      "path": "src/hyperfide/components.h",
+      "sha256": "0c89648b865492dca5a15f7b17c5cd6609ce37efffcab780cad870e77dd3eac3",
+      "size": 538
+    },
+    {
+      "path": "src/hyperfide/components/schema.kvx",
+      "sha256": "d93d9aa1d266794445bf1f236674319947f9f74437b5ce1528e83bbebfbf3fa1",
+      "size": 328
+    },
+    {
+      "path": "src/hyperfide/components/12.1.kvx",
+      "sha256": "1a2c9986c34f2f5b3e11c8e99395c775ddcb236e0f563d5b1bc2457c75944aea",
+      "size": 525
+    },
+    {
+      "path": "src/hyperfide/components/12.2.kvx",
+      "sha256": "c375f95f46c4a42764eee5e2978d842e9b1e7dd43cebdd75d03a15289b24f5c9",
+      "size": 238
+    },
+    {
+      "path": "src/hyperfide/components/12.3.kvx",
+      "sha256": "c896ff5802ca8938522bd9bea5f2b03548ffffef10f8e94bceddcd6a00b621e1",
+      "size": 207
+    },
+    {
+      "path": "src/hyperfide/components/12.4.kvx",
+      "sha256": "586ba78784dd3ba018d280bcd9570bcc55ca01600df773f8d9c8ece71837ba65",
+      "size": 498
+    },
+    {
+      "path": "src/hyperfide/control.c",
+      "sha256": "96959b7d64e04d5ecbe2aac3f38244e280341b56983aa89c849027cb9abef1fd",
+      "size": 61102
+    },
+    {
+      "path": "src/hyperfide/job.c",
+      "sha256": "75cd8d3513fd2e2f40ad06108c90280611f1f9fbdbfae5391db9da2d80ab0dae",
+      "size": 35623
+    },
+    {
+      "path": "src/hyperfide/preparation_stage.c",
+      "sha256": "3c595153d37a6544a836c22f09d381da9eaccb51682d24bd621e314755f7f433",
+      "size": 28841
+    },
+    {
+      "path": "src/hyperfide/budget.c",
+      "sha256": "6608eeeb338c7a43454191a2f9ec53c8ead0f07c049341194271a9512bf74efa",
+      "size": 26009
+    },
+    {
+      "path": "src/hyperfide/process_tree.c",
+      "sha256": "019fd5afd9669f9723838af33240b7275ca63c9f22ef8347e4e03e3de078c4ce",
+      "size": 4620
+    },
+    {
+      "path": "src/hyperfide/launch.c",
+      "sha256": "f7074456ae0ecf1c9d81c32708307152659d49186e301bbf067ee62216508245",
+      "size": 43943
+    },
+    {
+      "path": "src/hyperfide/supervisor.c",
+      "sha256": "cbac38ad9d54dadb401ddedc0b95e33f4abac1740813227a31d2033301beeffc",
+      "size": 20555
+    },
+    {
+      "path": "src/hyperfide/supervisor_daemon.c",
+      "sha256": "612da534a95ecf52711f032c2106c8142f1def8fec2f560d66e05c26052799a9",
+      "size": 16771
+    },
+    {
+      "path": "src/hyperfide/supervisor.h",
+      "sha256": "45d471171cc741a69d1ad0e491cde65b9250f46af25e7e3ba11f420502ba42db",
+      "size": 4234
+    },
+    {
+      "path": "src/hyperfide/transport.c",
+      "sha256": "149271bccafdce93b27f6701b8928a77f7acef5e01a6100e628d794c2a0f73d8",
+      "size": 30077
+    },
+    {
+      "path": "src/hyperfide/transport.h",
+      "sha256": "d23e1c6b438aef2c05a9f82b8352097028f4cd2f8af37ec0f739cdda3f390146",
+      "size": 2699
+    },
+    {
+      "path": "services/hyperfide/src/runner/capture.ts",
+      "sha256": "8fdcaaf147b1d4cd5a6dc29038c0ec49227b611a1e1aa6aebfd275011b6dd4b8",
+      "size": 12126
+    },
+    {
+      "path": "services/hyperfide/src/runner/workspaces.ts",
+      "sha256": "47d5035c3e2479761c4a0fe3c1d70f8395c58a99238431f1c3e7a900ff259483",
+      "size": 25278
+    },
+    {
+      "path": "services/hyperfide/src/runner/preparation_receipts.ts",
+      "sha256": "cbbadb3d75727c4dac802c0c78aa367cad43547376a59a79d378cad3c3da083e",
+      "size": 7373
+    },
+    {
+      "path": "services/hyperfide/src/runner/bridge.ts",
+      "sha256": "86873d2ca64eac60df05957fa65f92aa3f3c31b8e5883cd6edee1dcd289aee2d",
+      "size": 71786
+    },
+    {
+      "path": "services/hyperfide/src/runner/executor.ts",
+      "sha256": "594b6b416bd2e9353765c93d78333cbd312e4681bb0a8c14e396dac8b412b1fe",
+      "size": 49382
+    },
+    {
+      "path": "services/hyperfide/dist/control.js",
+      "sha256": "1383288f00472de29607207d1d318e257c6e80c0fb2c05ca9fb2d974040e8032",
+      "size": 118
+    },
+    {
+      "path": "services/hyperfide/dist/runner/capture.js",
+      "sha256": "5873e58b4baea1770c879cf3313762e2e0ed2aac4b7202894d7eb72eb30e5660",
+      "size": 12584
+    },
+    {
+      "path": "services/hyperfide/dist/runner/workspaces.js",
+      "sha256": "b92b34310c6e62d73d60b972aaf87f6a594b605840c5587fbb2c643957386516",
+      "size": 25177
+    },
+    {
+      "path": "services/hyperfide/dist/runner/preparation_receipts.js",
+      "sha256": "8e7c552a810c873599dc31b0c5b8322f0fe91fd6dcce6eb4a0e7f8838665baaa",
+      "size": 6888
+    },
+    {
+      "path": "services/hyperfide/dist/runner/bridge.js",
+      "sha256": "4974da89e939dfb2bd04b82e0a4093d3fb99b13adfde13b0405e3253ec78cdb0",
+      "size": 70548
+    },
+    {
+      "path": "services/hyperfide/dist/runner/executor.js",
+      "sha256": "33587f9319f8114dc5e8dc3ab22f4f05307313e64ffefb1a690aa2b38a47ab07",
+      "size": 51536
+    },
+    {
+      "path": "services/hyperfide/components/12.4-capture.json",
+      "sha256": "3ceb2b77e6a8bfa87f788e0b7ffdf1fd764cf51db8c2517e5ebe3f3f6ff5ad68",
+      "size": 644
+    },
+    {
+      "path": "services/hyperfide/components/12.4.json",
+      "sha256": "b24202dda953f8eb213e34874625771987b306bcac638f160ca1b5443bd33d2f",
+      "size": 290
+    },
+    {
+      "path": "services/hyperfide/components/12.4-executor.json",
+      "sha256": "04187b964041a10d25b46ce85491964901a04ac271ca4d668a62682e2427025d",
+      "size": 306
+    },
+    {
+      "path": "services/hyperfide/components/14.1.json",
+      "sha256": "d90461e0c89dedac5c578a4fe57c7269b9958c38668562247dbb39e3c6cca6be",
+      "size": 583
+    },
+    {
+      "path": "services/hyperfide/components/15.2.json",
+      "sha256": "7ab470f29929ec7dc22b0e4e70255241590b0a25ed3362978867489f1168d842",
+      "size": 487
+    },
+    {
+      "path": "services/hyperfide/migrations/0012-runner-registry.sql",
+      "sha256": "140cc41c611d88f748f504870df92057b165f46929672c314fc3e94f39c18332",
+      "size": 12029
+    },
+    {
+      "path": "services/hyperfide/migrations/0035-runner-preparation-receipts.sql",
+      "sha256": "352e66845670a114eba249b0141abc0891c7552cfd7696ac2a84620950498f12",
+      "size": 9453
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/12_4.py",
+      "sha256": "3b13d8b6aa37774548accaf48b9598a2e51d9fa1c21a98af02b7f95414834f9a",
+      "size": 38723
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/12_4_executor.py",
+      "sha256": "9e1e35d1cf7d31453d7e874f96dc34cfa51aaa292ee3a9208b508049f922f9b4",
+      "size": 35955
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/15_2.py",
+      "sha256": "15764545b61284d7bc8eee82aea806b88aca503e652e846440eb8ebe24fbfa91",
+      "size": 54584
+    },
+    {
+      "path": "tests/hyperfide/support/workspace_registration_fixture.py",
+      "sha256": "4fdae30419024d568e2fd9f7b9aadcef151b0cc3ad2a480b86a1c080b0cddce0",
+      "size": 9838
+    },
+    {
+      "path": "tests/hyperfide/support/preparation_stage_fixture.py",
+      "sha256": "204b24ed5ece83f6ae26d7e51b1e329c35bc0913eb42275fc7cd77ae893dd304",
+      "size": 17891
+    },
+    {
+      "path": "tests/hyperfide/support/runner_budget_fixture.py",
+      "sha256": "6ba49bf039af8d11e52a06cf8253e11b70093f93c68a86ce44303eaf4e53a8d4",
+      "size": 15602
+    },
+    {
+      "path": "tests/hyperfide/support/preparation_receipts.test.mjs",
+      "sha256": "f09961d28d368bc2b046bd9fcb900fbdb5ec1a15c91c6a809aa8200214a4d728",
+      "size": 3653
+    },
+    {
+      "path": "tests/hyperfide/support/identity_fixture.py",
+      "sha256": "2b992fd5eab4d903909a4dd621b2ce3c7278fa932e163cbad8f33cf2b65efe0a",
+      "size": 29318
+    },
+    {
+      "path": "tests/hyperfide/check-evidence.py",
+      "sha256": "cc8de56fb25bea153490b4143a231f1ff6f4dac758baaea4bf90fb7d9ba236a0",
+      "size": 30633
+    },
+    {
+      "path": "tests/hyperfide/manifest.schema.json",
+      "sha256": "3407092d7e6e452bb288e996f840bd5bab22d6c0f494a49bf944cd73c18078b8",
+      "size": 3216
+    },
+    {
+      "path": "tests/hyperfide/qualify.py",
+      "sha256": "8aa17f5e2572c8557f15353f7267e98600547fb0f2693486c0e0f2fc1abce8c2",
+      "size": 37538
+    },
+    {
+      "path": "tests/hyperfide/registrations/12.4.json",
+      "sha256": "38cbc247d83c4e39d46b20312b3f2352c973d43ebfc8816527e98f78745d563d",
+      "size": 8816
+    }
+  ],
+  "resources": [],
+  "seed": 1,
+  "policy": {
+    "component_only": true,
+    "frontier_calls": false,
+    "cloud_provisioning": false,
+    "execution": "remote-only",
+    "qualification_limitations": [
+      "Task-component variant only: V-006 and V-017 full-case, provider, connector and campaign receipts remain UNRUN and are not replaced.",
+      "Native control acts on real slot-UID process trees, files and the actual 12.4-capture HTTPS/PostgreSQL/15.2 service; no live provider sandbox, broker-managed agent launch or frontier connector is exercised.",
+      "runner.job.execute budget attachment and PREPARATION staging are linked and called but not exercised end-to-end (no authenticated 12.4 job claim fixture); staging is exercised through runner.preparation.stage and budget primitives through the kernel fixture.",
+      "Pre-launch cancellation is fenced at the coordinator and in the native ledger; the 12.2 broker does not yet consult the native fence before START.",
+      "Final merged-source manifests require refreshed complete inventory pins."
+    ]
+  }
+}

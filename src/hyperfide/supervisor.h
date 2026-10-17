@@ -42,6 +42,9 @@ int hf_process_tree_cancel(const HfRunnerBinding *,int rounds,int *remaining);
 int hf_runner_job_claim(const char *,const char *,HfHttpResponse *);
 int hf_runner_job_placement(const char *,const char *);
 int hf_runner_job_execute(const char *,FILE *);
+/* Task 12.4 control: durable admission fences and the authenticated runner API helper. */
+int hf_runner_admission_closed(const char *state_dir,uid_t uid);
+int hf_runner_control_api(const char *config_path,const char *component,const char *action,const char *input,HfHttpResponse *response);
 
 /* Dedicated slot UID cleanup survives a blocked or dead supervising broker. */
 pid_t hf_slot_watchdog(uid_t uid, long long deadline_ns, int *writer, const char *owner);
