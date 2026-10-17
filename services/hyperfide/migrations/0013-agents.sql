@@ -91,3 +91,30 @@ CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hype
 CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.agent_admission_accounts FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
 
 CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.agent_admission_reservations FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+-- Resumed work is a new admitted session linked to exactly one named predecessor checkpoint and persisted resume decision.
+CREATE TABLE hyperfide.native_session_resumptions (
+ organisation_id uuid NOT NULL, run_id uuid NOT NULL, session_id uuid NOT NULL,
+ predecessor_session_id uuid NOT NULL, checkpoint_id uuid NOT NULL, resume_operation_id uuid NOT NULL,
+ decision text NOT NULL CHECK(decision IN('ELIGIBLE_NATIVE_CONTEXT','FRESH_HANDOFF_REQUIRED')),
+ native_qualification_digest hyperfide.digest,
+ resumed_native_session_id text NOT NULL CHECK(length(resumed_native_session_id) BETWEEN 1 AND 255),
+ native_session_id text NOT NULL CHECK(length(native_session_id) BETWEEN 1 AND 255),
+ source_manifest_digest hyperfide.digest NOT NULL, configuration_digest hyperfide.digest NOT NULL,
+ process_id integer NOT NULL CHECK(process_id>0),
+ process_start_time text NOT NULL CHECK(process_start_time ~ '^[1-9][0-9]{0,19}$'),
+ boot_id uuid NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(organisation_id,run_id,session_id),
+ UNIQUE(organisation_id,run_id,predecessor_session_id),
+ UNIQUE(organisation_id,run_id,resume_operation_id),
+ CHECK(session_id<>predecessor_session_id),
+ CHECK((decision='ELIGIBLE_NATIVE_CONTEXT')=(native_qualification_digest IS NOT NULL)),
+ CHECK((decision='ELIGIBLE_NATIVE_CONTEXT')=(native_session_id=resumed_native_session_id)),
+ FOREIGN KEY(organisation_id,run_id,session_id) REFERENCES hyperfide.native_session_bindings(organisation_id,run_id,session_id),
+ FOREIGN KEY(organisation_id,run_id,predecessor_session_id,checkpoint_id) REFERENCES hyperfide.native_session_checkpoints(organisation_id,run_id,session_id,checkpoint_id),
+ FOREIGN KEY(organisation_id,run_id,resume_operation_id) REFERENCES hyperfide.native_session_events(organisation_id,run_id,operation_id)
+);
+CREATE TRIGGER immutable_binding BEFORE UPDATE OR DELETE ON hyperfide.native_session_resumptions
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','session_id','predecessor_session_id','checkpoint_id','resume_operation_id','decision','native_qualification_digest','resumed_native_session_id','native_session_id','source_manifest_digest','configuration_digest','process_id','process_start_time','boot_id','created_at');
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.native_session_resumptions FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
