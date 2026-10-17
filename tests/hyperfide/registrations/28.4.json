@@ -11,12 +11,16 @@
     "tests/hyperfide/cases/tasks/28_4.py"
   ],
   "assertion_ids": [
+    "traceability.implemented-revision-verdict",
     "traceability.actual-service-roundtrip",
     "traceability.not-product-qualification",
     "traceability.public-source-manifest",
+    "traceability.review-states-distinguished",
+    "traceability.private-audit-not-dependency",
     "traceability.stale-mapping-refused",
     "traceability.durable-public-archive",
     "traceability.unavailable-archive-not-success",
+    "traceability.controlled-pack-accepted",
     "traceability.reject-missing-clause",
     "traceability.reject-duplicate-clause",
     "traceability.reject-unknown-task",
@@ -25,7 +29,12 @@
     "traceability.reject-missing-task-requirement",
     "traceability.reject-unknown-case-registry",
     "traceability.reject-dependency-cycle",
-    "traceability.reject-native-case-mismatch"
+    "traceability.reject-native-case-mismatch",
+    "traceability.reject-private-source",
+    "traceability.reject-review-promoted-to-qualification",
+    "traceability.reject-unreported-open-qualification",
+    "traceability.reject-tampered-digest",
+    "traceability.reject-stale-revision"
   ],
   "cases": [
     "V-024",
