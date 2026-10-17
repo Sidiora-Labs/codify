@@ -165,15 +165,29 @@ static const char *version_source(const char *tree, char *path, size_t cap)
 /* The replacement text of the first `#define name ...` in body, or NULL. */
 static const char *macro_value(const char *body, const char *name, size_t len)
 {
-    for (const char *d = strstr(body, "define"); d; d = strstr(d + 1, "define"))
+    for (const char *line = body; *line; )
     {
-        const char *p = d + 6;
-        if (!isblank((unsigned char)*p))
-            continue;
-        p += strspn(p, " \t");
-        if (strncmp(p, name, len) || (!isblank((unsigned char)p[len])))
-            continue;
-        return p + len + strspn(p + len, " \t");
+        const char *end = strchr(line, '\n');
+        if (!end)
+            end = line + strlen(line);
+        const char *p = line;
+        while (p < end && isblank((unsigned char)*p))
+            p++;
+        if (p < end && *p++ == '#')
+        {
+            while (p < end && isblank((unsigned char)*p))
+                p++;
+            if (end - p >= 7 && !strncmp(p, "define", 6) && isblank((unsigned char)p[6]))
+            {
+                p += 6;
+                while (p < end && isblank((unsigned char)*p))
+                    p++;
+                if ((size_t)(end - p) > len && !strncmp(p, name, len) &&
+                    isblank((unsigned char)p[len]))
+                    return p + len + strspn(p + len, " \t");
+            }
+        }
+        line = *end ? end + 1 : end;
     }
     return NULL;
 }
@@ -185,6 +199,8 @@ static const char *macro_value(const char *body, const char *name, size_t len)
 void changelog_version_parse(const char *src, const char *body, char *out, size_t cap);
 void changelog_version_parse(const char *src, const char *body, char *out, size_t cap)
 {
+    if (!cap)
+        return;
     out[0] = 0;
     if (!body)
         return;
@@ -201,7 +217,7 @@ void changelog_version_parse(const char *src, const char *body, char *out, size_
             if (*v == '"')
             {
                 const char *e = strchr(v + 1, '"');
-                if (e)
+                if (e && !memchr(v + 1, '\n', (size_t)(e - v - 1)))
                     snprintf(out, cap, "%.*s", (int)(e - v - 1), v + 1);
                 return;
             }

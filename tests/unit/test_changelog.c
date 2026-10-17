@@ -40,5 +40,12 @@ int main(void) {
     changelog_version_parse("package.json", "{\"name\":\"x\",\"version\":\"0.4.0\"}", v, sizeof v);
     ok_str(v, "0.4.0");
 
+    changelog_version_parse("src/cg.h",
+        "// #define CG_VERSION \"wrong\"\n"
+        "#define CG_VERSION_NOTE \"wrong\"\n"
+        "  # define CG_VERSION HYPERFIDE_VERSION\n"
+        "#define HYPERFIDE_VERSION \"2.0.0-dev\"\n", v, sizeof v);
+    ok_str(v, "2.0.0-dev");
+
     return t_done("changelog");
 }
