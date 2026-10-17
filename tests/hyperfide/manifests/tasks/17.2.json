@@ -19,13 +19,13 @@
     "contract.impact.cross-repository-consumers",
     "contract.impact.missing-graph-explicit",
     "contract.impact.unknown-authentication",
+    "contract.impact.operational-invariants",
+    "contract.facets.missing-operational-refused",
     "contract.impact.unrun-not-proof",
     "contract.source.cross-run-refused",
     "contract.source.tree-refused",
     "contract.coverage.no-proof-no-completion",
     "contract.api.caller-outcome-refused",
-    "contract.impact.operational-invariants",
-    "contract.facets.missing-operational-refused",
     "contract.impact.stale-price-unchanged-signature",
     "contract.impact.error-order-unchanged-signature",
     "contract.impact.idempotency-unchanged-signature",
@@ -1520,7 +1520,7 @@
     },
     {
       "path": "tests/hyperfide/registrations/17.2.json",
-      "sha256": "402391d1869da0dfa3cfffec07122af354a83de4d6176c3736b42889d4146f4e",
+      "sha256": "10e608fb8e08c4465c425dc14dd125337a459854da653cbacf9ec4807c272e36",
       "size": 2881
     },
     {
