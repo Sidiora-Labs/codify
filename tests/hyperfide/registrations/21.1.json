@@ -50,7 +50,10 @@
     "jobs21.raw-provenance-preserved",
     "jobs21.wire-trust-refused",
     "jobs21.stale-real-job-capture",
-    "jobs21.accepted-source-preserved"
+    "jobs21.accepted-source-preserved",
+    "jobs21.legacy-submit-real-job",
+    "jobs21.legacy-egress-denied-abstains",
+    "jobs21.egress-denied-never-accepted"
   ],
   "argv": [
     "python3",
