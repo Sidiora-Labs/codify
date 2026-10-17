@@ -71,6 +71,8 @@ int hf_budget_attach(HfBudgetHandle *,const HfProcessIdentity *);
 int hf_budget_observe(const HfBudgetHandle *,FILE *);
 int hf_budget_release(HfBudgetHandle *);
 int hf_supervisor_daemon(const char *request,FILE *out);
+/* Registered inventory derived from the root-private slot ledger (JSON array). */
+int hf_slot_inventory(const char *root,const char *boot_id,const char *preparation,char **json,size_t *length);
 
 typedef struct {
  uid_t uid;gid_t gid;

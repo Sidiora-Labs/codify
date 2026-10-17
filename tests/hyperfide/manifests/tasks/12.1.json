@@ -1,0 +1,240 @@
+{
+  "approval": {
+    "allowed_actions": [],
+    "approved": true
+  },
+  "campaign_id": "hyperfide-task-12.1-native-component-v1",
+  "case_ids": [
+    "V-015",
+    "V-039"
+  ],
+  "expected_assertion_ids": [
+    "runner12.link-contract-qualified",
+    "runner12.sources-exclude-standalone-main",
+    "runner12.registry-equals-fragment-actions",
+    "runner12.main-cli-consumes-contract",
+    "runner12.runtime-matches-link-contract",
+    "runner12.native-enroll-real-https",
+    "runner12.native-signed-invoke",
+    "runner12.stale-bootstrap-token-refused",
+    "runner12.wrong-sandbox-identity-refused",
+    "runner12.forbidden-role-operation-refused",
+    "runner12.wrong-certificate-refused",
+    "runner12.wrong-hostname-refused",
+    "runner12.modified-payload-refused",
+    "runner12.replayed-nonce-refused",
+    "runner12.stale-request-time-refused",
+    "runner12.wrong-key-refused",
+    "runner12.worktree-only-profile-refused",
+    "runner12.slot-allocation-separates-resources",
+    "runner12.colliding-default-paths-isolated",
+    "runner12.cross-slot-access-denied",
+    "runner12.storage-exhaustion-contained",
+    "runner12.credential-sensitive-shared-kernel-refused",
+    "runner12.vm-dedicated-colocation-refused",
+    "runner12.daemon-registers-derived-inventory",
+    "runner12.daemon-heartbeat-real-https",
+    "runner12.daemon-reregisters-on-slot-change",
+    "runner12.daemon-verifies-slot-observations",
+    "runner12.daemon-reconnects-after-outage",
+    "runner12.daemon-refuses-identity-override",
+    "runner12.release-quarantines-slot",
+    "runner12.vm-dedicated-exclusive",
+    "runner12.rotation-lost-reply-recovers",
+    "runner12.rotated-credential-active",
+    "runner12.revoked-credential-refused",
+    "runner12.denials-leak-no-secrets",
+    "runner12.reproduction-jobs-node-suite",
+    "runner12.daemon-lifecycle-linked-binary"
+  ],
+  "inputs": [
+    {
+      "path": "Makefile",
+      "sha256": "de7c841dc0f158aae22ef694cfa01ebdc56452428dd0ddd341e0adbbff576597",
+      "size": 4408
+    },
+    {
+      "path": "build/hyperfide-native",
+      "sha256": "4af6bb345df677aba9d6359385300d87fc8c4a389fc85351353234e6d0a7ca48",
+      "size": 425880
+    },
+    {
+      "path": "scripts/hyperfide-native-components.py",
+      "sha256": "9aa5f86c12dc75ec3266eb9a9352ce832e2234c04c46a02c2b3f38e7eaa4cd87",
+      "size": 14689
+    },
+    {
+      "path": "services/hyperfide/components/12.1.json",
+      "sha256": "96a63882efc47508922b79fd7e0dc068b41fa18fc64789fdce9708b1e0319a56",
+      "size": 341
+    },
+    {
+      "path": "services/hyperfide/src/runner/reproduction_jobs.ts",
+      "sha256": "52b8b79abc80cb542fcc176571436125527abedef4ed71d79f00e7b67ca31587",
+      "size": 7802
+    },
+    {
+      "path": "src/hyperfide/component_main.c",
+      "sha256": "cb3b9f726346ac2724ca0d61f44845180074f2347f33a7c22d53b723e476223b",
+      "size": 7574
+    },
+    {
+      "path": "src/hyperfide/components.h",
+      "sha256": "0c89648b865492dca5a15f7b17c5cd6609ce37efffcab780cad870e77dd3eac3",
+      "size": 538
+    },
+    {
+      "path": "src/hyperfide/components/11.2.kvx",
+      "sha256": "4ceaea25f04e64302c2e3ac34f10bfbf25a824f9f851e8f8eea8018137c220c1",
+      "size": 232
+    },
+    {
+      "path": "src/hyperfide/components/11.3.kvx",
+      "sha256": "d5673d26953323a3ef6f6151a056735ecd73ffdf46b3b57ebf64217777bfee45",
+      "size": 267
+    },
+    {
+      "path": "src/hyperfide/components/12.1.kvx",
+      "sha256": "48272ce1744a8883bb95b89c8d559fa9d6be497e0899e65daddcb30b11ae8618",
+      "size": 1067
+    },
+    {
+      "path": "src/hyperfide/components/12.2.kvx",
+      "sha256": "c375f95f46c4a42764eee5e2978d842e9b1e7dd43cebdd75d03a15289b24f5c9",
+      "size": 238
+    },
+    {
+      "path": "src/hyperfide/components/12.3.kvx",
+      "sha256": "c896ff5802ca8938522bd9bea5f2b03548ffffef10f8e94bceddcd6a00b621e1",
+      "size": 207
+    },
+    {
+      "path": "src/hyperfide/components/12.4.kvx",
+      "sha256": "f46ca18c69296c8173f58b89bfcb7715ecda13688a3bfe426232278dd87df3e4",
+      "size": 344
+    },
+    {
+      "path": "src/hyperfide/components/13.1.kvx",
+      "sha256": "a594a81503ba4f6f6bbdbb35bcf7101fa57b6e38c1881b8882e6de42931e6559",
+      "size": 225
+    },
+    {
+      "path": "src/hyperfide/components/13.3.kvx",
+      "sha256": "a3d35c4357b0ca16ef6ed48ffd8a9b1bda34d8fc22719ed39229de5e7b4ab5af",
+      "size": 169
+    },
+    {
+      "path": "src/hyperfide/components/15.1.kvx",
+      "sha256": "423e1efca2316cf8f1e3e5e2afa7eddf9ba28378433c97655968f0a66ef983b0",
+      "size": 221
+    },
+    {
+      "path": "src/hyperfide/components/25.3.kvx",
+      "sha256": "3b25e2db9f131b40e0e300a27ac575807417802995b3dee9406849c17abcd10f",
+      "size": 299
+    },
+    {
+      "path": "src/hyperfide/components/26.1.kvx",
+      "sha256": "67006961bb6d6a6c68ea75e2fc7ab4c9acff53f1916ba47156d5868a69d7a509",
+      "size": 202
+    },
+    {
+      "path": "src/hyperfide/components/26.4.kvx",
+      "sha256": "80bf1755c8e996a0046a5ebf8e923afbc33f20dbbc6df61a58954aac7f2f7d7b",
+      "size": 187
+    },
+    {
+      "path": "src/hyperfide/components/schema.kvx",
+      "sha256": "e543d2bbbaf1cc956101b84c55b95483f4e26c7e6a11c1ff11935621190036a0",
+      "size": 351
+    },
+    {
+      "path": "src/hyperfide/supervisor.c",
+      "sha256": "acffff559001f675719d0f0b520900a4f37083a5eb5c29e70570a44d6bb8b1b3",
+      "size": 53670
+    },
+    {
+      "path": "src/hyperfide/supervisor.h",
+      "sha256": "3691d35f47536d8865412ca8c4fc78cf9b0168c154b3c0e8b0c30985330ec2b1",
+      "size": 4137
+    },
+    {
+      "path": "src/hyperfide/supervisor_daemon.c",
+      "sha256": "f743f0f7266358b96e880d1b89802c8095ecfc24acb1d7a5f1d984cd9afe6838",
+      "size": 24277
+    },
+    {
+      "path": "src/hyperfide/transport.c",
+      "sha256": "ec63d4d5188cb8eccaec0a0c5b12f03b07599c7288ab30fc21775d114020492a",
+      "size": 30602
+    },
+    {
+      "path": "src/hyperfide/transport.h",
+      "sha256": "ee4197064459155a8a12a693c79bff7b54042a3c66c18aeaffa6132348a20aa0",
+      "size": 2733
+    },
+    {
+      "path": "src/sha256.c",
+      "sha256": "eb8d406b26fb5ebdd835a88ed4e9033e211ba37e6cd25c8cc725a01ab74a536e",
+      "size": 2917
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/12_1.py",
+      "sha256": "73271f3e5504b69c5f2c7381a7d495f254c0f8e15085d782390b7835c7facb28",
+      "size": 48800
+    },
+    {
+      "path": "tests/hyperfide/check-evidence.py",
+      "sha256": "cc8de56fb25bea153490b4143a231f1ff6f4dac758baaea4bf90fb7d9ba236a0",
+      "size": 30633
+    },
+    {
+      "path": "tests/hyperfide/manifest.schema.json",
+      "sha256": "3407092d7e6e452bb288e996f840bd5bab22d6c0f494a49bf944cd73c18078b8",
+      "size": 3216
+    },
+    {
+      "path": "tests/hyperfide/qualify.py",
+      "sha256": "8aa17f5e2572c8557f15353f7267e98600547fb0f2693486c0e0f2fc1abce8c2",
+      "size": 37538
+    },
+    {
+      "path": "tests/hyperfide/registrations/12.1.json",
+      "sha256": "47aeb7b9aa5cbd86318a024783330be6af94ea896f46059dd36930cdba076172",
+      "size": 3478
+    },
+    {
+      "path": "tests/hyperfide/support/identity_fixture.py",
+      "sha256": "2b992fd5eab4d903909a4dd621b2ce3c7278fa932e163cbad8f33cf2b65efe0a",
+      "size": 29318
+    },
+    {
+      "path": "tests/hyperfide/support/reproduction_jobs.test.mjs",
+      "sha256": "7c5d191e617765ae9787024f539201db215aa5872de441a94e90f13d22235a6f",
+      "size": 5918
+    },
+    {
+      "path": "tests/hyperfide/support/supervisor_daemon_fixture.py",
+      "sha256": "43ecbd756fa330c2d6a3679a0cd73abb6060684c7b6d7bee067f1ab8e45ca458",
+      "size": 19587
+    }
+  ],
+  "policy": {
+    "cloud_provisioning": false,
+    "component_only": true,
+    "execution": "remote-only",
+    "frontier_calls": false,
+    "qualification_limitations": [
+      "Task-component variant only: V-015 and V-039 remain UNRUN as full cases; this receipt cannot replace any full-case/provider/connector/campaign receipt.",
+      "Actual linked native runner, signed HTTPS 14.1 service and PostgreSQL fixture are local disposable component evidence; no provider sandbox or VM boundary is qualified.",
+      "vm_dedicated is a declared profile whose exclusivity is enforced by the slot ledger; VM-level isolation itself is not qualified by this variant.",
+      "Slot storage bounds use per-slot tmpfs (memory-backed) mounts; disk-backed quota and cgroup memory pressure are not qualified.",
+      "Final merged-source manifests require refreshed complete inventory pins."
+    ]
+  },
+  "registered_variant": "task:12.1",
+  "resources": [],
+  "schema_version": 1,
+  "scope": "task-component",
+  "seed": 1
+}
