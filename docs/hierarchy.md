@@ -529,7 +529,7 @@ newer; see [projection.md](projection.md).
 The fleet roles are the agents Hyperfide spawned. A Claude Code or Codex
 session working on the project, and every subagent it spawns through its
 own Agent tool, is recorded by `hyperfide hook event` (see
-[events.md](events.md#native-agents-cg-hook-event)) and shown in the VS Code fleet view
+[events.md](events.md#native-agents-hyperfide-hook-event)) and shown in the VS Code fleet view
 under a **Sessions** root beside Main Gideon — and on its own when the
 repository has no `[hierarchy]`. One row per host session, its subagents
 nested under it, each reading:
