@@ -29,6 +29,16 @@ def package_manager(name):
     return str(Path(candidate).absolute())
 # Command-line settings keep fixture repository config untouched; detached auto-maintenance would orphan git daemons.
 GIT_QUIET=["-c","maintenance.auto=false","-c","gc.auto=0"]
+def tool_invocation(resolved):
+    # Native probes run with a fixed PATH, so an "env node" script binds its resolved interpreter explicitly.
+    with open(resolved,"rb") as stream:line=stream.readline(256)
+    words=line[2:].decode(errors="replace").split() if line.startswith(b"#!") else []
+    if words and Path(words[0]).name=="env":
+        words=[word for word in words[1:] if word!="-S"]
+        expect(words==["node"],"unsupported package-manager interpreter: "+line.decode(errors="replace").strip())
+        node=shutil.which("node");expect(node,"package manager needs node, which is not on PATH")
+        return str(Path(node).resolve()),[str(Path(resolved).resolve()),"--version"]
+    return resolved,["--version"]
 def git(path,*args):
     return subprocess.run(["git",*GIT_QUIET,"-C",str(path),*args],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,check=True).stdout.strip()
 class Fixture:
@@ -135,8 +145,9 @@ def main():
             f.prep.profile["repositories"][0]["commit"]=git(f.repo,"rev-parse","HEAD")
             relative="fixture/"+installed["lock"];target=f.prep.candidate/relative;target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(f.repo/installed["lock"],target)
             f.prep.profile["package_managers"]=[{"name":manager,"version":installed["version"],"locks":[f.prep.pin(relative)]}]
-            version_bytes=subprocess.check_output([resolved,"--version"])
-            f.bindings["bindings"].append({"name":manager,"version":installed["version"],"executable":resolved,"argv":["--version"],"output_digest":digest(version_bytes)})
+            executable,argv=tool_invocation(resolved)
+            version_bytes=subprocess.check_output([executable,*argv])
+            f.bindings["bindings"].append({"name":manager,"version":installed["version"],"executable":executable,"argv":argv,"output_digest":digest(version_bytes)})
             f.bindingsfile.write_text(json.dumps(f.bindings));f.publish()
             inventory=json.loads(Path(f.env["HF_READINESS_WORKSPACE_MANIFEST_FILE"]).read_text())
             expect(inventory["schema_version"]==2 and len(inventory["symlinks"])>0,"actual installed package links not measured")
