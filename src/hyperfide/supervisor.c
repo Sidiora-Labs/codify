@@ -451,7 +451,9 @@ static int credential_rotate(const HfJson *json,FILE *out) {
         char suffix[37];
         if (!hf_uuid_generate(suffix)||!hf_uuid_generate(operation)||!hf_uuid_generate(idempotency)||!hf_uuid_generate(correlation)) {free(state);return hf_native_error(out,"ROTATION_RANDOMNESS_UNAVAILABLE");}
         if (strlen(settings.key_path)+38>=sizeof new_key) {free(state);return hf_native_error(out,"ROTATION_KEY_PATH_TOO_LONG");}
-        snprintf(new_key,sizeof new_key,"%s.%.36s",settings.key_path,suffix);
+        /* The length guard above makes truncation impossible; checking the result keeps -Wformat-truncation (used by the 12.3 case build) honest about it. */
+        int written=snprintf(new_key,sizeof new_key,"%s.%.36s",settings.key_path,suffix);
+        if (written<0||(size_t)written>=sizeof new_key) {free(state);return hf_native_error(out,"ROTATION_KEY_PATH_TOO_LONG");}
         memcpy(old_credential,settings.credential_id,37);
         if (!hf_transport_keygen(new_key,public_key)) {free(state);return hf_native_error(out,"ROTATION_KEY_GENERATION_FAILED");}
         size_t size=0;FILE *s=open_memstream(&payload,&size);
