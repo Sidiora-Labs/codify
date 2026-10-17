@@ -8,6 +8,7 @@
   ],
   "assertion_ids": [
     "ranking.service-linked",
+    "ranking.consumer-purpose-policy",
     "ranking.eligible-order",
     "ranking.reject-ineligible",
     "ranking.reject-missing-choice",
@@ -23,16 +24,40 @@
     "ranking.finding-observation-identities",
     "ranking.finding-shortlist-bound",
     "ranking.finding-unavailable-explicit",
-    "ranking.deterministic-fallback"
+    "ranking.deterministic-fallback",
+    "signed21.actual-finding-component-linked",
+    "signed21.actual-finding-context-reader",
+    "signed21.no-fabricated-ranking-candidate",
+    "signed21.actual-packet",
+    "signed21.strict-null-json-record",
+    "signed21.real-primary-inspect",
+    "signed21.wire-advice-refused",
+    "signed21.cross-scope-refused",
+    "signed21.wrong-key-refused",
+    "signed21.missing-producer-abstains",
+    "signed21.secret-not-persisted",
+    "signed21.restart-history",
+    "signed21.accepted-intent-preserved",
+    "native21.local-mode-unchanged",
+    "native21.offline-deterministic",
+    "native21.real-service-fallback",
+    "native21.purpose-path-routed",
+    "native21.authority-claim-refused",
+    "native21.applied-advice-refused",
+    "native21.malformed-response-abstains",
+    "native21.deadline-abstains"
   ],
   "argv": [
     "python3",
     "tests/hyperfide/cases/tasks/21_3.py"
   ],
   "timeout_seconds": 240,
-  "required_env": [],
+  "required_env": [
+    "DATABASE_URL"
+  ],
   "fixtures": [
-    "services/hyperfide/dist/decisions/audit.js"
+    "services/hyperfide/dist/decisions/audit.js",
+    "tests/hyperfide/support/identity_fixture.py"
   ],
   "resources": [],
   "required_artifacts": [],
@@ -46,7 +71,15 @@
     "tests/hyperfide/cases/tasks/4_1.py",
     "tests/hyperfide/cases/tasks/21_4.py",
     "tests/hyperfide/cases/tasks/21_3.py",
-    "tests/hyperfide/registrations/21.3.json"
+    "tests/hyperfide/registrations/21.3.json",
+    "src/govern.c",
+    "src/fleet.c",
+    "src/memory.c",
+    "src/recap.c",
+    "src/hyperfide/client.c",
+    "src/hyperfide/client.h",
+    "scripts/hyperfide-native-components.py",
+    "Makefile"
   ],
   "source_roots": [
     "services/hyperfide/src",

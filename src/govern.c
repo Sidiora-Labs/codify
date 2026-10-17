@@ -1,5 +1,6 @@
 #include <stdio.h>
 extern int hf_client_authority_guard(const char *operation, FILE *output);
+extern int hf_decision_advice(int purpose, const char *observation, char **advice); /* 21.3, recap.c */
 /*
  * Governance: the commands that make Codify present at every step rather than
  * only at the bookends.
@@ -672,6 +673,56 @@ static void guard_collect(JevFinding **v, int *n, int *cap, const char *kind,
     f->score = -1;
 }
 
+/* Distributed guard ranking goes through the explicit 21.4 purpose path
+ * (HF_DECISION_GUARD) instead of Jev. Advice is a severity per finding on
+ * Jev's 0-4 scale; anything else leaves the collected order. -1 in local
+ * mode (the caller ranks with Jev as before), 1 when ranked, 0 otherwise.
+ * The rank only orders advisory findings: never pass, fail, or scope. */
+static int guard_decision_rank(JevFinding *v, int n) {
+    StrBuf o; sb_init(&o);
+    sb_puts(&o, "{\"findings\":[");
+    for (int i = 0; i < n; i++) {
+        sb_puts(&o, i ? ",{\"kind\":" : "{\"kind\":"); sb_json_str(&o, v[i].kind);
+        sb_puts(&o, ",\"path\":"); sb_json_str(&o, v[i].path);
+        sb_printf(&o, ",\"line\":%d,\"detail\":", v[i].line);
+        sb_json_str(&o, v[i].detail);
+        sb_putc(&o, '}');
+    }
+    sb_puts(&o, "]}");
+    char *advice = NULL;
+    int routed = hf_decision_advice(1 /* HF_DECISION_GUARD */, o.p, &advice);
+    sb_free(&o);
+    if (routed <= 0) return routed;
+    char *arr = json_get_raw(advice, "scores");
+    char **items = NULL;
+    int ni = arr ? json_array_items(arr, &items) : 0;
+    double *score = xmalloc(sizeof *score * (size_t)n);
+    bool ok = ni == n;
+    for (int i = 0; i < ni; i++) {
+        char *end = NULL;
+        double d = strtod(items[i], &end);
+        if (end == items[i] || *end || !(d >= 0 && d <= 4)) ok = false;
+        else if (i < n) score[i] = d;
+        free(items[i]);
+    }
+    free(items); free(arr); free(advice);
+    if (!ok) {
+        fprintf(stderr, "cg: guard advice was malformed — collected order kept\n");
+        free(score);
+        return 0;
+    }
+    /* stable: equal severities keep the order they were collected in */
+    for (int i = 0; i < n; i++) { v[i].score = score[i]; v[i].level[0] = 0; }
+    free(score);
+    for (int i = 1; i < n; i++) {
+        JevFinding t = v[i];
+        int j = i;
+        for (; j > 0 && v[j - 1].score < t.score; j--) v[j] = v[j - 1];
+        v[j] = t;
+    }
+    return 1;
+}
+
 int cmd_guard(Cg *cg, int npath, char **pathv, bool json, bool strict)
 {
     bool is_current = false;
@@ -744,7 +795,12 @@ int cmd_guard(Cg *cg, int npath, char **pathv, bool json, bool strict)
                           hf[h].line, hf[h].detail);
         hygiene_findings_free(hf, nh);
     }
-    bool ranked = nfindings > 0 && jev_rank_findings(cg, fv, nfindings) == JEV_OK;
+    bool ranked = false;
+    if (nfindings > 0) {
+        int routed = guard_decision_rank(fv, nfindings);
+        ranked = routed < 0 ? jev_rank_findings(cg, fv, nfindings) == JEV_OK
+                            : routed > 0;
+    }
 
     if (json) {
         printf("{\"guarded\":true,\"task\":");

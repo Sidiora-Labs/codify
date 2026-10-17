@@ -690,6 +690,44 @@ static void cache_write(const char *path, const Session *s, int from, int to) {
     sb_free(&b);
 }
 
+int hf_decision_advice(int purpose, const char *observation, char **advice);
+int hf_advice_unit(const char *obj, const char *key, double *out);
+
+/* Distributed recap advice: {"statements":[{"kind","pk","pt","pn"}...]},
+ * exactly one entry per statement of the chunk, every kind a known key and
+ * every probability in [0,1]. 1 when applied whole, 0 (nothing changed)
+ * otherwise. */
+static int recap_advice_apply(const char *advice, Session *s, int from, int to) {
+    int n = to - from;
+    char *arr = advice ? json_get_raw(advice, "statements") : NULL;
+    char **items = NULL;
+    int ni = arr ? json_array_items(arr, &items) : 0;
+    int *kind = xmalloc(sizeof *kind * (size_t)(n > 0 ? n : 1));
+    double *pv = xmalloc(sizeof *pv * (size_t)(n > 0 ? n : 1) * 3);
+    int ok = n > 0 && ni == n;
+    for (int i = 0; i < ni; i++) {
+        char *k = ok ? json_get_string(items[i], "kind") : NULL;
+        if (ok) {
+            kind[i] = -1;
+            for (int j = 0; k && j < NKINDS; j++)
+                if (strcmp(k, KIND_KEYS[j]) == 0) kind[i] = j;
+            ok = kind[i] >= 0 && hf_advice_unit(items[i], "pk", &pv[3 * i]) &&
+                 hf_advice_unit(items[i], "pt", &pv[3 * i + 1]) &&
+                 hf_advice_unit(items[i], "pn", &pv[3 * i + 2]);
+        }
+        free(k);
+        free(items[i]);
+    }
+    free(items); free(arr);
+    for (int i = 0; ok && i < n; i++) {
+        Snip *p = &s->s[from + i];
+        p->kind = kind[i];
+        p->pk = pv[3 * i]; p->pt = pv[3 * i + 1]; p->pn = pv[3 * i + 2];
+    }
+    free(kind); free(pv);
+    return ok;
+}
+
 /* Judge statements [from, to) of one session: three typed questions per
  * statement, one request. Returns 0, or -1 with the reason on stderr; the
  * statements keep kind -1 then and never get picked. */
@@ -701,6 +739,24 @@ static int decide_chunk(Cg *cg, Recap *r, Session *s, int from, int to) {
     if (cache_read(cp, s, from, to)) { r->cached++; sb_free(&state); return 0; }
 
     int n = to - from;
+    /* distributed: the explicit HF_DECISION_RECAP purpose path, never Jev.
+     * Without usable advice the chunk stays undecided (kind -1, never
+     * picked), as when the decision call fails. */
+    char *advice = NULL;
+    int routed = hf_decision_advice(5 /* HF_DECISION_RECAP */, state.p, &advice);
+    if (routed >= 0) {
+        int ok = recap_advice_apply(advice, s, from, to);
+        free(advice);
+        r->calls++;
+        if (!ok) {
+            r->failed++;
+            fprintf(stderr, "cg recap: %s statements %d-%d of %s skipped — no usable advice\n",
+                    s->agent, from + 1, to, s->title[0] ? s->title : s->path);
+        }
+        /* not cached: the local cache holds only local decisions */
+        sb_free(&state);
+        return ok ? 0 : -1;
+    }
     JevQuestion *qs = xmalloc(sizeof(JevQuestion) * (size_t)n * 3);
     for (int i = 0; i < n; i++) {
         char name[16], ins[400];
@@ -1205,4 +1261,122 @@ int cmd_recap(Cg *cg, const RecapOpts *o) {
     for (int i = 0; i < ss.n; i++) sess_free(&ss.v[i]);
     free(ss.v);
     return rc;
+}
+
+/* ---------------- bounded decision assistance (hyperfide 21.3) --------
+ * The legacy Jev consumers (guard, readiness, memory, recap) do not call
+ * Jev themselves in distributed mode: they go through 21.4's explicit
+ * decision.legacy.<purpose> capability path, one finite purpose each.
+ * Whatever comes back is advice about order or labels only — it never
+ * decides pass/fail, ownership, verification or criteria, and anything
+ * unavailable, malformed, late, or claiming authority is discarded so the
+ * caller keeps its deterministic outcome. Local mode is untouched. */
+#include "hyperfide/client.h"
+extern int hf_uuid_generate(char output[37]);
+
+#define HF_ADVICE_BUDGET_MS 2000
+
+/* One phase of the purpose path; the response body (malloc'd) or NULL. */
+static char *hf_decision_phase(int purpose, int phase, const char *input,
+                               long budget, char *error, size_t ecap) {
+    char op[37], key[37], corr[37];
+    if (!hf_uuid_generate(op) || !hf_uuid_generate(key) || !hf_uuid_generate(corr)) {
+        snprintf(error, ecap, "RESOURCE_LIMIT");
+        return NULL;
+    }
+    char *out = NULL, *err = NULL;
+    size_t on = 0, en = 0;
+    FILE *fo = open_memstream(&out, &on), *fe = open_memstream(&err, &en);
+    if (!fo || !fe) {
+        if (fo) fclose(fo);
+        if (fe) fclose(fe);
+        free(out); free(err);
+        snprintf(error, ecap, "RESOURCE_LIMIT");
+        return NULL;
+    }
+    int rc = hf_client_decision_invoke((HfDecisionPurpose)purpose, (HfDecisionPhase)phase,
+                                       input, op, key, corr, budget, fo, fe);
+    fclose(fo); fclose(fe);
+    char *code = err ? json_get_object(err, "error") : NULL;
+    if (!code && out) code = json_get_object(out, "error");   /* service refusal */
+    char *c = code ? json_get_string(code, "code") : NULL;
+    snprintf(error, ecap, "%s", c ? c : rc ? "ADVISORY_UNAVAILABLE" : "");
+    free(c); free(code); free(err);
+    char *ok = (rc == 0 && out) ? json_get_raw(out, "ok") : NULL;
+    bool good = ok && strcmp(ok, "true") == 0;
+    free(ok);
+    if (!good) {
+        if (!error[0]) snprintf(error, ecap, "ADVISORY_MALFORMED");
+        free(out);
+        return NULL;
+    }
+    return out;
+}
+
+/* -1: local authority, use the legacy path unchanged. 0: distributed, but
+ * no usable advice (the reason is on stderr once) — deterministic fallback.
+ * 1: *advice holds the advice object (malloc'd), which grants nothing. */
+int hf_decision_advice(int purpose, const char *observation, char **advice) {
+    static const char *const names[] = {NULL, "guard", "readiness", "triage", "memory", "recap"};
+    *advice = NULL;
+    int mode = hf_client_authority_mode();
+    if (mode == 0 || mode == 3) return -1;    /* local, offline-local */
+    if (purpose < HF_DECISION_GUARD || purpose > HF_DECISION_RECAP) return 0;
+    char error[96] = "";
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    StrBuf in; sb_init(&in);
+    sb_printf(&in, "{\"schema_version\":1,\"purpose\":\"%s\",\"observation\":%s}",
+              names[purpose], observation ? observation : "null");
+    char *submitted = mode == 1 ? hf_decision_phase(purpose, HF_DECISION_SUBMIT, in.p,
+                                                    HF_ADVICE_BUDGET_MS, error, sizeof error)
+                                : NULL;
+    if (mode != 1) snprintf(error, sizeof error, "DISTRIBUTED_AUTHORITY_UNAVAILABLE");
+    sb_free(&in);
+    char *result = NULL;
+    if (submitted) {
+        char *sr = json_get_object(submitted, "result");
+        char *decision = sr ? json_get_string(sr, "decision_id") : NULL;
+        free(sr); free(submitted);
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        long left = HF_ADVICE_BUDGET_MS - ((t1.tv_sec - t0.tv_sec) * 1000 +
+                                           (t1.tv_nsec - t0.tv_nsec) / 1000000);
+        if (!decision) snprintf(error, sizeof error, "ADVISORY_MALFORMED");
+        else if (left < 1) snprintf(error, sizeof error, "ADVISORY_DEADLINE_EXCEEDED");
+        else {
+            StrBuf q; sb_init(&q);
+            sb_puts(&q, "{\"decision_id\":"); sb_json_str(&q, decision); sb_putc(&q, '}');
+            result = hf_decision_phase(purpose, HF_DECISION_RESULT, q.p, left, error, sizeof error);
+            sb_free(&q);
+        }
+        free(decision);
+    }
+    if (result) {
+        char *body = json_get_object(result, "result");
+        char *authority = body ? json_get_string(body, "authority") : NULL;
+        char *applied = body ? json_get_raw(body, "applied") : NULL;
+        char *found = body ? json_get_object(body, "advice") : NULL;
+        /* advice claiming any authority, or saying it applied itself, is not advice */
+        if (found && authority && strcmp(authority, "NONE") == 0 &&
+            (!applied || strcmp(applied, "false") == 0)) {
+            *advice = found;
+            found = NULL;
+        } else snprintf(error, sizeof error, "ADVISORY_AUTHORITY_REFUSED");
+        free(found); free(applied); free(authority); free(body); free(result);
+    }
+    if (*advice) return 1;
+    fprintf(stderr, "cg: %s advice unavailable (%s) — deterministic outcome kept\n",
+            names[purpose], error[0] ? error : "ADVISORY_UNAVAILABLE");
+    return 0;
+}
+
+/* A probability field of an advice object: 1 when finite and in [0,1]. */
+int hf_advice_unit(const char *obj, const char *key, double *out) {
+    char *raw = obj ? json_get_raw(obj, key) : NULL;
+    char *end = NULL;
+    double v = raw ? strtod(raw, &end) : NAN;
+    bool ok = raw && end != raw && *end == 0 && isfinite(v) && v >= 0 && v <= 1;
+    free(raw);
+    if (ok) *out = v;
+    return ok;
 }

@@ -64,6 +64,10 @@ export function deterministicRanking(state:Data):Data{
  return {choice_order:list(state.eligible_choices).map(item=>obj(item)).sort((a,b)=>Number(b.priority)-Number(a.priority)||String(a.id).localeCompare(String(b.id))).map(item=>item.id),
  optional_context_order:list(state.optional_context).map(item=>obj(item).id),relationships:[],reviewer_suggestions:[],mandatory_context:state.mandatory_context,original_findings:state.findings,...(state.advisory_inputs?{advisory_inputs:state.advisory_inputs}:{}),...(state.finding_context?{original_finding_context:state.finding_context}:{}),required_reviewers:state.required_reviewers,authority:'NONE',applied:false};
 }
+// Native advisory consumers (src/govern.c, fleet.c, memory.c, recap.c) reach advice in distributed mode only through
+// these explicit 21.4 purpose actions; unusable or authority-claiming output keeps the deterministic outcome. Local mode is unchanged.
+export const consumerPurposes=Object.freeze(Object.fromEntries(([['guard','COLLECTED_ORDER'],['readiness','OMITTED'],['memory','UNCLASSIFIED'],['recap','UNDECIDED']] as const)
+ .map(([purpose,fallback])=>[purpose,Object.freeze({actions:Object.freeze(['decision.legacy.'+purpose+'.submit','decision.legacy.'+purpose+'.result']),fallback,authority:'NONE'})])));
 export function createComponent(ctx:ComponentContext):Component{
  registerAdvisoryPurpose(ctx,'ranking',async(client,scope,packet)=>{
   await assertFindingContext(client,scope,packet.state);
@@ -72,7 +76,7 @@ export function createComponent(ctx:ComponentContext):Component{
   if(fresh.availability!=='AVAILABLE'||canonical(candidatePins(list(fresh.eligible,8)))!==canonical(obj(packet.state.revision_bindings).candidates))fail('DECISION_STALE','Deterministic eligibility changed before model work');
  });
  return {apiVersion:1,actions:{
- 'decision.ranking.describe':()=>({schema_version:1,authority:'NONE',mandatory_context_removal:false,eligibility:'scheduler.resources.v1',shortlist_limit:8}),
+ 'decision.ranking.describe':()=>({schema_version:1,authority:'NONE',mandatory_context_removal:false,eligibility:'scheduler.resources.v1',shortlist_limit:8,consumer_purposes:consumerPurposes,local_consumers:'LEGACY_UNCHANGED'}),
  'decision.ranking.packet':async(value,ctx)=>{const q=input(value,['pool_id','profile_id']);return withAuthority(ctx,q.scope,'decision.ranking.packet',async client=>{
   const source=ctx.dependencies.require('5.4','scheduler.resources.v1',rankingSource);
   const query={...q.scope,pool_id:uuid(q.data.pool_id),...(q.data.profile_id===null?{}:{profile_id:str(q.data.profile_id)}),limit:8};
