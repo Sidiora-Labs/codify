@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "13.4.dispatch",
+  "task": "13.4",
+  "roles": [
+    "control"
+  ],
+  "module": "agents/dispatch.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "agent.launch-plan.describe",
+    "agent.launch-plan.prepare",
+    "agent.launch-plan.inspect"
+  ],
+  "requires": [
+    "12.2",
+    "13.4"
+  ]
+}
