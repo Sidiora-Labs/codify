@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "campaign_id": "hyperfide-task-25.2-cutover-rehearsal-v1",
+  "campaign_id": "hyperfide-task-25.2-cutover-rehearsal-v1-requal-12aa390190b3",
   "registered_variant": "task:25.2",
   "scope": "task-component",
   "case_ids": [
@@ -111,13 +111,13 @@
     },
     {
       "path": "services/hyperfide/components/3.1.json",
-      "sha256": "75306dbcb1451bac4cd9f000c029515c046a1b9650bf4f81ca1f30f3ca98638c",
-      "size": 502
+      "sha256": "e148d3295824d87501b136e4683ccbc4ed8835c811272a326618e7bcc2e04b0b",
+      "size": 637
     },
     {
       "path": "services/hyperfide/components/3.2.json",
-      "sha256": "f522355bfe192032f6aa8b53ea06fc4e2683edef6abf601ab32a56e3a0e438ca",
-      "size": 401
+      "sha256": "f2ca6017d794e835527ab28e335698858dd3b9c6e521eac2a9d67e1b9b02dba5",
+      "size": 432
     },
     {
       "path": "services/hyperfide/components/4.1.json",
@@ -161,8 +161,8 @@
     },
     {
       "path": "services/hyperfide/components/7.3.json",
-      "sha256": "5f33be058561f16fdcc99f6a5b36f133025a4c99a49f125f206329807ad240d7",
-      "size": 366
+      "sha256": "e98c721e7c2fdb12fed4a0d69f663f402803594757b5931625407718ab7c3f25",
+      "size": 392
     },
     {
       "path": "services/hyperfide/components/schema.json",
@@ -181,8 +181,8 @@
     },
     {
       "path": "services/hyperfide/dist/migration/legacy.js",
-      "sha256": "e5e5548c9ef69bd352dba52f41c3b59c441312545127998fe1a3f3daf728b7af",
-      "size": 20375
+      "sha256": "789320760d1aad1c955842be04748bc2addc78b8cd5a7c19004f2c8856957054",
+      "size": 21045
     },
     {
       "path": "services/hyperfide/dist/migration/parity.js",
@@ -191,8 +191,8 @@
     },
     {
       "path": "services/hyperfide/dist/migration/sqlite.js",
-      "sha256": "874448b34a68781035d670e1305cb087cca9d1e467a6f8687e81fe7934398c13",
-      "size": 32905
+      "sha256": "d2fb6f0635acf9dc2edc607a812946539f457f0fe06dc3de1a9084e56846d5d7",
+      "size": 36127
     },
     {
       "path": "services/hyperfide/migrations/0025-sqlite-history.sql",
@@ -221,8 +221,8 @@
     },
     {
       "path": "services/hyperfide/src/migration/legacy.ts",
-      "sha256": "962ced70c7aa4eab750e3b8baf8d8b2a79978e510a06a69b19acd9685e019719",
-      "size": 18870
+      "sha256": "dad2aca7de23b9056aad89f2c78e42d7403538b0505bf74cad28c37d4951035e",
+      "size": 19502
     },
     {
       "path": "services/hyperfide/src/migration/parity.ts",
@@ -231,8 +231,8 @@
     },
     {
       "path": "services/hyperfide/src/migration/sqlite.ts",
-      "sha256": "3a588dfcd87497b82e660b6148bf54447b17feec5106d37374236de721bf0256",
-      "size": 29507
+      "sha256": "b7ef8311e0fb12bacde3a5541907a2c65de226d70f1653202067a9f6dac5aa20",
+      "size": 32286
     },
     {
       "path": "services/hyperfide/tsconfig.json",
@@ -241,8 +241,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/15_2.py",
-      "sha256": "15764545b61284d7bc8eee82aea806b88aca503e652e846440eb8ebe24fbfa91",
-      "size": 54584
+      "sha256": "6a345a74224184cadd736b0fead3ba5b338346a616b71eb481ae89d8455b8ea4",
+      "size": 54551
     },
     {
       "path": "tests/hyperfide/cases/tasks/25_2.py",
