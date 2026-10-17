@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "variant": "task:11.5",
+  "task": "11.5",
+  "scope": "task-component",
+  "cases": [
+    "V-038",
+    "V-057"
+  ],
+  "assertion_ids": [
+    "slice.fixture.scale-and-languages",
+    "slice.graph.extraction-matches-live-7.1",
+    "slice.graph.real-publication",
+    "slice.component.registered-both-roles",
+    "slice.placement.role-separation",
+    "slice.derive.concurrent-distinct-slices",
+    "slice.derive.exact-commit-and-graph",
+    "slice.derive.file-level-closure",
+    "slice.derive.build-roots-tests-fixtures-contracts",
+    "slice.derive.unchanged-input-hit",
+    "slice.derive.changed-input-miss",
+    "slice.manifest.immutable",
+    "slice.fallback.unresolved-closure-edge",
+    "slice.fallback.unparsed-language",
+    "slice.fallback.budget-truncated",
+    "slice.fallback.graph-not-required",
+    "slice.fallback.stale-graph-generation",
+    "slice.fallback.reason-always-recorded",
+    "slice.materialize.concurrent-slots",
+    "slice.materialize.partial-clone-positive",
+    "slice.materialize.byte-identical-to-full-tree",
+    "slice.materialize.lfs-inside-slice",
+    "slice.materialize.submodule-and-lfs-full-tree",
+    "slice.materialize.undeclared-submodule-refused",
+    "slice.materialize.ineffective-partial-clone-never-ready",
+    "slice.materialize.slot-binding-and-occupancy",
+    "slice.cost.against-full-tree-baseline",
+    "slice.run.out-of-slice-read-refused",
+    "slice.run.out-of-slice-write-refused",
+    "slice.run.access-monitor-recorded",
+    "slice.run.excluded-build-root-refused",
+    "slice.widen.explicit-new-manifest",
+    "slice.widen.conflicting-identity-refused",
+    "slice.run.widened-slice-qualifies-inputs",
+    "slice.run.receipt-carries-slice-identity",
+    "slice.run.full-tree-detects-omitted-inputs",
+    "slice.run.full-tree-fallback-receipt",
+    "slice.run.operation-replay",
+    "slice.sql.immutable-history",
+    "slice.sql.repeatable-read-refused",
+    "slice.canary.no-authority-material",
+    "slice.cleanup.observed"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/11_5.py"
+  ],
+  "timeout_seconds": 3300,
+  "required_env": [
+    "DATABASE_URL"
+  ],
+  "fixtures": [
+    "cg",
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/provisioner.js",
+    "services/hyperfide/dist/preparation/slices.js",
+    "services/hyperfide/dist/graph/extraction.js",
+    "services/hyperfide/dist/hierarchy/packets.js",
+    "tests/hyperfide/support/identity_fixture.py",
+    "tests/hyperfide/cases/support/large_repo_fixture.py"
+  ],
+  "resources": [
+    {
+      "id": "hf-task-11.5-database",
+      "kind": "postgresql-database",
+      "scope": "task-11.5-disposable-component"
+    },
+    {
+      "id": "hf-task-11.5-repository-root",
+      "kind": "filesystem-directory",
+      "scope": "task-11.5-disposable-fixture-repository-graph-scratch-and-slots"
+    }
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/11_5.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 120,
+  "required_artifacts": [
+    "slices/observations.json",
+    "slices/resource-absence.json"
+  ],
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "graph.component.invoke",
+    "slice.component.invoke",
+    "slice.remote.materialize"
+  ],
+  "source_files": [
+    "services/hyperfide/src/preparation/slices.ts",
+    "services/hyperfide/migrations/0045-workspace-slices.sql",
+    "services/hyperfide/components/11.5.json",
+    "tests/hyperfide/cases/tasks/11_5.py",
+    "tests/hyperfide/registrations/11.5.json",
+    "services/hyperfide/src/preparation/manifests.ts",
+    "services/hyperfide/src/hierarchy/packets.ts",
+    "services/hyperfide/src/graph/publication.ts",
+    "services/hyperfide/src/graph/extraction.ts",
+    "services/hyperfide/src/graph/ingestion.ts",
+    "services/hyperfide/src/components/registry.ts",
+    "tests/hyperfide/cases/tasks/3_2.py",
+    "tests/hyperfide/cases/tasks/3_1.py",
+    "tests/hyperfide/registry.json",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py",
+    "services/hyperfide/package.json",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/tsconfig.json"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ]
+}

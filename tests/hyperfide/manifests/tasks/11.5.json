@@ -1,0 +1,230 @@
+{
+  "schema_version": 1,
+  "campaign_id": "hyperfide-task-11.5-workspace-slices-v1",
+  "registered_variant": "task:11.5",
+  "scope": "task-component",
+  "case_ids": [
+    "V-038",
+    "V-057"
+  ],
+  "expected_assertion_ids": [
+    "slice.fixture.scale-and-languages",
+    "slice.graph.extraction-matches-live-7.1",
+    "slice.graph.real-publication",
+    "slice.component.registered-both-roles",
+    "slice.placement.role-separation",
+    "slice.derive.concurrent-distinct-slices",
+    "slice.derive.exact-commit-and-graph",
+    "slice.derive.file-level-closure",
+    "slice.derive.build-roots-tests-fixtures-contracts",
+    "slice.derive.unchanged-input-hit",
+    "slice.derive.changed-input-miss",
+    "slice.manifest.immutable",
+    "slice.fallback.unresolved-closure-edge",
+    "slice.fallback.unparsed-language",
+    "slice.fallback.budget-truncated",
+    "slice.fallback.graph-not-required",
+    "slice.fallback.stale-graph-generation",
+    "slice.fallback.reason-always-recorded",
+    "slice.materialize.concurrent-slots",
+    "slice.materialize.partial-clone-positive",
+    "slice.materialize.byte-identical-to-full-tree",
+    "slice.materialize.lfs-inside-slice",
+    "slice.materialize.submodule-and-lfs-full-tree",
+    "slice.materialize.undeclared-submodule-refused",
+    "slice.materialize.ineffective-partial-clone-never-ready",
+    "slice.materialize.slot-binding-and-occupancy",
+    "slice.cost.against-full-tree-baseline",
+    "slice.run.out-of-slice-read-refused",
+    "slice.run.out-of-slice-write-refused",
+    "slice.run.access-monitor-recorded",
+    "slice.run.excluded-build-root-refused",
+    "slice.widen.explicit-new-manifest",
+    "slice.widen.conflicting-identity-refused",
+    "slice.run.widened-slice-qualifies-inputs",
+    "slice.run.receipt-carries-slice-identity",
+    "slice.run.full-tree-detects-omitted-inputs",
+    "slice.run.full-tree-fallback-receipt",
+    "slice.run.operation-replay",
+    "slice.sql.immutable-history",
+    "slice.sql.repeatable-read-refused",
+    "slice.canary.no-authority-material",
+    "slice.cleanup.observed"
+  ],
+  "approval": {
+    "approved": true,
+    "allowed_actions": [
+      "postgresql.fixture.create",
+      "postgresql.fixture.drop",
+      "graph.component.invoke",
+      "slice.component.invoke",
+      "slice.remote.materialize"
+    ]
+  },
+  "inputs": [
+    {
+      "path": "cg",
+      "sha256": "06845f2ab3d58630044ec75997e9788ca1113671e001c2b9821bd92936f05b37",
+      "size": 69276736
+    },
+    {
+      "path": "services/hyperfide/components/11.5.json",
+      "sha256": "b0a00e767f3887e1527eee1c9a62e4c821b328017558974b74e95b9eb8ef1864",
+      "size": 489
+    },
+    {
+      "path": "services/hyperfide/dist/control.js",
+      "sha256": "1383288f00472de29607207d1d318e257c6e80c0fb2c05ca9fb2d974040e8032",
+      "size": 118
+    },
+    {
+      "path": "services/hyperfide/dist/graph/extraction.js",
+      "sha256": "9d4fe92600066dcd8139561d2e1208b2a69c276cac9bcd6d02befa2206724770",
+      "size": 30933
+    },
+    {
+      "path": "services/hyperfide/dist/hierarchy/packets.js",
+      "sha256": "fd5f75b0a2b68ca45a9b961757793836a385522b7a46ba6928e241c8fffdbc08",
+      "size": 54946
+    },
+    {
+      "path": "services/hyperfide/dist/preparation/slices.js",
+      "sha256": "0a6c21e2bf7fc26b9d61cc306962a4c239b8d3449ad731abceb19a72ded8bb3d",
+      "size": 75803
+    },
+    {
+      "path": "services/hyperfide/dist/provisioner.js",
+      "sha256": "0747f45b91ff8319ea22f6ced47d0af9c812f502d8240b543d06c7f1ba0d030a",
+      "size": 126
+    },
+    {
+      "path": "services/hyperfide/migrations/0045-workspace-slices.sql",
+      "sha256": "8ea7657f5f97ab4365f0d6e1c5a9284d010be46a12f6976ddaaf918d66606a34",
+      "size": 9307
+    },
+    {
+      "path": "services/hyperfide/package-lock.json",
+      "sha256": "101f5bc9fbb5864f227051eb2d0388449925df88c0fdd0e5755b40b808a4cfbb",
+      "size": 128778
+    },
+    {
+      "path": "services/hyperfide/package.json",
+      "sha256": "51c686f08fdfa47386af869cd6cdb63f1d2553f99366741239ded92dfe0d4398",
+      "size": 766
+    },
+    {
+      "path": "services/hyperfide/src/components/registry.ts",
+      "sha256": "070480a8b924f1e7b3c0400a6a8adf1b8b49253623189efe09fede9c987e97d8",
+      "size": 12721
+    },
+    {
+      "path": "services/hyperfide/src/graph/extraction.ts",
+      "sha256": "808054c0926b0da9e89d776fff412d5091ae080476f6213bf8f64bd3d62cf251",
+      "size": 27637
+    },
+    {
+      "path": "services/hyperfide/src/graph/ingestion.ts",
+      "sha256": "f2bfb6f817d09597945e3a27569e264eb1e37180bda47bab988fb6eceeb2b7ec",
+      "size": 32614
+    },
+    {
+      "path": "services/hyperfide/src/graph/publication.ts",
+      "sha256": "d7c92acbda8df1e49cad7ce3ac78f4808d39b889c1323acce5ee532eabd2ca9e",
+      "size": 15046
+    },
+    {
+      "path": "services/hyperfide/src/hierarchy/packets.ts",
+      "sha256": "7e9cd6527682a6f46938904675b831a932d9a6481442b958292406efd4ad4177",
+      "size": 52017
+    },
+    {
+      "path": "services/hyperfide/src/preparation/manifests.ts",
+      "sha256": "a6be34770efd0a8b639f62179e3cfcfc304e258ff9ec48df7f7b2aff02ca73d4",
+      "size": 42115
+    },
+    {
+      "path": "services/hyperfide/src/preparation/slices.ts",
+      "sha256": "c06fb8e80da3e0da4abb4fa3ef5987409bf538433553d736b1420cd6f20eea2c",
+      "size": 71837
+    },
+    {
+      "path": "services/hyperfide/tsconfig.json",
+      "sha256": "2b45e09325652f23d0bf4ec53439e4552cf4c2854d7288ce40186d4074f894bb",
+      "size": 487
+    },
+    {
+      "path": "tests/hyperfide/cases/support/large_repo_fixture.py",
+      "sha256": "dbaef62bdda09d5177b9090d4e37783f978a4107ea252e41585718be883e03b5",
+      "size": 24393
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/11_5.py",
+      "sha256": "ce90fd4f154ff8c474211450e238a57fbd1ec595512ab7b5aa75ae51ec9d5094",
+      "size": 68936
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/3_1.py",
+      "sha256": "16359a464606e238a5bcfe16fce54d096ed48ae5182c18499d2b0613c21b3d08",
+      "size": 35448
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/3_2.py",
+      "sha256": "f718d35df3c5c6fd7149cd27e756027fbf638577e3862db291c51fb30d2ff6d4",
+      "size": 35541
+    },
+    {
+      "path": "tests/hyperfide/check-evidence.py",
+      "sha256": "cc8de56fb25bea153490b4143a231f1ff6f4dac758baaea4bf90fb7d9ba236a0",
+      "size": 30633
+    },
+    {
+      "path": "tests/hyperfide/manifest.schema.json",
+      "sha256": "3407092d7e6e452bb288e996f840bd5bab22d6c0f494a49bf944cd73c18078b8",
+      "size": 3216
+    },
+    {
+      "path": "tests/hyperfide/qualify.py",
+      "sha256": "8aa17f5e2572c8557f15353f7267e98600547fb0f2693486c0e0f2fc1abce8c2",
+      "size": 37538
+    },
+    {
+      "path": "tests/hyperfide/registrations/11.5.json",
+      "sha256": "0f730a9d7f672dc2ebf2f59b3e15594140afd5324dcec6c8dc4a2f2809a448a0",
+      "size": 4388
+    },
+    {
+      "path": "tests/hyperfide/registry.json",
+      "sha256": "59c858064cf8f112221068f9b2c6b7c9a3d5480aaad0792baa0845e1e601b52e",
+      "size": 11102
+    },
+    {
+      "path": "tests/hyperfide/support/identity_fixture.py",
+      "sha256": "2b992fd5eab4d903909a4dd621b2ce3c7278fa932e163cbad8f33cf2b65efe0a",
+      "size": 29318
+    }
+  ],
+  "resources": [
+    {
+      "id": "hf-task-11.5-database",
+      "kind": "postgresql-database",
+      "scope": "task-11.5-disposable-component"
+    },
+    {
+      "id": "hf-task-11.5-repository-root",
+      "kind": "filesystem-directory",
+      "scope": "task-11.5-disposable-fixture-repository-graph-scratch-and-slots"
+    }
+  ],
+  "seed": 115,
+  "policy": {
+    "cloud_provisioning": false,
+    "frontier_calls": false,
+    "full_tree_qualification": "NOT_CLAIMED",
+    "component_only": true,
+    "full_case_status": "INCOMPLETE",
+    "execution": "local sandbox provisioner process stands in for the remote host (HF_EXECUTION_HOST_CLASS=remote); no provider resources",
+    "graph_extraction": "7.1-equivalent bundle port for the >20,000-file commit (the HTTPS action's fixed 15 s deadline cannot cover it), proven byte-identical to live 7.1 on a control commit; 7.2 ingest and 7.3 publication through the signed service",
+    "access_monitor": "strace when present; otherwise ACCESS_MONITOR_UNAVAILABLE is recorded and slice qualification is refused",
+    "fixture_cleanup": "observed PostgreSQL database/role, fixture/key directory and listener absence; no retained resources"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "id": "11.5",
+  "task": "11.5",
+  "roles": [
+    "control",
+    "provisioner"
+  ],
+  "module": "preparation/slices.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "preparation.slice.describe",
+    "preparation.slice.derive",
+    "preparation.slice.widen",
+    "preparation.slice.inspect",
+    "preparation.slice.materialize",
+    "preparation.slice.run",
+    "preparation.slice.release"
+  ],
+  "requires": [
+    "4.2",
+    "14.1"
+  ]
+}
