@@ -118,7 +118,7 @@ def observation_dir():
  path=Path(os.environ.get("HYPERFIDE_CAMPAIGN_DIR","/tmp/hyperfide/task-"+TASK+"-raw"))/"recovery"
  path.mkdir(parents=True,exist_ok=True)
  return path
-def cleanup():
+def cleanup(emit=True):
  global DB,RESOURCE
  complete=True
  try:
@@ -133,7 +133,7 @@ def cleanup():
   observation_dir().joinpath("database-absence.json").write_text(json.dumps(record)+chr(10))
  except Exception:complete=False
  resources=[] if RESOURCE is None else [{"id":RESOURCE,"status":"deleted" if complete else "unknown","observed_absent":complete,"evidence_artifact":"recovery/database-absence.json"}]
- print(json.dumps({"type":"cleanup","complete":complete,"resources":resources}),flush=True)
+ if emit:print(json.dumps({"type":"cleanup","complete":complete,"resources":resources}),flush=True)
  return complete
 
 ACCEPTED_REBIND_PROBE=r'''
@@ -208,6 +208,6 @@ def run(task,callback):
  try:fixture=setup(task);callback(fixture)
  finally:
   if fixture:fixture.close()
-  complete=cleanup()
+  complete=cleanup(emit=False)
  return 1 if FAILED or not complete else 0
 if __name__=="__main__":sys.exit(run(TASK,tests))

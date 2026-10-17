@@ -1,0 +1,260 @@
+{
+  "approval": {
+    "allowed_actions": [
+      "postgresql.fixture.create",
+      "postgresql.fixture.drop",
+      "https.fixture.listen"
+    ],
+    "approved": true
+  },
+  "campaign_id": "hyperfide-task-24.2-worker-restoration-component-v1",
+  "case_ids": [
+    "V-004",
+    "V-041",
+    "V-049"
+  ],
+  "expected_assertion_ids": [
+    "recovery.worker.real-process",
+    "recovery.worker.durable-restoration-request",
+    "recovery.worker.restoration-source-pinned",
+    "recovery.worker.restoration-grants-no-authority",
+    "recovery.worker.compute-revoked",
+    "recovery.worker.lease-revoked",
+    "recovery.worker.custody-preserved",
+    "recovery.worker.normal-scheduler-eligible",
+    "recovery.worker.replacement-hold-durable",
+    "recovery.worker.qualification-not-compute",
+    "recovery.worker.no-premature-replacement",
+    "recovery.worker.explicit-resource-debt",
+    "recovery.worker.custody-loss-does-not-request-reimplementation",
+    "recovery.worker.accepted-submission-loss",
+    "recovery.worker.qualification-own-lease",
+    "recovery.worker.idempotent-loss",
+    "recovery.worker.idempotency-conflict",
+    "recovery.worker.stale-epoch",
+    "recovery.worker.restart-snapshot",
+    "recovery.worker.restoration-source-immutable",
+    "recovery.worker.restoration-snapshot",
+    "recovery.worker.inventory-required",
+    "recovery.worker.incompatible-checkpoint-held",
+    "recovery.worker.held-grants-nothing",
+    "recovery.worker.lost-boot-target-refused",
+    "recovery.worker.compatible-restore-ready",
+    "recovery.worker.restore-new-identity",
+    "recovery.worker.old-generation-not-renewed",
+    "recovery.worker.survivors-remain-explicit",
+    "recovery.worker.artifacts-preserved",
+    "recovery.worker.restore-idempotent",
+    "recovery.worker.restore-conflict",
+    "recovery.worker.clone-before-enrollment-inert",
+    "recovery.worker.copied-authority-refused",
+    "recovery.worker.clone-boot-refused",
+    "recovery.worker.fresh-identity-enrolled",
+    "recovery.worker.single-enrollment",
+    "recovery.worker.single-compute-owner",
+    "recovery.worker.partitioned-old-renew-refused",
+    "recovery.worker.stale-outputs-nonauthoritative",
+    "recovery.worker.skewed-clock-not-trusted",
+    "recovery.worker.renewal-after-expiry-refused",
+    "recovery.worker.expired-output-archived",
+    "recovery.worker.replacement-loss-restores",
+    "recovery.worker.new-first-publishes",
+    "recovery.worker.delayed-old-after-new-archived",
+    "recovery.worker.single-publication",
+    "recovery.worker.reordered-replay-stable",
+    "recovery.worker.replay-tamper-refused",
+    "recovery.worker.unknown-attempt-refused",
+    "recovery.worker.outside-lineage-refused",
+    "recovery.worker.restore-stale-epoch",
+    "recovery.worker.replacement-binding-immutable",
+    "recovery.worker.output-provenance-append-only",
+    "recovery.worker.no-hidden-backlog"
+  ],
+  "inputs": [
+    {
+      "path": "services/hyperfide/components/14.1.json",
+      "sha256": "d90461e0c89dedac5c578a4fe57c7269b9958c38668562247dbb39e3c6cca6be",
+      "size": 583
+    },
+    {
+      "path": "services/hyperfide/components/2.1.json",
+      "sha256": "8e3c3615b3e712b9d923e2bcfa5065dd0e192e4a822f4f3c11f3421e4ad345ad",
+      "size": 338
+    },
+    {
+      "path": "services/hyperfide/components/2.4.json",
+      "sha256": "c64dfc7057a799a1b5591a655821c99ff40810aa2f5b1fe347a5f8c3059986e9",
+      "size": 356
+    },
+    {
+      "path": "services/hyperfide/components/24.1.json",
+      "sha256": "d80fd4bc8186b9c46750c6350b91d3a9697b905d75c882b539cf6867f04a0ec8",
+      "size": 446
+    },
+    {
+      "path": "services/hyperfide/components/24.2.json",
+      "sha256": "6c0c5b7519bd6e6e297afe9a9d02056a13f0a7ad29c350f809bf004c0bb0dee8",
+      "size": 518
+    },
+    {
+      "path": "services/hyperfide/components/3.1.json",
+      "sha256": "75306dbcb1451bac4cd9f000c029515c046a1b9650bf4f81ca1f30f3ca98638c",
+      "size": 502
+    },
+    {
+      "path": "services/hyperfide/components/3.2.json",
+      "sha256": "f522355bfe192032f6aa8b53ea06fc4e2683edef6abf601ab32a56e3a0e438ca",
+      "size": 401
+    },
+    {
+      "path": "services/hyperfide/components/4.1.json",
+      "sha256": "e51ebab039cc34c08b50b73ea08955bd9bafb1a0fbb25de73fd328d981c79452",
+      "size": 375
+    },
+    {
+      "path": "services/hyperfide/components/4.2.json",
+      "sha256": "42cc05908e2eeb4692ec49a2c14dc64caf477448d431e96372fb0241bed7d061",
+      "size": 278
+    },
+    {
+      "path": "services/hyperfide/components/4.4.json",
+      "sha256": "1123d0b4cb595e434eb4cc483cf3fdbeff859998bacd67da21e91f0c6aa15771",
+      "size": 362
+    },
+    {
+      "path": "services/hyperfide/components/5.1.json",
+      "sha256": "c73623c22e058880f26667dddb3372e667be3727d2fe5b0312cfd0af47543203",
+      "size": 292
+    },
+    {
+      "path": "services/hyperfide/components/6.1.json",
+      "sha256": "cf10e88a3ed9542605b2e3a98deece43cf460d40b7fb4f1129ca257a0bf5cf3b",
+      "size": 487
+    },
+    {
+      "path": "services/hyperfide/components/6.2.json",
+      "sha256": "6e2caf80ff053d2e387010b1b6f6d5862015bac4ccb52f056465d81b9fc7981b",
+      "size": 330
+    },
+    {
+      "path": "services/hyperfide/components/6.4.json",
+      "sha256": "d8b6fc93cad9114618252eb6b9c435ea81b267d2d0046a801d68d9d3d326a622",
+      "size": 345
+    },
+    {
+      "path": "services/hyperfide/components/7.2.json",
+      "sha256": "9d7c611d354e1e1c6002767053b9711f87a9ed98953eaecbd7bcc89d38933dce",
+      "size": 399
+    },
+    {
+      "path": "services/hyperfide/components/7.3.json",
+      "sha256": "5f33be058561f16fdcc99f6a5b36f133025a4c99a49f125f206329807ad240d7",
+      "size": 366
+    },
+    {
+      "path": "services/hyperfide/dist/control.js",
+      "sha256": "1383288f00472de29607207d1d318e257c6e80c0fb2c05ca9fb2d974040e8032",
+      "size": 118
+    },
+    {
+      "path": "services/hyperfide/dist/recovery/control.js",
+      "sha256": "61e12389fe9db286ea4869103d808b063c6046bba03912dbf31a9f3fb6c34089",
+      "size": 38886
+    },
+    {
+      "path": "services/hyperfide/dist/recovery/workers.js",
+      "sha256": "429f82d9fa16035656700c55a1fb8c104b697ce6abfade81fa493e2953276e56",
+      "size": 38918
+    },
+    {
+      "path": "services/hyperfide/dist/transport/protocol.js",
+      "sha256": "fe965513abe410e78b8941de532bd2e4b7df12056a7fb35cd8645dc429e1e88d",
+      "size": 12240
+    },
+    {
+      "path": "services/hyperfide/migrations/0024-recovery.sql",
+      "sha256": "a7a5aff134f4bd4362348a7eb4284137e797637320c4310689e32bbda4028576",
+      "size": 14330
+    },
+    {
+      "path": "services/hyperfide/package-lock.json",
+      "sha256": "101f5bc9fbb5864f227051eb2d0388449925df88c0fdd0e5755b40b808a4cfbb",
+      "size": 128778
+    },
+    {
+      "path": "services/hyperfide/package.json",
+      "sha256": "51c686f08fdfa47386af869cd6cdb63f1d2553f99366741239ded92dfe0d4398",
+      "size": 766
+    },
+    {
+      "path": "services/hyperfide/src/recovery/control.ts",
+      "sha256": "e7b175db837d52486c8b18a03a4651ad6cd270dc98a055c7822a504a014a5a7d",
+      "size": 39383
+    },
+    {
+      "path": "services/hyperfide/src/recovery/workers.ts",
+      "sha256": "20b6ec1cff63f95479b8fb65a89d84fe66126b2394df4768d96b891fe2aeb9c0",
+      "size": 34786
+    },
+    {
+      "path": "services/hyperfide/tsconfig.json",
+      "sha256": "2b45e09325652f23d0bf4ec53439e4552cf4c2854d7288ce40186d4074f894bb",
+      "size": 487
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/24_1.py",
+      "sha256": "fb88b8e301adaf93dc288490730f4948dc362ca63a69f5c1f8aa9a72d3f35136",
+      "size": 19875
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/24_2.py",
+      "sha256": "d9406b60d0555803f4bd8ca24b1e03f97a53b11d5bc95ed24910e3f2fca7cea3",
+      "size": 22404
+    },
+    {
+      "path": "tests/hyperfide/check-evidence.py",
+      "sha256": "cc8de56fb25bea153490b4143a231f1ff6f4dac758baaea4bf90fb7d9ba236a0",
+      "size": 30633
+    },
+    {
+      "path": "tests/hyperfide/manifest.schema.json",
+      "sha256": "3407092d7e6e452bb288e996f840bd5bab22d6c0f494a49bf944cd73c18078b8",
+      "size": 3216
+    },
+    {
+      "path": "tests/hyperfide/qualify.py",
+      "sha256": "8aa17f5e2572c8557f15353f7267e98600547fb0f2693486c0e0f2fc1abce8c2",
+      "size": 37538
+    },
+    {
+      "path": "tests/hyperfide/registrations/24.2.json",
+      "sha256": "599e0493eda4e6a70b536f69202f6ea894d80bbb3e2f000ceed6d95009036770",
+      "size": 4452
+    },
+    {
+      "path": "tests/hyperfide/support/identity_fixture.py",
+      "sha256": "2b992fd5eab4d903909a4dd621b2ce3c7278fa932e163cbad8f33cf2b65efe0a",
+      "size": 29318
+    }
+  ],
+  "policy": {
+    "cloud_provisioning": false,
+    "component_only": true,
+    "execution": "remote-only",
+    "frontier_calls": false,
+    "full_case_status": "INCOMPLETE",
+    "scope_limit": "Registered task-component variant only; V-004/V-041/V-049 full-case, provider, connector and campaign receipts remain UNRUN.",
+    "simulation": "Disposable local PostgreSQL with registered control service; worker partitions, clock skew and returning old/new workers are driven through signed internal API calls. No live provider sandbox, process snapshot or network partition is exercised."
+  },
+  "registered_variant": "task:24.2",
+  "resources": [
+    {
+      "id": "hf-task-24.2-database",
+      "kind": "postgresql-database",
+      "scope": "task24.2-disposable"
+    }
+  ],
+  "schema_version": 1,
+  "scope": "task-component",
+  "seed": 242
+}

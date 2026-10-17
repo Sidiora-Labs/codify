@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "variant": "task:24.2",
+  "task": "24.2",
+  "scope": "task-component",
+  "cases": [
+    "V-004",
+    "V-041",
+    "V-049"
+  ],
+  "assertion_ids": [
+    "recovery.worker.real-process",
+    "recovery.worker.durable-restoration-request",
+    "recovery.worker.restoration-source-pinned",
+    "recovery.worker.restoration-grants-no-authority",
+    "recovery.worker.compute-revoked",
+    "recovery.worker.lease-revoked",
+    "recovery.worker.custody-preserved",
+    "recovery.worker.normal-scheduler-eligible",
+    "recovery.worker.replacement-hold-durable",
+    "recovery.worker.qualification-not-compute",
+    "recovery.worker.no-premature-replacement",
+    "recovery.worker.explicit-resource-debt",
+    "recovery.worker.custody-loss-does-not-request-reimplementation",
+    "recovery.worker.accepted-submission-loss",
+    "recovery.worker.qualification-own-lease",
+    "recovery.worker.idempotent-loss",
+    "recovery.worker.idempotency-conflict",
+    "recovery.worker.stale-epoch",
+    "recovery.worker.restart-snapshot",
+    "recovery.worker.restoration-source-immutable",
+    "recovery.worker.restoration-snapshot",
+    "recovery.worker.inventory-required",
+    "recovery.worker.incompatible-checkpoint-held",
+    "recovery.worker.held-grants-nothing",
+    "recovery.worker.lost-boot-target-refused",
+    "recovery.worker.compatible-restore-ready",
+    "recovery.worker.restore-new-identity",
+    "recovery.worker.old-generation-not-renewed",
+    "recovery.worker.survivors-remain-explicit",
+    "recovery.worker.artifacts-preserved",
+    "recovery.worker.restore-idempotent",
+    "recovery.worker.restore-conflict",
+    "recovery.worker.clone-before-enrollment-inert",
+    "recovery.worker.copied-authority-refused",
+    "recovery.worker.clone-boot-refused",
+    "recovery.worker.fresh-identity-enrolled",
+    "recovery.worker.single-enrollment",
+    "recovery.worker.single-compute-owner",
+    "recovery.worker.partitioned-old-renew-refused",
+    "recovery.worker.stale-outputs-nonauthoritative",
+    "recovery.worker.skewed-clock-not-trusted",
+    "recovery.worker.renewal-after-expiry-refused",
+    "recovery.worker.expired-output-archived",
+    "recovery.worker.replacement-loss-restores",
+    "recovery.worker.new-first-publishes",
+    "recovery.worker.delayed-old-after-new-archived",
+    "recovery.worker.single-publication",
+    "recovery.worker.reordered-replay-stable",
+    "recovery.worker.replay-tamper-refused",
+    "recovery.worker.unknown-attempt-refused",
+    "recovery.worker.outside-lineage-refused",
+    "recovery.worker.restore-stale-epoch",
+    "recovery.worker.replacement-binding-immutable",
+    "recovery.worker.output-provenance-append-only",
+    "recovery.worker.no-hidden-backlog"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/24_2.py"
+  ],
+  "timeout_seconds": 600,
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
+  "fixtures": [
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/transport/protocol.js",
+    "services/hyperfide/dist/recovery/control.js",
+    "services/hyperfide/dist/recovery/workers.js"
+  ],
+  "resources": [
+    {
+      "id": "hf-task-24.2-database",
+      "kind": "postgresql-database",
+      "scope": "task24.2-disposable"
+    }
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/24_2.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "required_artifacts": [
+    "recovery/database-absence.json",
+    "recovery/worker-observations.json"
+  ],
+  "source_files": [
+    "services/hyperfide/components/24.2.json",
+    "services/hyperfide/migrations/0024-recovery.sql",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/package.json",
+    "services/hyperfide/src/recovery/control.ts",
+    "services/hyperfide/src/recovery/workers.ts",
+    "services/hyperfide/tsconfig.json",
+    "tests/hyperfide/cases/tasks/24_1.py",
+    "tests/hyperfide/cases/tasks/24_2.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/registrations/24.2.json",
+    "tests/hyperfide/support/identity_fixture.py"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "https.fixture.listen"
+  ]
+}

@@ -12,7 +12,11 @@
     "recovery.worker.describe",
     "recovery.worker.loss",
     "recovery.worker.inventory",
-    "recovery.worker.restoration.inspect"
+    "recovery.worker.restoration.inspect",
+    "recovery.worker.restore",
+    "recovery.worker.enroll",
+    "recovery.worker.renew",
+    "recovery.worker.output"
   ],
   "requires": [
     "4.2",
