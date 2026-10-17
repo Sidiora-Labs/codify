@@ -212,6 +212,76 @@ export async function reserveDynamic(tx:PrimaryTransaction,input:DynamicCapacity
   return result;
 }
 
+const WAIT_FOR:Record<string,string>={MODEL_RATE:'MODEL',API_RATE:'PROVIDER_RATE',PROVISION_RATE:'PROVIDER_RATE',
+  EXCLUSIVE_SERVICE:'EXCLUSIVE_SERVICE',BUILD:'BUILD',REVIEW:'REVIEW',INTEGRATION:'REVIEW'};
+export interface AdmissionLimit {
+  capacity_account_id:string;dimension:string;resource_key:string;capacity_class:string;
+  configured_limit:string;occupied:string;requested:string;wait_reason:string;window_start?:string;
+}
+/** Locks the exact accounts in UUID order and names the first declared dimension that cannot admit the vector. Writes nothing. */
+export async function limitingResource(tx:PrimaryTransaction,input:SchedulerScope&{pool_id:string;dimensions:CapacityDimension[];request_id?:string}):Promise<AdmissionLimit|null>{
+  assertPrimaryTransaction(tx);
+  const demand=dimensions(input.dimensions);
+  const rows=await tx.query<{id:string;pool_id:string;dimension:string;resource_key:string;capacity_class:string;configured_limit:string;occupied:string}>(
+    'SELECT id,pool_id,dimension,resource_key,capacity_class,configured_limit::text,(reserved+allocated)::text AS occupied FROM hyperfide.capacity_accounts '+
+    'WHERE organisation_id=$1 AND id=ANY($2::uuid[]) ORDER BY id FOR UPDATE',[input.organisation_id,demand.map(item=>item.capacity_account_id)]);
+  if(rows.rows.length!==demand.length||rows.rows.some(row=>row.pool_id!==input.pool_id))
+    fail('CAPACITY_SCOPE_INVALID','Every requested dimension must belong to the selected pool');
+  for(const item of demand){
+    const row=rows.rows.find(candidate=>candidate.id===item.capacity_account_id)!;
+    let occupied=row.occupied,window:string|undefined;
+    if(row.capacity_class!=='RATE'&&input.request_id){
+      const prior=await tx.query("SELECT 1 FROM hyperfide.reservations WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3 AND capacity_account_id=$4 AND state<>'RELEASED'",
+        [input.organisation_id,input.run_id,input.request_id,row.id]);
+      if(prior.rows.length)continue;
+    }
+    if(row.capacity_class==='RATE'){
+      if(input.request_id){
+        const prior=await tx.query('SELECT 1 FROM hyperfide.capacity_rate_receipts WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3 AND capacity_account_id=$4',
+          [input.organisation_id,input.run_id,input.request_id,row.id]);
+        if(prior.rows.length)continue;
+      }
+      const used=await tx.query<{window_start:string;consumed:string}>(
+        'SELECT k.window_start::text,COALESCE(w.consumed,0)::text AS consumed FROM (SELECT to_timestamp(floor(extract(epoch FROM clock_timestamp())*1000/p.rate_window_ms)*p.rate_window_ms/1000) AS window_start '+
+        'FROM hyperfide.scheduling_policies p WHERE p.organisation_id=$1 AND p.pool_id=$2) k LEFT JOIN hyperfide.capacity_rate_windows w ON w.organisation_id=$1 AND w.capacity_account_id=$3 AND w.window_start=k.window_start',
+        [input.organisation_id,input.pool_id,row.id]);
+      if(!used.rows[0])fail('SCHEDULING_POLICY_MISSING','The selected pool has no approved scheduling policy');
+      occupied=used.rows[0].consumed;window=used.rows[0].window_start;
+    }
+    if(BigInt(occupied)+BigInt(item.quantity)>BigInt(row.configured_limit))
+      return {capacity_account_id:row.id,dimension:row.dimension,resource_key:row.resource_key,capacity_class:row.capacity_class,
+        configured_limit:row.configured_limit,occupied,requested:item.quantity,wait_reason:WAIT_FOR[row.dimension]??'CAPACITY',...(window?{window_start:window}:{})};
+  }
+  return null;
+}
+export interface Backpressure {
+  active:boolean;limiting_resource:string|null;
+  dimensions:{dimension:string;configured_limit:string;occupied:string;queued:string;saturated:boolean}[];
+}
+/**
+ * Review/integration backpressure. The declared REVIEW and INTEGRATION limits are the policy: once occupied plus live
+ * queued downstream work reaches the declared limit, new coding (AGENT) admissions wait with REVIEW instead of
+ * producing more unreviewable work. Pools with no outstanding downstream work never apply pressure.
+ */
+export async function reviewBackpressure(tx:PrimaryTransaction,scope:{organisation_id:string},pool_id:string):Promise<Backpressure>{
+  assertPrimaryTransaction(tx);
+  const rows=await tx.query<{dimension:string;configured_limit:string;occupied:string;queued:string}>(
+    "SELECT a.dimension,a.configured_limit::text,(a.reserved+a.allocated)::text AS occupied,(SELECT count(*) FROM hyperfide.resource_waiters w "+
+    "WHERE w.organisation_id=a.organisation_id AND w.pool_id=a.pool_id AND w.job_kind=a.dimension AND w.state='WAITING' AND w.deadline_at>clock_timestamp())::text AS queued "+
+    "FROM hyperfide.capacity_accounts a WHERE a.organisation_id=$1 AND a.pool_id=$2 AND a.capacity_class='EXECUTION' AND a.dimension IN ('REVIEW','INTEGRATION') ORDER BY a.dimension",
+    [scope.organisation_id,pool_id]);
+  const result=rows.rows.map(row=>{
+    const backlog=BigInt(row.occupied)+BigInt(row.queued);
+    return {...row,saturated:backlog>0n&&backlog>=BigInt(row.configured_limit)};
+  });
+  const limiting=result.find(row=>row.saturated);
+  return {active:limiting!==undefined,limiting_resource:limiting?.dimension??null,dimensions:result};
+}
+async function markWaiting(tx:PrimaryTransaction,scope:SchedulerScope,waiter:string,reason:string):Promise<void>{
+  await tx.query('UPDATE hyperfide.resource_waiters SET wait_reason=$4,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND wait_reason<>$4',
+    [scope.organisation_id,scope.run_id,waiter,reason]);
+}
+
 export class ResourceScheduler {
   private readonly readers=new Map<string,ProofReader>();
   registerProofReader(source:string,reader:ProofReader):()=>void{
@@ -304,7 +374,7 @@ async function requireQueueActor(tx:PrimaryTransaction,scope:SchedulerScope,acto
 }
 export function createComponent(_startup:ComponentContext):Component{
   const scheduler=new ResourceScheduler();
-  const capability=Object.freeze({eligibleTasks,eligibleDemand,validateResourceVector,allocate:allocateReservations,assertJobReservation,bindJobReservation,readJobAllocation,renewJobAllocation,releaseJobAllocation,reserveCapacity:reserveDynamic,
+  const capability=Object.freeze({eligibleTasks,eligibleDemand,validateResourceVector,allocate:allocateReservations,assertJobReservation,bindJobReservation,readJobAllocation,renewJobAllocation,releaseJobAllocation,reserveCapacity:reserveDynamic,limitingResource,reviewBackpressure,
     release:scheduler.release.bind(scheduler),registerProofReader:scheduler.registerProofReader.bind(scheduler)});
   return {apiVersion:1,capabilities:{'scheduler.resources.v1':capability},close:()=>scheduler.close(),actions:{
     'scheduler.resources.eligible':async(value,context)=>{
@@ -392,12 +462,19 @@ export function createComponent(_startup:ComponentContext):Component{
           await tx.query("UPDATE hyperfide.resource_waiters SET state='EXPIRED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[scope.organisation_id,scope.run_id,waiter]);
           return {waiter_id:waiter,admitted:false,state:'EXPIRED',wait_reason:'DEADLINE'};
         }
+        // Coding work waits behind saturated review/integration instead of being admitted or appearing stalled.
+        const pressure=await reviewBackpressure(tx,scope,pool);
+        if(row.job_kind==='AGENT'&&pressure.active){
+          await markWaiting(tx,scope,waiter,'REVIEW');
+          return {waiter_id:waiter,admitted:false,state:'QUEUED',wait_reason:'REVIEW',limiting_resource:{dimension:pressure.limiting_resource,cause:'BACKPRESSURE'},backpressure:pressure};
+        }
+        // Backpressured coding waiters cannot hold the head of line against the review work that relieves them.
         const rank=await tx.query<{id:string;run_id:string}>(
           'SELECT w.id,w.run_id FROM hyperfide.resource_waiters w JOIN hyperfide.runs r ON r.organisation_id=w.organisation_id AND r.id=w.run_id '+
           'JOIN hyperfide.scheduling_policies p ON p.organisation_id=w.organisation_id AND p.pool_id=w.pool_id '+
           'WHERE w.organisation_id=$1 AND w.pool_id=$2 AND w.state=\'WAITING\' AND w.deadline_at>clock_timestamp() '+
-          'AND r.state IN (\'READY\',\'RUNNING\') ORDER BY CASE WHEN extract(epoch FROM(clock_timestamp()-w.enqueued_at))>=p.max_bypass_seconds THEN 1 ELSE 0 END DESC,CASE WHEN extract(epoch FROM(clock_timestamp()-w.enqueued_at))>=p.max_bypass_seconds THEN w.enqueued_at END,w.priority+floor(extract(epoch FROM(clock_timestamp()-w.enqueued_at))/p.aging_seconds) DESC,w.enqueued_at,w.id LIMIT 1',
-          [scope.organisation_id,pool]);
+          'AND NOT($3::boolean AND w.job_kind=\'AGENT\') AND r.state IN (\'READY\',\'RUNNING\') ORDER BY CASE WHEN extract(epoch FROM(clock_timestamp()-w.enqueued_at))>=p.max_bypass_seconds THEN 1 ELSE 0 END DESC,CASE WHEN extract(epoch FROM(clock_timestamp()-w.enqueued_at))>=p.max_bypass_seconds THEN w.enqueued_at END,w.priority+floor(extract(epoch FROM(clock_timestamp()-w.enqueued_at))/p.aging_seconds) DESC,w.enqueued_at,w.id LIMIT 1',
+          [scope.organisation_id,pool,pressure.active]);
         if(rank.rows[0]?.id!==waiter||rank.rows[0]?.run_id!==scope.run_id)
           return {waiter_id:waiter,admitted:false,wait_reason:'FAIRNESS',state:'QUEUED'};
         const demand=await tx.query<CapacityDimension>('SELECT capacity_account_id,quantity FROM hyperfide.resource_waiter_dimensions '+
@@ -408,6 +485,12 @@ export function createComponent(_startup:ComponentContext):Component{
         if(!pins.rows[0]?.valid)fail('JOB_POLICY_STALE','Queued job no longer matches its immutable accepted task policy');
 
         if(canonical(expected)!==canonical(demand.rows))fail('RESOURCE_VECTOR_MISMATCH','Queued policy changed before resource admission');
+        // A declared limit leaves the waiter queued and names the actual limiting resource; nothing is partially reserved.
+        const limit=await limitingResource(tx,{...scope,pool_id:pool,request_id:row.request_id,dimensions:demand.rows});
+        if(limit){
+          await markWaiting(tx,scope,waiter,limit.wait_reason);
+          return {waiter_id:waiter,admitted:false,state:'QUEUED',wait_reason:limit.wait_reason,limiting_resource:limit};
+        }
         let result:unknown;
         let attempt=row.attempt_id;
         if(row.job_kind==='AGENT'){
@@ -436,10 +519,16 @@ export function createComponent(_startup:ComponentContext):Component{
           input.package_id===undefined?undefined:uuid(input.package_id,'package_id'));
         const rows=await tx.query('SELECT capacity_class,dimension,resource_key,configured_limit,reserved,allocated,qualification_state,state_version '+
           'FROM hyperfide.capacity_accounts WHERE organisation_id=$1 AND pool_id=$2 ORDER BY capacity_class,dimension,resource_key',[scope.organisation_id,pool]);
-        const queued=await tx.query('SELECT job_kind,wait_reason,count(*)::text AS count,min(enqueued_at)::text AS oldest '+
-          'FROM hyperfide.resource_waiters WHERE organisation_id=$1 AND run_id=$2 AND pool_id=$3 AND state=\'WAITING\' GROUP BY job_kind,wait_reason',
+        const queued=await tx.query('SELECT job_kind,wait_reason,count(*)::text AS count,min(enqueued_at)::text AS oldest,\'QUEUED\' AS state,false AS stalled '+
+          'FROM hyperfide.resource_waiters WHERE organisation_id=$1 AND run_id=$2 AND pool_id=$3 AND state=\'WAITING\' AND deadline_at>clock_timestamp() GROUP BY job_kind,wait_reason ORDER BY job_kind,wait_reason',
           [scope.organisation_id,scope.run_id,pool]);
-        return {accounts:rows.rows,queues:queued.rows,observation:'PRIMARY_SNAPSHOT',measurement_status:'NOT_A_PERFORMANCE_QUALIFICATION'};
+        // Stalled work holds current compute authority past its primary-clock lease; queued work never does.
+        const stalled=await tx.query('SELECT a.id AS attempt_id,a.task_id,a.lease_expires_at::text,\'STALLED\' AS state,\'COMPUTE_LEASE_EXPIRED\' AS reason '+
+          'FROM hyperfide.attempts a JOIN hyperfide.sandboxes s ON s.organisation_id=a.organisation_id AND s.id=a.sandbox_id '+
+          'WHERE a.organisation_id=$1 AND a.run_id=$2 AND s.pool_id=$3 AND a.compute_authority=\'CURRENT\' AND a.lease_expires_at<=clock_timestamp() ORDER BY a.id LIMIT 500',
+          [scope.organisation_id,scope.run_id,pool]);
+        return {accounts:rows.rows,queues:queued.rows,stalled:stalled.rows,backpressure:await reviewBackpressure(tx,scope,pool),
+          observation:'PRIMARY_SNAPSHOT',measurement_status:'NOT_A_PERFORMANCE_QUALIFICATION'};
       });
     },
     'scheduler.resources.release':async(value,context)=>{

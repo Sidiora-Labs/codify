@@ -1,0 +1,115 @@
+{
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "https.loopback.listen"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/5_4.py"
+  ],
+  "assertion_ids": [
+    "resources.eligible.real-pins",
+    "resources.eligible.manager-private",
+    "resources.eligible.no-authority",
+    "resources.prewarm.full-provisioned-profile",
+    "resources.prewarm.execution-separate",
+    "resources.prewarm.manager-spares-denied",
+    "resources.task-required",
+    "resources.manager.scope",
+    "resources.full-vector-required",
+    "resources.queue-not-compute",
+    "resources.queue-replay",
+    "resources.queue-conflict",
+    "resources.test.admitted",
+    "resources.agent-independent",
+    "resources.admission-replay",
+    "resources.no-proof.no-release",
+    "resources.primary-snapshot",
+    "resources.queue.primary-deadline",
+    "resources.deadline.no-physical-release",
+    "resources.limit.review.named",
+    "resources.limit.index.named",
+    "resources.limit.integration.named",
+    "resources.limit.exclusive-service.named",
+    "resources.backpressure.review-wait",
+    "resources.inspect.wait-vs-stalled",
+    "resources.backpressure.no-head-of-line",
+    "resources.release.proof-positive",
+    "resources.backpressure.relieved",
+    "resources.service.registered",
+    "resources.cleanup.observed",
+    "resources.fairness.priority-first",
+    "resources.fairness.bounded-bypass",
+    "resources.queue.overload",
+    "resources.child.aggregate-budget",
+    "resources.child.counted-until-proof",
+    "resources.provision.counted-until-absence",
+    "resources.rate.window-limit",
+    "resources.rate.idempotent-receipts",
+    "resources.no-fixed-concurrency-ceiling",
+    "resources.no-fixed-start-ceiling",
+    "resources.v047.component-replay.reference-match",
+    "resources.v047.component-replay.labelled",
+    "resources.cleanup.observed.second"
+  ],
+  "cases": [
+    "V-007",
+    "V-047"
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/5_4.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "fixtures": [
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/scheduler/resources.js",
+    "services/hyperfide/dist/scheduler/claim.js",
+    "services/hyperfide/dist/storage/runtime.js",
+    "services/hyperfide/dist/spec/import.js"
+  ],
+  "required_artifacts": [
+    "scheduler/observations.json",
+    "scheduler/cleanup.json"
+  ],
+  "required_env": [
+    "DATABASE_URL"
+  ],
+  "resources": [
+    {
+      "id": "hf-task-5.4-runtime",
+      "kind": "postgresql-database-role-listener",
+      "scope": "task5.4-disposable"
+    }
+  ],
+  "schema_version": 1,
+  "scope": "task-component",
+  "source_files": [
+    "services/hyperfide/src/scheduler/resources.ts",
+    "services/hyperfide/components/5.4.json",
+    "tests/hyperfide/cases/tasks/5_4.py",
+    "tests/hyperfide/registrations/5.4.json",
+    "tests/hyperfide/cases/tasks/5_1.py",
+    "tests/hyperfide/cases/tasks/3_2.py",
+    "tests/hyperfide/cases/tasks/3_1.py",
+    "tests/hyperfide/support/identity_fixture.py",
+    "services/hyperfide/migrations/0005-scheduling.sql",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "services/hyperfide/package.json",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/tsconfig.json"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "task": "5.4",
+  "timeout_seconds": 600,
+  "variant": "task:5.4"
+}
