@@ -6,8 +6,10 @@ import {readFileSync} from 'node:fs';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {assertPrimaryTransaction} from '../storage/transactions.js';
 import type {PrimaryTransaction,QuerySession} from '../storage/transactions.js';
-import {object} from '../policy/programme.js';
+import {FoundationError,object} from '../policy/programme.js';
 import {validateProfile} from '../preparation/manifests.js';
+import {loadProofObligations} from '../spec/obligations.js';
+import type {PrimaryClient} from '../spec/obligations.js';
 
 import {gateway,trustedActor,requireAuthority,record,uuid,decimal,digest,text,strings,canonical,hash,refuse,operation,ready,hierarchyReadGuard} from './packages.js';
 
@@ -119,9 +121,7 @@ export async function loadPreparationIntent(tx:PrimaryTransaction,input:{organis
  const policyDigest=digest(policyRows.rows[0].policy_digest);
  const profileId=uuid(definitionField(task.definition,'environment_profile_id'));
  if(input.profile_id!==undefined&&uuid(input.profile_id)!==profileId)return refuse('ENVIRONMENT_PROFILE_MISMATCH','Requested profile differs from accepted task intent');
- const proofModule=await import(new URL('../spec/obligations.js',import.meta.url).href);
- if(typeof proofModule.loadProofObligations!=='function')return refuse('PROOF_REGISTRY_MISSING','Actual proof obligation loader is unavailable');
- const proof:unknown=await proofModule.loadProofObligations(tx,{organisation_id:org,run_id:run,task_id:taskId,spec_generation:task.spec_generation,spec_revision_id:task.spec_revision_id});
+ const proof:unknown=await proofObligations(tx,{organisation_id:org,run_id:run,task_id:taskId,spec_generation:task.spec_generation,spec_revision_id:task.spec_revision_id});
  if(!object(proof)||!Array.isArray(proof.obligations)||!proof.obligations.length)return refuse('PROOF_REGISTRY_MISSING','Accepted preparation demand requires actual proof obligations');
  if(proof.criteria_digest!==task.criteria_digest||proof.spec_revision_id!==task.spec_revision_id||String(proof.spec_generation)!==task.spec_generation)return refuse('PROOF_REGISTRY_MISMATCH','Preparation proof policy differs from accepted task');
  const prepared=await preparationManifest(tx,org,profileId),requirements=resourceRequirements(definitionField(task.definition,'resource_requirements'));
@@ -130,6 +130,52 @@ export async function loadPreparationIntent(tx:PrimaryTransaction,input:{organis
   profile_id:profileId,profile_version:prepared.declared_profile.profile_version,...prepared,resource_requirements:requirements,
   registry_digest:digest(proof.registry_digest),proof_policy:proof.policy,execution_profile:acceptedExecutionProfile(task.definition,prepared.declared_profile),policy_digest:policyDigest,execution_authority:false as const});
 }
+
+/** Declared 7.3 capability; its graphGuard binds the authenticated role, scope and epoch to the read. */
+export interface GraphSnapshotCapability {
+ loadGraphSnapshot(tx:PrimaryTransaction,input:{organisation_id:string;run_id:string;authority_epoch:string;manifest_id:string;expected_sources:unknown[]},invocation:InvocationContext):Promise<Record<string,unknown>>;
+}
+export function isGraphSnapshotCapability(value:unknown):value is GraphSnapshotCapability {return object(value)&&typeof value.loadGraphSnapshot==='function';}
+async function graphSnapshot(tx:PrimaryTransaction,scope:{organisation_id:string;run_id:string;authority_epoch:string},manifestId:string,expected:unknown[],invocation:InvocationContext|undefined,reader:GraphSnapshotCapability|undefined):Promise<Record<string,unknown>>{
+ if(reader){
+  if(!invocation)return refuse('AUTHENTICATED_ACTOR_REQUIRED','Guarded graph capability reads require the actual authenticated invocation');
+  return reader.loadGraphSnapshot(tx,{...scope,manifest_id:manifestId,expected_sources:expected},invocation);
+ }
+ // Legacy in-process callers (scheduler/adoption) already hold their own guarded transaction.
+ const source=await import(new URL('../graph/publication.js',import.meta.url).href);
+ if(typeof source.loadGraphSnapshot!=='function')return refuse('GRAPH_INPUT_UNAVAILABLE','Actual guarded graph snapshot loader is unavailable');
+ return source.loadGraphSnapshot(tx,scope,manifestId,expected);
+}
+async function proofObligations(tx:PrimaryTransaction,pins:{organisation_id:string;run_id:string;task_id:string;spec_generation:string;spec_revision_id:string}):Promise<unknown>{
+ if(typeof loadProofObligations!=='function')return refuse('PROOF_REGISTRY_MISSING','Actual proof obligation loader is unavailable');
+ return loadProofObligations(tx as unknown as PrimaryClient,pins);
+}
+/** Every source the prepared environment declares must be the exact run-pinned commit. */
+function assertProfileSources(profile:ReturnType<typeof validateProfile>,repositories:Record<string,unknown>[]):void{
+ for(const declared of profile.repositories){
+  const pinned=repositories.find(r=>r.repository_id===declared.id);
+  if(!pinned||pinned.source_object_id!==declared.commit)return refuse('ENVIRONMENT_SOURCE_MISMATCH','Environment profile repository commit differs from the exact run source pin');
+ }
+}
+async function currentRepositories(tx:QuerySession,org:string,run:string){
+ return (await tx.query('SELECT repository_id,source_object_id,integration_ref FROM hyperfide.run_repositories WHERE organisation_id=$1 AND run_id=$2 ORDER BY repository_id',[org,run])).rows;
+}
+async function currentDependencies(tx:QuerySession,org:string,run:string,taskId:string){
+ const deps=await tx.query('SELECT d.predecessor_run_id,d.predecessor_task_id,d.milestone,t.state,t.current_custody_id,c.repository_id,c.source_object_id,c.custody_generation::text,c.authority,c.qualification_outcome FROM hyperfide.task_dependencies d JOIN hyperfide.tasks t ON t.organisation_id=d.organisation_id AND t.run_id=d.predecessor_run_id AND t.id=d.predecessor_task_id LEFT JOIN hyperfide.submission_custodies c ON c.organisation_id=t.organisation_id AND c.run_id=t.run_id AND c.id=t.current_custody_id WHERE d.organisation_id=$1 AND d.run_id=$2 AND d.task_id=$3 ORDER BY d.predecessor_run_id,d.predecessor_task_id',[org,run,taskId]);
+ if(deps.rows.some(d=>!d.repository_id||!d.source_object_id||d.qualification_outcome!=='PASS'||d.milestone==='RELEASED'||(d.milestone==='INTEGRATED'?d.state!=='INTEGRATED':!['QUALIFIED','INTEGRATING','INTEGRATED'].includes(d.state))))
+  return refuse('DEPENDENCY_INPUT_UNAVAILABLE','Dependency requires exact qualified/integrated source evidence or a release-barrier input');
+ return deps.rows;
+}
+/** Evidence identity of a dependency; lifecycle progress alone (QUALIFIED->INTEGRATED) is not a new input. */
+const DEPENDENCY_EVIDENCE=['predecessor_run_id','predecessor_task_id','milestone','current_custody_id','repository_id','source_object_id','custody_generation','authority','qualification_outcome'];
+function dependencyEvidence(rows:unknown[]):unknown[]{
+ return rows.map(row=>{if(!object(row))return refuse('PACKET_INPUTS_MISSING','Invalid immutable dependency pin');return Object.fromEntries(DEPENDENCY_EVIDENCE.map(key=>[key,row[key]??null]));});
+}
+async function supersededContract(tx:QuerySession,org:string,run:string,contract:Record<string,unknown>):Promise<boolean>{
+ const newer=await tx.query('SELECT 1 FROM hyperfide.contracts WHERE organisation_id=$1 AND run_id=$2 AND contract_key=$3 AND revision>$4 LIMIT 1',[org,run,text(contract.contract_key),decimal(contract.revision)]);
+ return Boolean(newer.rowCount);
+}
+function contentDigest(value:string):string{return 'sha256:'+createHash('sha256').update(value,'utf8').digest('hex');}
 
 export interface PacketAuthority {
  loadExecutionPacket:typeof loadExecutionPacket;readExecutionPacket:typeof readExecutionPacket;
@@ -168,36 +214,53 @@ export async function readExecutionPacket(tx:QuerySession,input:{organisation_id
  return freeze({packet_id:row.id,digest:identity,mandatory_digest:row.mandatory_digest,packet:p});
 }
 
-/** Current input eligibility for NEW admission only; never replace historical packet reads. */
-export async function validateExecutionInputs(tx:PrimaryTransaction,input:{organisation_id:string;run_id:string;digest:string},invocation?:InvocationContext){
+/** Current input eligibility for NEW admission only; never replace historical packet reads.
+ * Each independently changeable input class is rechecked against current authority: accepted task intent,
+ * platform epoch, environment manifest and its source commits, run source pins, dependency custody/qualification,
+ * contract revisions, required graph artifacts and continuation bindings. Unrelated rows are never consulted. */
+export async function validateExecutionInputs(tx:PrimaryTransaction,input:{organisation_id:string;run_id:string;digest:string},invocation?:InvocationContext,graphReader?:GraphSnapshotCapability){
  const loaded=await loadExecutionPacket(tx,input),m=loaded.packet.mandatory;
- if(!object(m)||!object(m.identity)||!object(m.runtime)||!object(m.inputs)||!Array.isArray(m.inputs.repositories)||!object(m.inputs.graph))return refuse('PACKET_INPUTS_MISSING','Admission requires complete immutable runtime/source inputs');
- const currentTask=await tx.query("SELECT t.spec_revision_id,t.spec_generation::text,t.criteria_digest,r.authority_epoch FROM hyperfide.tasks t JOIN hyperfide.runs r ON r.organisation_id=t.organisation_id AND r.id=t.run_id WHERE t.organisation_id=$1 AND t.run_id=$2 AND t.id=$3 FOR SHARE OF t,r",[uuid(input.organisation_id),uuid(input.run_id),uuid(m.identity.task_id)]);
+ if(!object(m)||!object(m.identity)||!object(m.intent)||!object(m.runtime)||!object(m.inputs)||!Array.isArray(m.inputs.repositories)||!Array.isArray(m.inputs.dependencies)||!Array.isArray(m.inputs.contracts)||!object(m.inputs.graph))return refuse('PACKET_INPUTS_MISSING','Admission requires complete immutable runtime/source inputs');
+ const org=uuid(input.organisation_id),run=uuid(input.run_id),taskId=uuid(m.identity.task_id);
+ const currentTask=await tx.query("SELECT t.spec_revision_id,t.spec_generation::text,t.criteria_digest,t.definition,r.authority_epoch FROM hyperfide.tasks t JOIN hyperfide.runs r ON r.organisation_id=t.organisation_id AND r.id=t.run_id WHERE t.organisation_id=$1 AND t.run_id=$2 AND t.id=$3 FOR SHARE OF t,r",[org,run,taskId]);
  const current=currentTask.rows[0];
- if(!current||current.spec_revision_id!==m.identity.spec_revision_id||current.spec_generation!==m.identity.spec_generation||current.criteria_digest!==m.identity.criteria_digest||current.authority_epoch!==m.identity.authority_epoch)
+ if(!current||current.spec_revision_id!==m.identity.spec_revision_id||current.spec_generation!==m.identity.spec_generation||current.criteria_digest!==m.identity.criteria_digest||current.authority_epoch!==m.identity.authority_epoch||canonical(current.definition)!==canonical(m.intent.definition))
   return refuse('EXECUTION_INPUTS_STALE','Current task acceptance or platform epoch differs from immutable packet inputs');
- const prepared=await preparationManifest(tx,uuid(input.organisation_id),uuid(m.runtime.environment_profile_id));
+ const prepared=await preparationManifest(tx,org,uuid(m.runtime.environment_profile_id));
  if(prepared.preparation_digest!==m.runtime.preparation_digest||hash(prepared.declared_profile)!==hash(m.runtime.declared_profile))return refuse('EXECUTION_INPUTS_STALE','Accepted environment manifest differs from immutable packet inputs');
- const graph=m.inputs.graph,checked=['IMMUTABLE_PACKET','CURRENT_ACCEPTED_TASK','CURRENT_AUTHORITY_EPOCH','ACCEPTED_ENVIRONMENT_MANIFEST'];
+ const checked=['IMMUTABLE_PACKET','CURRENT_ACCEPTED_TASK','CURRENT_AUTHORITY_EPOCH','ACCEPTED_ENVIRONMENT_MANIFEST'];
+ const repositories=await currentRepositories(tx,org,run);
+ if(canonical(repositories)!==canonical(m.inputs.repositories))return refuse('EXECUTION_INPUTS_STALE','Current run source pins differ from immutable packet inputs');
+ assertProfileSources(prepared.declared_profile,repositories);
+ checked.push('CURRENT_SOURCE_PINS');
+ let dependencies:unknown[];
+ try{dependencies=await currentDependencies(tx,org,run,taskId);}
+ catch(error){if(error instanceof FoundationError&&error.code==='DEPENDENCY_INPUT_UNAVAILABLE')return refuse('EXECUTION_INPUTS_STALE','Current dependency custody/qualification no longer satisfies immutable packet inputs');throw error;}
+ if(canonical(dependencyEvidence(dependencies))!==canonical(dependencyEvidence(m.inputs.dependencies)))return refuse('EXECUTION_INPUTS_STALE','Current dependency custody/qualification differs from immutable packet inputs');
+ checked.push('CURRENT_DEPENDENCY_CUSTODY');
+ for(const pinned of m.inputs.contracts){
+  if(!object(pinned))return refuse('PACKET_INPUTS_MISSING','Invalid immutable contract pin');
+  const rows=await tx.query('SELECT id AS contract_id,contract_key,revision::text,criteria_digest,definition FROM hyperfide.contracts WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND revision=$4 AND criteria_digest=$5',[org,run,uuid(pinned.contract_id),decimal(pinned.revision),digest(pinned.criteria_digest)]);
+  if(!rows.rowCount||canonical(rows.rows[0])!==canonical(pinned)||await supersededContract(tx,org,run,pinned))return refuse('EXECUTION_INPUTS_STALE','Pinned contract revision is unavailable or superseded');
+ }
+ checked.push('CURRENT_CONTRACT_REVISIONS');
+ const graph=m.inputs.graph;
  if(graph.required){
-  const source=await import(new URL('../graph/publication.js',import.meta.url).href);
-  if(typeof source.loadGraphSnapshot!=='function')return refuse('GRAPH_INPUT_UNAVAILABLE','Actual current graph eligibility loader is unavailable');
-  const current=await source.loadGraphSnapshot(tx,{organisation_id:uuid(input.organisation_id),run_id:uuid(input.run_id),authority_epoch:uuid(m.identity.authority_epoch)},uuid(graph.manifest_id),
-   m.inputs.repositories.map(value=>{if(!object(value))return refuse('PACKET_INPUTS_MISSING','Invalid immutable repository pin');return {repository_id:uuid(value.repository_id),source_object_id:text(value.source_object_id,64),overlay_digest:null};}));
+  const current=await graphSnapshot(tx,{organisation_id:org,run_id:run,authority_epoch:uuid(m.identity.authority_epoch)},uuid(graph.manifest_id),
+   m.inputs.repositories.map(value=>{if(!object(value))return refuse('PACKET_INPUTS_MISSING','Invalid immutable repository pin');return {repository_id:uuid(value.repository_id),source_object_id:text(value.source_object_id,64),overlay_digest:null};}),invocation,graphReader);
   const exact=['manifest_digest','source_manifest_digest','input_digest','parser_digest','schema_digest','config_digest','source_set','file_coverage','source_coverage','semantic_projection_complete','unprojected_semantic_edge_count','unresolved_reference_count'];
   if(!Array.isArray(current.source_coverage)||current.source_coverage.length<1||current.source_coverage.length>64||exact.some(key=>canonical(current[key])!==canonical(graph[key])))
    return refuse('EXECUTION_INPUTS_STALE','Current required graph provenance differs from the exact immutable packet inputs');
   checked.push('CURRENT_REQUIRED_GRAPH_ARTIFACTS');
  }else checked.push('GRAPH_EXPLICITLY_NOT_REQUIRED');
- if(object(m.intent)&&m.intent.continuation!==undefined&&m.intent.continuation!==null){
+ if(m.intent.continuation!==undefined&&m.intent.continuation!==null){
   if(!object(m.intent.continuation))return refuse('CONTINUATION_INPUT_INVALID','Stored continuation binding is invalid');
-  const continuation=await currentContinuation(tx,{organisation_id:uuid(input.organisation_id),run_id:uuid(input.run_id),checkpoint_id:uuid(m.intent.continuation.checkpoint_id)},invocation);
+  const continuation=await currentContinuation(tx,{organisation_id:org,run_id:run,checkpoint_id:uuid(m.intent.continuation.checkpoint_id)},invocation);
   if(canonical(continuation)!==canonical(m.intent.continuation))return refuse('EXECUTION_INPUTS_STALE','Historical checkpoint binding differs from immutable packet inputs');
   checked.push('CURRENT_CONTINUATION_ARTIFACTS');
  }
  return freeze({...loaded,checked_inputs:checked,execution_authority:false as const});
 }
-
 
 /** Pure hashes of supplied prepared bytes. The caller must establish provenance and readiness. */
 export function derivePreparedEnvironmentRoles(manifest:unknown,context:unknown){
@@ -255,16 +318,26 @@ export function createComponent(context:ComponentContext):Component {
   if(provider.sealed||provider.reader!==null||typeof reader!=='function')return refuse('CONTINUATION_REGISTRATION_CLOSED','Exactly one trusted checkpoint reader may register during component startup');
   provider.reader=reader;
  };
- return {apiVersion:1,capabilities:{'hierarchy.packets.v1':Object.freeze({loadExecutionPacket,readExecutionPacket,loadPreparationIntent,validateExecutionInputs,derivePreparedEnvironmentRoles,deriveQualificationInputs,installContinuationReader})},actions:{
- 'hierarchy.packet.describe':async input=>{provider.sealed=true;record(input,[]);return {schema_version:1,packet_phase:'PROSPECTIVE_ADMISSION',execution_authority:false,hash:'SHA256_CANONICAL_JSON',max_packet_bytes:262144,post_admission_required:['CURRENT_COMPUTE_GRANT','VERIFIED_MATERIALISATION','QUALIFIED_CONNECTOR_LAUNCH']};},
+ // Declared dependency capability (7.3); resolved per use so its graphGuard binds each authenticated read.
+ const graphReader=()=>context.dependencies.require('7.3','graph.snapshot.v1',isGraphSnapshotCapability);
+ const validateInputs:typeof validateExecutionInputs=(tx,input,invocation,reader)=>validateExecutionInputs(tx,input,invocation,reader??(invocation?graphReader():undefined));
+ return {apiVersion:1,capabilities:{'hierarchy.packets.v1':Object.freeze({loadExecutionPacket,readExecutionPacket,loadPreparationIntent,validateExecutionInputs:validateInputs,derivePreparedEnvironmentRoles,deriveQualificationInputs,installContinuationReader})},actions:{
+ 'hierarchy.packet.describe':async input=>{provider.sealed=true;record(input,[]);return {schema_version:1,packet_phase:'PROSPECTIVE_ADMISSION',execution_authority:false,hash:'SHA256_CANONICAL_JSON',max_packet_bytes:262144,
+  mandatory_digest_scope:['identity','intent','inputs','runtime','resource_requirements','policy_digest'],optional_context:'RANKED_TRIMMABLE_SHA256_TEXT',post_admission_required:['CURRENT_COMPUTE_GRANT','VERIFIED_MATERIALISATION','QUALIFIED_CONNECTOR_LAUNCH']};},
  'hierarchy.packet.create':async (input,invocation)=>{
   provider.sealed=true;
   const v=record(input,['idempotency_key','leader_generation','package_generation','task_id','attempt_id','attempt_generation','sandbox_id','slot_id','sandbox_boot_generation','max_bytes','optional_context','continuation_checkpoint_id'],['idempotency_key','leader_generation','package_generation','task_id','attempt_id','attempt_generation','sandbox_id','slot_id','sandbox_boot_generation','max_bytes','optional_context']);
   const a=trustedActor(invocation),taskId=uuid(v.task_id),attemptId=uuid(v.attempt_id),generation=decimal(v.attempt_generation);
   const sandboxId=uuid(v.sandbox_id),slotId=uuid(v.slot_id),boot=decimal(v.sandbox_boot_generation);
   if(!Number.isInteger(v.max_bytes)||Number(v.max_bytes)<4096||Number(v.max_bytes)>262144||!Array.isArray(v.optional_context)||v.optional_context.length>64)return refuse('INVALID_REQUEST','Packet/context limits are out of bounds');
-  const optionalInput=v.optional_context;
-  let optional=optionalInput.map(value=>{const c=record(value,['source_id','digest','text']);text(c.source_id);digest(c.digest);text(c.text,4096);return c;});
+  // Optional context is ranked best-first; only it may be trimmed, lowest rank first, and every omission is recorded.
+  const optionalInput=v.optional_context.map(value=>{
+   const c=record(value,['source_id','digest','text']);text(c.source_id);digest(c.digest);
+   if(contentDigest(text(c.text,4096))!==c.digest)return refuse('OPTIONAL_CONTEXT_DIGEST_MISMATCH','Optional context digest must be the SHA256 of its exact text');
+   return c;
+  });
+  if(new Set(optionalInput.map(c=>c.source_id)).size!==optionalInput.length)return refuse('INVALID_REQUEST','Optional context source identities must be unique');
+  let optional=optionalInput;
   return operation(g,a,'hierarchy.packet.create',v,async tx=>{
    await packetSchema(tx);
    const tasks=await tx.query('SELECT id,task_key,feature_package_id,spec_revision_id,spec_generation::text,criteria_digest,definition,wave,state,generation::text,state_version::text,current_attempt_id,current_custody_id FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR SHARE',[a.organisation_id,a.run_id,taskId]);
@@ -278,9 +351,7 @@ export function createComponent(context:ComponentContext):Component {
    const run=runs.rows[0]!;
    const accepted=await tx.query('SELECT 1 FROM hyperfide.run_spec_revisions WHERE organisation_id=$1 AND run_id=$2 AND spec_generation=$3 AND spec_revision_id=$4',[a.organisation_id,a.run_id,task.spec_generation,task.spec_revision_id]);
    if(!accepted.rowCount)return refuse('SPEC_REVISION_UNACCEPTED','Task is not pinned to accepted immutable run history');
-   const proofModule=await import(new URL('../spec/obligations.js',import.meta.url).href);
-   if(typeof proofModule.loadProofObligations!=='function')return refuse('PROOF_REGISTRY_MISSING','Actual proof obligation loader is unavailable');
-   const proof:unknown=await proofModule.loadProofObligations(tx,{organisation_id:a.organisation_id,run_id:a.run_id,spec_generation:task.spec_generation,spec_revision_id:task.spec_revision_id,task_id:taskId});
+   const proof:unknown=await proofObligations(tx,{organisation_id:a.organisation_id,run_id:a.run_id,spec_generation:task.spec_generation,spec_revision_id:task.spec_revision_id,task_id:taskId});
    if(!object(proof)||!Array.isArray(proof.obligations)||!proof.obligations.length)return refuse('PROOF_REGISTRY_MISSING','Task has no executable/review proof obligations');
    if(proof.criteria_digest!==task.criteria_digest||proof.spec_revision_id!==task.spec_revision_id||String(proof.spec_generation)!==task.spec_generation)return refuse('PROOF_REGISTRY_MISMATCH','Proof obligations differ from exact task criteria/spec');
    digest(proof.registry_digest);
@@ -295,17 +366,16 @@ export function createComponent(context:ComponentContext):Component {
    const execution=acceptedExecutionProfile(task.definition,profile);
    const scopeValue=definitionField(task.definition,'touches'),scope=strings(scopeValue,4096);
    if(!scope.length)return refuse('TASK_SCOPE_REQUIRED','Task has no explicit owned scope');
-   const repos=await tx.query('SELECT repository_id,source_object_id,integration_ref FROM hyperfide.run_repositories WHERE organisation_id=$1 AND run_id=$2 ORDER BY repository_id',[a.organisation_id,a.run_id]);
-   if(!repos.rowCount)return refuse('SOURCE_INPUTS_REQUIRED','No exact repository source input is pinned');
+   const repos={rows:await currentRepositories(tx,a.organisation_id,a.run_id)};
+   if(!repos.rows.length)return refuse('SOURCE_INPUTS_REQUIRED','No exact repository source input is pinned');
+   assertProfileSources(profile,repos.rows);
    let continuation:ContinuationBinding|null=null;
    if(v.continuation_checkpoint_id!==undefined){
     continuation=await currentContinuation(tx,{organisation_id:a.organisation_id,run_id:a.run_id,checkpoint_id:uuid(v.continuation_checkpoint_id)},a.invocation);
     if(continuation.source.task_id!==taskId||continuation.source.attempt_id===attemptId||BigInt(continuation.source.attempt_generation)>=BigInt(generation)||!repos.rows.some(r=>r.repository_id===continuation!.source.repository_id))
      return refuse('CONTINUATION_SOURCE_MISMATCH','Checkpoint must belong to an older same-task attempt and accepted repository; its branch commit remains a separate immutable input');
    }
-   const deps=await tx.query('SELECT d.predecessor_run_id,d.predecessor_task_id,d.milestone,t.state,t.current_custody_id,c.repository_id,c.source_object_id,c.custody_generation::text,c.authority,c.qualification_outcome FROM hyperfide.task_dependencies d JOIN hyperfide.tasks t ON t.organisation_id=d.organisation_id AND t.run_id=d.predecessor_run_id AND t.id=d.predecessor_task_id LEFT JOIN hyperfide.submission_custodies c ON c.organisation_id=t.organisation_id AND c.run_id=t.run_id AND c.id=t.current_custody_id WHERE d.organisation_id=$1 AND d.run_id=$2 AND d.task_id=$3 ORDER BY d.predecessor_run_id,d.predecessor_task_id',[a.organisation_id,a.run_id,taskId]);
-   if(deps.rows.some(d=>!d.repository_id||!d.source_object_id||d.qualification_outcome!=='PASS'||d.milestone==='RELEASED'||(d.milestone==='INTEGRATED'?d.state!=='INTEGRATED':!['QUALIFIED','INTEGRATING','INTEGRATED'].includes(d.state))))
-    return refuse('DEPENDENCY_INPUT_UNAVAILABLE','Dependency requires exact qualified/integrated source evidence or a release-barrier input');
+   const deps={rows:await currentDependencies(tx,a.organisation_id,a.run_id,taskId)};
    const contractPolicy=definitionField(task.definition,'contract_inputs');
    if(!Array.isArray(contractPolicy)||contractPolicy.length>256)return refuse('CONTRACT_INPUTS_REQUIRED','Accepted intent must explicitly name all required contract pins, including an explicit empty set');
    const contracts:Record<string,unknown>[]=[];
@@ -314,6 +384,7 @@ export function createComponent(context:ComponentContext):Component {
     const contract=await tx.query('SELECT id AS contract_id,contract_key,revision::text,criteria_digest,definition FROM hyperfide.contracts WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND revision=$4 AND criteria_digest=$5',
      [a.organisation_id,a.run_id,uuid(pin.contract_id),decimal(pin.revision),digest(pin.criteria_digest)]);
     if(!contract.rowCount)return refuse('CONTRACT_INPUT_UNAVAILABLE','Required immutable contract revision is unavailable');
+    if(await supersededContract(tx,a.organisation_id,a.run_id,contract.rows[0]!))return refuse('CONTRACT_REVISION_SUPERSEDED','Accepted intent pins a superseded contract revision; revalidate the task first');
     contracts.push(contract.rows[0]!);
    }
    const graphPolicy=record(definitionField(task.definition,'graph_inputs'),['required','manifest_id','reason']);
@@ -322,9 +393,7 @@ export function createComponent(context:ComponentContext):Component {
    if(graphPolicy.required){
     const graphId=uuid(graphPolicy.manifest_id);
     if(graphPolicy.reason!==null)return refuse('GRAPH_INPUT_REQUIRED','Pinned graph uses its exact manifest, not an absence reason');
-    const graphModule=await import(new URL('../graph/publication.js',import.meta.url).href);
-    if(typeof graphModule.loadGraphSnapshot!=='function')return refuse('GRAPH_INPUT_UNAVAILABLE','Actual guarded graph snapshot loader is unavailable');
-    const graph=await graphModule.loadGraphSnapshot(tx,{organisation_id:a.organisation_id,run_id:a.run_id,authority_epoch:a.authority_epoch},graphId,repos.rows.map(r=>({repository_id:r.repository_id,source_object_id:r.source_object_id,overlay_digest:null})));
+    const graph=await graphSnapshot(tx,{organisation_id:a.organisation_id,run_id:a.run_id,authority_epoch:a.authority_epoch},graphId,repos.rows.map(r=>({repository_id:r.repository_id,source_object_id:r.source_object_id,overlay_digest:null})),a.invocation,graphReader());
     if(!Array.isArray(graph.source_coverage)||graph.source_coverage.length<1||graph.source_coverage.length>64||typeof graph.semantic_projection_complete!=='boolean')return refuse('GRAPH_INPUT_UNAVAILABLE','Published graph lacks exact source or semantic projection coverage');
     decimal(graph.unprojected_semantic_edge_count,true);decimal(graph.unresolved_reference_count,true);
     graphInputs={required:true,manifest_id:graphId,manifest_digest:digest(graph.manifest_digest),source_manifest_digest:digest(graph.source_manifest_digest),
@@ -346,7 +415,8 @@ export function createComponent(context:ComponentContext):Component {
     resource_requirements:requirements,policy_digest:run.policy_digest};
    const mandatoryDigest=hash(mandatory);
    const payload=()=>({schema_version:1,packet_phase:'PROSPECTIVE_ADMISSION',execution_authority:false,mandatory,mandatory_digest:mandatoryDigest,
-    observation:{run_spec_generation:run.spec_generation,run_state_version:run.state_version},optional_context:optional,omitted_optional_context:optionalInput.length-optional.length});
+    observation:{run_spec_generation:run.spec_generation,run_state_version:run.state_version},optional_context:optional,omitted_optional_context:optionalInput.length-optional.length,
+    omitted_optional_context_ids:optionalInput.slice(optional.length).map(c=>({source_id:c.source_id,digest:c.digest}))});
    while(Buffer.byteLength(canonical(payload()))>Number(v.max_bytes)){
     if(!optional.length)return refuse('PACKET_BUDGET_TOO_SMALL','Mandatory intent/constraints exceed packet budget and cannot be removed');
     optional=optional.slice(0,-1);
@@ -368,7 +438,18 @@ export function createComponent(context:ComponentContext):Component {
    const loaded=await loadExecutionPacket(tx,{organisation_id:a.organisation_id,run_id:a.run_id,digest:identity});
    const m=loaded.packet.mandatory;if(!object(m)||!object(m.identity))return refuse('PACKET_CORRUPT','Immutable task identity is missing');
    await requireAuthority(tx,{...a,leader_generation:decimal(v.leader_generation),package_id:uuid(m.identity.package_id),package_generation:decimal(v.package_generation),roles:['LEADER','FEATURE_MANAGER']});
-   return validateExecutionInputs(tx,{organisation_id:a.organisation_id,run_id:a.run_id,digest:identity},a.invocation);
+   return validateInputs(tx,{organisation_id:a.organisation_id,run_id:a.run_id,digest:identity},a.invocation);
+  });
+ },
+ 'hierarchy.packet.derive':async (input,invocation)=>{
+  provider.sealed=true;
+  const v=record(input,['leader_generation','package_generation','digest','manifest']),a=trustedActor(invocation),identity=digest(v.digest);
+  return g.withPrimaryTransaction({timeoutMs:10000,guard:hierarchyReadGuard(a),signal:a.signal},async tx=>{
+   const loaded=await loadExecutionPacket(tx,{organisation_id:a.organisation_id,run_id:a.run_id,digest:identity});
+   const m=loaded.packet.mandatory;if(!object(m)||!object(m.identity)||!object(m.runtime))return refuse('PACKET_CORRUPT','Immutable task identity is missing');
+   await requireAuthority(tx,{...a,leader_generation:decimal(v.leader_generation),package_id:uuid(m.identity.package_id),package_generation:decimal(v.package_generation),roles:['LEADER','FEATURE_MANAGER']});
+   const roles=derivePreparedEnvironmentRoles(v.manifest,{execution_profile:m.runtime.execution_profile,resource_requirements:m.resource_requirements,policy_digest:m.policy_digest});
+   return {digest:identity,roles,baseline:deriveQualificationInputs(loaded.packet),authority:'NONE'};
   });
  },
  'hierarchy.packet.inspect':async (input,invocation)=>{
