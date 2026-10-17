@@ -1,9 +1,9 @@
 {
   "task": "1.1",
-  "commit": "611dba45586adfdd6f5f62c86cb4a33950875394",
+  "commit": "12aa390190b3d3e360e079254378a381103fc236",
+  "requalified_on": "12aa390190b3d3e360e079254378a381103fc236",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-007 --manifest tests/hyperfide/manifests/tasks/1.1.json && python3 tests/hyperfide/qualify.py --case V-052 --manifest tests/hyperfide/manifests/tasks/1.1.json",
   "exit_code": 0,
-  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"09a3944e-b440-4c6d-819e-35401b7b3dd1\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/1.1/campaigns/b2cd6165d685248bb2a02b943009dca067b9abafef3dd69fbec696059c17675f\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"87db09e9-f8d4-4367-9d3e-1d3bc338fd0e\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/1.1/campaigns/b2cd6165d685248bb2a02b943009dca067b9abafef3dd69fbec696059c17675f\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}",
-  "ran_at": "2026-10-17T09:27:23.012518Z",
-  "ran_as": "repository owner (hf); as root the independent checker's safe_git refuses the hf-owned checkout (dubious ownership)"
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"5d49b7fb-7c1a-4df4-8042-a340f9db3125\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/1.1/campaigns/a1bc3b70ab909a25f2f1d7a446bfb3cfd27788c21a8adb0de91952ed9de23abd\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"0b42a593-2087-45c3-a9cf-ba9ccb0c98d5\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/1.1/campaigns/a1bc3b70ab909a25f2f1d7a446bfb3cfd27788c21a8adb0de91952ed9de23abd\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T14:01:22.764Z"
 }
