@@ -191,6 +191,8 @@ After that acknowledgement, the original worker ceases task mutation; the superv
 
 After terminal integration releases submission custody, subsequent assurance requalification uses a new coordinator-owned operation/generation bound to the immutable integration receipt and exact inputs, with its own verification jobs. It never resurrects the original worker lease or released custody. Candidate inputs already present in an integrated base are justified by their integration receipts; only newly pending contributors require active submitted-result custody.
 
+QUALIFICATION preparation plans may bind lease generation `0` before the first verifier claim; staging and preparation at that generation grant no verification execution authority.
+
 ### 5.3 Infrastructure and sessions
 
 | Entity | Lifecycle | Important orthogonal observations |

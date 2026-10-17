@@ -157,7 +157,7 @@ def run_probe(binary, service_root):
         v=claim();v["result"]["plan"]["preparation"]["target_binding"]["preparation_operation_id"]=str(uuid.uuid4());tests.append(("target-operation",v))
         v=claim();v["result"]["plan"]["preparation"]["target_binding"]["home_path"]="/etc";tests.append(("target-home-alias",v))
         v=claim();v["result"]["plan"]["preparation"]["target_binding"]["execution_authority"]=True;tests.append(("target-authority-flag",v))
-        v=claim();v["result"]["plan"]["preparation"]["job_binding"]["lease_generation"]="0";tests.append(("zero-active-job-generation",v))
+        v=claim();v["result"]["plan"]["preparation"]["job_binding"].update(namespace="CANDIDATE",lease_generation="0");tests.append(("zero-active-job-generation",v))
         for name,v in tests:
             result,reply=invoke(v)
             check("native-staging-refuses-"+name,result.returncode!=0 and not reply["ok"] and not (Path("/run/hyperfide-stage")/v["result"]["operation_id"]/"context.json").exists())
@@ -178,6 +178,10 @@ def run_probe(binary, service_root):
         reproduction["result"]["plan"]["preparation"]["job_binding"].update(namespace="REPRODUCTION",lease_generation="0")
         result,reply=invoke(reproduction)
         check("native-staging-reproduction-zero-admission-generation",result.returncode==0 and json.loads(Path(reply["context_path"]).read_text())["job_binding"]["lease_generation"]=="0")
+        qualification=claim()
+        qualification["result"]["plan"]["preparation"]["job_binding"]["lease_generation"]="0"
+        result,reply=invoke(qualification)
+        check("native-staging-qualification-zero-admission-generation",result.returncode==0 and json.loads(Path(reply["context_path"]).read_text())["job_binding"]==qualification["result"]["plan"]["preparation"]["job_binding"])
         fixture.set_mode(pieces[0],"corrupt")
         v=claim();result,reply=invoke(v)
         check("native-staging-refuses-backend-corruption",result.returncode!=0 and not reply["ok"])
