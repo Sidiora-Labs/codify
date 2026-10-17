@@ -26,9 +26,9 @@
     "slice.fallback.graph-not-required",
     "slice.fallback.stale-graph-generation",
     "slice.fallback.reason-always-recorded",
+    "slice.materialize.concurrent-slots",
     "slice.materialize.partial-clone-positive",
     "slice.materialize.byte-identical-to-full-tree",
-    "slice.materialize.concurrent-slots",
     "slice.materialize.lfs-inside-slice",
     "slice.materialize.submodule-and-lfs-full-tree",
     "slice.materialize.undeclared-submodule-refused",
@@ -159,7 +159,7 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/11_5.py",
-      "sha256": "76567d55b8988975f1ee509f06ee3f284ceec4b8379f85a87f753e20895def43",
+      "sha256": "ce90fd4f154ff8c474211450e238a57fbd1ec595512ab7b5aa75ae51ec9d5094",
       "size": 68936
     },
     {
@@ -189,7 +189,7 @@
     },
     {
       "path": "tests/hyperfide/registrations/11.5.json",
-      "sha256": "f654019c2b9bdad332d854b48771e76cc72082077a4d82a91b87141e249e6172",
+      "sha256": "0f730a9d7f672dc2ebf2f59b3e15594140afd5324dcec6c8dc4a2f2809a448a0",
       "size": 4388
     },
     {
