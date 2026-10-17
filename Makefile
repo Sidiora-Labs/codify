@@ -69,8 +69,13 @@ integration: $(BIN)
 
 test: unit integration
 
+# Both command names are byte-identical copies of the one linked executable;
+# cg is the documented compatibility alias, never a wrapper over PATH.
 install: $(BIN) $(COMPAT_BIN)
-	install -m 755 $(BIN) $(PREFIX)/bin/$(BIN)
+	cmp -s $(BIN) $(COMPAT_BIN)
+	install -d $(DESTDIR)$(PREFIX)/bin
+	install -m 755 $(BIN) $(DESTDIR)$(PREFIX)/bin/$(BIN)
+	install -m 755 $(BIN) $(DESTDIR)$(PREFIX)/bin/$(COMPAT_BIN)
 
 uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/$(BIN) $(DESTDIR)$(PREFIX)/bin/$(COMPAT_BIN)
@@ -80,7 +85,8 @@ clean:
 
 .PHONY: all unit integration test install uninstall clean release
 
-# static release binary published to the web root (see scripts/release.sh)
+# nonpublishing release construction; destinations are operator configuration
+# (see scripts/release.sh)
 release:
 	scripts/release.sh
 
