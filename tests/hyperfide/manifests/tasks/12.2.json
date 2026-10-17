@@ -1,0 +1,296 @@
+{
+  "approval": {
+    "allowed_actions": [
+      "postgresql.fixture.create",
+      "postgresql.fixture.drop"
+    ],
+    "approved": true
+  },
+  "campaign_id": "hyperfide-task-12.2-native-component-v1",
+  "case_ids": [
+    "V-006",
+    "V-041",
+    "V-043"
+  ],
+  "expected_assertion_ids": [
+    "runner.root-fixture",
+    "transport.separate-https-coordinator",
+    "transport.rejects-forged-request-proof",
+    "launch.serve-poll-spawns-agent",
+    "launch.durable-accept-before-spawn",
+    "launch.lost-handoff-redelivered-single-start",
+    "ack.lost-responses-replayed-idempotently",
+    "steer.delivered-once",
+    "steer.redelivery-not-rewritten",
+    "steer.duplicate-frame-not-replayed",
+    "supervisor.kill-leaves-broker-and-agent",
+    "controller.outage-agent-stdin-open",
+    "reconcile.live-broker-adopted",
+    "reconcile.adoption-single-owner",
+    "reconnect.backoff-bounded",
+    "reconnect.steer-after-restart-delivered",
+    "start.no-duplicate-logical-start",
+    "reconcile.accepted-without-broker-not-spawned",
+    "reconcile.unattributed-process-uncertain",
+    "reconcile.dead-broker-lost",
+    "reconcile.reused-pid-not-adopted",
+    "reconcile.orphan-reported-without-stdin",
+    "reconcile.no-blind-relaunch",
+    "cancel.orphan-stopped-without-broker",
+    "steer.before-start-not-written",
+    "cancel.before-start-fences-launch",
+    "cancel.stale-generation-not-applied",
+    "cancel.current-generation-stops",
+    "evidence.spool-digest-uploaded",
+    "broker.retires-after-delivery",
+    "spool.replayed-without-duplicates",
+    "serve.summary-bounded",
+    "dispatch.describe-not-ready",
+    "dispatch.consume-plan-reader-not-ready",
+    "dispatch.consume-rejects-invalid-claim",
+    "dispatch.consume-rejects-unknown-field"
+  ],
+  "inputs": [
+    {
+      "path": "Makefile",
+      "sha256": "15a4ba0d37f9282fe0eb7b77de54de1f3c3bc5246cd283afe7fc54ad6d0f5e8b",
+      "size": 4205
+    },
+    {
+      "path": "build/hyperfide-native",
+      "sha256": "e31c665f56cdb349ef882331e06699484a7e7bd86d2f04678875559ffb80d170",
+      "size": 421424
+    },
+    {
+      "path": "scripts/hyperfide-native-components.py",
+      "sha256": "5eb01214a3a91430cf2b66b2f15b40b91d06db8a87a00d88a11aca90985a23c2",
+      "size": 9165
+    },
+    {
+      "path": "services/hyperfide/components/1.4.json",
+      "sha256": "bad91dd5fb9ed7e60aaad3dfd43510a848ee86a5f95c5bb682082f029c8f1f26",
+      "size": 274
+    },
+    {
+      "path": "services/hyperfide/components/12.2.json",
+      "sha256": "4dd0eb3fda8f7a2f7ed4a846f30d4c9d1dbc914bef5ea9d6e76008fc699a53c7",
+      "size": 334
+    },
+    {
+      "path": "services/hyperfide/components/14.1.json",
+      "sha256": "d90461e0c89dedac5c578a4fe57c7269b9958c38668562247dbb39e3c6cca6be",
+      "size": 583
+    },
+    {
+      "path": "services/hyperfide/components/2.1.json",
+      "sha256": "8e3c3615b3e712b9d923e2bcfa5065dd0e192e4a822f4f3c11f3421e4ad345ad",
+      "size": 338
+    },
+    {
+      "path": "services/hyperfide/components/2.4.json",
+      "sha256": "c64dfc7057a799a1b5591a655821c99ff40810aa2f5b1fe347a5f8c3059986e9",
+      "size": 356
+    },
+    {
+      "path": "services/hyperfide/components/3.1.json",
+      "sha256": "75306dbcb1451bac4cd9f000c029515c046a1b9650bf4f81ca1f30f3ca98638c",
+      "size": 502
+    },
+    {
+      "path": "services/hyperfide/components/3.2.json",
+      "sha256": "f522355bfe192032f6aa8b53ea06fc4e2683edef6abf601ab32a56e3a0e438ca",
+      "size": 401
+    },
+    {
+      "path": "services/hyperfide/components/4.1.json",
+      "sha256": "e51ebab039cc34c08b50b73ea08955bd9bafb1a0fbb25de73fd328d981c79452",
+      "size": 375
+    },
+    {
+      "path": "services/hyperfide/components/4.2.json",
+      "sha256": "42cc05908e2eeb4692ec49a2c14dc64caf477448d431e96372fb0241bed7d061",
+      "size": 278
+    },
+    {
+      "path": "services/hyperfide/components/4.4.json",
+      "sha256": "1123d0b4cb595e434eb4cc483cf3fdbeff859998bacd67da21e91f0c6aa15771",
+      "size": 362
+    },
+    {
+      "path": "services/hyperfide/components/5.1.json",
+      "sha256": "c73623c22e058880f26667dddb3372e667be3727d2fe5b0312cfd0af47543203",
+      "size": 292
+    },
+    {
+      "path": "services/hyperfide/components/5.2.json",
+      "sha256": "4cae0edf18155ab4444b27dd8b891bdbc3335da14433a1b8b9b0f303987ebf80",
+      "size": 363
+    },
+    {
+      "path": "services/hyperfide/components/6.1.json",
+      "sha256": "cf10e88a3ed9542605b2e3a98deece43cf460d40b7fb4f1129ca257a0bf5cf3b",
+      "size": 487
+    },
+    {
+      "path": "services/hyperfide/components/6.2.json",
+      "sha256": "6e2caf80ff053d2e387010b1b6f6d5862015bac4ccb52f056465d81b9fc7981b",
+      "size": 330
+    },
+    {
+      "path": "services/hyperfide/components/6.3.json",
+      "sha256": "684b3e7654f5c764665e195437aba93a429c02aedb9ef14876f1f05e34ef3112",
+      "size": 548
+    },
+    {
+      "path": "services/hyperfide/components/7.2.json",
+      "sha256": "9d7c611d354e1e1c6002767053b9711f87a9ed98953eaecbd7bcc89d38933dce",
+      "size": 399
+    },
+    {
+      "path": "services/hyperfide/components/7.3.json",
+      "sha256": "5f33be058561f16fdcc99f6a5b36f133025a4c99a49f125f206329807ad240d7",
+      "size": 366
+    },
+    {
+      "path": "services/hyperfide/dist/control.js",
+      "sha256": "1383288f00472de29607207d1d318e257c6e80c0fb2c05ca9fb2d974040e8032",
+      "size": 118
+    },
+    {
+      "path": "services/hyperfide/dist/runner/dispatch.js",
+      "sha256": "a6a512fc88cd5a81d89e52237f3327b1c97100dfa333fb5e33d9b2b5bed44289",
+      "size": 7395
+    },
+    {
+      "path": "services/hyperfide/src/events/instructions.ts",
+      "sha256": "68e0544de13916f122d3f661242540c3cd18e99bd923b7e805726c15e2584278",
+      "size": 36498
+    },
+    {
+      "path": "services/hyperfide/src/events/runner_commands.ts",
+      "sha256": "147692b2fbaf14d83338fcaf258c7ec0cb7e5f2dff77e8e56c7e34597c587de2",
+      "size": 9398
+    },
+    {
+      "path": "services/hyperfide/src/runner/dispatch.ts",
+      "sha256": "9c5de549dc240d1fbd5919053e57d924f6d4da52ddc320c167f7f1d178cd2076",
+      "size": 7629
+    },
+    {
+      "path": "src/hyperfide/component_main.c",
+      "sha256": "cb3b9f726346ac2724ca0d61f44845180074f2347f33a7c22d53b723e476223b",
+      "size": 7574
+    },
+    {
+      "path": "src/hyperfide/components.h",
+      "sha256": "0c89648b865492dca5a15f7b17c5cd6609ce37efffcab780cad870e77dd3eac3",
+      "size": 538
+    },
+    {
+      "path": "src/hyperfide/components/12.1.kvx",
+      "sha256": "1a2c9986c34f2f5b3e11c8e99395c775ddcb236e0f563d5b1bc2457c75944aea",
+      "size": 525
+    },
+    {
+      "path": "src/hyperfide/components/12.2.kvx",
+      "sha256": "f23474fcbd5b5cfde33456b3737a268926b67678fb75a4e130084a7d174fcd4a",
+      "size": 274
+    },
+    {
+      "path": "src/hyperfide/components/schema.kvx",
+      "sha256": "d93d9aa1d266794445bf1f236674319947f9f74437b5ce1528e83bbebfbf3fa1",
+      "size": 328
+    },
+    {
+      "path": "src/hyperfide/launch.c",
+      "sha256": "0b8cfc4eb3a79e6affaea313572bc93e5ac84e6438e18db2e5ad2124e66a770d",
+      "size": 73247
+    },
+    {
+      "path": "src/hyperfide/supervisor.c",
+      "sha256": "cbac38ad9d54dadb401ddedc0b95e33f4abac1740813227a31d2033301beeffc",
+      "size": 20555
+    },
+    {
+      "path": "src/hyperfide/supervisor.h",
+      "sha256": "604960950882f2dd64b42f85de2ce46493fdf699f9e0c326235c340cf559bea3",
+      "size": 3942
+    },
+    {
+      "path": "src/hyperfide/supervisor_daemon.c",
+      "sha256": "612da534a95ecf52711f032c2106c8142f1def8fec2f560d66e05c26052799a9",
+      "size": 16771
+    },
+    {
+      "path": "src/hyperfide/transport.c",
+      "sha256": "149271bccafdce93b27f6701b8928a77f7acef5e01a6100e628d794c2a0f73d8",
+      "size": 30077
+    },
+    {
+      "path": "src/hyperfide/transport.h",
+      "sha256": "d23e1c6b438aef2c05a9f82b8352097028f4cd2f8af37ec0f739cdda3f390146",
+      "size": 2699
+    },
+    {
+      "path": "src/sha256.c",
+      "sha256": "eb8d406b26fb5ebdd835a88ed4e9033e211ba37e6cd25c8cc725a01ab74a536e",
+      "size": 2917
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/12_2.py",
+      "sha256": "2c00295953ab3939cd9e06bb47261ed94d7c63dc36feacf48703f22634740e18",
+      "size": 55000
+    },
+    {
+      "path": "tests/hyperfide/check-evidence.py",
+      "sha256": "cc8de56fb25bea153490b4143a231f1ff6f4dac758baaea4bf90fb7d9ba236a0",
+      "size": 30633
+    },
+    {
+      "path": "tests/hyperfide/manifest.schema.json",
+      "sha256": "3407092d7e6e452bb288e996f840bd5bab22d6c0f494a49bf944cd73c18078b8",
+      "size": 3216
+    },
+    {
+      "path": "tests/hyperfide/qualify.py",
+      "sha256": "8aa17f5e2572c8557f15353f7267e98600547fb0f2693486c0e0f2fc1abce8c2",
+      "size": 37538
+    },
+    {
+      "path": "tests/hyperfide/registrations/12.2.json",
+      "sha256": "117bf59e59a7da386c74977e148449b04972e71efee25d52e03243ec6a4f06cc",
+      "size": 4256
+    },
+    {
+      "path": "tests/hyperfide/support/identity_fixture.py",
+      "sha256": "2b992fd5eab4d903909a4dd621b2ce3c7278fa932e163cbad8f33cf2b65efe0a",
+      "size": 29318
+    }
+  ],
+  "policy": {
+    "cloud_provisioning": false,
+    "component_only": true,
+    "execution": "remote-only",
+    "frontier_calls": false,
+    "qualification_limitations": [
+      "No live frontier inference, preserved native context, unattended permissions, credential refresh or MAIN restriction qualification.",
+      "The coordinator is a local signed-HTTPS fixture implementing the 6.3 runner poll/handoff/ack contract, 1.1 placement and the assumed 12.2 structured-event ingest; it is not the production coordinator.",
+      "The agent is a pinned root-owned pass-through binary from a fixture connector plan; real connector dispatch awaits task 13.1 qualification (connector.launch plans are dispatch_eligible:false).",
+      "Crash windows between durable acceptance and broker identity persistence are modelled by committing the exact ledger rows; broker death, supervisor kill and transport loss are real.",
+      "runner.dispatch START issuance is not exercised: no trusted 13.4 plan reader exists and no production reader is registered.",
+      "Actual installed native transport, signed HTTPS and PostgreSQL probes are bounded component evidence only.",
+      "Final merged-source manifests require refreshed complete inventory pins."
+    ]
+  },
+  "registered_variant": "task:12.2",
+  "resources": [
+    {
+      "id": "runner-dispatch-database",
+      "kind": "postgresql-database",
+      "scope": "task12.2-disposable"
+    }
+  ],
+  "schema_version": 1,
+  "scope": "task-component",
+  "seed": 1
+}
