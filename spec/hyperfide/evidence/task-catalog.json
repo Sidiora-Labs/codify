@@ -18,7 +18,7 @@
     "component_registration": "Task-owned typed service/native registration fragments connect modules to real internal entrypoints; public facade integration has explicit later owner."
   },
   "task_count": 112,
-  "wave_count": 33,
+  "wave_count": 34,
   "shared_path_policy": "Each task owns its declared exact paths while active; same-wave overlap is forbidden. Serialized shared paths: services/hyperfide/src/components/registry.ts owned by 1.4 -> 4.2 -> 14.1; services/hyperfide/src/components/service.ts owned by 1.4 -> 14.1; Makefile owned by 1.4 -> 12.1 -> 25.3 -> 26.2; src/hyperfide/components/schema.kvx owned by 1.4 -> 12.1; scripts/hyperfide-native-components.py owned by 1.4 -> 12.1; src/hyperfide/component_main.c owned by 1.4 -> 25.3; src/hyperfide/components.h owned by 1.4 -> 25.3; scripts/install.sh owned by 26.1 -> 26.2; scripts/release.sh owned by 26.1 -> 26.2; src/spec.c owned by 25.3 -> 26.4. Other shared-source edits require explicit serialized ownership and dependencies before work starts.",
   "tasks": [
     {
@@ -244,9 +244,11 @@
       "id": "2.1",
       "title": "Import pinned run specifications with immutable revision identity",
       "status": "pending",
-      "wave": 4,
+      "wave": 7,
       "requires": [
-        "4.1"
+        "4.1",
+        "4.2",
+        "14.1"
       ],
       "reqs": [
         "2.1"
@@ -505,7 +507,7 @@
       "id": "2.2",
       "title": "Validate cross-programme dependency graphs and explicit milestones",
       "status": "pending",
-      "wave": 7,
+      "wave": 8,
       "requires": [
         "2.1",
         "14.1",
@@ -544,7 +546,7 @@
       "id": "3.1",
       "title": "Register leader, manager, wave-package and execution role ownership",
       "status": "pending",
-      "wave": 5,
+      "wave": 8,
       "requires": [
         "2.1",
         "4.2"
@@ -668,7 +670,7 @@
       "id": "7.1",
       "title": "Extract repository and workspace graph bundles remotely",
       "status": "pending",
-      "wave": 7,
+      "wave": 8,
       "requires": [
         "4.1",
         "2.1",
@@ -734,7 +736,11 @@
         "services/hyperfide/components/12.1.json",
         "services/hyperfide/migrations/0012-runner-registry.sql",
         "services/hyperfide/src/runner/bridge.ts",
-        "src/hyperfide/component_main.c"
+        "src/hyperfide/component_main.c",
+        "src/hyperfide/supervisor_daemon.c",
+        "tests/hyperfide/support/supervisor_daemon_fixture.py",
+        "services/hyperfide/src/runner/reproduction_jobs.ts",
+        "tests/hyperfide/support/reproduction_jobs.test.mjs"
       ],
       "do_steps": [
         "Register boot/capability/preparation/slot inventory and allocate separate worktree/build/home/temp/ports with explicit security isolation profiles.",
@@ -779,7 +785,10 @@
         "services/hyperfide/components/14.2.json",
         "services/hyperfide/src/transport/isolation.ts",
         "tests/hyperfide/cases/tasks/14_isolation_transport.py",
-        "services/hyperfide/src/transport/writer_observation.ts"
+        "services/hyperfide/src/transport/writer_observation.ts",
+        "tests/hyperfide/cases/tasks/14_writer_observation_transport.py",
+        "services/hyperfide/src/identity/recovery.ts",
+        "services/hyperfide/migrations/0040-identity-recovery.sql"
       ],
       "do_steps": [
         "Implement distinct image/build/runtime/process layers, secret-reference resolution, designated-canary redaction and revoke/rotate protocols.",
@@ -856,7 +865,10 @@
         "tests/hyperfide/registrations/25.1.json",
         "services/hyperfide/components/25.1.json",
         "services/hyperfide/migrations/0025-sqlite-history.sql",
-        "services/hyperfide/components/legacy-writer-isolation.json"
+        "services/hyperfide/components/legacy-writer-isolation.json",
+        "services/hyperfide/src/migration/legacy.ts",
+        "tests/hyperfide/cases/tasks/25_2.py",
+        "tests/hyperfide/support/sqlite_schema_fixture.py"
       ],
       "do_steps": [
         "Read actual tables/columns including same-v18 additive variants; inventory external journals/config/memory/attempt/event/graph/docs evidence and WAL-safe snapshots.",
@@ -967,7 +979,7 @@
       "id": "1.1",
       "title": "Enforce supervision-only main-host placement across all job classes",
       "status": "pending",
-      "wave": 6,
+      "wave": 9,
       "requires": [
         "8.1",
         "3.1"
@@ -1004,9 +1016,15 @@
       "id": "2.3",
       "title": "Version task decomposition and active-run replanning",
       "status": "pending",
-      "wave": 8,
+      "wave": 21,
       "requires": [
-        "2.2"
+        "2.2",
+        "3.1",
+        "5.1",
+        "5.2",
+        "16.1",
+        "16.4",
+        "4.4"
       ],
       "reqs": [
         "2.3"
@@ -1042,7 +1060,7 @@
       "id": "2.4",
       "title": "Register criterion-level proof obligations and permitted review rubrics",
       "status": "pending",
-      "wave": 8,
+      "wave": 9,
       "requires": [
         "2.2",
         "14.1",
@@ -1080,7 +1098,7 @@
       "id": "3.3",
       "title": "Provide bounded leader and manager context views",
       "status": "pending",
-      "wave": 8,
+      "wave": 9,
       "requires": [
         "3.1",
         "2.2"
@@ -1117,7 +1135,7 @@
       "id": "5.1",
       "title": "Atomically admit task claims and capacity reservations",
       "status": "pending",
-      "wave": 11,
+      "wave": 12,
       "requires": [
         "4.2",
         "2.2",
@@ -1196,7 +1214,7 @@
       "id": "7.2",
       "title": "Bulk-stage graph facts and resolve references in bounded batches",
       "status": "pending",
-      "wave": 8,
+      "wave": 9,
       "requires": [
         "7.1",
         "4.2",
@@ -1247,7 +1265,9 @@
         "tests/hyperfide/manifests/tasks/14.3.json",
         "tests/hyperfide/cases/tasks/14_3.py",
         "tests/hyperfide/registrations/14.3.json",
-        "services/hyperfide/components/14.3.json"
+        "services/hyperfide/components/14.3.json",
+        "services/hyperfide/src/identity/qualification.ts",
+        "services/hyperfide/migrations/0042-native-qualification.sql"
       ],
       "do_steps": [
         "Resolve the unanswered current-auth choice through non-secret operator configuration and qualified per-connector account/API profiles.",
@@ -1347,7 +1367,7 @@
       "id": "3.2",
       "title": "Build immutable scoped execution packets",
       "status": "pending",
-      "wave": 10,
+      "wave": 11,
       "requires": [
         "3.1",
         "2.4",
@@ -1387,7 +1407,7 @@
       "id": "5.2",
       "title": "Enforce monotonic generations and primary-clock leases",
       "status": "pending",
-      "wave": 12,
+      "wave": 13,
       "requires": [
         "5.1"
       ],
@@ -1424,7 +1444,7 @@
       "id": "5.4",
       "title": "Replace fixed local slot/start limits with resource admission and fairness",
       "status": "pending",
-      "wave": 12,
+      "wave": 13,
       "requires": [
         "5.1"
       ],
@@ -1460,7 +1480,7 @@
       "id": "6.4",
       "title": "Recover durable dispatch after controller restart",
       "status": "pending",
-      "wave": 14,
+      "wave": 15,
       "requires": [
         "6.2",
         "14.1",
@@ -1501,7 +1521,7 @@
       "id": "7.3",
       "title": "Publish complete graph generations atomically",
       "status": "pending",
-      "wave": 9,
+      "wave": 10,
       "requires": [
         "7.2"
       ],
@@ -1607,11 +1627,12 @@
       "id": "3.4",
       "title": "Register native descendants and adopt valid work after manager replacement",
       "status": "pending",
-      "wave": 13,
+      "wave": 14,
       "requires": [
         "3.1",
         "5.2",
-        "12.1"
+        "12.1",
+        "14.3"
       ],
       "reqs": [
         "3.4"
@@ -1622,7 +1643,8 @@
         "tests/hyperfide/cases/tasks/3_4.py",
         "tests/hyperfide/registrations/3.4.json",
         "services/hyperfide/components/3.4.json",
-        "services/hyperfide/migrations/0034-child-sessions.sql"
+        "services/hyperfide/migrations/0034-child-sessions.sql",
+        "services/hyperfide/components/3.4-workers.json"
       ],
       "do_steps": [
         "Register native-child parentage, task association, sandbox/slot and resource consumption; persist adoption/handoff requests.",
@@ -1646,7 +1668,7 @@
       "id": "4.3",
       "title": "Assemble consistent packets with topology-aware replica barriers",
       "status": "pending",
-      "wave": 11,
+      "wave": 12,
       "requires": [
         "4.2",
         "3.2",
@@ -1685,7 +1707,7 @@
       "id": "5.3",
       "title": "Reconcile idempotent dispatch and uncertain external outcomes",
       "status": "pending",
-      "wave": 13,
+      "wave": 14,
       "requires": [
         "5.2",
         "6.1",
@@ -1725,7 +1747,7 @@
       "id": "6.3",
       "title": "Deliver generation-bound start, steering and cancellation instructions",
       "status": "pending",
-      "wave": 13,
+      "wave": 14,
       "requires": [
         "6.2",
         "5.2",
@@ -1740,7 +1762,9 @@
         "tests/hyperfide/cases/tasks/6_3.py",
         "tests/hyperfide/registrations/6.3.json",
         "services/hyperfide/components/6.3.json",
-        "services/hyperfide/src/events/api.ts"
+        "services/hyperfide/src/events/api.ts",
+        "services/hyperfide/migrations/0006-event-session-bindings.sql",
+        "services/hyperfide/src/events/runner_commands.ts"
       ],
       "do_steps": [
         "Persist stable command IDs, target generation, ordering, delivery state and acknowledgements with bounded spool/central retention.",
@@ -1765,7 +1789,7 @@
       "id": "8.2",
       "title": "Implement pool inventory and separately qualified account quotas",
       "status": "pending",
-      "wave": 13,
+      "wave": 14,
       "requires": [
         "8.1",
         "5.4"
@@ -1803,7 +1827,7 @@
       "id": "15.3",
       "title": "Adopt stale-attempt artifacts without restoring stale authority",
       "status": "pending",
-      "wave": 17,
+      "wave": 18,
       "requires": [
         "15.1",
         "15.2",
@@ -1821,7 +1845,8 @@
         "tests/hyperfide/registrations/15.3.json",
         "services/hyperfide/components/15.3.json",
         "services/hyperfide/migrations/0015-artifact-adoption.sql",
-        "services/hyperfide/src/artifacts/checkpoint-recipes.ts"
+        "services/hyperfide/src/artifacts/checkpoint-recipes.ts",
+        "services/hyperfide/src/artifacts/continuation.ts"
       ],
       "do_steps": [
         "Validate source/session/environment compatibility and preserve provenance when a new attempt adopts old recoverable artifacts.",
@@ -1885,7 +1910,7 @@
       "id": "1.2",
       "title": "Expose one human programme interface through primary leader",
       "status": "pending",
-      "wave": 14,
+      "wave": 15,
       "requires": [
         "3.1",
         "6.3",
@@ -1923,7 +1948,7 @@
       "id": "7.4",
       "title": "Port graph query and search semantics with differential parity",
       "status": "pending",
-      "wave": 12,
+      "wave": 13,
       "requires": [
         "7.3",
         "4.3"
@@ -1936,7 +1961,15 @@
         "tests/hyperfide/manifests/tasks/7.4.json",
         "tests/hyperfide/cases/tasks/7_4.py",
         "tests/hyperfide/registrations/7.4.json",
-        "services/hyperfide/components/7.4.json"
+        "services/hyperfide/components/7.4.json",
+        "services/hyperfide/src/graph/contract_query.ts",
+        "services/hyperfide/src/graph/projection.ts",
+        "services/hyperfide/src/graph/projection_extract.ts",
+        "tests/hyperfide/cases/support/graph_contracts.py",
+        "tests/hyperfide/cases/support/graph_projection.py",
+        "services/hyperfide/migrations/0704-graph-query-parity.sql",
+        "services/hyperfide/src/graph/replica_query.ts",
+        "tests/hyperfide/cases/support/graph_replicas.py"
       ],
       "do_steps": [
         "Implement grouped context/traversal and PostgreSQL word/body/comment/trigram queries with provenance, branch and budget controls.",
@@ -1948,9 +1981,10 @@
         "V-020",
         "V-021",
         "V-025",
-        "V-048"
+        "V-048",
+        "V-023"
       ],
-      "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-020 --manifest tests/hyperfide/manifests/tasks/7.4.json && python3 tests/hyperfide/qualify.py --case V-021 --manifest tests/hyperfide/manifests/tasks/7.4.json && python3 tests/hyperfide/qualify.py --case V-025 --manifest tests/hyperfide/manifests/tasks/7.4.json && python3 tests/hyperfide/qualify.py --case V-048 --manifest tests/hyperfide/manifests/tasks/7.4.json",
+      "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-020 --manifest tests/hyperfide/manifests/tasks/7.4.json && python3 tests/hyperfide/qualify.py --case V-021 --manifest tests/hyperfide/manifests/tasks/7.4.json && python3 tests/hyperfide/qualify.py --case V-025 --manifest tests/hyperfide/manifests/tasks/7.4.json && python3 tests/hyperfide/qualify.py --case V-048 --manifest tests/hyperfide/manifests/tasks/7.4.json && python3 tests/hyperfide/qualify.py --case V-023 --manifest tests/hyperfide/manifests/tasks/7.4.json",
       "artifacts": [
         "artifacts/hyperfide/tasks/7.4/manifest.json",
         "artifacts/hyperfide/tasks/7.4/evidence-index.json"
@@ -1962,12 +1996,13 @@
       "id": "8.3",
       "title": "Persist provisioning intents and quarantine ambiguous or orphan resources",
       "status": "pending",
-      "wave": 15,
+      "wave": 16,
       "requires": [
         "8.2",
         "5.3",
         "6.4",
-        "14.1"
+        "14.1",
+        "5.4"
       ],
       "reqs": [
         "8.3"
@@ -1978,7 +2013,8 @@
         "tests/hyperfide/cases/tasks/8_3.py",
         "tests/hyperfide/registrations/8.3.json",
         "services/hyperfide/components/8.3.json",
-        "services/hyperfide/src/providers/worker.ts"
+        "services/hyperfide/src/providers/worker.ts",
+        "services/hyperfide/components/8.3-accounting.json"
       ],
       "do_steps": [
         "Record intent before external create, persist returned IDs early and completely paginate inventory for reconciliation.",
@@ -2005,7 +2041,7 @@
       "id": "8.4",
       "title": "Implement authenticated cross-pool connectivity and compatible relocation",
       "status": "pending",
-      "wave": 17,
+      "wave": 18,
       "requires": [
         "8.2",
         "14.1",
@@ -2020,7 +2056,8 @@
         "tests/hyperfide/manifests/tasks/8.4.json",
         "tests/hyperfide/cases/tasks/8_4.py",
         "tests/hyperfide/registrations/8.4.json",
-        "services/hyperfide/components/8.4.json"
+        "services/hyperfide/components/8.4.json",
+        "services/hyperfide/components/8.4-probe.json"
       ],
       "do_steps": [
         "Qualify coordinator/Git/artifact/model reachability per pool without cross-environment private DNS assumptions; apply region/profile compatibility rules.",
@@ -2044,7 +2081,7 @@
       "id": "9.2",
       "title": "Apply complete Railway runtime profiles for every launch",
       "status": "pending",
-      "wave": 14,
+      "wave": 15,
       "requires": [
         "9.1",
         "8.2"
@@ -2081,7 +2118,7 @@
       "id": "10.2",
       "title": "Apply explicit Blaxel process and sandbox lifetime controls",
       "status": "pending",
-      "wave": 14,
+      "wave": 15,
       "requires": [
         "10.1",
         "8.2"
@@ -2118,7 +2155,7 @@
       "id": "12.2",
       "title": "Persist local start ledger and own agent IPC across reconnects",
       "status": "pending",
-      "wave": 14,
+      "wave": 15,
       "requires": [
         "12.1",
         "6.3",
@@ -2161,7 +2198,7 @@
       "id": "21.1",
       "title": "Add advisory clause critique with validated change proposals",
       "status": "pending",
-      "wave": 12,
+      "wave": 23,
       "requires": [
         "20.4",
         "2.3",
@@ -2199,10 +2236,13 @@
       "id": "21.4",
       "title": "Persist complete decision audit records and eventual outcomes",
       "status": "pending",
-      "wave": 11,
+      "wave": 22,
       "requires": [
         "20.4",
-        "15.2"
+        "15.2",
+        "4.4",
+        "12.1",
+        "25.3"
       ],
       "reqs": [
         "21.4"
@@ -2213,7 +2253,10 @@
         "tests/hyperfide/cases/tasks/21_4.py",
         "tests/hyperfide/registrations/21.4.json",
         "services/hyperfide/components/21.4.json",
-        "services/hyperfide/migrations/0021-decisions.sql"
+        "services/hyperfide/migrations/0021-decisions.sql",
+        "src/hyperfide/advisory.c",
+        "src/hyperfide/advisory.h",
+        "src/hyperfide/components/21.4.kvx"
       ],
       "do_steps": [
         "Record purpose/packet hash/revisions/rubric/model/route/raw output/calibrated interpretation/action/latency/usage and outcome links.",
@@ -2237,7 +2280,7 @@
       "id": "9.3",
       "title": "Track Railway durable sessions, logs and process termination",
       "status": "pending",
-      "wave": 15,
+      "wave": 16,
       "requires": [
         "9.2",
         "12.2",
@@ -2275,7 +2318,7 @@
       "id": "10.3",
       "title": "Reconcile Blaxel create-or-get and recover process streams",
       "status": "pending",
-      "wave": 16,
+      "wave": 17,
       "requires": [
         "10.2",
         "12.2",
@@ -2316,7 +2359,7 @@
       "id": "11.4",
       "title": "Schedule remote preparation and eligible-work-driven prewarming",
       "status": "pending",
-      "wave": 16,
+      "wave": 17,
       "requires": [
         "11.1",
         "5.4",
@@ -2335,7 +2378,10 @@
         "services/hyperfide/migrations/0011-prewarm.sql",
         "services/hyperfide/components/11.4-provisioner.json",
         "services/hyperfide/src/preparation/effective.ts",
-        "services/hyperfide/src/preparation/recipe.ts"
+        "services/hyperfide/src/preparation/recipe.ts",
+        "services/hyperfide/src/preparation/seal.ts",
+        "services/hyperfide/src/preparation/checkpoint.ts",
+        "tests/hyperfide/cases/support/checkpoint_source.py"
       ],
       "do_steps": [
         "Dispatch prerequisite installation and indexing preparation remotely with bounded retry/diagnostics and capacity reservations driven by eligible work.",
@@ -2359,7 +2405,7 @@
       "id": "12.3",
       "title": "Observe process trees, useful progress and resource usage separately",
       "status": "pending",
-      "wave": 15,
+      "wave": 16,
       "requires": [
         "12.2",
         "3.4"
@@ -2396,7 +2442,7 @@
       "id": "13.1",
       "title": "Implement pinned Claude Code and Codex connector capability profiles",
       "status": "pending",
-      "wave": 15,
+      "wave": 16,
       "requires": [
         "12.2",
         "14.3"
@@ -2411,7 +2457,8 @@
         "tests/hyperfide/registrations/13.1.json",
         "src/hyperfide/components/13.1.kvx",
         "runtime/supervisory_host.py",
-        "tests/hyperfide/cases/tasks/13_1_host.py"
+        "tests/hyperfide/cases/tasks/13_1_host.py",
+        "services/hyperfide/src/agents/qualification.ts"
       ],
       "do_steps": [
         "Qualify actual launch/input/output/steer/cancel/child/resume capabilities for each pinned CLI/auth mode and resolve user frontier aliases from real configuration.",
@@ -2434,7 +2481,7 @@
       "id": "15.4",
       "title": "Implement reference-safe retention, garbage collection and destruction gates",
       "status": "pending",
-      "wave": 18,
+      "wave": 19,
       "requires": [
         "15.2",
         "8.3",
@@ -2450,7 +2497,8 @@
         "tests/hyperfide/registrations/15.4.json",
         "services/hyperfide/components/15.4.json",
         "services/hyperfide/migrations/0029-artifact-retention.sql",
-        "services/hyperfide/src/artifacts/objects.ts"
+        "services/hyperfide/src/artifacts/objects.ts",
+        "services/hyperfide/src/artifacts/destruction.ts"
       ],
       "do_steps": [
         "Track active evidence/findings/publication/recovery references, retention policy and garbage-collection tombstones before destruction.",
@@ -2474,7 +2522,7 @@
       "id": "16.1",
       "title": "Submit immutable worker results and dispatch independent qualification",
       "status": "pending",
-      "wave": 16,
+      "wave": 17,
       "requires": [
         "2.4",
         "5.2",
@@ -2526,7 +2574,7 @@
       "id": "22.1",
       "title": "Build temporally valid labelled evaluation datasets",
       "status": "pending",
-      "wave": 12,
+      "wave": 23,
       "requires": [
         "21.4"
       ],
@@ -2561,7 +2609,7 @@
       "id": "1.3",
       "title": "Apply qualified frontier assignment policy and user model aliases",
       "status": "pending",
-      "wave": 16,
+      "wave": 17,
       "requires": [
         "13.1",
         "5.4"
@@ -2598,7 +2646,7 @@
       "id": "9.4",
       "title": "Reconcile Railway API edge cases and qualify actual account lifecycle",
       "status": "pending",
-      "wave": 18,
+      "wave": 19,
       "requires": [
         "9.3",
         "8.3",
@@ -2637,7 +2685,7 @@
       "id": "10.4",
       "title": "Gate Blaxel preview capabilities and qualify fresh-identity recovery",
       "status": "pending",
-      "wave": 18,
+      "wave": 19,
       "requires": [
         "10.3",
         "14.1",
@@ -2675,13 +2723,14 @@
       "id": "12.4",
       "title": "Implement runner pause, drain, cancel and verified stop",
       "status": "pending",
-      "wave": 16,
+      "wave": 17,
       "requires": [
         "12.3",
         "15.2",
         "11.3",
         "5.1",
-        "8.2"
+        "8.2",
+        "5.2"
       ],
       "reqs": [
         "12.4"
@@ -2699,7 +2748,16 @@
         "services/hyperfide/src/runner/executor.ts",
         "tests/hyperfide/cases/tasks/12_4_executor.py",
         "src/hyperfide/preparation_stage.c",
-        "tests/hyperfide/support/preparation_stage_fixture.py"
+        "tests/hyperfide/support/preparation_stage_fixture.py",
+        "services/hyperfide/src/runner/preparation_receipts.ts",
+        "services/hyperfide/migrations/0035-runner-preparation-receipts.sql",
+        "src/hyperfide/budget.c",
+        "tests/hyperfide/support/runner_budget_fixture.py",
+        "services/hyperfide/src/runner/workspaces.ts",
+        "tests/hyperfide/support/workspace_registration_fixture.py",
+        "services/hyperfide/src/runner/capture.ts",
+        "services/hyperfide/components/12.4-capture.json",
+        "tests/hyperfide/support/preparation_receipts.test.mjs"
       ],
       "do_steps": [
         "Implement distinct control semantics with fenced authority and artifact-safe cleanup; report confirmed and unresolved termination explicitly.",
@@ -2723,7 +2781,7 @@
       "id": "13.2",
       "title": "Persist native session lineage and source-linked checkpoints",
       "status": "pending",
-      "wave": 16,
+      "wave": 17,
       "requires": [
         "13.1",
         "15.1"
@@ -2761,13 +2819,14 @@
       "id": "13.4",
       "title": "Integrate native quotas, permission profiles and autonomous escalation",
       "status": "pending",
-      "wave": 17,
+      "wave": 18,
       "requires": [
         "13.1",
         "5.4",
         "13.2",
         "5.1",
-        "1.1"
+        "1.1",
+        "3.4"
       ],
       "reqs": [
         "13.4"
@@ -2781,7 +2840,8 @@
         "services/hyperfide/src/agents/supervision.ts",
         "services/hyperfide/components/13.4-supervision.json",
         "services/hyperfide/src/agents/dispatch.ts",
-        "services/hyperfide/components/13.4-dispatch.json"
+        "services/hyperfide/components/13.4-dispatch.json",
+        "services/hyperfide/migrations/0134-native-launch-plans.sql"
       ],
       "do_steps": [
         "Bind provider/model quotas and qualified approval/permission behaviour to the approved run policy; enforce bounded retry and escalation.",
@@ -2806,7 +2866,7 @@
       "id": "16.2",
       "title": "Reject false qualification from missing checks and legacy force paths",
       "status": "pending",
-      "wave": 17,
+      "wave": 18,
       "requires": [
         "16.1",
         "27.1",
@@ -2848,7 +2908,7 @@
       "id": "17.1",
       "title": "Discover every commit and enforce the full watcher obligation matrix",
       "status": "pending",
-      "wave": 17,
+      "wave": 18,
       "requires": [
         "16.1",
         "13.1",
@@ -2887,7 +2947,7 @@
       "id": "22.2",
       "title": "Measure calibrated quality, latency and billed cost against baseline",
       "status": "pending",
-      "wave": 13,
+      "wave": 24,
       "requires": [
         "22.1",
         "20.3"
@@ -2923,7 +2983,7 @@
       "id": "23.2",
       "title": "Account for distinct infrastructure and model resource dimensions",
       "status": "pending",
-      "wave": 21,
+      "wave": 22,
       "requires": [
         "5.4",
         "8.2",
@@ -2962,7 +3022,7 @@
       "id": "13.3",
       "title": "Recover transport and process loss with explicit context outcomes",
       "status": "pending",
-      "wave": 18,
+      "wave": 19,
       "requires": [
         "13.2",
         "15.3"
@@ -2999,7 +3059,7 @@
       "id": "16.3",
       "title": "Record clause evidence and policy-limited independent review judgements",
       "status": "pending",
-      "wave": 18,
+      "wave": 19,
       "requires": [
         "16.2",
         "2.4"
@@ -3037,12 +3097,14 @@
       "id": "21.2",
       "title": "Rank policy-permitted recovery actions from preserved failure packets",
       "status": "pending",
-      "wave": 18,
+      "wave": 27,
       "requires": [
         "20.4",
         "13.4",
         "16.2",
-        "21.4"
+        "21.4",
+        "25.3",
+        "26.4"
       ],
       "reqs": [
         "21.2"
@@ -3052,7 +3114,8 @@
         "tests/hyperfide/manifests/tasks/21.2.json",
         "tests/hyperfide/cases/tasks/21_2.py",
         "tests/hyperfide/registrations/21.2.json",
-        "services/hyperfide/components/21.2.json"
+        "services/hyperfide/components/21.2.json",
+        "src/spec.c"
       ],
       "do_steps": [
         "Build failure/context/resource packets and recommend only allowed retry/context/profile/manager/insufficient-evidence responses.",
@@ -3076,7 +3139,7 @@
       "id": "16.4",
       "title": "Invalidate affected assurance while retaining task history",
       "status": "pending",
-      "wave": 19,
+      "wave": 20,
       "requires": [
         "16.3",
         "7.3"
@@ -3114,7 +3177,7 @@
       "id": "17.2",
       "title": "Build producer-consumer contracts and behavioural impact analysis",
       "status": "pending",
-      "wave": 19,
+      "wave": 20,
       "requires": [
         "7.4",
         "16.3",
@@ -3152,7 +3215,7 @@
       "id": "18.1",
       "title": "Implement canonical findings and provenance-preserving deduplication",
       "status": "pending",
-      "wave": 21,
+      "wave": 22,
       "requires": [
         "16.3",
         "3.1",
@@ -3190,7 +3253,7 @@
       "id": "24.1",
       "title": "Recover supervisory desired state and bounded offline continuation",
       "status": "pending",
-      "wave": 19,
+      "wave": 20,
       "requires": [
         "6.4",
         "3.4",
@@ -3232,7 +3295,7 @@
       "id": "17.3",
       "title": "Persist revision-specific review receipts and invalidate stale conclusions",
       "status": "pending",
-      "wave": 20,
+      "wave": 21,
       "requires": [
         "17.1",
         "17.2",
@@ -3271,7 +3334,7 @@
       "id": "17.4",
       "title": "Dispatch remote reproductions and contract/system qualification jobs",
       "status": "pending",
-      "wave": 21,
+      "wave": 22,
       "requires": [
         "17.2",
         "16.2",
@@ -3315,7 +3378,7 @@
       "id": "18.2",
       "title": "Project findings to GitHub with ten-minute reconciliation",
       "status": "pending",
-      "wave": 22,
+      "wave": 23,
       "requires": [
         "18.1",
         "6.2",
@@ -3352,7 +3415,7 @@
       "id": "18.3",
       "title": "Route findings through revision, attempt and current accountable manager",
       "status": "pending",
-      "wave": 22,
+      "wave": 23,
       "requires": [
         "18.1",
         "3.4"
@@ -3389,13 +3452,14 @@
       "id": "21.3",
       "title": "Rank eligible frontier profiles, optional context and review/finding advice",
       "status": "pending",
-      "wave": 22,
+      "wave": 23,
       "requires": [
         "20.4",
         "5.4",
         "18.1",
         "17.2",
-        "21.4"
+        "21.4",
+        "25.3"
       ],
       "reqs": [
         "21.3"
@@ -3405,7 +3469,11 @@
         "tests/hyperfide/manifests/tasks/21.3.json",
         "tests/hyperfide/cases/tasks/21_3.py",
         "tests/hyperfide/registrations/21.3.json",
-        "services/hyperfide/components/21.3.json"
+        "services/hyperfide/components/21.3.json",
+        "src/govern.c",
+        "src/fleet.c",
+        "src/memory.c",
+        "src/recap.c"
       ],
       "do_steps": [
         "Rank only deterministically eligible frontier choices and optional packet context; offer semantic routing/duplicate suggestions while preserving evidence/ownership.",
@@ -3428,7 +3496,7 @@
       "id": "23.1",
       "title": "Expose desired/observed fleet state, evidence and critical paths",
       "status": "pending",
-      "wave": 20,
+      "wave": 21,
       "requires": [
         "3.3",
         "5.4",
@@ -3469,7 +3537,7 @@
       "id": "23.3",
       "title": "Instrument lifecycle, graph freshness, recovery and qualified outcome cost",
       "status": "pending",
-      "wave": 21,
+      "wave": 23,
       "requires": [
         "6.4",
         "7.3",
@@ -3509,7 +3577,7 @@
       "id": "24.2",
       "title": "Recover lost sandboxes and processes with fenced compatible replacement",
       "status": "pending",
-      "wave": 20,
+      "wave": 21,
       "requires": [
         "24.1",
         "8.4",
@@ -3549,7 +3617,7 @@
       "id": "25.3",
       "title": "Route CLI, MCP, editor, hooks and offline workflows through authority modes",
       "status": "pending",
-      "wave": 20,
+      "wave": 21,
       "requires": [
         "4.3",
         "6.3",
@@ -3558,7 +3626,10 @@
         "12.2",
         "14.1",
         "12.1",
-        "1.4"
+        "1.4",
+        "3.1",
+        "3.3",
+        "4.2"
       ],
       "reqs": [
         "25.3"
@@ -3578,7 +3649,10 @@
         "src/hyperfide/components/25.3.kvx",
         "Makefile",
         "src/hyperfide/component_main.c",
-        "src/hyperfide/components.h"
+        "src/hyperfide/components.h",
+        "services/hyperfide/src/migration/workflow.ts",
+        "services/hyperfide/components/25.3-workflow.json",
+        "tests/hyperfide/cases/tasks/25_3_workflow.py"
       ],
       "do_steps": [
         "Integrate distributed API transport and explicit local/offline modes with work_open/update/handoff/projection/docs, CLI/MCP/editor/hooks contracts.",
@@ -3606,7 +3680,7 @@
       "id": "18.4",
       "title": "Close findings only after fenced repair and recorded resolution proof",
       "status": "pending",
-      "wave": 23,
+      "wave": 24,
       "requires": [
         "18.3",
         "16.4",
@@ -3644,7 +3718,7 @@
       "id": "22.3",
       "title": "Run shadow evaluation then bounded controlled decision trials",
       "status": "pending",
-      "wave": 23,
+      "wave": 28,
       "requires": [
         "22.2",
         "21.1",
@@ -3682,7 +3756,7 @@
       "id": "23.4",
       "title": "Deliver bounded actionable notifications and durable evidence links",
       "status": "pending",
-      "wave": 21,
+      "wave": 22,
       "requires": [
         "23.1",
         "6.2"
@@ -3719,13 +3793,15 @@
       "id": "24.3",
       "title": "Implement scoped pause, drain, cancel and fleet stop controllers",
       "status": "pending",
-      "wave": 21,
+      "wave": 22,
       "requires": [
         "12.4",
         "24.2",
         "15.4",
         "5.1",
-        "25.1"
+        "25.1",
+        "9.3",
+        "10.3"
       ],
       "reqs": [
         "24.3"
@@ -3762,7 +3838,7 @@
       "id": "25.4",
       "title": "Build reproducible releases and deploy prebuilt services in compatibility order",
       "status": "pending",
-      "wave": 21,
+      "wave": 22,
       "requires": [
         "25.3",
         "4.4",
@@ -3783,7 +3859,10 @@
         "tests/hyperfide/cases/tasks/25_4.py",
         "tests/hyperfide/registrations/25.4.json",
         "services/hyperfide/components/25.4.json",
-        "deploy/hyperfide/migrate.mjs"
+        "deploy/hyperfide/migrate.mjs",
+        "deploy/hyperfide/issue-watcher.service",
+        "deploy/hyperfide/supervisory-host.service",
+        "deploy/hyperfide/install-service.mjs"
       ],
       "do_steps": [
         "Produce remote native/TS builds with pinned dependencies/SDKs/runtime, capability/schema/protocol manifests, authenticated artifacts and service definitions.",
@@ -3808,11 +3887,14 @@
       "id": "19.1",
       "title": "Build immutable multi-repository integration candidates remotely",
       "status": "pending",
-      "wave": 24,
+      "wave": 25,
       "requires": [
         "16.4",
         "17.4",
-        "18.4"
+        "18.4",
+        "4.4",
+        "5.1",
+        "5.2"
       ],
       "reqs": [
         "19.1"
@@ -3823,7 +3905,8 @@
         "tests/hyperfide/cases/tasks/19_1.py",
         "tests/hyperfide/registrations/19.1.json",
         "services/hyperfide/components/19.1.json",
-        "services/hyperfide/migrations/0019-integration.sql"
+        "services/hyperfide/migrations/0019-integration.sql",
+        "services/hyperfide/src/integration/cleanup.ts"
       ],
       "do_steps": [
         "Assemble exact qualified commit sets with environment/graph/contract manifests and run mechanical/semantic/regression/system gates remotely.",
@@ -3848,7 +3931,7 @@
       "id": "22.4",
       "title": "Gate decision promotion, drift rollback and optional Span self-hosting",
       "status": "pending",
-      "wave": 24,
+      "wave": 29,
       "requires": [
         "22.3"
       ],
@@ -3884,7 +3967,7 @@
       "id": "26.1",
       "title": "Apply Hyperfide identity to owned product and distribution surfaces",
       "status": "pending",
-      "wave": 22,
+      "wave": 23,
       "requires": [
         "25.4"
       ],
@@ -3924,7 +4007,7 @@
       "id": "19.2",
       "title": "Enforce sole protected-target publication gateway and CAS reconciliation",
       "status": "pending",
-      "wave": 25,
+      "wave": 26,
       "requires": [
         "19.1",
         "14.4",
@@ -3963,7 +4046,7 @@
       "id": "26.2",
       "title": "Ship canonical hyperfide entrypoint with explicit cg compatibility policy",
       "status": "pending",
-      "wave": 23,
+      "wave": 24,
       "requires": [
         "26.1",
         "25.3"
@@ -4007,7 +4090,7 @@
       "id": "19.3",
       "title": "Evaluate task, wave and programme closure against required milestones",
       "status": "pending",
-      "wave": 26,
+      "wave": 27,
       "requires": [
         "19.2",
         "16.3",
@@ -4045,7 +4128,7 @@
       "id": "26.3",
       "title": "Migrate config, directories and variable aliases with backups and conflict checks",
       "status": "pending",
-      "wave": 24,
+      "wave": 25,
       "requires": [
         "26.2",
         "25.1"
@@ -4086,7 +4169,7 @@
       "id": "19.4",
       "title": "Publish explicit partial outcomes behind multi-repository release barrier",
       "status": "pending",
-      "wave": 27,
+      "wave": 28,
       "requires": [
         "19.2",
         "19.3"
@@ -4123,7 +4206,7 @@
       "id": "26.4",
       "title": "Regenerate owned guidance and verify old/new integration parity",
       "status": "pending",
-      "wave": 25,
+      "wave": 26,
       "requires": [
         "26.3",
         "25.3",
@@ -4160,7 +4243,13 @@
         "tests/hyperfide/cases/tasks/26_4_bootstrap.py",
         "tests/hyperfide/cases/tasks/26_4_watcher.py",
         "services/hyperfide/src/bootstrap_identity.ts",
-        "services/hyperfide/migrations/0026-bootstrap.sql"
+        "services/hyperfide/migrations/0026-bootstrap.sql",
+        "services/hyperfide/src/supervisory-host.ts",
+        "services/hyperfide/components/26.4-watcher.json",
+        "tests/hyperfide/cases/tasks/26_4_launchers.py",
+        "services/hyperfide/migrations/0041-bootstrap-recovery.sql",
+        "services/hyperfide/src/bootstrap_recovery.ts",
+        "tests/hyperfide/cases/tasks/26_4_recovery.py"
       ],
       "do_steps": [
         "Update generator-owned workflow/templates and regenerate AGENTS/CLAUDE/context/codemap/spec mirrors after approval; migrate owned MCP/hooks/editor assets with backups.",
@@ -4185,7 +4274,7 @@
       "id": "25.2",
       "title": "Rehearse single-authority cutover and separate rollback boundaries",
       "status": "pending",
-      "wave": 26,
+      "wave": 27,
       "requires": [
         "25.1",
         "7.4",
@@ -4203,7 +4292,11 @@
         "tests/hyperfide/manifests/tasks/25.2.json",
         "tests/hyperfide/cases/tasks/25_2.py",
         "tests/hyperfide/registrations/25.2.json",
-        "services/hyperfide/components/25.2.json"
+        "services/hyperfide/components/25.2.json",
+        "services/hyperfide/src/migration/legacy.ts",
+        "services/hyperfide/src/migration/sqlite.ts",
+        "services/hyperfide/src/migration/parity.ts",
+        "services/hyperfide/migrations/0252-migration-proof.sql"
       ],
       "do_steps": [
         "Quiesce all legacy writers, snapshot/import/reconcile source/Git/artifacts and commit one named authority epoch; allow read-only shadow comparison only.",
@@ -4228,7 +4321,7 @@
       "id": "24.4",
       "title": "Exercise operational recovery runbooks and declared RPO/RTO",
       "status": "pending",
-      "wave": 28,
+      "wave": 29,
       "requires": [
         "24.3",
         "4.4",
@@ -4242,7 +4335,9 @@
         "tests/hyperfide/manifests/tasks/24.4.json",
         "tests/hyperfide/cases/tasks/24_4.py",
         "tests/hyperfide/registrations/24.4.json",
-        "services/hyperfide/components/24.4.json"
+        "services/hyperfide/components/24.4.json",
+        "services/hyperfide/src/storage/recovery_probes.ts",
+        "tests/hyperfide/cases/support/postgres_drills.py"
       ],
       "do_steps": [
         "Implement and remotely rehearse DB/object/Git/provider/auth/full-disk recovery with recorded proposed then measured RPO/RTO and non-reused restore epoch.",
@@ -4267,7 +4362,7 @@
       "id": "27.2",
       "title": "Replay deterministic large-spec, mixed-graph and 1500-session schedules",
       "status": "pending",
-      "wave": 28,
+      "wave": 29,
       "requires": [
         "5.4",
         "7.4",
@@ -4282,7 +4377,16 @@
         "tests/hyperfide/campaigns/deterministic.py",
         "tests/hyperfide/manifests/tasks/27.2.json",
         "tests/hyperfide/cases/tasks/27_2.py",
-        "tests/hyperfide/registrations/27.2.json"
+        "tests/hyperfide/registrations/27.2.json",
+        "tests/hyperfide/campaigns/authority.py",
+        "tests/hyperfide/test_authority_campaign.py",
+        "tests/hyperfide/campaigns/parity.py",
+        "tests/hyperfide/cases/parity/v020.py",
+        "tests/hyperfide/cases/parity/v025.py",
+        "tests/hyperfide/registrations/full/V-020.json",
+        "tests/hyperfide/registrations/full/V-025.json",
+        "tests/hyperfide/manifests/full/V-020.json",
+        "tests/hyperfide/manifests/full/V-025.json"
       ],
       "do_steps": [
         "Implement independent reference-model schedules with the approved manifest-selected planning corpus, pinned graph corpora, 100 sandbox equivalents, 200 simultaneous slots, 1,500 session lifetimes, 72 virtual hours and multiple fault seeds.",
@@ -4307,7 +4411,7 @@
       "id": "27.3",
       "title": "Qualify both live providers and native agents through staged48/72-hour fleet campaigns",
       "status": "pending",
-      "wave": 29,
+      "wave": 30,
       "requires": [
         "27.2",
         "9.4",
@@ -4368,7 +4472,7 @@
       "id": "27.4",
       "title": "Run composite fault qualification and independent invariant reconstruction",
       "status": "pending",
-      "wave": 30,
+      "wave": 31,
       "requires": [
         "27.3",
         "24.4",
@@ -4418,7 +4522,7 @@
       "id": "28.1",
       "title": "Publish operational documentation from qualified implementation interfaces",
       "status": "pending",
-      "wave": 30,
+      "wave": 31,
       "requires": [
         "26.4",
         "27.3"
@@ -4455,7 +4559,7 @@
       "id": "28.2",
       "title": "Persist deterministic documentation closure snapshots and receipts",
       "status": "pending",
-      "wave": 31,
+      "wave": 32,
       "requires": [
         "28.1",
         "19.3",
@@ -4496,7 +4600,7 @@
       "id": "28.4",
       "title": "Retain requirements, decisions, source evidence and implementation traceability",
       "status": "pending",
-      "wave": 32,
+      "wave": 33,
       "requires": [
         "27.4",
         "28.2",
@@ -4538,7 +4642,7 @@
       "id": "28.3",
       "title": "Assemble independent release readiness and complete closure evidence",
       "status": "pending",
-      "wave": 33,
+      "wave": 34,
       "requires": [
         "27.4",
         "28.2",

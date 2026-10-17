@@ -79,7 +79,42 @@
     },
     "V-020": {
       "title": "Hyperfide acceptance case V-020",
-      "full_assertion_ids": []
+      "full_assertion_ids": [
+        "parity.v020.source-revision",
+        "parity.v020.configuration",
+        "parity.v020.legacy-toolchain",
+        "parity.v020.approved-corpus-complete",
+        "parity.v020.symbol-semantics",
+        "parity.v020.reference-semantics",
+        "parity.v020.caller-semantics",
+        "parity.v020.contract-findings",
+        "parity.v020.word-body-fts",
+        "parity.v020.comment-fts",
+        "parity.v020.identifier-trigram",
+        "parity.v020.body-trigram",
+        "parity.v020.identifier-segmentation",
+        "parity.v020.unicode-tokenisation",
+        "parity.v020.case-and-punctuation",
+        "parity.v020.phrase-and-boolean-syntax",
+        "parity.v020.path-glob-language-filters",
+        "parity.v020.rank-order",
+        "parity.v020.explicit-rank-ties",
+        "parity.v020.branch-isolation",
+        "parity.v020.folded-branch-projection",
+        "parity.v020.missing-source-diagnostics",
+        "parity.v020.contentless-body-readback",
+        "parity.v020.stable-pagination",
+        "parity.v020.output-and-time-budgets",
+        "parity.v020.approved-differences-only",
+        "parity.v020.complete-source-provenance",
+        "parity.v020.original-inputs-unchanged",
+        "parity.v020.complete-cleanup",
+        "parity.v020.coverage-and-freshness",
+        "parity.v020.exact-name-precedence",
+        "parity.v020.negative-empty-escaped-parameterisation",
+        "parity.v020.structured-timeout-and-truncation",
+        "parity.v020.explain-plan-and-round-trips"
+      ]
     },
     "V-021": {
       "title": "Hyperfide acceptance case V-021",
@@ -99,7 +134,31 @@
     },
     "V-025": {
       "title": "Hyperfide acceptance case V-025",
-      "full_assertion_ids": []
+      "full_assertion_ids": [
+        "parity.v025.accepted-import-snapshot-binding",
+        "parity.v025.actual-schema-capabilities",
+        "parity.v025.typed-row-preservation",
+        "parity.v025.deterministic-identity-relationships",
+        "parity.v025.actual-import-readback",
+        "parity.v025.graph-schema-upgrade",
+        "parity.v025.search-semantics-preserved",
+        "parity.v025.unicode-trigram-edge-matrix",
+        "parity.v025.incomplete-snapshot-refusal",
+        "parity.v025.durable-boundary-interruptions",
+        "parity.v025.idempotent-resume",
+        "parity.v025.specified-recovery-strategy",
+        "parity.v025.source-provenance-preserved",
+        "parity.v025.unsupported-legacy-diagnostics",
+        "parity.v025.original-archive-retained",
+        "parity.v025.historical-state-not-live-authority",
+        "parity.v025.no-partial-graph-publication",
+        "parity.v025.approved-differences-only",
+        "parity.v025.complete-cleanup",
+        "parity.v025.wal-consistent-capture",
+        "parity.v025.complete-table-column-class-inventory",
+        "parity.v025.forward-version-client-refusal",
+        "parity.v025.unresolved-reference-diagnostics"
+      ]
     },
     "V-026": {
       "title": "Hyperfide acceptance case V-026",
@@ -390,5 +449,5 @@
       "V-056"
     ]
   },
-  "registration_glob": "registrations/*.json"
+  "registration_glob": "registrations/**/*.json"
 }

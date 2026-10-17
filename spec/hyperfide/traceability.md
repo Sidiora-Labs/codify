@@ -35,7 +35,7 @@ The listed cases are the exact union assigned to the covering tasks. A task may 
 | 7.1 | 7.1 | V-018, V-020 | [storage.md](storage.md); [migration.md](migration.md) |
 | 7.2 | 7.2 | V-011, V-022 | [storage.md](storage.md); [migration.md](migration.md) |
 | 7.3 | 7.3 | V-021, V-022 | [storage.md](storage.md); [migration.md](migration.md) |
-| 7.4 | 7.4 | V-020, V-021, V-025, V-048 | [storage.md](storage.md); [migration.md](migration.md) |
+| 7.4 | 7.4 | V-020, V-021, V-025, V-048, V-023 | [storage.md](storage.md); [migration.md](migration.md) |
 | 8.1 | 8.1 | V-036, V-041 | [execution-contract.md](execution-contract.md); [identity-security.md](identity-security.md) |
 | 8.2 | 8.2 | V-007, V-036 | [execution-contract.md](execution-contract.md); [identity-security.md](identity-security.md) |
 | 8.3 | 8.3 | V-037, V-054 | [execution-contract.md](execution-contract.md); [identity-security.md](identity-security.md) |
