@@ -28,7 +28,10 @@ interface ProviderExecution {
 interface Packet {source_state_digest:string;workspace_digest:string;request:RunnerRemotePlan;binding:Record<string,any>;allocation:Record<string,any>;reservations:unknown}
 interface Job {organisation_id:string;run_id:string;operation_id:string;session_id:string;plan:Packet;plan_digest:string;principal:Principal;authority_epoch:string;reservation_id:string;expires_at:Date|string;state:string;claim_id:string|null;executor_credential_id:string|null;[name:string]:any}
 interface ObjectReference {storage_kind:'manifest';artifact_id:string;digest:string;manifest_digest:string;size_bytes:string;complete:boolean}
-export interface NativeRunnerRequest {session_id:string;operation_id:string;action:'runner.observe'|'runner.stop';command_id?:string;launch_id?:string}
+export type NativeControlAction='runner.observe'|'runner.stop'|'runner.pause'|'runner.drain'|'runner.cancel'|'runner.resume';
+/** Every action except observe is a coordinator command identified by command_id (task 12.4). */
+export const NATIVE_CONTROL_ACTIONS:readonly NativeControlAction[]=Object.freeze(['runner.observe','runner.stop','runner.pause','runner.drain','runner.cancel','runner.resume']);
+export interface NativeRunnerRequest {session_id:string;operation_id:string;action:NativeControlAction;command_id?:string;launch_id?:string}
 export interface NativeRunnerCapability {
  invokeNativeRunner(invocation:InvocationContext,input:NativeRunnerRequest,signal:AbortSignal):Promise<unknown>;
  authenticatePlacementProbe(invocation:InvocationContext,input:{probe_id:string},signal:AbortSignal):Promise<{request:BoundProviderRequest;invocation:InvocationContext}>;
@@ -156,7 +159,23 @@ function controlRequest(binding:Record<string,any>,input:NativeRunnerRequest):Bo
 export interface NativeControlTarget {readonly launch_id:string;readonly attempt_id:string;readonly attempt_generation:string;readonly sandbox_id:string;readonly boot_id:string;readonly boot_generation:string;readonly uid:number}
 // Coherence validation grants no authority. The runtime derives its target from
 // guarded primary state and its receipt from actual provider-captured stdout.
-export function validateNativeControlReceipt(value:unknown,target:NativeControlTarget,command_id?:string):Record<string,unknown>{
+const CONTROL_STATUS:Record<string,readonly string[]>={'runner.observe':['RUNNING','CONFIRMED_STOPPED','UNKNOWN','PAUSED','DRAINING','DRAINED','CANCELLED','UNRESOLVED'],'runner.stop':['CONFIRMED_STOPPED','UNKNOWN'],'runner.cancel':['CANCELLED','UNRESOLVED'],'runner.pause':['PAUSED','UNRESOLVED'],'runner.drain':['DRAINING','DRAINED','CONFIRMED_STOPPED','UNRESOLVED'],'runner.resume':['RUNNING','UNRESOLVED']};
+function validateControlCleanup(receipt:Record<string,unknown>,action:NativeControlAction):void{
+ const artifacts=receipt.required_artifacts,credentials=receipt.credential_revocation;
+ if(!Array.isArray(artifacts)||!Array.isArray(credentials)||artifacts.length>64||credentials.length>256)fail('RUNNER_CONTROL_RECEIPT_INVALID','Explicit required artifact and credential revocation inventories required');
+ for(const a of artifacts)if(!object(a)||typeof a.name!=='string'||typeof a.local_durable!=='boolean'||a.digest!==null&&!digest(a.digest)||a.capture_receipt!==null&&!digest(a.capture_receipt))fail('RUNNER_CONTROL_RECEIPT_INVALID','Required artifact entries must carry digests and capture receipts explicitly');
+ for(const c of credentials)if(!object(c)||typeof c.name!=='string'||!['REVOKED','UNRESOLVED','ABSENT'].includes(String(c.state)))fail('RUNNER_CONTROL_RECEIPT_INVALID','Credential revocation must be reported explicitly');
+ if(receipt.cleanup_complete===true&&(!['CONFIRMED_STOPPED','CANCELLED','DRAINED'].includes(String(receipt.status))||artifacts.some(a=>!a.local_durable||a.capture_receipt===null)||credentials.some(c=>c.state==='UNRESOLVED')))fail('RUNNER_CONTROL_RECEIPT_CONTRADICTION','Cleanup completion requires confirmed termination, durable captured outputs and revoked credentials');
+ if(action!=='runner.observe'&&(!object(receipt.authority)||receipt.authority.command_id!==receipt.command_id||!uuid(receipt.authority.authority_epoch)||!decimal(String(receipt.authority.fence_sequence),true)))fail('RUNNER_CONTROL_RECEIPT_INVALID','Command receipts must carry the verified coordinator fence');
+}
+export function validateNativeControlReceipt(value:unknown,target:NativeControlTarget,command_id?:string,action?:NativeControlAction):Record<string,unknown>{
+ if(action!==undefined&&action!=='runner.observe'){
+  if(!object(value)||!CONTROL_STATUS[action]!.includes(String(value.status))||value.action!==action||value.command_id!==command_id||!uuid(command_id))fail('RUNNER_CONTROL_RECEIPT_INVALID','Control receipt status, action and command identity required');
+  validateControlCleanup(value,action);
+  if(value.status==='PAUSED'&&Array.isArray(value.processes)&&value.processes.some(p=>!object(p)||!['T','t'].includes(String(p.state))))fail('RUNNER_CONTROL_RECEIPT_CONTRADICTION','Paused receipt requires every slot process frozen');
+  if(['CANCELLED','DRAINED'].includes(String(value.status))&&(!Array.isArray(value.processes)||value.processes.length!==0||value.remaining_descendants!==0))fail('RUNNER_CONTROL_RECEIPT_CONTRADICTION','Confirmed termination requires an empty tree');
+  return validateNativeControlReceipt({...value,status:['CANCELLED','DRAINED'].includes(String(value.status))?'CONFIRMED_STOPPED':['PAUSED','DRAINING','UNRESOLVED'].includes(String(value.status))?'UNKNOWN':value.status},target,command_id)&&value;
+ }
  if(!object(value))fail('RUNNER_CONTROL_RECEIPT_INVALID','Native observation object required');
  const receipt=value,scope=object(receipt.binding)?receipt.binding:receipt;
  for(const field of ['launch_id','attempt_id','attempt_generation','sandbox_id','boot_id','boot_generation'] as const){const actual=field==='launch_id'?receipt.launch_id:scope[field];if(String(actual)!==String(target[field]))fail('RUNNER_CONTROL_RECEIPT_MISMATCH','Physical observation target differs');}
@@ -233,7 +252,7 @@ export async function createComponent(ctx:ComponentContext):Promise<Component>{
  const native:NativeRunnerCapability=Object.freeze({invokeNativeRunner:async(i:InvocationContext,input:NativeRunnerRequest,requestedSignal:AbortSignal)=>{
  if(signal.aborted)fail('RUNNER_EXECUTOR_CLOSED','Provisioner executor is closed');
  assertInvocation(i);
- const controlSignal=AbortSignal.any([signal,requestedSignal,i.signal]);await authority.authorize(i);if(i.principal.role!=='PROVISIONER'||!object(input)||!uuid(input.session_id)||!uuid(input.operation_id)||!['runner.observe','runner.stop'].includes(input.action)||input.command_id!==undefined&&!uuid(input.command_id)||input.launch_id!==undefined&&!uuid(input.launch_id)||input.action==='runner.stop'&&!uuid(input.command_id)||Object.keys(input).some(k=>!['session_id','operation_id','action','command_id','launch_id'].includes(k)))fail('RUNNER_CONTROL_DENIED','Actual provisioner and bounded native control request required');
+ const controlSignal=AbortSignal.any([signal,requestedSignal,i.signal]);await authority.authorize(i);if(i.principal.role!=='PROVISIONER'||!object(input)||!uuid(input.session_id)||!uuid(input.operation_id)||!NATIVE_CONTROL_ACTIONS.includes(input.action)||input.command_id!==undefined&&!uuid(input.command_id)||input.launch_id!==undefined&&!uuid(input.launch_id)||input.action!=='runner.observe'&&!uuid(input.command_id)||Object.keys(input).some(k=>!['session_id','operation_id','action','command_id','launch_id'].includes(k)))fail('RUNNER_CONTROL_DENIED','Actual provisioner and bounded native control request required');
  const b=await g.withPrimaryTransaction<Record<string,any>>({timeoutMs:5000,signal:controlSignal,guard:tx=>i.guard(tx)},async tx=>{
   const launch_id=input.launch_id??(await readRunnerBinding(tx as PrimaryTransaction,{organisation_id:i.principal.organisation_id,run_id:i.principal.run_id,session_id:input.session_id})).launch_id;
   if(!uuid(launch_id))fail('RUNNER_CONTROL_TARGET_UNREGISTERED','Actual committed START launch required');
@@ -248,7 +267,7 @@ export async function createComponent(ctx:ComponentContext):Promise<Component>{
  let observed:ProviderResult;try{observed=await provider.executeBound(request,controlSignal,proof);}finally{retainedRequests.delete(request);}if(!observed.captured||typeof observed.process_ref!=='string'||!observed.process_ref)fail('RUNNER_CONTROL_UNKNOWN','Actual provider native control capture required');
  const captured=observed.captured;if(captured.complete!==true||captured.exit_code!==0)fail('RUNNER_CONTROL_UNKNOWN','Complete native control observation required');
  const result=strictJSON(Buffer.from(captured.stdout),MAX_CAPTURE);if(!object(result)||result.ok!==true||!object(result.result))fail('RUNNER_CONTROL_UNKNOWN','Actual native control receipt required');
- const receipt=validateNativeControlReceipt(result.result,{...target,uid:b.uid},input.action==='runner.stop'?input.command_id:undefined);
+ const receipt=validateNativeControlReceipt(result.result,{...target,uid:b.uid},input.action==='runner.observe'?undefined:input.command_id,input.action);
  const evidence=await storeBytes(store,proof,Buffer.from(captured.stdout));
  return {native:receipt,native_receipt:evidence,provider:{process_ref:observed.process_ref,evidence_digest:observed.evidence_digest,spool_digest:captured.spool_digest},retained_start:b.retained_start,executable_identity:{registered_digest:b.runner_binary_digest,freshly_measured_digest:null,qualification:'NOT_EVALUATED'},authority:'OBSERVATION_ONLY'};
  },authenticatePlacementProbe:async(i:InvocationContext,input:{probe_id:string},requestedSignal:AbortSignal)=>{

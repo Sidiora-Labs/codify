@@ -12,6 +12,9 @@ import type {InvocationContext,Principal} from '../transport/protocol.js';
 import {readRuntimeReadiness} from '../providers/pools.js';
 import {isArtifactStoreCapability} from '../artifacts/objects.js';
 import type {ArtifactStoreCapability} from '../artifacts/objects.js';
+import {assertSandboxReservation} from '../scheduler/claim.js';
+import {readPreparationReceipt,recordPreparationReceipt,verifyPreparationReceipt} from './preparation_receipts.js';
+import type {PreparationReceiptPlan,VerifiedPreparationReceipt} from './preparation_receipts.js';
 
 export interface RunnerRemotePlan {
  session_id:string;operation_id:string;repository_id:string;reservation_id:string;
@@ -76,7 +79,9 @@ interface Resources {
 const isRemote=(v:unknown):v is RunnerRemote=>object(v)&&typeof v.prepare==='function'&&typeof v.execute==='function';
 const isResources=(v:unknown):v is Resources=>object(v)&&typeof v.assertJobReservation==='function'&&typeof v.readJobAllocation==='function';
 const isProvider=(v:unknown):v is ProviderExecution=>object(v)&&typeof v.executeBound==='function'&&typeof v.registerRunnerBindingVerifier==='function';
-export interface RunnerPreparation {prepare(tx:PrimaryTransaction,i:InvocationContext,plan:RunnerPreparationPlan):Promise<RunnerRemotePermit>;execute(permit:RunnerRemotePermit,signal:AbortSignal):Promise<RunnerRemoteResult>;assertJobAdmission(tx:PrimaryTransaction,i:InvocationContext,plan:RunnerPreparationPlan):Promise<void>}
+export interface RunnerPreparation {prepare(tx:PrimaryTransaction,i:InvocationContext,plan:RunnerPreparationPlan):Promise<RunnerRemotePermit>;execute(permit:RunnerRemotePermit,signal:AbortSignal):Promise<RunnerRemoteResult>;assertJobAdmission(tx:PrimaryTransaction,i:InvocationContext,plan:RunnerPreparationPlan):Promise<void>;
+ /** Native preparation-stage receipts (12.4): verify against the committed plan, persist idempotently, read back. */
+ verifyReceipt(bytes:Buffer,plan:PreparationReceiptPlan):VerifiedPreparationReceipt;recordReceipt(tx:PrimaryTransaction,i:InvocationContext,input:{operation_id:string;receipt_base64:string}):Promise<Record<string,unknown>>;readReceipt(tx:PrimaryTransaction,scope:{organisation_id:string;run_id:string;operation_id:string}):Promise<Record<string,unknown>|null>}
 export function requireRunnerPreparation(ctx:ComponentContext):RunnerPreparation{return ctx.dependencies.require('12.4','runner.preparation.v1',(v:unknown):v is RunnerPreparation=>object(v)&&typeof v.prepare==='function'&&typeof v.execute==='function');}
 export function requireRunnerRemote(ctx:ComponentContext):RunnerRemote {
  return ctx.dependencies.require('12.4','runner.remote.v1',isRemote);
@@ -468,7 +473,8 @@ export async function createRemoteComponent(ctx:ComponentContext):Promise<Compon
    const refs=[{role:'input-manifest',artifact_id:request.input_manifest_artifact_id,storage_kind:'object',digest:request.input_manifest_digest,size_bytes:null},...plan.preparation!.staging];
    for(const ref of refs){const objectDigest=ref.storage_kind==='manifest'?(ref as RunnerStagingReference).manifest_digest!:ref.digest;const artifact=(await tx.query("SELECT digest,size_bytes FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND status='COMPLETE' FOR SHARE",[p.organisation_id,p.run_id,ref.artifact_id])).rows[0];if(!artifact||artifact.digest!==objectDigest||ref.storage_kind==='object'&&ref.size_bytes!==null&&String(artifact.size_bytes)!==ref.size_bytes)fail('PREPARATION_ARTIFACT_UNAVAILABLE','Actual scoped immutable COMPLETE inputs required');await tx.query('INSERT INTO hyperfide.runner_result_artifacts(organisation_id,run_id,operation_id,role,artifact_id,artifact_digest,content_digest,size_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[p.organisation_id,p.run_id,plan.operation_id,'input:'+hash(ref.role).slice(7),ref.artifact_id,objectDigest,ref.digest,ref.size_bytes??String(artifact.size_bytes)]);}
    const permit=Object.freeze({}) as RunnerRemotePermit;permits.set(permit,{context:ctx,plan,binding:r,principal:p,invocation:i,digest:pin});return permit;
-  },execute:remote.execute
+  },execute:remote.execute,
+  verifyReceipt:verifyPreparationReceipt,recordReceipt:recordPreparationReceipt,readReceipt:readPreparationReceipt
  });
  return {apiVersion:1,capabilities:{'runner.remote.v1':remote,'runner.preparation.v1':preparation},actions:{
   'runner.job.claim':(v,context)=>identityTransaction(context,async(tx,i)=>{
@@ -487,7 +493,12 @@ export async function createRemoteComponent(ctx:ComponentContext):Promise<Compon
    if(r.credential_id!==p.credential_id||r.boot_id!==p.boot_id||r.boot_generation!==p.boot_generation)fail('REMOTE_JOB_SCOPE_DENIED','Operation belongs to another authenticated runner boot');const checked=row.job_class==='PREPARATION'?null:await readRunnerReadiness(tx as PrimaryTransaction,r);
    const clock=(await tx.query('SELECT clock_timestamp() AS db_now')).rows[0]!;const remaining_ms=Math.max(0,Math.floor(new Date(row.expires_at).getTime()-new Date(clock.db_now).getTime()));
    if(remaining_ms<=0)fail('REMOTE_RESERVATION_EXPIRED','Job admission expired');
-   return {operation_id:row.operation_id,job_class:row.job_class,plan_digest:row.plan_digest,plan:row.plan.request,binding:{...r,public_key_b64:undefined},allocation:row.plan.allocation,readiness:checked,remaining_ms,expires_at:new Date(row.expires_at).toISOString(),authority:'BOUNDED_JOB_ONLY'};
+   // The held per-boot charge (if any) is delivered with the authenticated claim; native
+   // job execution attaches the job tree to that budget cgroup or reports it unavailable.
+   let charge:unknown=null;
+   try{charge=await assertSandboxReservation(tx as PrimaryTransaction,{organisation_id:p.organisation_id,run_id:p.run_id,reservation_id:row.reservation_id});}catch(error){if(!object(error)||error.code!=='SANDBOX_CHARGE_UNAVAILABLE')throw error;}
+   const budget=charge===null?null:{charge,boot_id:r.boot_id,uid:r.uid,gid:r.gid};
+   return {operation_id:row.operation_id,job_class:row.job_class,plan_digest:row.plan_digest,plan:row.plan.request,binding:{...r,public_key_b64:undefined},allocation:row.plan.allocation,readiness:checked,budget,remaining_ms,expires_at:new Date(row.expires_at).toISOString(),authority:'BOUNDED_JOB_ONLY'};
   })
  }};
 }
