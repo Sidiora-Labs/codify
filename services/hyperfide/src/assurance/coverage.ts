@@ -176,7 +176,7 @@ async function accept(ctx:ComponentContext,raw:unknown):Promise<Data>{
  const preflight=await transaction(ctx,async db=>{
   const coverage=await inspectCoverage(db,{organisation_id:s[0],run_id:s[1]},id);
   if(!coverage.proof_complete||!coverage.receipt_digest)fail('QUALIFICATION_PROOF_INCOMPLETE','Mandatory current command and clause proof required');
-  const stored=await db.query('SELECT receipt,receipt_digest,receipt_artifact_id FROM hyperfide.assurance_job_receipts WHERE organisation_id=$1 AND run_id=$2 AND receipt_digest=$3',[...s,coverage.receipt_digest]);
+  const stored=await db.query('SELECT receipt,receipt_digest,receipt_artifact_id,evidence_id FROM hyperfide.assurance_job_receipts WHERE organisation_id=$1 AND run_id=$2 AND receipt_digest=$3',[...s,coverage.receipt_digest]);
   const inputs=await db.query('SELECT input_manifest FROM hyperfide.assurance_applicability WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3',[...s,id]);
   const reviews=await db.query("SELECT support FROM hyperfide.assurance_judgements WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3 AND disposition='PASS' AND input_manifest_digest=$4",[...s,id,hash(inputs.rows[0].input_manifest)]);
   return {...stored.rows[0],support_artifact_ids:reviews.rows.flatMap((row:Data)=>row.support)};
@@ -195,6 +195,11 @@ async function accept(ctx:ComponentContext,raw:unknown):Promise<Data>{
   if(!coverage.proof_complete||!coverage.receipt_digest)
    fail('QUALIFICATION_PROOF_INCOMPLETE','One or more mandatory acceptance clauses remain open');
   if(coverage.applicability==='STALE')fail('QUALIFICATION_INPUT_STALE','Relevant input changes require independent requalification');
+  const admitted=await client.query("SELECT id FROM hyperfide.evidence WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND attempt_id=$4 AND attempt_generation=$5 AND repository_id=$6 AND source_object_id=$7 AND criteria_digest=$8 AND manifest_digest=$9 AND artifact_id=$10 AND admission_state='ADMITTED' FOR SHARE",
+   [...s,preflight.evidence_id,c.source_attempt_id,c.source_generation,c.repository_id,c.source_object_id,c.criteria_digest,coverage.receipt_digest,preflight.receipt_artifact_id]);
+  if(admitted.rows.length!==1)fail('QUALIFICATION_PROOF_INCOMPLETE','Exact admitted independent receipt evidence is required');
+  await client.query('INSERT INTO hyperfide.submission_evidence(organisation_id,run_id,custody_id,evidence_id,source_attempt_id,source_generation,repository_id,source_object_id,criteria_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING',
+   [...s,id,preflight.evidence_id,c.source_attempt_id,c.source_generation,c.repository_id,c.source_object_id,c.criteria_digest]);
   await client.query("UPDATE hyperfide.submission_custodies SET qualification_outcome='PASS',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[...s,id]);
   await client.query("UPDATE hyperfide.assurance_applicability SET applicability='CURRENT',current_receipt_digest=$4,reasons='[]',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3",[...s,id,coverage.receipt_digest]);
   await client.query("UPDATE hyperfide.tasks SET state='QUALIFIED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[...s,c.task_id]);
