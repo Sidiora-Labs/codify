@@ -13,7 +13,7 @@ export interface Trial {
 }
 export interface TrialReport {
   trial_id:string; mode:string; purpose:string; scorecard_id:string; dataset_id:string; baseline:Profile; candidate:Profile;
-  complete:boolean; count:number; per_arm:Record<string,Obj>; benefit_interval:{lower:number;upper:number}|null;
+  complete:boolean; count:number; per_arm:Record<string,Obj>; totals:{retries:number;qualified:number;qualified_per_hour:number|null;total_cost_microusd:number}; benefit_interval:{lower:number;upper:number}|null;
   defect_difference_upper:number|null; benefit_demonstrated:boolean; noninferiority_demonstrated:boolean;
   stop_required:boolean; stop_reasons:string[]; evidence_class:string; production_eligible:boolean; evidence_digest:string;
 }
@@ -56,8 +56,8 @@ export async function createTrial(input:unknown,context:ComponentContext):Promis
 }
 export async function reportTrial(input:unknown,context:ComponentContext):Promise<Obj>{
   const r=fields(input,['trial_id','observations']),store=new EvaluationStore(context),trial=await store.get<Trial>(r.trial_id,'trial');
-  const seen=new Set<string>(),arms:Record<string,{primary:number[];defect_rates:number[];qualified:number;defects:number;cost:number;attempts:number;duration:number}>={
-    baseline:{primary:[],defect_rates:[],qualified:0,defects:0,cost:0,attempts:0,duration:0},candidate:{primary:[],defect_rates:[],qualified:0,defects:0,cost:0,attempts:0,duration:0}};
+  const seen=new Set<string>(),arms:Record<string,{primary:number[];defect_rates:number[];qualified:number;defects:number;cost:number;attempts:number;retries:number;duration:number}>={
+    baseline:{primary:[],defect_rates:[],qualified:0,defects:0,cost:0,attempts:0,retries:0,duration:0},candidate:{primary:[],defect_rates:[],qualified:0,defects:0,cost:0,attempts:0,retries:0,duration:0}};
   const stop:string[]=[],proofs:string[]=[];let live=trial.evidence_class==='live';
   for(const value of list(r.observations,1,10000)){
     const receipt=attestation(context,value,'trial_observation'),o=fields(receipt.payload,['trial_digest','unit_id','arm','qualified','escaped_defects','attempts','cost_microusd','duration_ms','invariant_violations','started_at','ended_at','outcome_evidence','cost_breakdown']);
@@ -68,7 +68,7 @@ export async function reportTrial(input:unknown,context:ComponentContext):Promis
     if(Date.parse(start)<Date.parse(trial.starts_at)||Date.parse(end)>Date.parse(trial.ends_at)||Date.parse(end)<Date.parse(start)||Date.parse(end)>Date.parse(receipt.observed_at))fail('Observation outside approved time window');
     const duration=integer(o.duration_ms,1,trial.max_duration_ms),qualified=integer(o.qualified),defects=integer(o.escaped_defects,0,qualified);
     if(duration!==Date.parse(end)-Date.parse(start))fail('Observed duration differs from timestamps');
-    const cost=integer(o.cost_microusd),attempts=integer(o.attempts),violations=integer(o.invariant_violations);
+    const cost=integer(o.cost_microusd),attempts=integer(o.attempts,1),violations=integer(o.invariant_violations);
     const costs=fields(o.cost_breakdown,['sandbox','frontier','decisions','packet_build']);
     const total=Object.values(costs).reduce<number>((sum,value)=>sum+integer(value),0);
     if(!Number.isSafeInteger(total)||total!==cost)fail('Full outcome cost breakdown is incomplete/inconsistent');
@@ -79,8 +79,8 @@ export async function reportTrial(input:unknown,context:ComponentContext):Promis
     else if(primary>trial.max_primary)stop.push('outcome_outside_predeclared_bound:'+unit.unit_id);
     const arm=arms[unit.arm]!;if(primary!==null&&primary<=trial.max_primary)arm.primary.push(primary);
     if(qualified)arm.defect_rates.push(defects/qualified);
-    arm.qualified+=qualified;arm.defects+=defects;arm.cost+=cost;arm.attempts+=attempts;arm.duration+=duration;
-    for(const number of [arm.qualified,arm.defects,arm.cost,arm.attempts,arm.duration])integer(number);
+    arm.qualified+=qualified;arm.defects+=defects;arm.cost+=cost;arm.attempts+=attempts;arm.retries+=attempts-1;arm.duration+=duration;
+    for(const number of [arm.qualified,arm.defects,arm.cost,arm.attempts,arm.retries,arm.duration])integer(number);
   }
   if(arms.baseline!.cost+arms.candidate!.cost>trial.max_cost_microusd)stop.push('cost_budget_exceeded');
   if(arms.baseline!.attempts+arms.candidate!.attempts>trial.max_attempts)stop.push('attempt_budget_exceeded');
@@ -101,8 +101,12 @@ export async function reportTrial(input:unknown,context:ComponentContext):Promis
   const eligible=complete&&enough&&stop.length===0&&trial.mode==='controlled'&&live;
   const report:TrialReport={trial_id:hash(r.trial_id),mode:trial.mode,purpose:trial.purpose,scorecard_id:trial.scorecard_id,dataset_id:trial.dataset_id,
     baseline:trial.baseline,candidate:trial.candidate,complete,count:seen.size,
+    totals:{retries:baseline.retries+candidate.retries,qualified:baseline.qualified+candidate.qualified,
+      qualified_per_hour:baseline.duration+candidate.duration?(baseline.qualified+candidate.qualified)*3600000/(baseline.duration+candidate.duration):null,
+      total_cost_microusd:baseline.cost+candidate.cost},
     per_arm:Object.fromEntries(Object.entries(arms).map(([k,v])=>[k,{units:v.primary.length,qualified:v.qualified,escaped_defects:v.defects,
-      actual_cost_microusd:v.cost,attempts:v.attempts,duration_ms:v.duration,mean_primary:v.primary.length?mean(v.primary):null,
+      actual_cost_microusd:v.cost,attempts:v.attempts,retries:v.retries,duration_ms:v.duration,
+      qualified_per_hour:v.duration?v.qualified*3600000/v.duration:null,mean_primary:v.primary.length?mean(v.primary):null,
       cost_per_qualified:v.qualified?v.cost/v.qualified:null,defect_interval:wilson(v.defects,v.qualified)}])),
     benefit_interval:benefitInterval,defect_difference_upper:defectUpper,
     benefit_demonstrated:eligible&&benefitInterval!==null&&benefitInterval.lower>=trial.minimum_benefit,
@@ -111,7 +115,9 @@ export async function reportTrial(input:unknown,context:ComponentContext):Promis
     production_eligible:eligible&&benefitInterval!==null&&benefitInterval.lower>=trial.minimum_benefit&&defectUpper!==null&&defectUpper<=trial.defect_margin,evidence_digest:digest(proofs.sort())};
   const artifact_id=await store.put('trial_report',report);
   return {artifact_id,...report,interval_method:'95% bounded independent-unit Hoeffding differences for primary and defect outcomes; case-level Wilson intervals are diagnostic',
-    counterfactual_claim:false,shadow_cannot_prove_live_benefit:trial.mode==='shadow'};
+    counterfactual_claim:false,shadow_cannot_prove_live_benefit:trial.mode==='shadow',
+    // Shadow agreement is collected without action; only a complete live controlled trial can speak to scheduling effects.
+    effect_basis:trial.mode==='shadow'?'shadow_observation_only':eligible?'controlled_live_trial':'insufficient_for_effect_claim'};
 }
 export function createComponent(_context:ComponentContext):Component {
   return {apiVersion:1,actions:{'evaluation.trial.create':createTrial,'evaluation.trial.report':reportTrial}};
