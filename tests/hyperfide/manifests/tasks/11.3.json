@@ -310,8 +310,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/11_3.py",
-      "sha256": "1fb1eaa90b698e261b5f3496e5b7ae83a68f7d93b5cc2b4cbd351cd4eb823fdd",
-      "size": 23544
+      "sha256": "1abc2ef66e88686a3db48594032d56f0203392a4befa2250cbfe874ad4860f63",
+      "size": 23732
     },
     {
       "path": "tests/hyperfide/check-evidence.py",

@@ -27,8 +27,10 @@ def package_manager(name):
     expect(Path(candidate).is_absolute() and resolved.is_file() and os.access(resolved,os.X_OK),"HF_TEST_"+name.upper()+" is not an absolute executable: "+candidate)
     expect(resolved.name not in ("mise","asdf","volta","corepack"),name+" resolves to a version-manager shim ("+str(resolved)+"); set HF_TEST_"+name.upper())
     return str(Path(candidate).absolute())
+# Command-line settings keep fixture repository config untouched; detached auto-maintenance would orphan git daemons.
+GIT_QUIET=["-c","maintenance.auto=false","-c","gc.auto=0"]
 def git(path,*args):
-    return subprocess.run(["git","-C",str(path),*args],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,check=True).stdout.strip()
+    return subprocess.run(["git",*GIT_QUIET,"-C",str(path),*args],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,check=True).stdout.strip()
 class Fixture:
     def __init__(self,base):
         self.base=base
