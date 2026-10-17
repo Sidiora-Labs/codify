@@ -16,18 +16,26 @@ import type {BoundProviderRequest,CapturedProviderOutput} from '../providers/rec
 import {readRunnerBinding,readRunnerReadiness,runnerCanonical,runnerResultSigningBytes} from './bridge.js';
 import type {RunnerRemotePlan} from './bridge.js';
 import {readJobAllocation} from '../scheduler/claim.js';
+import {lookupNativeLaunch} from '../events/outbox.js';
+import {currentPool,digestDocument,readDeployment} from '../providers/pools.js';
 
 interface Signer {credential_id:string;key:KeyObject;public_key_b64:string}
 interface ProviderResult {outcome:unknown;process_ref:unknown;captured?:CapturedProviderOutput;evidence_digest?:unknown;cleanup_confirmed?:unknown;[name:string]:unknown}
 interface ProviderExecution {
  executeBound(input:BoundProviderRequest,signal:AbortSignal,invocation:InvocationContext):Promise<ProviderResult>;
- registerRunnerBindingVerifier(reader:(tx:PrimaryTransaction,binding:BoundProviderRequest['binding'])=>Promise<{evidence_digest:string;observed_at:string}|null>):void|(()=>void);
+ registerRunnerBindingVerifier(reader:(tx:PrimaryTransaction,binding:BoundProviderRequest['binding'],request:unknown)=>Promise<{evidence_digest:string;observed_at:string}|null>):void|(()=>void);
 }
 interface Packet {source_state_digest:string;workspace_digest:string;request:RunnerRemotePlan;binding:Record<string,any>;allocation:Record<string,any>;reservations:unknown}
 interface Job {organisation_id:string;run_id:string;operation_id:string;session_id:string;plan:Packet;plan_digest:string;principal:Principal;authority_epoch:string;reservation_id:string;expires_at:Date|string;state:string;claim_id:string|null;executor_credential_id:string|null;[name:string]:any}
 interface ObjectReference {storage_kind:'manifest';artifact_id:string;digest:string;manifest_digest:string;size_bytes:string;complete:boolean}
-export interface NativeRunnerRequest {session_id:string;operation_id:string;action:'runner.observe'|'runner.stop';command_id?:string}
-export interface NativeRunnerCapability {invokeNativeRunner(invocation:InvocationContext,input:NativeRunnerRequest,signal:AbortSignal):Promise<unknown>}
+export interface NativeRunnerRequest {session_id:string;operation_id:string;action:'runner.observe'|'runner.stop';command_id?:string;launch_id?:string}
+export interface NativeRunnerCapability {
+ invokeNativeRunner(invocation:InvocationContext,input:NativeRunnerRequest,signal:AbortSignal):Promise<unknown>;
+ authenticatePlacementProbe(invocation:InvocationContext,input:{probe_id:string},signal:AbortSignal):Promise<{request:BoundProviderRequest;invocation:InvocationContext}>;
+}
+export function isNativeRunnerCapability(v:unknown):v is NativeRunnerCapability {
+ return object(v)&&typeof v.invokeNativeRunner==='function'&&typeof v.authenticatePlacementProbe==='function';
+}
 const isProvider=(v:unknown):v is ProviderExecution=>object(v)&&typeof v.executeBound==='function'&&typeof v.registerRunnerBindingVerifier==='function';
 const MAX_CAPTURE=96*1024*1024;
 const RETENTION={retention_class:'RUN',retention_until:null,retention_hold:false} as const;
@@ -71,7 +79,8 @@ async function authenticate(authority:IdentityAuthority,signer:Signer,run:string
  return invocation;
 }
 function boundRequest(binding:Record<string,any>,operation_id:string,argv:string[],timeout_ms:number):BoundProviderRequest{
- return {binding:{organisation_id:binding.organisation_id,run_id:binding.run_id,session_id:binding.session_id,pool_id:binding.pool_id,sandbox_id:binding.sandbox_id,external_sandbox_id:binding.external_sandbox_id,boot_generation:String(binding.boot_generation),preparation_digest:binding.preparation_digest},operation_id,argv,cwd:binding.workspace_path,env_refs:{},timeout_ms};
+ if(!digest(binding.boot_preparation_digest))fail('RUNNER_BOOT_SEED_UNPINNED','Actual registered sandbox boot preparation identity required');
+ return {binding:{organisation_id:binding.organisation_id,run_id:binding.run_id,session_id:binding.session_id,pool_id:binding.pool_id,sandbox_id:binding.sandbox_id,external_sandbox_id:binding.external_sandbox_id,boot_generation:String(binding.boot_generation),preparation_digest:binding.boot_preparation_digest},operation_id,argv,cwd:binding.workspace_path,env_refs:{},timeout_ms};
 }
 function jobRequest(row:Job):BoundProviderRequest{
  const b=row.plan.binding;
@@ -120,11 +129,29 @@ async function persistableResult(store:ArtifactStoreCapability,i:InvocationConte
  const stdout=capturedItem(n.stdout),stderr=capturedItem(n.stderr);
  const stdoutRef=await storeBytes(store,i,stdout.bytes),stderrRef=await storeBytes(store,i,stderr.bytes),nativeRef=await storeBytes(store,i,decoded.raw);
  const artifacts:Record<string,unknown>[]=[];for(const item of n.artifacts){const capture=capturedItem(item);artifacts.push({path:item.path,...await storeBytes(store,i,capture.bytes),complete:capture.complete&&n.artifacts_complete});}
- const complete=provider.cleanup_confirmed===true&&stdout.complete&&stderr.complete&&artifacts.every(a=>a.complete===true)&&n.output_complete&&!n.truncated&&n.artifacts_complete&&n.cleanup_status==='CONFIRMED'&&n.observed_process_absent;
- return {execution_plane:'REMOTE',outcome:complete?(n.exit_code===0&&n.signal===0&&!n.timed_out&&!n.interrupted?'SUCCEEDED':'FAILED'):'UNKNOWN',status:complete?(n.timed_out?'TIMED_OUT':'COMPLETED'):'UNKNOWN',operation_id:row.operation_id,session_id:row.session_id,organisation_id:row.organisation_id,run_id:row.run_id,repository_id:p.repository_id,sandbox_id:b.sandbox_id,boot_id:b.boot_id,boot_generation:String(b.boot_generation),sandbox_boot_generation:String(b.boot_generation),slot_id:b.slot_id,slot_generation:String(b.slot_generation),provider:b.provider,native_resource_id:b.external_sandbox_id,process_ref:provider.process_ref,start_identity:n.start_identity,argv:p.argv,cwd:n.requested_cwd,workspace_path:n.workspace_path,source_digest:p.source_digest,source_manifest_digest:p.source_digest,source_state_digest:n.source_state_digest,workspace_digest:n.workspace_digest,source_object_id:n.source_object_id,source_tree_id:n.source_tree_id,...(p.source_provenance_digest!==undefined?{source_provenance_digest:p.source_provenance_digest}:{}),policy_digest:p.policy_digest,executable_digest:p.executable_digest,environment_digest:p.environment_digest,exit_code:n.signal===0?n.exit_code:null,signal:n.signal===0?null:n.signal,timed_out:n.timed_out,interrupted:n.interrupted,truncated:n.truncated,started_at:n.started_at,ended_at:n.ended_at,duration_ms:n.duration_ms,stdout:{...stdoutRef,complete:stdout.complete&&n.output_complete&&!n.truncated},stderr:{...stderrRef,complete:stderr.complete&&n.output_complete&&!n.truncated},stdout_digest:stdout.digest,stderr_digest:stderr.digest,spool_digest:provider.captured!.spool_digest,output_complete:n.output_complete,artifacts,artifacts_complete:n.artifacts_complete,cleanup_status:n.cleanup_status,cleanup:{complete:provider.cleanup_confirmed===true&&n.cleanup_status==='CONFIRMED'&&n.observed_process_absent,observed_process_absent:n.observed_process_absent,receipt_digest:decoded.digest},native_receipt:nativeRef,provider_evidence_digest:provider.evidence_digest};
+ const complete=provider.provider_process_termination_confirmed===true&&stdout.complete&&stderr.complete&&artifacts.every(a=>a.complete===true)&&n.output_complete&&!n.truncated&&n.artifacts_complete&&n.cleanup_status==='CONFIRMED'&&n.observed_process_absent;
+ return {execution_plane:'REMOTE',outcome:complete?(n.exit_code===0&&n.signal===0&&!n.timed_out&&!n.interrupted?'SUCCEEDED':'FAILED'):'UNKNOWN',status:complete?(n.timed_out?'TIMED_OUT':'COMPLETED'):'UNKNOWN',operation_id:row.operation_id,session_id:row.session_id,organisation_id:row.organisation_id,run_id:row.run_id,repository_id:p.repository_id,sandbox_id:b.sandbox_id,boot_id:b.boot_id,boot_generation:String(b.boot_generation),sandbox_boot_generation:String(b.boot_generation),slot_id:b.slot_id,slot_generation:String(b.slot_generation),provider:b.provider,native_resource_id:b.external_sandbox_id,process_ref:provider.process_ref,start_identity:n.start_identity,argv:p.argv,cwd:n.requested_cwd,workspace_path:n.workspace_path,source_digest:p.source_digest,source_manifest_digest:p.source_digest,source_state_digest:n.source_state_digest,workspace_digest:n.workspace_digest,source_object_id:n.source_object_id,source_tree_id:n.source_tree_id,...(p.source_provenance_digest!==undefined?{source_provenance_digest:p.source_provenance_digest}:{}),policy_digest:p.policy_digest,executable_digest:p.executable_digest,environment_digest:p.environment_digest,exit_code:n.signal===0?n.exit_code:null,signal:n.signal===0?null:n.signal,timed_out:n.timed_out,interrupted:n.interrupted,truncated:n.truncated,started_at:n.started_at,ended_at:n.ended_at,duration_ms:n.duration_ms,stdout:{...stdoutRef,complete:stdout.complete&&n.output_complete&&!n.truncated},stderr:{...stderrRef,complete:stderr.complete&&n.output_complete&&!n.truncated},stdout_digest:stdout.digest,stderr_digest:stderr.digest,spool_digest:provider.captured!.spool_digest,output_complete:n.output_complete,artifacts,artifacts_complete:n.artifacts_complete,cleanup_status:n.cleanup_status,cleanup:{complete:provider.provider_process_termination_confirmed===true&&n.cleanup_status==='CONFIRMED'&&n.observed_process_absent,observed_process_absent:n.observed_process_absent,receipt_digest:decoded.digest},native_receipt:nativeRef,provider_evidence_digest:provider.evidence_digest};
 }
 async function wait(ms:number,signal:AbortSignal):Promise<void>{
  if(signal.aborted)return;await new Promise<void>(resolve=>{const timer=setTimeout(done,ms);function done(){signal.removeEventListener('abort',cancel);resolve();}function cancel(){clearTimeout(timer);done();}signal.addEventListener('abort',cancel,{once:true});});
+}
+// Retained START observations grant no restart, admission, lease or cleanup
+// authority. The registered executable digest remains historical only.
+async function retainedControlBinding(tx:PrimaryTransaction,i:InvocationContext,session_id:string,launch_id:string):Promise<Record<string,any>>{
+ const guards=await tx.query("SELECT tgname FROM pg_trigger WHERE tgrelid='hyperfide.runner_registry'::regclass AND NOT tgisinternal AND tgenabled IN('O','A') AND tgname=ANY($1::text[])",[['immutable_physical_binding','retain_runner_registry']]);
+ if(new Set(guards.rows.map(r=>r.tgname)).size!==2)fail('RUNNER_RETAINED_SCHEMA_REQUIRED','Actual immutable physical registry and retention guards required');
+ const launch=await lookupNativeLaunch(tx,{organisation_id:i.principal.organisation_id,run_id:i.principal.run_id,launch_id},i);
+ if(!object(launch)||launch.authority!=='NONE'||launch.execution_observed_only!==true)fail('RUNNER_CONTROL_TARGET_UNREGISTERED','Actual retained committed START required');
+ const r=(await tx.query('SELECT r.*,s.pool_id,s.native_sandbox_id AS external_sandbox_id,p.provider,clock_timestamp() AS db_now FROM hyperfide.runner_registry r JOIN hyperfide.sandboxes s ON s.organisation_id=r.organisation_id AND s.id=r.sandbox_id AND s.boot_generation=r.boot_generation JOIN hyperfide.sandbox_boots b ON b.organisation_id=r.organisation_id AND b.sandbox_id=r.sandbox_id AND b.boot_generation=r.boot_generation AND b.boot_id=r.boot_id JOIN hyperfide.worker_slots w ON w.organisation_id=r.organisation_id AND w.id=r.slot_id AND w.sandbox_id=r.sandbox_id AND w.boot_generation=r.boot_generation JOIN hyperfide.provider_pools p ON p.organisation_id=s.organisation_id AND p.id=s.pool_id WHERE r.organisation_id=$1 AND r.run_id=$2 AND r.session_id=$3 FOR SHARE OF r,s,b,w,p',[i.principal.organisation_id,i.principal.run_id,session_id])).rows[0];
+ if(!r||!['CURRENT','PREPARING','REVOKED'].includes(r.state))fail('RUNNER_CONTROL_TARGET_UNREGISTERED','Retained physical slot and exact existing resource boot required');
+ for(const key of ['organisation_id','run_id','sandbox_id','boot_id','slot_id'])if(String(r[key])!==String(launch[key]))fail('RUNNER_CONTROL_TARGET_MISMATCH','Retained START and physical registry differ');
+ if(String(r.boot_generation)!==String(launch.sandbox_boot_generation)||!uuid(launch.attempt_id)||!decimal(launch.attempt_generation,true)||!digest(launch.payload_digest)||!digest(r.observation_digest)||!digest(r.boot_preparation_digest)||!digest(r.runner_binary_digest)||!Number.isSafeInteger(r.uid)||r.uid<1||!Number.isSafeInteger(r.gid)||r.gid<1||!uuid(r.session_id)||!uuid(r.pool_id)||typeof r.external_sandbox_id!=='string'||!r.external_sandbox_id)fail('RUNNER_CONTROL_TARGET_MISMATCH','Retained observed target identity is incomplete');
+ for(const key of ['state_dir','runner_binary','workspace_path'])if(typeof r[key]!=='string'||!path.isAbsolute(r[key])||path.normalize(r[key])!==r[key]||r[key].includes('\0'))fail('RUNNER_CONTROL_TARGET_MISMATCH','Registered fixed physical paths required');
+ return {...r,boot_generation:String(r.boot_generation),launch_id,attempt_id:launch.attempt_id,attempt_generation:String(launch.attempt_generation),retained_start:launch};
+}
+function controlRequest(binding:Record<string,any>,input:NativeRunnerRequest):BoundProviderRequest{
+ const target={state_dir:binding.state_dir,launch_id:binding.launch_id,attempt_id:binding.attempt_id,attempt_generation:String(binding.attempt_generation),sandbox_id:binding.sandbox_id,boot_id:binding.boot_id,boot_generation:String(binding.boot_generation),...(input.command_id?{command_id:input.command_id}:{})};
+ return boundRequest(binding,input.operation_id,[binding.runner_binary,'--component','12.4','--action',input.action,'--request-base64',Buffer.from(JSON.stringify(target)).toString('base64url')],30000);
 }
 export interface NativeControlTarget {readonly launch_id:string;readonly attempt_id:string;readonly attempt_generation:string;readonly sandbox_id:string;readonly boot_id:string;readonly boot_generation:string;readonly uid:number}
 // Coherence validation grants no authority. The runtime derives its target from
@@ -147,6 +174,7 @@ export async function createComponent(ctx:ComponentContext):Promise<Component>{
  const config=await configuration(ctx),g=gatewayOf(ctx),controller=new AbortController(),signal=AbortSignal.any([ctx.signal,controller.signal]);
  const migration=await fs.readFile(new URL('../../migrations/0012-runner-registry.sql',import.meta.url));
  await g.withPrimaryTransaction({timeoutMs:5000},async tx=>{const row=(await tx.query('SELECT name,checksum FROM hyperfide.schema_migrations WHERE version=12')).rows[0];if(!row||row.name!=='0012-runner-registry'||row.checksum!==hash(migration))fail('RUNNER_SCHEMA_REQUIRED','Apply the exact trusted runner migration before executor startup');});
+ const retainedRequests=new WeakMap<object,{invocation:InvocationContext;input:NativeRunnerRequest}>();
  let unregister:void|(()=>void);
  let active=0,completed=0,unknown=0,last_error:string|null=null;
  async function next(s:Signer):Promise<Job|null>{return g.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal},async tx=>{
@@ -205,23 +233,70 @@ export async function createComponent(ctx:ComponentContext):Promise<Component>{
  const native:NativeRunnerCapability=Object.freeze({invokeNativeRunner:async(i:InvocationContext,input:NativeRunnerRequest,requestedSignal:AbortSignal)=>{
  if(signal.aborted)fail('RUNNER_EXECUTOR_CLOSED','Provisioner executor is closed');
  assertInvocation(i);
- const controlSignal=AbortSignal.any([signal,requestedSignal,i.signal]);await authority.authorize(i);if(i.principal.role!=='PROVISIONER'||!object(input)||!uuid(input.session_id)||!uuid(input.operation_id)||!['runner.observe','runner.stop'].includes(input.action)||input.command_id!==undefined&&!uuid(input.command_id)||input.action==='runner.stop'&&!uuid(input.command_id)||Object.keys(input).some(k=>!['session_id','operation_id','action','command_id'].includes(k)))fail('RUNNER_CONTROL_DENIED','Actual provisioner and bounded native control request required');
- const b=await g.withPrimaryTransaction<Record<string,any>>({timeoutMs:5000,signal:controlSignal,guard:tx=>i.guard(tx)},tx=>readRunnerBinding(tx as PrimaryTransaction,{organisation_id:i.principal.organisation_id,run_id:i.principal.run_id,session_id:input.session_id}));
+ const controlSignal=AbortSignal.any([signal,requestedSignal,i.signal]);await authority.authorize(i);if(i.principal.role!=='PROVISIONER'||!object(input)||!uuid(input.session_id)||!uuid(input.operation_id)||!['runner.observe','runner.stop'].includes(input.action)||input.command_id!==undefined&&!uuid(input.command_id)||input.launch_id!==undefined&&!uuid(input.launch_id)||input.action==='runner.stop'&&!uuid(input.command_id)||Object.keys(input).some(k=>!['session_id','operation_id','action','command_id','launch_id'].includes(k)))fail('RUNNER_CONTROL_DENIED','Actual provisioner and bounded native control request required');
+ const b=await g.withPrimaryTransaction<Record<string,any>>({timeoutMs:5000,signal:controlSignal,guard:tx=>i.guard(tx)},async tx=>{
+  const launch_id=input.launch_id??(await readRunnerBinding(tx as PrimaryTransaction,{organisation_id:i.principal.organisation_id,run_id:i.principal.run_id,session_id:input.session_id})).launch_id;
+  if(!uuid(launch_id))fail('RUNNER_CONTROL_TARGET_UNREGISTERED','Actual committed START launch required');
+  return retainedControlBinding(tx as PrimaryTransaction,i,input.session_id,launch_id);
+ });
  const signer=config.signers.find(s=>s.credential_id===i.principal.credential_id);if(!signer)fail('RUNNER_CONTROL_DENIED','Current configured provisioner signer required');
  if(!uuid(b.launch_id)||!uuid(b.attempt_id)||!decimal(b.attempt_generation,true))fail('RUNNER_CONTROL_TARGET_UNREGISTERED','Authoritative native launch and attempt binding required');
  const target={state_dir:b.state_dir,launch_id:b.launch_id,attempt_id:b.attempt_id,attempt_generation:String(b.attempt_generation),sandbox_id:b.sandbox_id,boot_id:b.boot_id,boot_generation:String(b.boot_generation),...(input.command_id?{command_id:input.command_id}:{})};
- const encoded=Buffer.from(JSON.stringify(target)).toString('base64url');
- const request=boundRequest(b,input.operation_id,[b.runner_binary,'--component','12.4','--action',input.action,'--request-base64',encoded],30000);
+ const request=controlRequest(b,input);
+ retainedRequests.set(request,{invocation:i,input:{...input,launch_id:b.launch_id}});
  const proof=await authenticate(authority,signer,i.principal.run_id,i.principal.deployment_epoch,request,controlSignal);
- const observed=await provider.executeBound(request,controlSignal,proof);if(!observed.captured||typeof observed.process_ref!=='string'||!observed.process_ref)fail('RUNNER_CONTROL_UNKNOWN','Actual provider native control capture required');
+ let observed:ProviderResult;try{observed=await provider.executeBound(request,controlSignal,proof);}finally{retainedRequests.delete(request);}if(!observed.captured||typeof observed.process_ref!=='string'||!observed.process_ref)fail('RUNNER_CONTROL_UNKNOWN','Actual provider native control capture required');
  const captured=observed.captured;if(captured.complete!==true||captured.exit_code!==0)fail('RUNNER_CONTROL_UNKNOWN','Complete native control observation required');
  const result=strictJSON(Buffer.from(captured.stdout),MAX_CAPTURE);if(!object(result)||result.ok!==true||!object(result.result))fail('RUNNER_CONTROL_UNKNOWN','Actual native control receipt required');
  const receipt=validateNativeControlReceipt(result.result,{...target,uid:b.uid},input.action==='runner.stop'?input.command_id:undefined);
  const evidence=await storeBytes(store,proof,Buffer.from(captured.stdout));
- return {native:receipt,native_receipt:evidence,provider:{process_ref:observed.process_ref,evidence_digest:observed.evidence_digest,spool_digest:captured.spool_digest},authority:'OBSERVATION_ONLY'};
+ return {native:receipt,native_receipt:evidence,provider:{process_ref:observed.process_ref,evidence_digest:observed.evidence_digest,spool_digest:captured.spool_digest},retained_start:b.retained_start,executable_identity:{registered_digest:b.runner_binary_digest,freshly_measured_digest:null,qualification:'NOT_EVALUATED'},authority:'OBSERVATION_ONLY'};
+ },authenticatePlacementProbe:async(i:InvocationContext,input:{probe_id:string},requestedSignal:AbortSignal)=>{
+ assertInvocation(i);
+ if(signal.aborted)fail('RUNNER_EXECUTOR_CLOSED','Provisioner executor is closed');
+ const probeSignal=AbortSignal.any([signal,requestedSignal,i.signal]);await authority.authorize(i);
+ if(i.principal.role!=='PROVISIONER'||i.payload.component!=='8.4-probe'||i.payload.action!=='provider.placement.probe'||!object(input)||!uuid(input.probe_id)||Object.keys(input).some(k=>k!=='probe_id')||!object(i.payload.input))fail('RUNNER_PROBE_AUTHORITY_DENIED','Genuine bounded placement probe invocation required');
+ const original=i.payload.input;
+ if(!uuid(original.pool_id)||!uuid(original.sandbox_id)||original.run_id!==i.principal.run_id||Object.keys(original).some(k=>!['pool_id','sandbox_id','run_id'].includes(k)))fail('RUNNER_PROBE_AUTHORITY_DENIED','Exact authenticated placement target required');
+ const signer=config.signers.find(s=>s.credential_id===i.principal.credential_id);
+ if(!signer)fail('RUNNER_PROBE_AUTHORITY_DENIED','Configured current provisioner signer required');
+ if(input.probe_id!==i.operation.operation_id)fail('RUNNER_PROBE_AUTHORITY_DENIED','Probe identity must equal the genuine source operation');
+ const deployment=await readDeployment(ctx.env);
+ const connectivity=strictJSON(await privateBytes(ctx.env.HYPERFIDE_CONNECTIVITY_CONFIG,1024*1024));
+ if(!object(connectivity)||connectivity.schema_version!==1||!Array.isArray(connectivity.targets))fail('RUNNER_PLACEMENT_PROBE_INVALID','Actual protected connectivity targets required');
+ const targetsDigest=digestDocument(connectivity.targets);
+ const request=await g.withPrimaryTransaction<BoundProviderRequest>({timeoutMs:5000,signal:probeSignal,guard:tx=>i.guard(tx)},async tx=>{
+  const row=(await tx.query('SELECT p.*,clock_timestamp() AS db_now FROM hyperfide.provider_connectivity_probes p JOIN hyperfide.provider_pool_configurations pc ON pc.organisation_id=p.organisation_id AND pc.pool_id=p.pool_id AND pc.configuration_digest=p.configuration_digest AND pc.active WHERE p.organisation_id=$1 AND p.id=$2 FOR SHARE OF p,pc',[i.principal.organisation_id,input.probe_id])).rows[0];
+  if(!row||row.pool_id!==original.pool_id||row.sandbox_id!==original.sandbox_id||row.status!=='UNKNOWN'||new Date(row.expires_at).getTime()<=new Date(row.db_now).getTime()||!object(row.observation)||!object(row.observation.bound_request))fail('RUNNER_PLACEMENT_PROBE_UNAVAILABLE','Actual current scoped durable probe request required');
+  const pool=await currentPool(tx as PrimaryTransaction,deployment,String(row.pool_id));
+  if(pool.scope.organisation_id!==i.principal.organisation_id||pool.scope.configuration_digest!==row.configuration_digest||row.endpoints_digest!==targetsDigest||connectivity.evidence_scope!==row.evidence_scope)fail('RUNNER_PLACEMENT_POLICY_STALE','Protected current pool or connectivity policy differs');
+  const expected={component:i.payload.component,action:i.payload.action,payload_digest:i.operation.payload_digest,operation_id:i.operation.operation_id,credential_id:i.principal.credential_id,run_id:i.principal.run_id};
+  if(!same(row.observation.source_invocation,expected))fail('RUNNER_PROBE_AUTHORITY_DENIED','Persisted probe source differs from the genuine incoming invocation');
+  const candidate=row.observation.bound_request;
+  exact(candidate,['binding','operation_id','argv','cwd','env_refs','timeout_ms']);
+  if(!object(candidate.binding)||candidate.operation_id!==input.probe_id||!Array.isArray(candidate.argv)||!candidate.argv.length||candidate.argv.length>256||candidate.argv.some((v:unknown)=>typeof v!=='string'||!v||v.length>4096||v.includes('\0'))||typeof candidate.cwd!=='string'||!path.isAbsolute(candidate.cwd)||!object(candidate.env_refs)||Object.entries(candidate.env_refs).some(([k,v])=>!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)||typeof v!=='string'||!v||v.length>4096)||typeof candidate.timeout_ms!=='number'||!Number.isSafeInteger(candidate.timeout_ms)||candidate.timeout_ms<1||candidate.timeout_ms>3600000)fail('RUNNER_PLACEMENT_PROBE_INVALID','Stored protected-policy probe request is invalid');
+  const b=candidate.binding;
+  exact(b,['organisation_id','run_id','session_id','pool_id','sandbox_id','external_sandbox_id','boot_generation','preparation_digest']);
+  if(b.organisation_id!==i.principal.organisation_id||b.run_id!==i.principal.run_id||b.pool_id!==row.pool_id||b.sandbox_id!==row.sandbox_id||String(b.boot_generation)!==String(row.boot_generation)||!uuid(b.session_id))fail('RUNNER_PROBE_AUTHORITY_DENIED','Stored probe differs from authenticated scope and boot');
+  const observed=await readRunnerBinding(tx as PrimaryTransaction,{organisation_id:i.principal.organisation_id,run_id:i.principal.run_id,session_id:b.session_id});
+  for(const key of Object.keys(b))if(!same(key==='preparation_digest'?observed.boot_preparation_digest:observed[key],b[key]))fail('RUNNER_BINDING_STALE','Current registered physical probe target differs');
+  await readRunnerReadiness(tx as PrimaryTransaction,observed);
+  return candidate as unknown as BoundProviderRequest;
+ });
+ const proof=await authenticate(authority,signer,i.principal.run_id,i.principal.deployment_epoch,request,probeSignal);
+ return {request,invocation:proof};
  }});
  for(const signer of config.signers)await next(signer);
- unregister=provider.registerRunnerBindingVerifier(async(tx,b)=>{try{const r=await readRunnerBinding(tx,b);for(const key of Object.keys(b))if(String(r[key])!==String(b[key as keyof typeof b]))return null;await readRunnerReadiness(tx,r);return {evidence_digest:r.observation_digest,observed_at:new Date(r.db_now).toISOString()};}catch{return null;}});
+ unregister=provider.registerRunnerBindingVerifier(async(tx,b,request)=>{try{
+ const retained=object(request)?retainedRequests.get(request):undefined;
+ if(retained){
+  await retained.invocation.guard(tx);
+  const r=await retainedControlBinding(tx,retained.invocation,retained.input.session_id,retained.input.launch_id!);
+  if(!same(controlRequest(r,retained.input),request))return null;
+  for(const key of Object.keys(b))if(!same(key==='preparation_digest'?r.boot_preparation_digest:r[key],b[key as keyof typeof b]))return null;
+  return {evidence_digest:hash(runnerCanonical({registry:r.observation_digest,registry_version:String(r.registration_version),launch:r.retained_start})),observed_at:new Date(r.db_now).toISOString()};
+ }
+const r=await readRunnerBinding(tx,b);for(const key of Object.keys(b))if(String(key==='preparation_digest'?r.boot_preparation_digest:r[key])!==String(b[key as keyof typeof b]))return null;await readRunnerReadiness(tx,r);return {evidence_digest:r.observation_digest,observed_at:new Date(r.db_now).toISOString()};}catch{return null;}});
  const workers=Array.from({length:config.concurrency},(_,index)=>worker(index));
  return {apiVersion:1,capabilities:{'runner.native.v1':native},actions:{'runner.executor.describe':async(_input,context)=>{assertInvocation(context.invocation);await authority.authorize(context.invocation);if(context.invocation.principal.role!=='PROVISIONER'||!config.signers.some(s=>s.credential_id===context.invocation!.principal.credential_id))fail('ROLE_DENIED','Configured provisioner status required');return {active,completed,unknown,last_error,concurrency:config.concurrency,replay_policy:'NEVER_RELAUNCH_CLAIMED_OR_UNKNOWN',authority:'NONE'};}},close:async()=>{controller.abort();await Promise.all(workers);if(typeof unregister==='function')unregister();}};
 }
