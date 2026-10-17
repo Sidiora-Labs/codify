@@ -261,8 +261,8 @@ module.cleanup_git=cleanup_behaviour
 if "--cleanup" not in sys.argv:
     # Only the registered independent cleanup command reports the single observed cleanup event.
     original_cleanup=module.cleanup
-    def quiet_cleanup():
-        with contextlib.redirect_stdout(io.StringIO()):return original_cleanup()
+    def quiet_cleanup(*args, **kwargs):
+        with contextlib.redirect_stdout(io.StringIO()):return original_cleanup(*args, **kwargs)
     module.cleanup=quiet_cleanup
 
 raise SystemExit(module.main("16.4"))
