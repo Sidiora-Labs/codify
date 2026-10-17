@@ -24,6 +24,21 @@ typedef struct {
 } HfRunnerBinding;
 int hf_runner_binding(const char *request,HfRunnerBinding *binding);
 int hf_runner_processes(const HfRunnerBinding *,HfProcessIdentity *,size_t);
+/* Complete job tree (task 12.3): exact agent descendants of any UID, slot-UID
+ * orphans adopted by the broker and escaped slot-UID processes. Every member
+ * carries pid+start_time+boot identity and stays accountable for stop/checkpoint. */
+enum {HF_TREE_AGENT=1,HF_TREE_DESCENDANT,HF_TREE_ADOPTED,HF_TREE_ESCAPED};
+typedef struct {
+ HfProcessIdentity process;pid_t session;
+ int relation,depth,uid_changed,native_child;long threads;
+ unsigned long long cpu_ticks;
+} HfTreeMember;
+typedef struct {
+ HfTreeMember members[1024];
+ int count,agent_index,broker_present,raced;
+} HfProcessTree;
+int hf_process_tree_inventory(const HfRunnerBinding *,HfProcessTree *);
+int hf_process_tree_cancel(const HfRunnerBinding *,int rounds,int *remaining);
 int hf_runner_job_claim(const char *,const char *,HfHttpResponse *);
 int hf_runner_job_placement(const char *,const char *);
 int hf_runner_job_execute(const char *,FILE *);
