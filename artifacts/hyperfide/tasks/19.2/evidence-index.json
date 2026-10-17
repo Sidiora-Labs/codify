@@ -1,0 +1,9 @@
+{
+  "task": "19.2",
+  "commit": "3ff0a4d7417281b6f5f74d2c141087060d49863d",
+  "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-033 --manifest tests/hyperfide/manifests/tasks/19.2.json",
+  "exit_code": 0,
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"77cb3ad6-768d-4327-8864-bcc098ae9f4b\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/19.2/campaigns/3d8bf5640fa0cdb174a4e0a9533aa5fb46fc78492993b99cfbb2ee1bb3842ddb\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T09:37:59.929960+00:00",
+  "note": "Run as root with /work/hyperfide and .git temporarily chowned to root (restored to hf afterwards) because the checker's safe_git refuses a repository owned by another uid."
+}
