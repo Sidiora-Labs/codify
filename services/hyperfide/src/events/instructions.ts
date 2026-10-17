@@ -1,3 +1,4 @@
+import {pollRunnerCommands} from './runner_commands.js';
 import { assertNoExecutionHold } from '../scheduler/claim.js';
 import { ready as hierarchyReady,leadership,requireAuthority } from '../hierarchy/packages.js';
 import { randomUUID } from 'node:crypto';
@@ -381,6 +382,7 @@ async function issueAuthority(tx:PrimaryTransaction,input:unknown,invocation:Inv
 export function createComponent(context:ComponentContext):Component {
   const g=gateway(context);
   const component={apiVersion:1 as const,capabilities:{'events.instructions.v1':Object.freeze({issue,acceptInstruction,handoff,replayInstructions,recordRunnerAcknowledgement,lookupNativeLaunch,registerRunnerConsumer,resolveRunnerConsumer})},actions:{
+    'instructions.runner.poll':(input:unknown,context:ComponentContext)=>pollRunnerCommands(context,input),
     'instructions.consumer.register':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['RUNNER'],(tx,invocation)=>registerRunnerConsumer(tx,input,invocation)),
     'instructions.describe':()=>({schema_version:1,kinds:['START','STEER','CANCEL'],identity:'stable-command-UUID',
       bounds:{body_bytes:65536,outstanding:256},execution:'native-connector-required',full_case_status:'INCOMPLETE'}),

@@ -1,3 +1,4 @@
+import {startContinuousDispatch} from './dispatcher.js';
 import type { Component, ComponentContext } from '../components/registry.js';
 import type { PrimaryTransaction, TransactionGateway } from '../storage/transactions.js';
 import { assertPrimaryTransaction } from '../storage/transactions.js';
@@ -145,13 +146,13 @@ export class DurableDispatcher {
     await Promise.allSettled([this.active,this.loop].filter((p):p is Promise<DispatchPass>|Promise<void>=>p!==undefined));
   }
 }
-export function createComponent(context:ComponentContext):Component {
-  const g=gateway(context);
+export async function createComponent(context:ComponentContext):Promise<Component> {
+  const g=gateway(context),worker=await startContinuousDispatch(context);
   const component={apiVersion:1 as const,capabilities:{'events.recovery.v1':Object.freeze({inspectPending,recoverySnapshot,DurableDispatcher})},actions:{
-    'recovery.describe':()=>({schema_version:1,recovery:'bounded-primary-poll',notifications:'wakeups-only',
+    'recovery.describe':()=>({schema_version:1,recovery:'bounded-primary-poll',notifications:'wakeups-only',worker:worker?.describe()??null,
       acknowledgement:'receiver-inbox-commit',external_adapter:'trusted-linked-code-required',full_case_status:'INCOMPLETE'}),
     'recovery.inspect':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','DISPATCH'],tx=>inspectPending(tx,input)),
     'recovery.claim':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','DISPATCH'],tx=>claimPending(tx,input))
   }};
-  return component;
+  return {...component,close:async()=>{await worker?.close();}};
 }

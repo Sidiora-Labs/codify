@@ -159,8 +159,8 @@
     },
     {
       "path": "services/hyperfide/components/6.4.json",
-      "sha256": "6a0adeb7e09a920dd8cac8000b81ff18765234d1125cd30cf0399c33f5b632df",
-      "size": 333
+      "sha256": "d8b6fc93cad9114618252eb6b9c435ea81b267d2d0046a801d68d9d3d326a622",
+      "size": 345
     },
     {
       "path": "services/hyperfide/components/7.1.json",
@@ -268,6 +268,21 @@
       "size": 185
     },
     {
+      "path": "services/hyperfide/dist/events/dispatcher.d.ts",
+      "sha256": "7e459515cbe0bb8c5a5ae2a8374236f427f65c4306d6d063774c873bb5a7bb3e",
+      "size": 420
+    },
+    {
+      "path": "services/hyperfide/dist/events/dispatcher.js",
+      "sha256": "a572dc3fe52c191c87e15b6426eaf21cb2eaf4926df51313da60daf81faea169",
+      "size": 14806
+    },
+    {
+      "path": "services/hyperfide/dist/events/dispatcher.js.map",
+      "sha256": "166b841ffdbb2604d514868f7ab47f6cc070674874007b90a4191b922bab6b5c",
+      "size": 14777
+    },
+    {
       "path": "services/hyperfide/dist/events/inbox.d.ts",
       "sha256": "e8efb6f4e3ac27751a42ecca59bb89d4aff657b07033982b9a3faf94c1ca6107",
       "size": 1868
@@ -314,18 +329,18 @@
     },
     {
       "path": "services/hyperfide/dist/events/recovery.d.ts",
-      "sha256": "d3e4a5309bbb68a5051586b15aa8c49154d6c4ab5b27b4f28d201b8ee83fe58a",
-      "size": 1416
+      "sha256": "a4c1a44f73c35a6d806d2f34db2c45b67935dc3b891fa64929fa2cdc4d0903d4",
+      "size": 1425
     },
     {
       "path": "services/hyperfide/dist/events/recovery.js",
-      "sha256": "d4edfcaa3d484deee214b9371aef71f902d055289e15c02e58f8668795eaeece",
-      "size": 11447
+      "sha256": "cf1fedfa0752b0d2dc596c5f14abc2d15c6d7f290be6130671cd06b8166597c5",
+      "size": 11651
     },
     {
       "path": "services/hyperfide/dist/events/recovery.js.map",
-      "sha256": "ea045830342632de6058b3a1eb776ca9acbf6cdea97b0b7b256bfdd58a1f8170",
-      "size": 8799
+      "sha256": "71ca77f5e7cf3a3cc2414fe99b066cfa1150d98519a8bcb252bbfa13a7e8d5c9",
+      "size": 9031
     },
     {
       "path": "services/hyperfide/dist/graph/extraction.d.ts",
@@ -863,6 +878,11 @@
       "size": 84
     },
     {
+      "path": "services/hyperfide/src/events/dispatcher.ts",
+      "sha256": "ed93982b96062596b84b97e3e3662aca691f5ed3be3d21455d86b586d476abdc",
+      "size": 12798
+    },
+    {
       "path": "services/hyperfide/src/events/inbox.ts",
       "sha256": "79b6eb40bbae96fa472a844bf5b884663109ff9600cdd1484dd218789b5a78b9",
       "size": 22387
@@ -879,8 +899,8 @@
     },
     {
       "path": "services/hyperfide/src/events/recovery.ts",
-      "sha256": "5020ec522ce56448259637f9f7b60eb69251a31ee70a11930317aecb2d9f23ac",
-      "size": 11127
+      "sha256": "65c352d3e439553caa1d12f3ea6b9218966ab359bfce26387221e489ac87665f",
+      "size": 11322
     },
     {
       "path": "services/hyperfide/src/graph/extraction.ts",
@@ -1039,8 +1059,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/6_1.py",
-      "sha256": "3fadbdb64da348e52d572feac0278661a070695ceb7a22973863d188fa77507a",
-      "size": 67626
+      "sha256": "0a0fe0788189ff261e896547268970794837c8a3b3b0376ad8003967af740315",
+      "size": 80017
     },
     {
       "path": "tests/hyperfide/cases/tasks/6_2.py",

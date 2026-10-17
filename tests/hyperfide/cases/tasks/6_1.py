@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Real PostgreSQL, signed HTTPS and native instruction boundary tests."""
 from __future__ import annotations
-import concurrent.futures,base64,hashlib,importlib.util,json,os,re,shutil,signal,subprocess,sys,tempfile,time,uuid
+import concurrent.futures,base64,hashlib,importlib.util,json,os,re,shutil,signal,subprocess,sys,tempfile,time,uuid,socket,select
 from pathlib import Path
 from urllib.parse import urlsplit,urlunsplit
 ROOT=Path(__file__).resolve().parents[4]
@@ -54,12 +54,23 @@ def cleanup():
             expect(re.fullmatch(r"hf_ir_[a-f0-9]{32}",role),"Unexpected fixture runtime role")
             sql('DROP ROLE IF EXISTS "'+role+'"',True)
         role_absent=bool(role) and sql("SELECT count(*) FROM pg_roles WHERE rolname="+q(role),True)=="0"
+        extra=record.get("dispatcher_process",{})
+        extra_pid=extra.get("pid")
+        if isinstance(extra_pid,int) and Path("/proc/"+str(extra_pid)+"/stat").exists():
+            fields=Path("/proc/"+str(extra_pid)+"/stat").read_text().split()
+            expect(fields[21]==extra.get("start_time") and Path("/proc/sys/kernel/random/boot_id").read_text().strip()==extra.get("boot_id"),"Refusing dispatcher cleanup after PID reuse")
+            os.kill(extra_pid,signal.SIGTERM);end=time.monotonic()+8
+            while Path("/proc/"+str(extra_pid)).exists() and time.monotonic()<end:time.sleep(.05)
+            if Path("/proc/"+str(extra_pid)).exists():os.kill(extra_pid,signal.SIGKILL)
         directory=record.get("directory")
         if directory:
             p=Path(directory)
             expect(p.parent==Path(tempfile.gettempdir()) and p.name.startswith("hyperfide-identity-"),"Unexpected fixture cleanup path")
             shutil.rmtree(p,ignore_errors=True)
         observed=[absent,role_absent,not pid or not Path("/proc/"+str(pid)).exists(),not directory or not Path(directory).exists()]
+        if TASK=="6.4":
+            resources.append({"id":"hf-task-6.4-dispatch-process","status":"unknown","observed_absent":False})
+            observed.append(not extra_pid or not Path("/proc/"+str(extra_pid)).exists())
         for row,value in zip(resources,observed):
             row.update(status="deleted" if value else "unknown",observed_absent=value,evidence_artifact="events/resource-absence.json")
         complete=all(observed)
@@ -74,11 +85,22 @@ import {enqueue,lockRun,authorizedRun,lookupConsumerBinding,lookupNativeLaunch} 
 import {receive,bootstrapConsumer,supersedeDelivery} from './events/inbox.js';
 import {applyExecutionControl} from './scheduler/claim.js';
 import {registerRunnerConsumer} from './events/instructions.js';
+import fs from 'node:fs/promises';
 import {DurableDispatcher,recoverySnapshot} from './events/recovery.js';
 export function createComponent(ctx) {
  const g=ctx.dependencies.require('4.2','storage.transactions.v1',v=>typeof v?.withPrimaryTransaction==='function');
  const auth=(context,input,op)=>authorizedRun(g,context,input,['OPERATOR'],op);
  const actions={
+  'fixture.worker-admit':async(input,context)=>{
+    const result=await authorizedRun(g,context,input,['DISPATCH'],tx=>receive(tx,input,async tx=>{
+      await tx.query('UPDATE hyperfide.runs SET state_version=state_version+1 WHERE organisation_id=$1 AND id=$2',[input.organisation_id,input.run_id]);
+      return {effect:'COMMITTED_ONCE'};
+    }));
+    const marker=ctx.env.HF_TEST_DAEMON_CRASH_FILE;
+    if(marker)try{await fs.writeFile(marker,JSON.stringify({event_id:input.event_id,status:result.status,inbox_id:result.inbox_id??null}),{flag:'wx',mode:0o600});process.kill(process.pid,'SIGKILL');}
+      catch(error){if(error?.code!=='EEXIST')throw error;}
+    return result;
+  },
   'fixture.native-registration-rollback':(input,context)=>authorizedRun(g,context,input,['RUNNER'],async(tx,i)=>{
     await registerRunnerConsumer(tx,input,i);throw new Error('INTENTIONAL_NATIVE_BOOTSTRAP_ROLLBACK');
   }),
@@ -112,6 +134,7 @@ export function createComponent(ctx) {
   'fixture.native-forged':(input,context)=>auth(context,input,(tx,i)=>lookupNativeLaunch(tx,input,{...i,principal:{...i.principal,role:'PROVISIONER'}})),
   'fixture.crash':async(input,context)=>{
    const dispatch=new DurableDispatcher(g,input.config,async(claim)=>{
+    if(claim.id!==input.expected_event_id)throw new Error('UNEXPECTED_CRASH_DELIVERY');
     if(input.after_receive)await auth(context,input,tx=>receive(tx,{organisation_id:claim.organisation_id,run_id:claim.run_id,event_id:claim.id,consumer_id:claim.consumer_id}));
     process.kill(process.pid,'SIGKILL');
     await new Promise(()=>{});
@@ -166,6 +189,7 @@ class Service(identity.IdentityFixture):
         for name,version in [('0002-spec',2),('0003-hierarchy',3),('0005-scheduling',5),('0006-event-session-bindings',6),('0007-graph',7),('0032-execution-packets',32)]:
             self.apply_migration(name)
         self.env['HF_SCHEDULER_DISPATCH_CONSUMER_ID']=CONSUMER
+        if TASK=='6.4':self.env['HF_TEST_DAEMON_CRASH_FILE']=str(self.path/'worker-after-commit-crash')
         self.env['HF_TEST_EXECUTION_CONTROLS']='1' if self.include_instructions else '0'
         self.runtime_root=self.path/"runtime";module=self.runtime_root/"services/hyperfide/dist"
         module.parent.mkdir(parents=True)
@@ -178,7 +202,7 @@ class Service(identity.IdentityFixture):
         syntax=subprocess.run(["node","--check",str(module/"fixture.js")],capture_output=True,text=True)
         expect(syntax.returncode==0,"Trusted fixture module syntax failed: "+syntax.stderr[:1000])
         (module/"package.json").write_text('{"type":"module"}')
-        actions=["fixture.atomic","fixture.selected","fixture.effect","fixture.snapshot","fixture.hung","fixture.dispatch","fixture.bootstrap","fixture.supersede","fixture.control","fixture.binding","fixture.native-lookup","fixture.native-forged","fixture.crash","fixture.runtime-role","fixture.native-registration-rollback","fixture.native-registration-crash"]
+        actions=["fixture.atomic","fixture.selected","fixture.effect","fixture.snapshot","fixture.hung","fixture.dispatch","fixture.bootstrap","fixture.supersede","fixture.control","fixture.binding","fixture.native-lookup","fixture.native-forged","fixture.crash","fixture.runtime-role","fixture.native-registration-rollback","fixture.native-registration-crash","fixture.worker-admit"]
         fragment={"schema_version":1,"id":"fixture.events","task":"6.1","roles":["control"],"module":"fixture.js","entry":"createComponent",
             "api_version":1,"actions":actions,"requires":["4.2","6.1","6.2","6.4"]}
         if self.include_instructions:fragment["requires"]+=["5.1","6.3"]
@@ -625,24 +649,124 @@ def suite64(s):
     check("recovery.unresponsive-adapter-bounded",lambda:expect(hung["result"]["pending"]==1 and hung["elapsed_ms"]<3000,"Unresponsive adapter prevented bounded shutdown"))
 
     def crash_recover(number,after):
-        e=event(number);s.ok("outbox.enqueue",e)
-        # Retire the intentionally hung prior obligation through the actual receiver before isolating this crash.
-        for pending in claim(s,lease=5000):
-            if pending["id"]!=e["id"]:ack(s,pending,receipt(pending))
-            else:s.ok("outbox.retry",dict(S,event_id=e["id"],consumer_id=CONSUMER,attempt_count=pending["attempt_count"],delay_ms=0,error="CRASH_TEST_READY"))
+        # Each fault boundary owns a real bootstrapped consumer; unrelated expired work must not choose the killed effect.
+        consumer=uid(number+10000)
+        s.ok("outbox.consumer.register",dict(S,id=consumer,consumer_key="crash-boundary-"+str(number),critical=True,state="BUFFERING"))
+        s.ok("fixture.bootstrap",dict(S,bootstrap_id=uid(number+20000),consumer_id=consumer,aggregate_types=["fixture"],limit=128))
+        e=event(number);s.ok("fixture.selected",{"event":e,"consumer_ids":[consumer]})
         old=s.child;disconnected=False
-        try:s.ok("fixture.crash",{"config":dict(S,consumer_id=CONSUMER,batch_size=1,lease_ms=50,poll_ms=10,retry_ms=0),"after_receive":after})
+        try:s.ok("fixture.crash",{"config":dict(S,consumer_id=consumer,batch_size=1,lease_ms=1000,poll_ms=10,retry_ms=0),"expected_event_id":e["id"],"after_receive":after})
         except Exception:disconnected=True
         old.wait(timeout=10);expect(disconnected and old.returncode==-signal.SIGKILL,"Fixture did not actually kill its dispatcher process")
         s.child=None
-        expect(sql("SELECT count(*) FROM hyperfide.command_inbox WHERE operation='event.receive' AND idempotency_key="+q(e["id"]))==("1" if after else "0"),"Crash boundary did not match committed receiver state")
-        s.start();sql("SELECT pg_sleep(0.1)")
-        restarted=s.ok("fixture.dispatch",{"config":dict(S,consumer_id=CONSUMER,batch_size=1,lease_ms=5000,poll_ms=10,retry_ms=0),"poll":True})
-        expect(restarted["sends"]==1 and sql("SELECT state FROM hyperfide.event_deliveries WHERE event_id="+q(e["id"]))=="ACKNOWLEDGED" and
-            sql("SELECT count(*) FROM hyperfide.command_inbox WHERE operation='event.receive' AND idempotency_key="+q(e["id"]))=="1","Crash recovery lost identity or duplicated receiver effect")
+        expect(sql("SELECT count(*) FROM hyperfide.command_inbox WHERE operation='event.receive' AND idempotency_key="+q(e["id"])+" AND principal_scope="+q(consumer))==("1" if after else "0"),"Crash boundary did not match committed receiver state")
+        s.start();sql("SELECT pg_sleep(1.1)")
+        restarted=s.ok("fixture.dispatch",{"config":dict(S,consumer_id=consumer,batch_size=1,lease_ms=5000,poll_ms=10,retry_ms=0),"poll":True})
+        expect(restarted["sends"]==1 and sql("SELECT state FROM hyperfide.event_deliveries WHERE event_id="+q(e["id"])+" AND consumer_id="+q(consumer))=="ACKNOWLEDGED" and
+            sql("SELECT count(*) FROM hyperfide.command_inbox WHERE operation='event.receive' AND idempotency_key="+q(e["id"])+" AND principal_scope="+q(consumer))=="1","Crash recovery lost identity or duplicated receiver effect")
     sql("SELECT pg_sleep(0.2)")
     check("recovery.sigkill-before-receiver-commit",lambda:crash_recover(4030,False))
     check("recovery.sigkill-after-receiver-commit",lambda:crash_recover(4040,True))
+    daemon_lifecycle(s)
+
+def daemon_lifecycle(s):
+    key=s.path/"dispatch-service.pem"
+    subprocess.run(["openssl","genpkey","-algorithm","Ed25519","-out",str(key)],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);key.chmod(0o600)
+    public=subprocess.check_output(["openssl","pkey","-in",str(key),"-pubout","-outform","DER"],stderr=subprocess.DEVNULL)[-32:]
+    service_id=str(uuid.uuid4())
+    status,issued=s.invoke("identity.service.issue",{"credential_id":service_id,"actor_id":str(uuid.uuid4()),"role":"DISPATCH",
+        "public_key_b64":base64.urlsafe_b64encode(public).decode().rstrip("="),
+        "allowed_actions":["identity.describe","identity.principal.renew","outbox.claim","outbox.acknowledge","outbox.retry","fixture.worker-admit"],"ttl_seconds":300},component="14.1")
+    check("recovery.daemon-real-service-identity",lambda:expect(status==200 and issued.get("ok") and issued["result"]["role"]=="DISPATCH","Actual operator service issuance failed"))
+    with socket.socket() as sock:sock.bind(("127.0.0.1",0));port=sock.getsockname()[1]
+    origin="https://localhost:"+str(port)
+    identity_config=s.path/"dispatch-identity.json";value=json.loads(s.identity_config.read_text());value["origin"]=origin;identity_config.write_text(json.dumps(value));identity_config.chmod(0o600)
+    consumer=uid(640)
+    s.ok("outbox.consumer.register",dict(S,id=consumer,consumer_key="isolated-production-dispatch",critical=True,state="BUFFERING"))
+    s.ok("fixture.bootstrap",dict(S,bootstrap_id=uid(641),consumer_id=consumer,aggregate_types=["fixture"],limit=128))
+    config=s.path/"dispatch-worker.json"
+    config.write_text(json.dumps(dict(S,credential_id=service_id,key_file=str(key),ca_file=str(s.ca),control_origin=s.origin,
+        consumer_ids=[consumer],routes=[{"aggregate_type":"fixture","event_type":"fixture.changed","component":"fixture.events","action":"fixture.worker-admit","input_mode":"DELIVERY"}],
+        poll_ms=20,retry_ms=50,lease_ms=2000,batch_size=2,request_timeout_ms=1000,credential_ttl_seconds=300,credential_renewal_ms=1000)));config.chmod(0o600)
+    process=None;dispatches=[];control_processes=[]
+    def start_dispatch():
+        nonlocal process
+        env=s.env.copy();env["HF_IDENTITY_CONFIG_FILE"]=str(identity_config);env["HF_EVENT_DISPATCH_CONFIG"]=str(config)
+        process=subprocess.Popen(["node",str(s.runtime_root/"services/hyperfide/dist/dispatch.js"),"--policy",str(s.policy),"--spec-revision","fixture-identity-v1","--components",str(s.components),
+            "--module-root",str(s.runtime_root/"services/hyperfide/dist"),"--mode","https","--host","127.0.0.1","--port",str(port),"--tls-cert",str(s.ca),"--tls-key",str(s.tlskey)],
+            cwd=ROOT,env=env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+        descriptor=target()/"resource.json";record=json.loads(descriptor.read_text());record["dispatcher_process"]={"pid":process.pid,
+            "start_time":Path("/proc/"+str(process.pid)+"/stat").read_text().split()[21],"boot_id":Path("/proc/sys/kernel/random/boot_id").read_text().strip()};descriptor.write_text(json.dumps(record)+"\n")
+        dispatches.append(record["dispatcher_process"])
+        deadline=time.monotonic()+15;lines=[]
+        while time.monotonic()<deadline:
+            ready,_,_=select.select([process.stderr],[],[],0.1)
+            if ready:
+                line=process.stderr.readline();lines.append(line)
+                if '"event":"ready"' in line:return
+            if process.poll() is not None:break
+        raise AssertionError("Actual dispatch daemon did not become ready: "+"".join(lines)[:1500])
+    def stop_dispatch(kill=False):
+        nonlocal process
+        if process:
+            if kill:process.kill()
+            else:process.send_signal(signal.SIGTERM)
+            out,err=process.communicate(timeout=8)
+            expect(process.returncode==(-signal.SIGKILL if kill else 0),"Dispatch termination failed: "+err[:1000]);process=None
+    def wait_for(predicate,message):
+        deadline=time.monotonic()+12
+        while time.monotonic()<deadline:
+            if predicate():return
+            time.sleep(.05)
+        raise AssertionError(message)
+    def describe_dispatch():
+        old_origin,old_port=s.origin,s.port
+        try:
+            s.origin,s.port=origin,port
+            status,response=s.invoke("recovery.describe",{},component="6.4")
+            expect(status==200 and response.get("ok"),"Actual dispatch worker description failed")
+            return response["result"]["worker"]
+        finally:s.origin,s.port=old_origin,old_port
+    unknown=event(4050,event_type="fixture.no-handler");work=event(4060)
+    s.ok("fixture.selected",{"event":unknown,"consumer_ids":[consumer]});s.ok("fixture.selected",{"event":work,"consumer_ids":[consumer]})
+    try:
+        start_dispatch()
+        check("recovery.daemon-separate-process-stdin-eof",lambda:expect(process.pid!=s.child.pid and process.poll() is None,"Worker did not survive DEVNULL stdin as a separate service"))
+        old=s.child;control_processes.append({k:v for k,v in json.loads((target()/"resource.json").read_text()).items() if k in ("pid","start_time","boot_id")})
+        wait_for(lambda:sql("SELECT count(*) FROM hyperfide.command_inbox WHERE operation='event.receive' AND idempotency_key="+q(work["id"]))=="1","Daemon never reached actual committed receiver")
+        old.wait(timeout=10);s.child=None
+        marker=json.loads((s.path/"worker-after-commit-crash").read_text())
+        expect(marker["event_id"]==work["id"] and marker["status"]=="APPLIED" and marker["inbox_id"],"Unexpected receiver crash boundary: "+json.dumps(marker))
+        check("recovery.daemon-after-commit-response-loss",lambda:expect(old.returncode==-signal.SIGKILL and sql("SELECT state FROM hyperfide.event_deliveries WHERE event_id="+q(work["id"]))!="ACKNOWLEDGED","Lost network response was falsely acknowledged"))
+        stop_dispatch(True)
+        s.start();control_processes.append({k:v for k,v in json.loads((target()/"resource.json").read_text()).items() if k in ("pid","start_time","boot_id")});start_dispatch()
+        wait_for(lambda:sql("SELECT state FROM hyperfide.event_deliveries WHERE event_id="+q(work["id"]))=="ACKNOWLEDGED","Restarted daemon did not reconcile the original obligation")
+        check("recovery.daemon-restart-stable-effect",lambda:expect(sql("SELECT count(*) FROM hyperfide.command_inbox WHERE operation='event.receive' AND idempotency_key="+q(work["id"]))=="1" and
+            int(sql("SELECT attempt_count FROM hyperfide.event_deliveries WHERE event_id="+q(work["id"])))>=2,"Daemon restart duplicated effect or replaced delivery identity"))
+        check("recovery.daemon-missing-handler-held",lambda:expect(sql("SELECT state FROM hyperfide.event_deliveries WHERE event_id="+q(unknown["id"]))!="ACKNOWLEDGED" and
+            sql("SELECT count(*) FROM hyperfide.command_inbox WHERE operation='event.receive' AND idempotency_key="+q(unknown["id"]))=="0","Unknown event route was acknowledged without its handler"))
+        check("recovery.daemon-real-runtime-status",lambda:expect(describe_dispatch()["transport"]=="signed-HTTPS" and describe_dispatch()["acknowledged"]>=1,"Actual worker counters did not reflect committed ACK"))
+        check("recovery.daemon-renews-service-not-compute",lambda:expect(int(sql("SELECT credential_version FROM hyperfide.identity_principals WHERE credential_id="+q(service_id)))>=2 and
+            sql("SELECT count(*) FROM hyperfide.identity_operation_results WHERE scope_id="+q(service_id)+" AND operation='identity.principal.renew' AND response->'compute_lease_renewed'='false'::jsonb")!="0","Service identity renewal did not use actual guarded noncompute path"))
+        stop_dispatch()
+        held=event(4070);s.ok("fixture.selected",{"event":held,"consumer_ids":[consumer]})
+        actual_config=json.loads(config.read_text());wrong=dict(actual_config,credential_id=s.ids["operator"],key_file=str(s.keys["operator"]["path"]))
+        config.write_text(json.dumps(wrong));start_dispatch()
+        wait_for(lambda:describe_dispatch()["state"]=="RETRYING","Wrong-role worker did not refuse its identity")
+        check("recovery.daemon-no-operator-fallback",lambda:expect(sql("SELECT attempt_count FROM hyperfide.event_deliveries WHERE event_id="+q(held["id"]))=="0","Worker used OPERATOR identity as fallback"))
+        stop_dispatch();config.write_text(json.dumps(actual_config))
+        version=sql("SELECT credential_version FROM hyperfide.identity_principals WHERE credential_id="+q(service_id))
+        status,response=s.invoke("identity.principal.revoke",{"credential_id":service_id,"expected_version":version},component="14.1")
+        expect(status==200 and response.get("ok"),"Actual service identity revocation failed")
+        start_dispatch();wait_for(lambda:describe_dispatch()["state"]=="RETRYING","Revoked worker did not stop admission")
+        check("recovery.daemon-revocation-holds-work",lambda:expect(sql("SELECT attempt_count FROM hyperfide.event_deliveries WHERE event_id="+q(held["id"]))=="0" and
+            sql("SELECT count(*) FROM hyperfide.command_inbox WHERE operation='event.receive' AND idempotency_key="+q(held["id"]))=="0","Revoked service delivered or acknowledged work"))
+        (target()/"daemon-observations.json").write_text(json.dumps({"scope":"separate-control-dispatch-components","transport":"actual-signed-HTTPS","stdin":"DEVNULL",
+            "service_credential_id":service_id,"control_processes":control_processes,"dispatch_processes":dispatches,"source_event_id":work["id"],
+            "receiver_receipts":json.loads(sql("SELECT coalesce(json_agg(json_build_object('inbox_id',id,'state',state,'request_digest',request_digest)),'[]'::json)::text FROM hyperfide.command_inbox WHERE operation='event.receive' AND idempotency_key="+q(work["id"]))),
+            "delivery":json.loads(sql("SELECT row_to_json(d)::text FROM (SELECT event_id,consumer_id,state,attempt_count,acknowledged_at FROM hyperfide.event_deliveries WHERE event_id="+q(work["id"])+") d")),
+            "unregistered_event_id":unknown["id"],"revoked_identity_event_id":held["id"],"task_completion_authority":False,"native_execution":"NOT_CLAIMED"},sort_keys=True)+"\n")
+    finally:stop_dispatch()
 
 def main(task="6.1"):
     global TASK,ACTIVE,S
