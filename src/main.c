@@ -198,7 +198,7 @@ int main(int argc, char **argv) {
     }
 
     { int launcher_rc = hf_entrypoint_dispatch(argc,argv); if (launcher_rc >= 0) return host_hook ? 0 : launcher_rc; }
-    { int remote_rc = hf_client_dispatch(argc,argv,stdout,stderr); if (remote_rc >= 0) return host_hook ? 0 : remote_rc; }
+    { int remote_rc = hf_client_dispatch(argc,argv,stdout,stderr); if (remote_rc >= 0) return remote_rc; }
 
     /* spec works without .codegraph — dispatch before opening the graph */
     if (strcmp(cmd, "spec") == 0) {
