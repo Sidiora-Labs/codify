@@ -12,6 +12,8 @@
     "V-034"
   ],
   "expected_assertion_ids": [
+    "review.semantic-fence.current-authenticated-read",
+    "review.graph-custody.quarantine-and-scope-fenced",
     "review.inputs.exact-obligation-generation",
     "review.inputs.replay-stable",
     "review.inputs.empty-graph-not-proof",
@@ -19,6 +21,9 @@
     "review.receipt.operator-cannot-review",
     "review.receipt.caller-reviewer-refused",
     "review.lease.real-delegated-watcher",
+    "review.execution.old-sandbox-stop-preserves-current-review",
+    "review.lease.owner-renewal",
+    "review.lease.wrong-owner-renewal-refused",
     "review.lease.wrong-job-refused",
     "review.lease.same-watcher-concurrency-refused",
     "review.receipt.expired-lease-refused",
@@ -28,24 +33,19 @@
     "review.receipt.immutable-history",
     "review.receipt.exact-replay",
     "review.coverage.limitations-prevent-completion",
-    "review.inputs.changed-policy-stales",
-    "review.inputs.reconcile-preserves-history",
-    "review.observation.origin-attempt-refused",
-    "review.observation.exact-source-attribution",
-    "review.observation.history-immutable",
-    "review.inputs.partial-task-revision-stales",
-    "review.inputs.rebind-fences-old-generation",
     "review.coverage.duplicate-cannot-fill",
     "review.decision-model.rank-cannot-certify",
     "review.decision-model.non-watcher-cannot-satisfy",
     "review.receipt.inspect-advisory-only",
     "review.execution.package-stop-denies-claim",
+    "review.observation.origin-attempt-refused",
     "review.execution.sandbox-stop-denies-output",
-    "review.execution.old-sandbox-stop-preserves-current-review",
-    "review.lease.owner-renewal",
-    "review.lease.wrong-owner-renewal-refused",
-    "review.semantic-fence.current-authenticated-read",
-    "review.graph-custody.quarantine-and-scope-fenced"
+    "review.observation.exact-source-attribution",
+    "review.observation.history-immutable",
+    "review.inputs.partial-task-revision-stales",
+    "review.inputs.rebind-fences-old-generation",
+    "review.inputs.changed-policy-stales",
+    "review.inputs.reconcile-preserves-history"
   ],
   "inputs": [
     {
@@ -1530,7 +1530,7 @@
     },
     {
       "path": "tests/hyperfide/registrations/17.3.json",
-      "sha256": "4ccd7e55ba0e9ca3841c95eabbde179fcba14db55d56dbacdc11699796508dbf",
+      "sha256": "7857310b0eddd375e888d57f02fc9bdb4ee29fd5ff9ffa5f782ed093580c23bc",
       "size": 3242
     },
     {
