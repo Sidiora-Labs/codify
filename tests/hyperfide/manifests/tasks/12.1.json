@@ -3,7 +3,7 @@
     "allowed_actions": [],
     "approved": true
   },
-  "campaign_id": "hyperfide-task-12.1-native-component-v1",
+  "campaign_id": "hyperfide-task-12.1-native-component-v1-requal-12aa390190b3",
   "case_ids": [
     "V-015",
     "V-039"
@@ -50,18 +50,18 @@
   "inputs": [
     {
       "path": "Makefile",
-      "sha256": "de7c841dc0f158aae22ef694cfa01ebdc56452428dd0ddd341e0adbbff576597",
-      "size": 4408
+      "sha256": "40cee85c4626ae57fe8bd7332788456812e54f3f8c96fc628f814dfc8ad1e54c",
+      "size": 5022
     },
     {
       "path": "build/hyperfide-native",
-      "sha256": "4af6bb345df677aba9d6359385300d87fc8c4a389fc85351353234e6d0a7ca48",
-      "size": 425880
+      "sha256": "e9cafa47ac941c06fde622534b92fa1fc56470ebfb80a4a7f98977e24e725171",
+      "size": 574552
     },
     {
       "path": "scripts/hyperfide-native-components.py",
-      "sha256": "9aa5f86c12dc75ec3266eb9a9352ce832e2234c04c46a02c2b3f38e7eaa4cd87",
-      "size": 14689
+      "sha256": "e9d35c48c7fa582299809f03e485451ba86eb4585f9262150e38b49979ae1ef3",
+      "size": 14830
     },
     {
       "path": "services/hyperfide/components/12.1.json",
@@ -100,8 +100,8 @@
     },
     {
       "path": "src/hyperfide/components/12.2.kvx",
-      "sha256": "c375f95f46c4a42764eee5e2978d842e9b1e7dd43cebdd75d03a15289b24f5c9",
-      "size": 238
+      "sha256": "f23474fcbd5b5cfde33456b3737a268926b67678fb75a4e130084a7d174fcd4a",
+      "size": 274
     },
     {
       "path": "src/hyperfide/components/12.3.kvx",
@@ -110,18 +110,18 @@
     },
     {
       "path": "src/hyperfide/components/12.4.kvx",
-      "sha256": "f46ca18c69296c8173f58b89bfcb7715ecda13688a3bfe426232278dd87df3e4",
-      "size": 344
+      "sha256": "586ba78784dd3ba018d280bcd9570bcc55ca01600df773f8d9c8ece71837ba65",
+      "size": 498
     },
     {
       "path": "src/hyperfide/components/13.1.kvx",
-      "sha256": "a594a81503ba4f6f6bbdbb35bcf7101fa57b6e38c1881b8882e6de42931e6559",
-      "size": 225
+      "sha256": "209ad59a62816b385b548ea630842e3659844b8cd7718386926130554fbd9fcd",
+      "size": 289
     },
     {
       "path": "src/hyperfide/components/13.3.kvx",
-      "sha256": "a3d35c4357b0ca16ef6ed48ffd8a9b1bda34d8fc22719ed39229de5e7b4ab5af",
-      "size": 169
+      "sha256": "b583d33715988f3d82098a0c89b074e4509ba2a1f9a882302b96bfc827edc2eb",
+      "size": 177
     },
     {
       "path": "src/hyperfide/components/15.1.kvx",
@@ -155,8 +155,8 @@
     },
     {
       "path": "src/hyperfide/supervisor.h",
-      "sha256": "3691d35f47536d8865412ca8c4fc78cf9b0168c154b3c0e8b0c30985330ec2b1",
-      "size": 4137
+      "sha256": "bf02c2c2209295d26ed5fce9914bcdb9772d1e945ef8ec5d656ae841c527a0c7",
+      "size": 5171
     },
     {
       "path": "src/hyperfide/supervisor_daemon.c",
