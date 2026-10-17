@@ -190,7 +190,7 @@ try{
 if(failures.length)process.exitCode=1;
 """
 def main():
- out=Path(os.environ.get("HYPERFIDE_CAMPAIGN_DIR","/tmp/hyperfide/writer-observation14-transport"))/"transport"
+ out=Path(os.environ.get("HYPERFIDE_CAMPAIGN_DIR","/tmp/hyperfide/writer-observation14-transport"))/"writer-observation14-transport"
  out.mkdir(parents=True,exist_ok=True)
  with tempfile.TemporaryDirectory(prefix="hf-writer-observation-transport-") as temp:
   base=Path(temp)
