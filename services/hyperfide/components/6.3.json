@@ -17,7 +17,8 @@
     "instructions.ack",
     "instructions.lookup-native",
     "instructions.consumer.register",
-    "instructions.runner.poll"
+    "instructions.runner.poll",
+    "instructions.events.ingest"
   ],
   "requires": [
     "4.2",

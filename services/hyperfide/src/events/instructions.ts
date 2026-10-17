@@ -1,4 +1,4 @@
-import {pollRunnerCommands} from './runner_commands.js';
+import {runnerApi,RUNNER_EVENT_BOUNDS} from './api.js';
 import { assertNoExecutionHold } from '../scheduler/claim.js';
 import { ready as hierarchyReady,leadership,requireAuthority } from '../hierarchy/packages.js';
 import { randomUUID } from 'node:crypto';
@@ -12,9 +12,9 @@ import type { Scope,OutboxEvent } from './outbox.js';
 import { receive } from './inbox.js';
 export { lookupNativeLaunch } from './outbox.js';
 
-interface Instruction extends Scope { id:string; attempt_id:string; attempt_generation:string;
+export interface Instruction extends Scope { id:string; attempt_id:string; attempt_generation:string;
   authority_epoch:string; sandbox_boot_generation:string; kind:'START'|'STEER'|'CANCEL'; body:Record<string,unknown> }
-function instruction(value:unknown):Instruction {
+export function instruction(value:unknown):Instruction {
   const v=fields(value,['organisation_id','run_id','id','attempt_id','attempt_generation','authority_epoch','sandbox_boot_generation','kind','body']);
   if(!['START','STEER','CANCEL'].includes(String(v.kind))||typeof v.body!=='object'||v.body===null||Array.isArray(v.body))
     fail('INSTRUCTION_INPUT_INVALID','Instruction needs a supported kind and JSON object body');
@@ -139,7 +139,7 @@ export async function registerRunnerConsumer(tx:PrimaryTransaction,input:unknown
   return {...(await resolveRunnerConsumer(tx,{...s,sandbox_id:p.sandbox_id,boot_id:p.boot_id,boot_generation:p.boot_generation}))!,
     registered:true,replayed:false,needs_recovery:false,execution_authority:false};
 }
-async function instructionRecipient(tx:PrimaryTransaction,s:Scope,target:{sandbox_id:string;boot_id:string},generation:string,active:boolean):Promise<string> {
+export async function instructionRecipient(tx:PrimaryTransaction,s:Scope,target:{sandbox_id:string;boot_id:string},generation:string,active:boolean):Promise<string> {
   const binding=await resolveRunnerConsumer(tx,{organisation_id:s.organisation_id,run_id:s.run_id,
     sandbox_id:target.sandbox_id,boot_id:target.boot_id,boot_generation:generation});
   if(!binding||active&&binding.consumer_state!=='ACTIVE')
@@ -261,7 +261,7 @@ export async function replayInstructions(tx:PrimaryTransaction,input:unknown):Pr
   }
   return {results,complete:pending.rows.length<limit,resnapshot_required:false};
 }
-function runnerMatches(principal:Principal,i:Instruction,target:{sandbox_id:string;boot_id:string}):void {
+export function runnerMatches(principal:Principal,i:Instruction,target:{sandbox_id:string;boot_id:string}):void {
   if(principal.role!=='RUNNER'||principal.organisation_id!==i.organisation_id||principal.run_id!==i.run_id||
     principal.sandbox_id!==target.sandbox_id||principal.boot_id!==target.boot_id||principal.boot_generation!==i.sandbox_boot_generation||
     principal.attempt_id!==null&&principal.attempt_id!==i.attempt_id||
@@ -339,29 +339,6 @@ export async function recordRunnerAcknowledgement(tx:PrimaryTransaction,input:un
 }
 
 
-async function nativeInvocation<T>(g:ReturnType<typeof gateway>,context:ComponentContext,input:unknown,
-    operation:'HANDOFF'|'ACK',apply:(tx:PrimaryTransaction,invocation:InvocationContext)=>Promise<T>):Promise<T> {
-  const invocation=requireInvocation(context,input,['RUNNER']);
-  return g.withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:invocation.signal,guard:tx=>invocation.identityGuard(tx)},async tx=>{
-    const v=input as Record<string,unknown>,s=scope(v),id=uuid(operation==='HANDOFF'?v.event_id:v.command_id);
-    const row=(await tx.query("SELECT * FROM hyperfide.outbox_events WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND aggregate_type='attempt.instructions'",
-      [s.organisation_id,s.run_id,id])).rows[0];
-    if(!row)fail('INSTRUCTION_EVENT_INVALID','Native cleanup requires an already committed exact instruction');
-    const p=row.payload as Record<string,unknown>,i=instruction({...s,id:p.instruction_id,attempt_id:p.attempt_id,
-      attempt_generation:p.attempt_generation,authority_epoch:p.authority_epoch,sandbox_boot_generation:p.sandbox_boot_generation,kind:p.kind,body:p.body}),
-      target={sandbox_id:uuid(p.sandbox_id),boot_id:uuid(p.boot_id)};
-    if(i.id!==id||i.attempt_id!==row.aggregate_id||row.event_type!=='instruction.'+i.kind.toLowerCase())
-      fail('INSTRUCTION_EVENT_INVALID','Stored native instruction metadata is inconsistent');
-    runnerMatches(invocation.principal,i,target);
-    const consumer=await instructionRecipient(tx,s,target,i.sandbox_boot_generation,false);
-    if(operation==='HANDOFF'&&uuid(v.consumer_id)!==consumer)fail('AUTH_SCOPE_DENIED','Handoff does not address the authenticated boot consumer');
-    // The exception is selected only by immutable server state. ACKs report observations, never execution permission.
-    if(operation==='HANDOFF'&&i.kind!=='CANCEL')await invocation.guard(tx);
-    const result=await apply(tx,invocation);
-    if(operation==='HANDOFF'&&i.kind!=='CANCEL')await invocation.guard(tx);else await invocation.identityGuard(tx);
-    return result;
-  });
-}
 async function issueAuthority(tx:PrimaryTransaction,input:unknown,invocation:InvocationContext):Promise<void> {
   const principal=invocation.principal;
   if(!['LEADER','FEATURE_MANAGER'].includes(principal.role))return;
@@ -382,16 +359,14 @@ async function issueAuthority(tx:PrimaryTransaction,input:unknown,invocation:Inv
 export function createComponent(context:ComponentContext):Component {
   const g=gateway(context);
   const component={apiVersion:1 as const,capabilities:{'events.instructions.v1':Object.freeze({issue,acceptInstruction,handoff,replayInstructions,recordRunnerAcknowledgement,lookupNativeLaunch,registerRunnerConsumer,resolveRunnerConsumer})},actions:{
-    'instructions.runner.poll':(input:unknown,context:ComponentContext)=>pollRunnerCommands(context,input),
-    'instructions.consumer.register':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['RUNNER'],(tx,invocation)=>registerRunnerConsumer(tx,input,invocation)),
     'instructions.describe':()=>({schema_version:1,kinds:['START','STEER','CANCEL'],identity:'stable-command-UUID',
-      bounds:{body_bytes:65536,outstanding:256},execution:'native-connector-required',full_case_status:'INCOMPLETE'}),
+      bounds:{body_bytes:65536,outstanding:256,runner_event_bytes:RUNNER_EVENT_BOUNDS.payload_bytes,runner_events_per_stream:RUNNER_EVENT_BOUNDS.events_per_stream},execution:'native-connector-required',full_case_status:'INCOMPLETE'}),
     'instructions.issue':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','LEADER','FEATURE_MANAGER','COORDINATOR'],async(tx,invocation)=>{await issueAuthority(tx,input,invocation);return issue(tx,input);}),
     'instructions.accept':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','DISPATCH'],tx=>acceptInstruction(tx,input)),
-    'instructions.handoff':(input:unknown,context:ComponentContext)=>nativeInvocation(g,context,input,'HANDOFF',(tx,invocation)=>handoff(tx,input,invocation.principal)),
     'instructions.replay':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','DISPATCH'],tx=>replayInstructions(tx,input)),
     'instructions.lookup-native':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['RUNNER','OPERATOR','COORDINATOR','DISPATCH'],(tx,invocation)=>lookupNativeLaunch(tx,input,invocation)),
-    'instructions.ack':(input:unknown,context:ComponentContext)=>nativeInvocation(g,context,input,'ACK',(tx,invocation)=>recordRunnerAcknowledgement(tx,input,invocation))
+    // Runner-facing poll/delivery, acknowledgement and event ingress are bound in api.ts.
+    ...runnerApi(g)
   }};
   return component;
 }
