@@ -1,9 +1,9 @@
 {
   "task": "23.2",
-  "commit": "db090634452955b898c68440ee16a7de857ce4d4",
+  "commit": "12aa390190b3d3e360e079254378a381103fc236",
+  "requalified_on": "12aa390190b3d3e360e079254378a381103fc236",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-007 --manifest tests/hyperfide/manifests/tasks/23.2.json && python3 tests/hyperfide/qualify.py --case V-048 --manifest tests/hyperfide/manifests/tasks/23.2.json",
   "exit_code": 0,
-  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"5df0f6ee-24a9-47fb-b43a-dc1be8c53778\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/23.2/campaigns/e31b6d6f5d0616b6abb36d6601cee0eddcc3521d05ff790185f3917d48d6e610\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"22d3a7fe-7878-4cb8-baae-f05d5450fd76\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/23.2/campaigns/e31b6d6f5d0616b6abb36d6601cee0eddcc3521d05ff790185f3917d48d6e610\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\nexit=0\n",
-  "ran_at": "2026-10-17T09:17:45Z",
-  "note": "Run as root; /work/hyperfide and .git were temporarily chowned root (non-recursive) because qualify's safe_git ignores global safe.directory, then restored to hf."
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"a60d61c5-3149-4078-8869-9b575c8362e0\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/23.2/campaigns/afce6adaad810279230958d0ccb161baa1a6eeca467bd754c28d99f31ea1e82f\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"aaf66cc9-593c-45f3-99da-4d9d30714cce\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/23.2/campaigns/afce6adaad810279230958d0ccb161baa1a6eeca467bd754c28d99f31ea1e82f\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T14:09:14.959909+00:00"
 }
