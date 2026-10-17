@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "campaign_id": "hyperfide-task-24.4-recovery-drills-component-v1",
+  "registered_variant": "task:24.4",
+  "scope": "task-component",
+  "case_ids": [
+    "V-009",
+    "V-049",
+    "V-053"
+  ],
+  "expected_assertion_ids": [
+    "recovery.drill.real-process",
+    "recovery.drill.rpo-label",
+    "recovery.drill.proposed-database",
+    "recovery.drill.proposed-object",
+    "recovery.drill.proposed-git",
+    "recovery.drill.proposed-provider",
+    "recovery.drill.proposed-auth",
+    "recovery.drill.proposed-full_disk",
+    "recovery.drill.proposed-restore",
+    "recovery.drill.no-invented-measurements",
+    "recovery.drill.primary-inspection",
+    "recovery.drill.plan-replay",
+    "recovery.drill.plan-conflict",
+    "recovery.drill.unconfigured-profile-refusal",
+    "recovery.drill.tampered-profile-refusal",
+    "recovery.drill.reject-self-reported-proof",
+    "recovery.drill.reject-negative-target",
+    "recovery.drill.stale-epoch",
+    "recovery.drill.execute-async",
+    "recovery.drill.measured-database",
+    "recovery.drill.measured-object",
+    "recovery.drill.measured-git",
+    "recovery.drill.measured-provider",
+    "recovery.drill.measured-auth",
+    "recovery.drill.measured-full_disk",
+    "recovery.drill.measured-restore",
+    "recovery.drill.provider-fake-scope",
+    "recovery.drill.no-disruptive-replay",
+    "recovery.drill.database-old-epoch-fenced",
+    "recovery.drill.restore-stale-worker-fenced",
+    "recovery.drill.restore-requires-reconciliation",
+    "recovery.drill.restore-reconciled",
+    "recovery.drill.restore-current-worker-accepted",
+    "recovery.drill.all-scenarios-reconciled",
+    "recovery.drill.reconcile-unmeasured-refused",
+    "recovery.drill.incomplete-reconciliation-refused",
+    "recovery.drill.auth-identity-expiry"
+  ],
+  "approval": {
+    "approved": true,
+    "allowed_actions": [
+      "postgresql.fixture.create",
+      "postgresql.fixture.drop",
+      "https.fixture.listen"
+    ]
+  },
+  "inputs": [
+    {
+      "path": "services/hyperfide/components/24.4.json",
+      "sha256": "64a40e10f6e9c3ecf96eec8399041b43261a7f4da759864105a2ddf7ce1a7f53",
+      "size": 436
+    },
+    {
+      "path": "services/hyperfide/dist/control.js",
+      "sha256": "1383288f00472de29607207d1d318e257c6e80c0fb2c05ca9fb2d974040e8032",
+      "size": 118
+    },
+    {
+      "path": "services/hyperfide/dist/recovery/control.js",
+      "sha256": "61e12389fe9db286ea4869103d808b063c6046bba03912dbf31a9f3fb6c34089",
+      "size": 38886
+    },
+    {
+      "path": "services/hyperfide/dist/recovery/drills.js",
+      "sha256": "ab6e738c5f702d39d76fa87c69231b1a78e0828f81de93360db38a66b8b1ad7a",
+      "size": 14733
+    },
+    {
+      "path": "services/hyperfide/dist/storage/recovery_probes.js",
+      "sha256": "d2869b2ced00f6a21573741a9a648d8195ae138d87444d532e0d287810e6a8e1",
+      "size": 43547
+    },
+    {
+      "path": "services/hyperfide/dist/transport/protocol.js",
+      "sha256": "fe965513abe410e78b8941de532bd2e4b7df12056a7fb35cd8645dc429e1e88d",
+      "size": 12240
+    },
+    {
+      "path": "services/hyperfide/migrations/0024-recovery.sql",
+      "sha256": "488bfa3e107470e8e7465b674a16f7ca01cab045e5de3bce6631473cf7160ee6",
+      "size": 11993
+    },
+    {
+      "path": "services/hyperfide/package-lock.json",
+      "sha256": "101f5bc9fbb5864f227051eb2d0388449925df88c0fdd0e5755b40b808a4cfbb",
+      "size": 128778
+    },
+    {
+      "path": "services/hyperfide/package.json",
+      "sha256": "51c686f08fdfa47386af869cd6cdb63f1d2553f99366741239ded92dfe0d4398",
+      "size": 766
+    },
+    {
+      "path": "services/hyperfide/src/recovery/control.ts",
+      "sha256": "e7b175db837d52486c8b18a03a4651ad6cd270dc98a055c7822a504a014a5a7d",
+      "size": 39383
+    },
+    {
+      "path": "services/hyperfide/src/recovery/drills.ts",
+      "sha256": "e43f43bacf8ca0cb83971391ab0eab27315116f1954931c02c03ee43d15689b9",
+      "size": 13195
+    },
+    {
+      "path": "services/hyperfide/src/storage/recovery_probes.ts",
+      "sha256": "77a194d1cad282f84756833933c7aec386406084a6f0b3ab4111389593609565",
+      "size": 41048
+    },
+    {
+      "path": "services/hyperfide/tsconfig.json",
+      "sha256": "2b45e09325652f23d0bf4ec53439e4552cf4c2854d7288ce40186d4074f894bb",
+      "size": 487
+    },
+    {
+      "path": "tests/hyperfide/cases/support/postgres_cluster.py",
+      "sha256": "71e86ee1f8e0ee180d551d74c9de987ffc25d8976c114a91cc000916b1c3f31a",
+      "size": 5412
+    },
+    {
+      "path": "tests/hyperfide/cases/support/postgres_drills.py",
+      "sha256": "80c041afe0e61ef08a2dd5327bf2debac2ddb30cd2312efcca168242c379fbcd",
+      "size": 22939
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/24_1.py",
+      "sha256": "501cafb76358fcb20432ca8fe79a6eea0a5cdafef63ab431dec0fddf9bbc1660",
+      "size": 19848
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/24_4.py",
+      "sha256": "a9f7f06d9b3378327b65e16d5b5e6344b2cfa98d043a7913e14d155a53fb7c74",
+      "size": 12905
+    },
+    {
+      "path": "tests/hyperfide/check-evidence.py",
+      "sha256": "cc8de56fb25bea153490b4143a231f1ff6f4dac758baaea4bf90fb7d9ba236a0",
+      "size": 30633
+    },
+    {
+      "path": "tests/hyperfide/manifest.schema.json",
+      "sha256": "3407092d7e6e452bb288e996f840bd5bab22d6c0f494a49bf944cd73c18078b8",
+      "size": 3216
+    },
+    {
+      "path": "tests/hyperfide/qualify.py",
+      "sha256": "8aa17f5e2572c8557f15353f7267e98600547fb0f2693486c0e0f2fc1abce8c2",
+      "size": 37538
+    },
+    {
+      "path": "tests/hyperfide/registrations/24.4.json",
+      "sha256": "284ff4c02f47726e2ea6282ee5e3562e65cc5eab6a6c3e4b2453460845d980af",
+      "size": 3779
+    },
+    {
+      "path": "tests/hyperfide/support/identity_fixture.py",
+      "sha256": "2b992fd5eab4d903909a4dd621b2ce3c7278fa932e163cbad8f33cf2b65efe0a",
+      "size": 29318
+    }
+  ],
+  "resources": [
+    {
+      "id": "hf-task-24.4-database",
+      "kind": "postgresql-database",
+      "scope": "task24.4-disposable"
+    }
+  ],
+  "seed": 244,
+  "policy": {
+    "component_only": true,
+    "execution": "remote-only",
+    "full_case_status": "INCOMPLETE",
+    "cloud_provisioning": false,
+    "frontier_calls": false,
+    "provider_rehearsal": "BLOCKED: live Railway/Blaxel recovery requires provider credentials and programme approval; PROVIDER drill uses a loopback fake",
+    "rpo_measurement": "ACKNOWLEDGED_ID_LOSS_COUNT_ONLY_NO_TIME_BOUND_INFERRED; targets labelled PROPOSED until measured",
+    "fixtures": "Isolated PostgreSQL18 cluster for DATABASE/RESTORE; owned local object store, bare Git, Ed25519 trust store and bounded tmpfs for OBJECT/GIT/AUTH/FULL_DISK",
+    "limits": "Task-component variant only; cannot replace any full-case, provider, connector or campaign receipt"
+  }
+}

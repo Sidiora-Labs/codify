@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "variant": "task:24.4",
+  "task": "24.4",
+  "scope": "task-component",
+  "cases": [
+    "V-009",
+    "V-049",
+    "V-053"
+  ],
+  "assertion_ids": [
+    "recovery.drill.real-process",
+    "recovery.drill.rpo-label",
+    "recovery.drill.proposed-database",
+    "recovery.drill.proposed-object",
+    "recovery.drill.proposed-git",
+    "recovery.drill.proposed-provider",
+    "recovery.drill.proposed-auth",
+    "recovery.drill.proposed-full_disk",
+    "recovery.drill.proposed-restore",
+    "recovery.drill.no-invented-measurements",
+    "recovery.drill.primary-inspection",
+    "recovery.drill.plan-replay",
+    "recovery.drill.plan-conflict",
+    "recovery.drill.unconfigured-profile-refusal",
+    "recovery.drill.tampered-profile-refusal",
+    "recovery.drill.reject-self-reported-proof",
+    "recovery.drill.reject-negative-target",
+    "recovery.drill.stale-epoch",
+    "recovery.drill.execute-async",
+    "recovery.drill.measured-database",
+    "recovery.drill.measured-object",
+    "recovery.drill.measured-git",
+    "recovery.drill.measured-provider",
+    "recovery.drill.measured-auth",
+    "recovery.drill.measured-full_disk",
+    "recovery.drill.measured-restore",
+    "recovery.drill.provider-fake-scope",
+    "recovery.drill.no-disruptive-replay",
+    "recovery.drill.database-old-epoch-fenced",
+    "recovery.drill.restore-stale-worker-fenced",
+    "recovery.drill.restore-requires-reconciliation",
+    "recovery.drill.restore-reconciled",
+    "recovery.drill.restore-current-worker-accepted",
+    "recovery.drill.all-scenarios-reconciled",
+    "recovery.drill.reconcile-unmeasured-refused",
+    "recovery.drill.incomplete-reconciliation-refused",
+    "recovery.drill.auth-identity-expiry"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/24_4.py"
+  ],
+  "timeout_seconds": 600,
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
+  "fixtures": [
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/transport/protocol.js",
+    "services/hyperfide/dist/recovery/drills.js",
+    "services/hyperfide/dist/recovery/control.js",
+    "services/hyperfide/dist/storage/recovery_probes.js",
+    "tests/hyperfide/cases/support/postgres_drills.py",
+    "tests/hyperfide/cases/support/postgres_cluster.py"
+  ],
+  "resources": [
+    {
+      "id": "hf-task-24.4-database",
+      "kind": "postgresql-database",
+      "scope": "task24.4-disposable"
+    }
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/24_4.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "required_artifacts": [
+    "recovery/database-absence.json",
+    "recovery/drill-evidence.json"
+  ],
+  "source_files": [
+    "services/hyperfide/components/24.4.json",
+    "services/hyperfide/migrations/0024-recovery.sql",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/package.json",
+    "services/hyperfide/src/recovery/control.ts",
+    "services/hyperfide/src/recovery/drills.ts",
+    "services/hyperfide/src/storage/recovery_probes.ts",
+    "services/hyperfide/tsconfig.json",
+    "tests/hyperfide/cases/support/postgres_cluster.py",
+    "tests/hyperfide/cases/support/postgres_drills.py",
+    "tests/hyperfide/cases/tasks/24_1.py",
+    "tests/hyperfide/cases/tasks/24_4.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/registrations/24.4.json",
+    "tests/hyperfide/support/identity_fixture.py"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "https.fixture.listen"
+  ]
+}

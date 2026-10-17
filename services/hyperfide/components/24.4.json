@@ -12,7 +12,9 @@
     "recovery.drill.describe",
     "recovery.drill.plan",
     "recovery.drill.execute",
-    "recovery.drill.inspect"
+    "recovery.drill.inspect",
+    "recovery.drill.reconcile",
+    "recovery.drill.accept_result"
   ],
   "requires": [
     "4.2",
