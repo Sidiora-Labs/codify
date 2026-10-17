@@ -386,8 +386,10 @@ console.log(JSON.stringify(out));
             plan=success("connector.launch",dict(codex_launch_request(resumable),native_session_id="thread-exact"),renv)
             expect(plan["dispatch_eligible"]and plan["native_session_id"]=="thread-exact","qualified resume plan not dispatch-eligible")
             boot=Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+            exited=subprocess.Popen(["/bin/true"])
+            exited.wait(timeout=20)
             recover={"connector":"codex","native_session_id":"thread-exact","source_manifest_digest":"sha256:"+"a"*64,"configuration_digest":"sha256:"+"b"*64,"auth_state":"VALID","transport_state":"LOST",
-              "process_state":"EXITED_VERIFIED","process_boot_id":boot,"observed_boot_id":boot,"process_start_time":"1","observed_process_start_time":"1","protocol_delivery":"ACKNOWLEDGED",
+              "process_pid":exited.pid,"process_boot_id":boot,"process_start_time":"1","protocol_delivery":"ACKNOWLEDGED",
               "saved_native_session_id":"thread-exact","checkpoint_reference":"sha256:"+"d"*64,"checkpoint_source_manifest_digest":"sha256:"+"a"*64,"checkpoint_configuration_digest":"sha256:"+"b"*64}
             def recover_with(e):
                 r=subprocess.run([ROOT/"build/hyperfide-native","--component","13.3","--action","connector.recover"],input=json.dumps(recover),text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=e,cwd=ROOT,timeout=20)
