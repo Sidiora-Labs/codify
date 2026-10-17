@@ -1,0 +1,9 @@
+{
+  "task": "4.1",
+  "commit": "ff4632c9bc896057147975b600323af8f8b21f89",
+  "requalified_on": "ff4632c9bc896057147975b600323af8f8b21f89",
+  "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-002 --manifest tests/hyperfide/manifests/tasks/4.1.json && python3 tests/hyperfide/qualify.py --case V-015 --manifest tests/hyperfide/manifests/tasks/4.1.json",
+  "exit_code": 1,
+  "stdout_tail": "{\"status\": \"FAIL\", \"receipt_id\": \"13c71073-aa3e-4118-92db-cb275394f87f\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/4.1/campaigns/6032922cd16222e604b55b3298089589c4c3e6315521dc9308b67f3fd2fca567\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": [\"executed assertion inventory differs from exact registration\", \"one or more behavioural assertions failed\", \"probe failed, was unavailable, or timed out\", \"required artifact missing or unsafe: storage/observations.json\"]}\n",
+  "ran_at": "2026-10-17T18:52:55.344900+00:00"
+}
