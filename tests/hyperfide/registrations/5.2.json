@@ -1,0 +1,131 @@
+{
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "https.loopback.listen"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/5_2.py"
+  ],
+  "assertion_ids": [
+    "lease.renew.manager-denied",
+    "lease.expiry.primary-clock",
+    "lease.expired.dispatch-denied",
+    "lease.expiry.exact-attempt",
+    "lease.expiry.fences-authority",
+    "lease.expiry.keeps-quota",
+    "lease.expiry.requests-cleanup",
+    "lease.expiry.idempotent",
+    "lease.trusted-primary.renew",
+    "lease.pause.primary-history",
+    "lease.pause.blocks-advance",
+    "lease.pause.allows-checkpoint",
+    "lease.pause.allows-renewal",
+    "lease.control.unknown-fields",
+    "lease.resume.requires-cas",
+    "lease.resume.exact-generation",
+    "lease.drain.persisted-admission",
+    "lease.drain.requires-selector",
+    "lease.drain.blocks-admission",
+    "lease.cancel.foreign-manager",
+    "lease.cancel.logical-only",
+    "lease.cancel.replay",
+    "lease.cancel.stale-result-denied",
+    "lease.cancel.immutable-history",
+    "lease.cleanup.retains-sandbox-charges",
+    "lease.expiry.no-custody-created",
+    "lease.cleanup.observed",
+    "lease.recovery.exact-source-epoch",
+    "lease.recovery.transaction-rollback",
+    "lease.recovery.revokes-current",
+    "lease.recovery.retains-physical-debt",
+    "lease.recovery.does-not-rebind-run",
+    "lease.recovery.idempotent-revocation",
+    "lease.recovery.cleanup.observed",
+    "lease.component.registered",
+    "lease.generation.initial",
+    "lease.renew.worker-principal",
+    "lease.renew.foreign-worker-denied",
+    "lease.renew.invalid-authority-refused",
+    "lease.clock.strict-inputs",
+    "lease.expired.renew-refused",
+    "lease.expire.fences-generation",
+    "lease.generation.monotonic-reassignment",
+    "lease.generation.stale-requests-refused",
+    "lease.generation.one-current",
+    "lease.stale-artifact.retained-untrusted",
+    "custody.requires-released-compute",
+    "custody.worker-renewal-refused",
+    "custody.worker-cancel-refused",
+    "custody.expiry-never-reclaims",
+    "custody.fence-preserves",
+    "custody.reassignment-blocked",
+    "custody.revocation-reassignment-serialize",
+    "custody.revoked-worker-stays-stale",
+    "lease.generations.cleanup.observed",
+    "lease.clock.skewed-worker-primary-expiry",
+    "lease.clock.skewed-timezone-primary-expiry",
+    "lease.race.renew-expire-exactly-one",
+    "lease.races.cleanup.observed"
+  ],
+  "cases": [
+    "V-003",
+    "V-004"
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/5_2.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "fixtures": [
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/scheduler/leases.js",
+    "services/hyperfide/dist/scheduler/claim.js",
+    "services/hyperfide/dist/scheduler/resources.js",
+    "services/hyperfide/dist/storage/runtime.js"
+  ],
+  "required_artifacts": [
+    "scheduler/observations.json",
+    "scheduler/cleanup.json"
+  ],
+  "required_env": [
+    "DATABASE_URL"
+  ],
+  "resources": [
+    {
+      "id": "hf-task-5.2-runtime",
+      "kind": "postgresql-database-role-listener",
+      "scope": "task5.2-disposable"
+    }
+  ],
+  "schema_version": 1,
+  "scope": "task-component",
+  "source_files": [
+    "services/hyperfide/src/scheduler/leases.ts",
+    "services/hyperfide/components/5.2.json",
+    "tests/hyperfide/cases/tasks/5_2.py",
+    "tests/hyperfide/registrations/5.2.json",
+    "tests/hyperfide/cases/tasks/5_1.py",
+    "tests/hyperfide/cases/tasks/3_2.py",
+    "tests/hyperfide/cases/tasks/3_1.py",
+    "tests/hyperfide/support/identity_fixture.py",
+    "services/hyperfide/migrations/0005-scheduling.sql",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "services/hyperfide/package.json",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/tsconfig.json"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "task": "5.2",
+  "timeout_seconds": 600,
+  "variant": "task:5.2"
+}
