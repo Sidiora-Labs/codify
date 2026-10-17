@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "campaign_id": "hyperfide-task-14.1-real-journal-identity-v4-requal-12aa390190b3-requal-6a91b0130b1d-requal-ff4632c9bc89-requal-a80cd7edbb1c",
+ "campaign_id": "hyperfide-task-14.1-real-journal-identity-v4-requal-12aa390190b3-requal-6a91b0130b1d-requal-ff4632c9bc89-requal-a80cd7edbb1c-v20261017T192255Z-requal-a80cd7edbb1c",
  "registered_variant": "task:14.1",
  "scope": "task-component",
  "case_ids": [
@@ -1319,8 +1319,8 @@
   },
   {
    "path": "tests/hyperfide/registrations/14.1.json",
-   "sha256": "1b7792be4144f0c405786349abbd7cbb6dbe52953c30e273b08655bfb2a47219",
-   "size": 18621
+   "sha256": "ac76820285e82ceb0fb54050f02d6ec5e89ee30a015f822385e5f13b9825a873",
+   "size": 17910
   },
   {
    "path": "tests/hyperfide/registry.json",
