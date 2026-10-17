@@ -292,6 +292,8 @@ def graph_inputs_regression():
    expect(result.returncode==0,"Native graph fixture command failed: "+result.stderr[-1000:])
    return result.stdout.strip()
   command(["git","init","-q"]);command(["git","config","user.name","Hyperfide component fixture"]);command(["git","config","user.email","fixture@example.invalid"])
+  # No detached auto-gc/maintenance may outlive the probe (the gate reaps owned descendants).
+  command(["git","config","gc.auto","0"]);command(["git","config","maintenance.auto","false"]);command(["git","config","gc.autoDetach","false"])
   (repo/"owned.c").write_text("/* @contract Preserve the value. */\nint value(int input) { return input + 1; }\nint consume(void) { return value(2); }\n")
   command(["git","add","owned.c"]);command(["git","commit","-qm","pinned graph packet fixture"])
   commit=command(["git","rev-parse","HEAD"]);tree=command(["git","rev-parse","HEAD^{tree}"])
