@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -53,7 +55,7 @@ def inventory(root):
     expected = {
         'version': 1,
         'required_fields': ['schema_version', 'id', 'source', 'entry', 'actions'],
-        'optional_fields': ['requires', 'support_sources', 'headers', 'libraries'],
+        'optional_fields': ['requires', 'support_sources', 'headers', 'libraries', 'native_dependencies'],
         'callback': 'int entry(const char *action, const char *request_json, FILE *output)',
     }
     if type(schema.get('schema', {}).get('version')) is not int or schema != {'schema': expected}:
@@ -68,7 +70,7 @@ def inventory(root):
             raise ValueError('fragment must contain exactly [component]')
         item = parsed['component']
         required = set(expected['required_fields'])
-        if not required <= set(item) or set(item) - required - {'requires', 'support_sources', 'headers', 'libraries'}:
+        if not required <= set(item) or set(item) - required - set(expected['optional_fields']):
             raise ValueError('missing or unknown component fields')
         if type(item['schema_version']) is not int or item['schema_version'] != 1:
             raise ValueError('unsupported component schema version')
@@ -107,6 +109,14 @@ def inventory(root):
         libraries = item.setdefault('libraries', [])
         if not isinstance(libraries, list) or len(libraries) != len(set(libraries)) or any(not isinstance(value, str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]{0,63}', value) for value in libraries):
             raise ValueError('invalid native link library declaration')
+        dependencies = item.setdefault('native_dependencies', {})
+        if not isinstance(dependencies, dict) or set(dependencies) - set(libraries):
+            raise ValueError('native dependency must describe a declared link library')
+        for declaration in dependencies.values():
+            if not isinstance(declaration, dict) or not {'pkg_config', 'minimum', 'header', 'header_macro'} <= set(declaration) or set(declaration) - set(DEPENDENCY_FIELDS):
+                raise ValueError('invalid native dependency declaration')
+            if any(not isinstance(value, str) or not re.fullmatch(DEPENDENCY_FIELDS[key], value) for key, value in declaration.items()):
+                raise ValueError('invalid native dependency declaration value')
         components.append(item)
     by_id = {item['id']: item for item in components}
     incoming = {key: len(item['requires']) for key, item in by_id.items()}
@@ -128,6 +138,83 @@ def inventory(root):
         raise ValueError('native component dependency cycle')
     return [by_id[key] for key in seen]
 
+DEPENDENCY_FIELDS = {
+    'pkg_config': r'[A-Za-z0-9_.+-]{1,64}',
+    'minimum': r'[0-9]+[.][0-9]+[.][0-9]+',
+    'header': r'[A-Za-z0-9_/-]{1,96}[.]h',
+    'header_macro': r'[A-Z][A-Z0-9_]{0,63}',
+    'tls_backend': r'[A-Za-z0-9_-]{1,32}',
+    'debian_development': r'[a-z0-9][a-z0-9.+-]{0,63}',
+    'debian_runtime': r'[a-z0-9][a-z0-9.+-]{0,63}',
+}
+
+def version_tuple(text):
+    match = re.match(r'([0-9]+)[.]([0-9]+)(?:[.]([0-9]+))?', text or '')
+    return tuple(int(part or 0) for part in match.groups()) if match else None
+
+def tool(argv, stdin=None):
+    try:
+        result = subprocess.run(argv, input=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return result.stdout.strip() if result.returncode == 0 else None
+
+def package(name):
+    if not name or not shutil.which('dpkg-query'):
+        return None
+    version = tool(['dpkg-query', '-W', '-f=${Version}', name])
+    return {'name': name, 'version': version} if version else {'name': name, 'version': None}
+
+def resolve(library, declaration):
+    """Observe the actual development/runtime prerequisite and enforce its minimum."""
+    module = declaration['pkg_config']
+    observed = {'library': library, **declaration}
+    observed['pkg_config_version'] = tool(['pkg-config', '--modversion', module])
+    observed['cflags'] = tool(['pkg-config', '--cflags', module])
+    observed['libs'] = tool(['pkg-config', '--libs', module])
+    compiler = os.environ.get('CC') or 'cc'
+    macros = tool([compiler, *(observed['cflags'] or '').split(), '-E', '-dM', '-include', declaration['header'], '-x', 'c', '-'], '') or ''
+    header = re.search(r'^#define ' + re.escape(declaration['header_macro']) + r' "([^"]+)"', macros, re.M)
+    observed['header_version'] = header[1] if header else None
+    problems = []
+    minimum = version_tuple(declaration['minimum'])
+    for key in ('pkg_config_version', 'header_version'):
+        actual = version_tuple(observed[key])
+        if actual is None or actual < minimum:
+            problems.append(key + ' below ' + declaration['minimum'])
+    if observed['pkg_config_version'] and observed['header_version'] and version_tuple(observed['pkg_config_version']) != version_tuple(observed['header_version']):
+        problems.append('pkg-config and header versions differ')
+    if 'tls_backend' in declaration:
+        backends = tool(['curl-config', '--ssl-backends'])
+        observed['tls_backends'] = sorted(part.strip() for part in (backends or '').split(',') if part.strip())
+        if declaration['tls_backend'] not in observed['tls_backends']:
+            problems.append('qualified TLS backend ' + declaration['tls_backend'] + ' unavailable')
+    observed['development_package'] = package(declaration.get('debian_development'))
+    observed['runtime_package'] = package(declaration.get('debian_runtime'))
+    observed['problems'] = problems
+    observed['qualified'] = not problems
+    return observed
+
+def link_contract(items):
+    """Source/link contract shared by the native runner and the public CLI build."""
+    dependencies = {}
+    for item in items:
+        for library, declaration in sorted(item['native_dependencies'].items()):
+            if library in dependencies and dependencies[library]['declared'] != declaration:
+                raise ValueError('conflicting native dependency declarations for ' + library)
+            dependencies.setdefault(library, {'declared': declaration})
+    resolved = {library: resolve(library, value['declared']) for library, value in sorted(dependencies.items())}
+    return {
+        'schema_version': 1,
+        'sources': sorted({path for item in items for path in [item['source'], *item['support_sources']]}),
+        'headers': sorted({path for item in items for path in item['headers']}),
+        'libraries': ['-l' + library for library in sorted({library for item in items for library in item['libraries']})],
+        'standalone_mains_excluded': ['src/hyperfide/component_main.c'],
+        'components': [{'id': item['id'], 'entry': item['entry'], 'actions': item['actions']} for item in items],
+        'dependencies': resolved,
+        'status': 'PASS' if all(value['qualified'] for value in resolved.values()) else 'FAIL',
+    }
+
 def generate(items):
     lines = ['/* Generated by scripts/hyperfide-native-components.py. */']
     for item in items:
@@ -147,6 +234,7 @@ def main():
     parser.add_argument('--sources', action='store_true')
     parser.add_argument('--headers', action='store_true')
     parser.add_argument('--libraries', action='store_true')
+    parser.add_argument('--link-contract', action='store_true')
     args = parser.parse_args()
     root = args.root.resolve()
     try:
@@ -164,7 +252,12 @@ def main():
                 finally:
                     if os.path.exists(temporary):
                         os.unlink(temporary)
-        if args.sources:
+        if args.link_contract:
+            contract = link_contract(items)
+            print(json.dumps(contract, sort_keys=True))
+            if contract['status'] != 'PASS':
+                raise ValueError('native link prerequisites unqualified: ' + '; '.join(f'{name}: {problem}' for name, value in contract['dependencies'].items() for problem in value['problems']))
+        elif args.sources:
             print(' '.join(sorted({path for item in items for path in [item['source'], *item['support_sources']]})))
         elif args.headers:
             print(' '.join(sorted({path for item in items for path in item['headers']})))

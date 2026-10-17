@@ -102,5 +102,7 @@ hyperfide-native:
 	@mkdir -p $(BUILD)
 	@rm -f $(BUILD)/hyperfide-native $(BUILD)/hyperfide-native.tmp
 	python3 scripts/hyperfide-native-components.py --generate $(BUILD)/hyperfide-native-registry.inc
+	python3 scripts/hyperfide-native-components.py --link-contract > $(BUILD)/hyperfide-native-link-contract.tmp
+	mv $(BUILD)/hyperfide-native-link-contract.tmp $(BUILD)/hyperfide-native-link-contract.json
 	$(CC) $(CFLAGS) -Isrc/hyperfide -I$(BUILD) $(LDFLAGS) -Wl,--disable-new-dtags,-rpath,'$$ORIGIN/../lib/hyperfide' -o $(BUILD)/hyperfide-native.tmp src/hyperfide/component_main.c src/sha256.c $$(python3 scripts/hyperfide-native-components.py --sources) $(LDLIBS) $$(python3 scripts/hyperfide-native-components.py --libraries)
 	mv $(BUILD)/hyperfide-native.tmp $(BUILD)/hyperfide-native
