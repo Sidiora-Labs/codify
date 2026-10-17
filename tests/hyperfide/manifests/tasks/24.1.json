@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "campaign_id": "hyperfide-task-24.1-control-recovery-component-v1",
+  "campaign_id": "hyperfide-task-24.1-control-recovery-component-v1-requal-12aa390190b3",
   "registered_variant": "task:24.1",
   "scope": "task-component",
   "case_ids": [
@@ -105,8 +105,8 @@
     },
     {
       "path": "services/hyperfide/migrations/0024-recovery.sql",
-      "sha256": "1fa85902851893983c51e9c1d146126db59379aabe4bf189021f3a5d7718c9ec",
-      "size": 11353
+      "sha256": "285d5d5fe0788a22231fbcf633e1ce663a4d19b0b1fad6c0dde5003ba6014eeb",
+      "size": 14970
     },
     {
       "path": "services/hyperfide/package-lock.json",
