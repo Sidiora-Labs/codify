@@ -5,10 +5,11 @@ make -s -j1 build/libcg.a
 test_bin="$(mktemp)"
 test_root="$(mktemp -d)"
 trap 'rm -f "$test_bin"; rm -rf "$test_root"' EXIT
+read -r -a link_libs <<< "$(make -s print-link-libs)"
 cc -std=gnu11 -Wall -Wextra -Werror -Isrc \
    -Ivendor/tree-sitter/lib/include \
    -o "$test_bin" tests/fixtures/semantic/managed/test_managed.c \
-   build/libcg.a -lsqlite3 -lpthread -lm
+   build/libcg.a "${link_libs[@]}"
 "$test_bin" tests/fixtures/semantic/managed
 cp tests/fixtures/semantic/managed/Box.* "$test_root/"
 git -C "$test_root" init -q
