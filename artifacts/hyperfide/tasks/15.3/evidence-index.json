@@ -1,9 +1,9 @@
 {
   "task": "15.3",
-  "commit": "12aa390190b3d3e360e079254378a381103fc236",
-  "requalified_on": "12aa390190b3d3e360e079254378a381103fc236",
+  "commit": "6a91b0130b1d6a09407f5f786b975545dcdc937b",
+  "requalified_on": "6a91b0130b1d6a09407f5f786b975545dcdc937b",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-003 --manifest tests/hyperfide/manifests/tasks/15.3.json && python3 tests/hyperfide/qualify.py --case V-014 --manifest tests/hyperfide/manifests/tasks/15.3.json && python3 tests/hyperfide/qualify.py --case V-043 --manifest tests/hyperfide/manifests/tasks/15.3.json",
-  "exit_code": 1,
-  "stdout_tail": "{\"status\": \"FAIL\", \"receipt_id\": \"9129ef33-0078-4340-9c5d-c6bdae345364\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/15.3/campaigns/fbdb161ff476a0d872eeb27186940192a4ce32e2f167551de157a862589e6c38\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": [\"executed assertion inventory differs from exact registration\", \"probe failed, was unavailable, or timed out\"]}\n",
-  "ran_at": "2026-10-17T14:15:53.754561+00:00"
+  "exit_code": 0,
+  "stdout_tail": "Refreshed 200 pins; 18 changed\n{\"status\": \"PASS\", \"receipt_id\": \"d9e4c6bd-9857-4cc7-89f7-bfc7dc911df1\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/15.3/campaigns/5a8d144e205aeb9efb3d8d8ff9f6de06e2ce8971791d53de9e0d5037b49a7360\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"9614b976-2fff-4d78-bb2c-885617cb3113\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/15.3/campaigns/5a8d144e205aeb9efb3d8d8ff9f6de06e2ce8971791d53de9e0d5037b49a7360\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"1bbae1a4-dfb8-42ce-bf25-be0f2efce5dd\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/15.3/campaigns/5a8d144e205aeb9efb3d8d8ff9f6de06e2ce8971791d53de9e0d5037b49a7360\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T18:21:16.830Z"
 }
