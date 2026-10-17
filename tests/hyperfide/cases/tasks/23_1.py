@@ -155,6 +155,13 @@ def finish():
 def views_cases(f):
  check("observability.views.registered",lambda:expect(f.ok("23.1","fleet.views.describe")["activity_is_progress"] is False))
  check("observability.views.primary-snapshot",lambda:expect(f.ok("23.1","fleet.views.snapshot")["freshness"]["route"]=="PRIMARY"))
+ def replica_absent():
+  # V-010 option (b): observational views are primary-only; with no replica
+  # route configured the service still reports the primary route explicitly.
+  expect(not any(k.endswith("_REPLICA_DATABASE_URL") for k in f.identity.env),"Fixture unexpectedly configures a replica route")
+  d=f.ok("23.1","fleet.views.describe");r=f.ok("23.1","fleet.views.snapshot")["freshness"]
+  expect(d["replica_routing"]=="UNSUPPORTED" and d["read_route"]=="PRIMARY" and r["route"]=="PRIMARY" and r["replica_routing"]=="UNSUPPORTED" and r["replica_lag_ms"] is None and r["replica_lag_status"]=="NOT_APPLICABLE" and r["sampled_at"])
+ check("observability.views.replica-absent-primary-only",replica_absent)
  check("observability.views.cross-run-denied",lambda:f.reject("23.1","fleet.views.snapshot",{},run=RUN2))
  check("observability.views.unsigned-denied",lambda:f.reject("23.1","fleet.views.snapshot",{},unsigned=True))
  check("observability.views.input-closed",lambda:f.reject("23.1","fleet.views.snapshot",{"sql":"SELECT 1"},"OBSERVABILITY_INPUT_INVALID"))
@@ -178,8 +185,22 @@ def views_cases(f):
   f.ok("23.1","fleet.views.observe",dict(own,observed_state="RUNNING"))
   f.reject("23.1","fleet.views.observe",dict(own,producer_sequence="2"),"OBSERVABILITY_STALE_OBSERVATION",role="VERIFIER")
  check("observability.views.trusted-observer-priority",priority)
+ def live_pid():
+  # Seeded attempt and sessions are RUNNING with no durable milestones; the
+  # VERIFIER session also carries a RUNNING observation. None of it is progress.
+  r=f.ok("23.1","fleet.views.snapshot");g=r["progress"];live=g["live_activity"]
+  expect(any(s["desired_state"]=="RUNNING" for s in r["sessions"]) and any(o["entity_type"]=="SESSION" and o["observed_state"]=="RUNNING" for o in r["observations"]))
+  expect(live["running_sessions"]>=1 and live["running_attempts"]>=1 and live["counted_as_progress"] is False)
+  expect(g["live_pid_is_progress"] is False and g["log_volume_is_progress"] is False and g["integrated_outcome_count"] is None and all(o["activity_is_qualified_progress"] is False for o in r["observations"]))
+ check("observability.views.live-pid-not-progress",live_pid)
  check("observability.views.entity-pagination",lambda:expect(f.ok("23.1","fleet.views.entities",{"kind":"SESSION","limit":1})["pagination"]["next"] is not None))
- check("observability.views.evidence-unknown",lambda:expect(f.ok("23.1","fleet.views.snapshot")["evidence"]["status"]=="UNKNOWN"))
+ def evidence():
+  # Evidence status follows the installed assurance authority; with no custody
+  # no evidence row (and so no validity) is reported.
+  installed=sql("SELECT to_regclass('hyperfide.assurance_applicability') IS NOT NULL;").stdout.strip()=="t"
+  e=f.ok("23.1","fleet.views.snapshot")["evidence"]
+  expect(e=={"status":"AVAILABLE","rows":[]} if installed else e["status"]=="UNKNOWN","Evidence view differs from installed authority: "+json.dumps(e)[:300])
+ check("observability.views.evidence-matches-authority",evidence)
  check("observability.views.no-fabricated-release-count",lambda:expect(f.ok("23.1","fleet.views.snapshot")["progress"]["integrated_outcome_count"] is None))
  def graph():
   for n in [100,101]:

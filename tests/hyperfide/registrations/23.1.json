@@ -10,6 +10,7 @@
   "assertion_ids": [
     "observability.views.registered",
     "observability.views.primary-snapshot",
+    "observability.views.replica-absent-primary-only",
     "observability.views.cross-run-denied",
     "observability.views.unsigned-denied",
     "observability.views.input-closed",
@@ -23,8 +24,9 @@
     "observability.views.future-time-rejected",
     "observability.views.nonowner-observer-denied",
     "observability.views.trusted-observer-priority",
+    "observability.views.live-pid-not-progress",
     "observability.views.entity-pagination",
-    "observability.views.evidence-unknown",
+    "observability.views.evidence-matches-authority",
     "observability.views.no-fabricated-release-count",
     "observability.views.actual-critical-path",
     "observability.views.integrated-label-not-terminal-proof",
