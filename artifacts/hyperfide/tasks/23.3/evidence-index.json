@@ -1,9 +1,9 @@
 {
   "task": "23.3",
-  "commit": "6a91b0130b1d6a09407f5f786b975545dcdc937b",
+  "commit": "0f2e867d972e85cec2d5020714dcdf748f914260",
   "requalified_on": "6a91b0130b1d6a09407f5f786b975545dcdc937b",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-011 --manifest tests/hyperfide/manifests/tasks/23.3.json && python3 tests/hyperfide/qualify.py --case V-048 --manifest tests/hyperfide/manifests/tasks/23.3.json",
   "exit_code": 1,
-  "stdout_tail": "{\"status\": \"FAIL\", \"receipt_id\": \"29e9f00c-c96a-41ae-8fbe-ab57c792b098\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/23.3/campaigns/80371c1d127cd64c4310eecbaaab0c396eedf6ed055d6e7b2ebe41de0c4f8f1d\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": [\"one or more behavioural assertions failed\", \"probe failed, was unavailable, or timed out\"]}\n",
-  "ran_at": "2026-10-17T18:20:04.724601+00:00"
+  "stdout_tail": "{\"receipt_id\": \"a08542fb-b351-4dbe-9e60-9047a6b4d00d\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": [\"one or more behavioural assertions failed\", \"probe failed, was unavailable, or timed out\"], \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/23.3/campaigns/a8b224a32ccfc781fee00cca1bca7af75687d828a78a78a245502453c3c27900\"}\n",
+  "ran_at": "2026-10-17T18:24:46.965129+00:00"
 }
