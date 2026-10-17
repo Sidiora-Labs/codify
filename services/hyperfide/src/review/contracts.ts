@@ -3,7 +3,11 @@ import {authorizeReview,canonical,digest,fail,hash,obj,oid,primary,reviewError,s
 import type {ReviewDb,ReviewScope} from './coverage.js';
 
 export const CONTRACT_FACETS=['schema','signatures','errors','authentication','state','units','precision','ordering','idempotency','compatibility','operational_invariants'] as const;
+// Facets whose change alters runtime behaviour while every symbol and signature may stay identical.
+export const BEHAVIOURAL_FACETS=CONTRACT_FACETS.filter(name=>name!=='schema'&&name!=='signatures');
 interface Endpoint {repository_id:string;source_object_id:string;symbol_ids:string[]}
+type ConsumerOrigin='BASELINE'|'CANDIDATE'|'GRAPH';
+interface AffectedConsumer extends Endpoint {origins:ConsumerOrigin[]}
 interface ContractDefinition {
  producer:Endpoint;consumers:Endpoint[];facets:Record<string,{status:'DEFINED'|'UNKNOWN';definition:unknown}>;
  scenario_templates:Array<{template_id:string;assertion_ids:string[]}>;
@@ -76,16 +80,26 @@ export async function analyseContractImpact(context:ComponentContext,value:unkno
  const changed=CONTRACT_FACETS.filter(name=>canonical(data.before.definition.facets[name])!==canonical(data.after.definition.facets[name]));
  const unknown=CONTRACT_FACETS.filter(name=>data.after.definition.facets[name]?.status!=='DEFINED');
  const sourceChanged=canonical(data.before.definition.producer)!==canonical(data.after.definition.producer);
- const consumers=new Map<string,Endpoint>();
- for(const consumer of [...data.before.definition.consumers,...data.after.definition.consumers])consumers.set(consumer.repository_id+':'+consumer.source_object_id,consumer);
+ const consumers=new Map<string,AffectedConsumer>();
+ const declare=(consumer:Endpoint,origin:ConsumerOrigin)=>{
+  const key=consumer.repository_id+':'+consumer.source_object_id,previous=consumers.get(key);
+  consumers.set(key,{repository_id:consumer.repository_id,source_object_id:consumer.source_object_id,
+   symbol_ids:[...new Set([...(previous?.symbol_ids??[]),...consumer.symbol_ids])],origins:[...new Set([...(previous?.origins??[]),origin])]});
+ };
+ for(const consumer of data.before.definition.consumers)declare(consumer,'BASELINE');
+ for(const consumer of data.after.definition.consumers)declare(consumer,'CANDIDATE');
  const limitations:string[]=[];let graph:unknown=null,graphComplete=false;
  if(v.graph_manifest_id){
   const manifestId=uuid(v.graph_manifest_id);
+  let capability:GraphCapability|null=null;
   try{
    const dependencies=(context as unknown as {dependencies?:{require:(id:string,key:string,guard:(value:unknown)=>boolean)=>unknown}}).dependencies;
    if(!dependencies)fail('CONTRACT_GRAPH_UNAVAILABLE','Graph capability is unavailable');
-   const capability=dependencies.require('7.4','graph.query.v1',graphCapability);
-   if(!graphCapability(capability))fail('CONTRACT_GRAPH_UNAVAILABLE','Graph capability is incompatible');
+   const resolved=dependencies.require('7.4','graph.query.v1',graphCapability);
+   if(!graphCapability(resolved))fail('CONTRACT_GRAPH_UNAVAILABLE','Graph capability is incompatible');
+   capability=resolved;
+  }catch(error){limitations.push('GRAPH_CAPABILITY_UNAVAILABLE');graph={error_code:reviewError(error).code};}
+  if(capability)try{
    const response=await capability.traverse({...binding,authority_epoch:data.authority_epoch,manifest_id:manifestId,
     symbol_ids:data.after.definition.producer.symbol_ids,direction:'callers',depth:4,max_nodes:500},context.invocation);
    if(!response||typeof response!=='object')fail('CONTRACT_GRAPH_UNAVAILABLE','Graph traversal did not return provenance');
@@ -100,20 +114,33 @@ export async function analyseContractImpact(context:ComponentContext,value:unkno
     const pins=sourceSet.filter(source=>source.repository_id===node.repository_id&&source.source_kind==='COMMIT'&&source.overlay_digest===null&&typeof source.commit==='string');
     if(pins.length!==1){graphComplete=false;limitations.push('GRAPH_CONSUMER_SOURCE_UNBOUND');continue;}
     const repository=uuid(node.repository_id),commit=oid(pins[0]!.commit),key=repository+':'+commit;
-    const previous=consumers.get(key),symbol=uuid(node.id);
-    if(repository===data.after.definition.producer.repository_id&&commit===data.after.definition.producer.source_object_id)continue;
-    consumers.set(key,{repository_id:repository,source_object_id:commit,symbol_ids:[...new Set([...(previous?.symbol_ids??[]),symbol])]});
+    const symbol=uuid(node.id);
+    if(repository===data.after.definition.producer.repository_id&&commit===data.after.definition.producer.source_object_id&&data.after.definition.producer.symbol_ids.includes(symbol))continue;
+    declare({repository_id:repository,source_object_id:commit,symbol_ids:[symbol]},'GRAPH');
    }
    if(!graphComplete)limitations.push('GRAPH_CONSUMERS_INCOMPLETE');
-  }catch(error){limitations.push('GRAPH_CAPABILITY_UNAVAILABLE');graph={error_code:reviewError(error).code};}
+  }catch(error){limitations.push('GRAPH_SNAPSHOT_UNAVAILABLE');graph={error_code:reviewError(error).code};}
  }else limitations.push('GRAPH_SNAPSHOT_REQUIRED');
  if(unknown.length)limitations.push('UNKNOWN_BEHAVIOURAL_FACETS');
  const scenarios=data.after.definition.scenario_templates;
  if(!scenarios.length)limitations.push('EXECUTABLE_REPRODUCTIONS_REQUIRED');
+ // Consumers whose own source is identical in both revisions (or only reached through the graph)
+ // remain affected by any behavioural change; an unchanged consumer is never evidence of compatibility.
+ const affected=[...consumers.values()],sides=affected.map(point=>({repository_id:point.repository_id,source_object_id:point.source_object_id,symbol_ids:point.symbol_ids}));
+ const unchangedConsumers=affected.filter(point=>point.origins.includes('BASELINE')===point.origins.includes('CANDIDATE')).map(point=>({repository_id:point.repository_id,source_object_id:point.source_object_id}));
+ const behavioural=changed.filter(name=>(BEHAVIOURAL_FACETS as readonly string[]).includes(name));
+ const producers={baseline:data.before.definition.producer,candidate:data.after.definition.producer};
+ // Each reproduction is a cross-component obligation pinned to both sides; symbol agreement never satisfies it.
+ const reproductions=changed.length?scenarios.map(scenario=>({template_id:scenario.template_id,assertion_ids:scenario.assertion_ids,
+  baseline_contract_id:data.before.id,candidate_contract_id:data.after.id,producer:producers,consumers:sides,facets:changed,status:'UNRUN'})):[];
+ const findings=changed.map(facet=>({facet,kind:behavioural.includes(facet)?'BEHAVIOURAL':'STRUCTURAL',
+  signature_unchanged:!changed.includes('signatures'),baseline:data.before.definition.facets[facet],candidate:data.after.definition.facets[facet],
+  producer:producers,consumers:sides,reproducer_template_ids:scenarios.map(scenario=>scenario.template_id),
+  status:scenarios.length?'REPRODUCTION_REQUIRED':'REPRODUCER_MISSING'}));
  return {baseline_contract_id:data.before.id,candidate_contract_id:data.after.id,
-  changed_facets:changed,unchanged_signatures:!changed.includes('signatures'),producer_source_changed:sourceChanged,
-  affected_consumers:[...consumers.values()],graph,unknown_facets:unknown,
-  required_reproductions:scenarios,analysis_complete:graphComplete&&!unknown.length,
+  changed_facets:changed,behavioural_facets_changed:behavioural,unchanged_signatures:!changed.includes('signatures'),producer_source_changed:sourceChanged,
+  affected_consumers:affected,unchanged_consumers:unchangedConsumers,graph,unknown_facets:unknown,
+  required_reproductions:scenarios,reproductions,findings,analysis_complete:graphComplete&&!unknown.length,
   requires_behavioural_qualification:true,qualification_status:'UNRUN',limitations};
 }
 export interface ContractCoverageBinding {repository_id:string;source_object_id:string;candidate_digest?:string;input_manifest_digest?:string}
