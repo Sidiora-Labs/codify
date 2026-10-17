@@ -1,9 +1,9 @@
 {
   "task": "7.2",
-  "commit": "6a91b0130b1d6a09407f5f786b975545dcdc937b",
-  "requalified_on": "6a91b0130b1d6a09407f5f786b975545dcdc937b",
+  "commit": "ff4632c9bc896057147975b600323af8f8b21f89",
+  "requalified_on": "ff4632c9bc896057147975b600323af8f8b21f89",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-011 --manifest tests/hyperfide/manifests/tasks/7.2.json && python3 tests/hyperfide/qualify.py --case V-022 --manifest tests/hyperfide/manifests/tasks/7.2.json",
-  "exit_code": 0,
-  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"af0fa8c7-9631-4bcf-a979-07877acb07b9\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/7.2/campaigns/0ec97892abf482096d90ad198178193ada671c82ce566729c9727406f832a9ca\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"02c253db-990b-41df-aee2-d22cae99bcff\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/7.2/campaigns/0ec97892abf482096d90ad198178193ada671c82ce566729c9727406f832a9ca\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}",
-  "ran_at": "2026-10-17T18:06:48.594Z"
+  "exit_code": 1,
+  "stdout_tail": "{\"status\": \"FAIL\", \"receipt_id\": \"e0dc8504-52d6-4e44-ac2a-091dcc47fe89\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/7.2/campaigns/831fa822648375aea0aadac032611df7a4ba4931c1187b9f10d9d909af5aacee\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": [\"executed assertion inventory differs from exact registration\", \"probe failed, was unavailable, or timed out\", \"required artifact missing or unsafe: graph/task-7.2-observations.json\"]}\n",
+  "ran_at": "2026-10-17T18:57:00.780153+00:00"
 }
