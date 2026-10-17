@@ -1,6 +1,6 @@
 # Maintainers
 
-This file lists the people responsible for Codify, what they own, and how maintainership works. It is the authoritative record; if GitHub permissions and this file ever disagree, this file wins and permissions get corrected.
+This file lists the people responsible for Hyperfide (released as Codify through 1.x), what they own, and how maintainership works. It is the authoritative record; if GitHub permissions and this file ever disagree, this file wins and permissions get corrected.
 
 ## Current maintainers
 
@@ -14,20 +14,24 @@ Contact for project matters: maintainers@sidiora.com
 
 - Review and merge pull requests
 - Triage issues and label them honestly, including closing ones that will not be worked on
-- Cut releases and write release notes
+- Cut releases and write release notes; nothing in the 2.0.0-dev tree is a release until an approved release is cut
 - Handle security reports per [SECURITY.md](SECURITY.md)
 - Enforce the [code of conduct](CODE_OF_CONDUCT.md)
-- Keep `docs/ARCHITECTURE.md` truthful as the code evolves
+- Keep `docs/ARCHITECTURE.md` and `docs/hyperfide/operations.md` truthful as the code evolves
+- Keep task `status` lines in `spec/hyperfide/spec.kvx` backed by the evidence under `artifacts/hyperfide/tasks/`
 
 ## Decision making
 
 Day-to-day decisions are made in issues and pull requests by whoever is doing the work, subject to review. Anything that changes an external contract gets extra scrutiny before merge:
 
-- CLI flags and output formats
+- CLI flags and output formats, for both `hyperfide` and the deprecated `cg` compatibility alias, which must keep identical arguments, JSON and exit codes for the compatibility window of the approved release
 - The `--json` schemas
-- MCP tool names and shapes
+- MCP tool names and shapes, and the `hyperfide://` and legacy `codify://` resource schemes
+- Configuration names: `codify.kvx` and its planned `hyperfide.kvx` successor, and the legacy `CG_*` and `CODIFY_*` environment aliases
 - The kvx grammar and spec render output (locked to golden files)
 - The snapshot object format
+- The control-service protocol and PostgreSQL migrations under `services/hyperfide/migrations/`
+- The qualification harness: the case registry, registrations and manifests under `tests/hyperfide/`
 
 Disagreements are resolved by discussion first. If discussion stalls, the lead maintainer decides. Decisions are recorded in the relevant issue so they do not have to be re-argued from memory.
 
