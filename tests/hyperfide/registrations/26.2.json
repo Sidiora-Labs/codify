@@ -5,7 +5,6 @@
   "scope": "task-component",
   "cases": [
     "V-026",
-    "V-027",
     "V-028"
   ],
   "assertion_ids": [
