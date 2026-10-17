@@ -137,7 +137,8 @@ static int drift_diff(const char *tree, const char *base, const char *head,
     return n;
 }
 
-/* Codify's own bookkeeping moves with every task and is nobody's drift */
+/* Workflow bookkeeping, configured spec/context directories and both config
+ * basenames are exempt from task-scope drift; product paths still need touches. */
 static bool drift_exempt(const char *tree, const char *path) {
     const char *ctx = config_context_rel(tree);
     size_t nc = strlen(ctx);

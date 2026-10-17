@@ -269,8 +269,9 @@ char *cg_meta_get(Cg *cg, const char *k);          /* malloc'd or NULL */
  * rebuilds them; memories/history/leases always survive. 0 ok */
 int  cg_schema_upgrade(Cg *cg);
 
-/* ---------------- project configuration (config.c): codify.kvx ---------------- */
-/* One optional file at the root of a tree. It travels with the branch like
+/* -------------- project configuration (config.c): hyperfide.kvx -------------- */
+/* Canonical root configuration; legacy codify.kvx remains selectable under the
+ * names-migration rules. Configuration travels with the branch like
  * the spec directory does, so every accessor takes the tree it asks about:
  * cg->root for the tree being worked on, cg->shared where a caller reads the
  * main tree's spec. Loaded once per tree per process; a missing file or key
