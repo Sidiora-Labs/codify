@@ -686,7 +686,7 @@
 <div id="root">
   <header id="ctxbar">
     <span class="dot" id="livedot"></span>
-    <span id="ctxfeature">codify</span>
+    <span id="ctxfeature">hyperfide</span>
     <span id="buildversion" title="Running Hyperfide extension version"></span>
     <button class="chip" id="taskchip" title="Attach a spec task to this chat">no task</button>
     <span class="pill" id="taskstatus"></span>
@@ -1825,7 +1825,7 @@
         breakBlocks();
         var card = makeCard('cg collapsible' + (m.open ? '' : ' closed') +
             (m.ok === false ? ' bad' : ' ok'), '⌘',
-            'cg ' + m.cmd, m.ok === false ? 'failed' : '');
+            'hyperfide ' + m.cmd, m.ok === false ? 'failed' : '');
         var bodyEl = card.querySelector('.body');
         bodyEl.appendChild(el('pre', 'wrap', m.output || '(no output)'));
         add(card);
@@ -2255,7 +2255,7 @@
             if (m.idle && !log.childElementCount) welcome();
         } else if (m.type === 'board') {
             document.getElementById('ctxfeature').textContent =
-                m.feature ? m.feature + (m.mode ? ' · ' + m.mode : '') : 'codify';
+                m.feature ? m.feature + (m.mode ? ' · ' + m.mode : '') : 'hyperfide';
         } else if (m.type === 'task') {
             setTask(m.task);
         } else if (m.type === 'adapter') {

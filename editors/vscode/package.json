@@ -804,7 +804,7 @@
         "codify.serve": {
           "type": "boolean",
           "default": true,
-          "description": "Keep one `cg serve` connection open for every call and live events (no polling). Off, or with an older cg, the extension shells out and polls as before."
+          "description": "Keep one `hyperfide serve` connection open for every call and live events (no polling). Off, or with an older hyperfide, the extension shells out and polls as before."
         },
         "codify.binaryPath": {
           "type": "string",
@@ -819,7 +819,7 @@
         "codify.languageServer": {
           "type": "boolean",
           "default": true,
-          "description": "Run `cg lsp` for go-to-definition, references, hover, code lens, and scope diagnostics. Turn off to use the task board alone."
+          "description": "Run `hyperfide lsp` for go-to-definition, references, hover, code lens, and scope diagnostics. Turn off to use the task board alone."
         },
         "codify.agentName": {
           "type": "string",
@@ -892,7 +892,7 @@
         "codify.agent.parallelism": {
           "type": "number",
           "default": 2,
-          "description": "Agent slots used by Hyperfide: Run Wave with Agents (cg spec run -n)."
+          "description": "Agent slots used by Hyperfide: Run Wave with Agents (hyperfide spec run -n)."
         },
         "hyperfide.binaryPath": {
           "type": "string",

@@ -176,7 +176,7 @@ function updateStatusBar(model) {
         ? `$(play-circle) ${cur.id} ${s.done}/${s.tasks}`
         : `$(checklist) ${s.feature} ${s.done}/${s.tasks}`;
     statusItem.tooltip = new vscode.MarkdownString(
-        `**Codify** — ${s.feature} (${s.mode} mode)\n\n` +
+        `**Hyperfide** — ${s.feature} (${s.mode} mode)\n\n` +
         `${pct}% done` +
         (cur ? `\n\nIn progress: **${cur.id}** ${cur.title}` : '') +
         (s.next ? `\n\nNext: **${s.next.id}** ${s.next.title}` : '') +
@@ -242,7 +242,7 @@ async function pickTask(statusFilter) {
             statusFilter ? `No ${statusFilter} tasks.` : 'No tasks.');
         return undefined;
     }
-    const pick = await vscode.window.showQuickPick(items, { placeHolder: 'Codify task' });
+    const pick = await vscode.window.showQuickPick(items, { placeHolder: 'Hyperfide task' });
     return pick && pick.id;
 }
 
@@ -487,18 +487,18 @@ async function cmdBrief() {
 
 async function cmdReview() {
     const r = await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Window, title: 'Codify: reviewing change' },
+        { location: vscode.ProgressLocation.Window, title: 'Hyperfide: reviewing change' },
         () => cg(['review']));
     openReport('review', 'Review', fence(r.stdout + r.stderr));
 }
 
 async function cmdCheck() {
     const r = await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Window, title: 'Codify: checking repository' },
+        { location: vscode.ProgressLocation.Window, title: 'Hyperfide: checking repository' },
         () => cg(['check']));
     show(r.stdout + r.stderr);
-    if (r.code !== 0) vscode.window.showErrorMessage('cg check found failures.');
-    else vscode.window.showInformationMessage('cg check passed.');
+    if (r.code !== 0) vscode.window.showErrorMessage('hyperfide check found failures.');
+    else vscode.window.showInformationMessage('hyperfide check passed.');
 }
 
 async function cmdGuard() {
@@ -748,8 +748,8 @@ async function activate(ctx) {
             out.appendLine('language server ready');
         } else {
             out.appendLine(
-                'language features are off — run `cg init` here, or set ' +
-                'codify.binaryPath if cg is not on PATH.');
+                'language features are off — run `hyperfide init` here, or set ' +
+                'hyperfide.binaryPath if hyperfide is not on PATH.');
         }
     }
 
@@ -765,7 +765,7 @@ async function activate(ctx) {
         serveClient = new ServeClient(binary(), root, (m) => out.appendLine(m));
         ctx.subscriptions.push({ dispose: () => serveClient.dispose() });
         if (await serveClient.start()) {
-            out.appendLine(`cg serve connected (events from #${serveClient.cursor})`);
+            out.appendLine(`hyperfide serve connected (events from #${serveClient.cursor})`);
             serveClient.on('event', (ev) => {
                 for (const fn of eventFans) { try { fn(ev); } catch (e) { out.appendLine(`event fan: ${e.message}`); } }
                 const applied = applyEvent(live, ev);
@@ -783,7 +783,7 @@ async function activate(ctx) {
             serveClient.on('down', () => scheduleRefresh());
             try { await serveClient.subscribe(); } catch (e) { out.appendLine(`subscribe: ${e.message}`); }
         } else if (serveClient.unsupported) {
-            out.appendLine('this cg has no `serve` — polling as before (update cg for live views)');
+            out.appendLine('this hyperfide has no `serve` — polling as before (update hyperfide for live views)');
             serveClient = null;
         } else {
             serveClient = null;

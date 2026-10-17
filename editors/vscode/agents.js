@@ -111,11 +111,11 @@ async function pickTask(filter, placeHolder) {
         .filter((t) => !filter || filter(t))
         .map((t) => ({ label: `${t.id}  ${t.title}`, description: t.status, id: t.id }));
     if (!items.length) {
-        vscode.window.showInformationMessage('Codify: no matching tasks.');
+        vscode.window.showInformationMessage('Hyperfide: no matching tasks.');
         return undefined;
     }
     const pick = await vscode.window.showQuickPick(items,
-        { placeHolder: placeHolder || 'Codify task' });
+        { placeHolder: placeHolder || 'Hyperfide task' });
     return pick && pick.id;
 }
 
@@ -137,18 +137,18 @@ async function promptFileFor(id) {
     if (id === '@docs' && !body.trim())
         throw new Error('Documentation evidence packet failed: ' + r.stderr);
     if (id === '@docs' && body.trim()) {
-        body = 'You own Codify\'s final @docs closure. Update only configured ' +
+        body = 'You own Hyperfide\'s final @docs closure. Update only configured ' +
             'documentation targets from this evidence, keep user, developer, ' +
-            'and release coverage explicit, then finish with `cg docs close`. ' +
-            'Do not run `cg spec run` or `cg spec done @docs`.\n\n' + body;
+            'and release coverage explicit, then finish with `hyperfide docs close`. ' +
+            'Do not run `hyperfide spec run` or `hyperfide spec done @docs`.\n\n' + body;
     }
     if (!body.trim()) {
         const b = await deps.cg(['brief']);
-        body = `You are resuming Codify task ${id}.\n\n` +
+        body = `You are resuming Hyperfide task ${id}.\n\n` +
             (b.stdout || '').trimEnd() + '\n\n' +
-            'Use `cg context <area>` to load relevant code, run ' +
-            `\`cg spec implemented ${id}\` or \`cg spec done ${id}\` when ` +
-            'finished, and `cg handoff` if you stop early.\n';
+            'Use `hyperfide context <area>` to load relevant code, run ' +
+            `\`hyperfide spec implemented ${id}\` or \`hyperfide spec done ${id}\` when ` +
+            'finished, and `hyperfide handoff` if you stop early.\n';
     }
     const dir = path.join(root, '.codegraph', 'agents');
     const file = path.join(dir, `vscode-${id}.prompt`);
@@ -156,7 +156,7 @@ async function promptFileFor(id) {
         fs.mkdirSync(dir, { recursive: true });
         fs.writeFileSync(file, body);
     } catch (e) {
-        vscode.window.showErrorMessage(`Codify: cannot write ${file}: ${e.message}`);
+        vscode.window.showErrorMessage(`Hyperfide: cannot write ${file}: ${e.message}`);
         return undefined;
     }
     return file;
@@ -169,7 +169,7 @@ async function offerRelease(id, agent, exitCode) {
         ? `Task ${id} is not complete.`
         : `The agent on ${id} exited (rc=${exitCode}) without completing it.`;
     const pick = await vscode.window.showWarningMessage(
-        `Codify: ${why} Release the claim held by ${claim.agent}?`,
+        `Hyperfide: ${why} Release the claim held by ${claim.agent}?`,
         'Release', 'Keep claim');
     if (pick !== 'Release') return;
     let r = await deps.cg(['spec', 'release', id, '--agent', claim.agent || agent]);
@@ -177,7 +177,7 @@ async function offerRelease(id, agent, exitCode) {
     if (r.code !== 0) r = await deps.cg(['spec', 'release', id]);
     if (r.code !== 0) {
         vscode.window.showErrorMessage(
-            `Codify: release of ${id} failed — ${firstLine(r.stderr || r.stdout)}`);
+            `Hyperfide: release of ${id} failed — ${firstLine(r.stderr || r.stdout)}`);
     }
     deps.refresh();
 }
@@ -186,7 +186,7 @@ async function offerRelease(id, agent, exitCode) {
 
 function openTerminal(id, agent, promptfile) {
     const term = vscode.window.createTerminal({
-        name: `codify: ${driverName()} ${id}`,
+        name: `hyperfide: ${driverName()} ${id}`,
         cwd: deps.workspaceRoot(),
     });
     sessions.set(id, { terminal: term, agent });
@@ -208,7 +208,7 @@ function runHeadless(id, agent, promptfile) {
             sessions.delete(id);
             stopPollingIfIdle();
             vscode.window.showErrorMessage(
-                `Codify: headless agent on ${id} failed to start: ${e.message}`);
+                `Hyperfide: headless agent on ${id} failed to start: ${e.message}`);
         });
     ensurePolling();
 }
@@ -221,7 +221,7 @@ async function startAgentSession(id, headless) {
     if (!deps.workspaceRoot()) return;
     if (sessions.has(id)) {
         vscode.window.showInformationMessage(
-            `Codify: a tracked agent session already exists for ${id}.`);
+            `Hyperfide: a tracked agent session already exists for ${id}.`);
         return;
     }
     const agent = `vscode-${++seq}`;
@@ -232,7 +232,7 @@ async function startAgentSession(id, headless) {
         if (c.code !== 0) {
             sessions.delete(id);
             vscode.window.showErrorMessage(
-                `Codify: claim of ${id} refused — ${firstLine(c.stderr || c.stdout)}`);
+                `Hyperfide: claim of ${id} refused — ${firstLine(c.stderr || c.stdout)}`);
             return;
         }
         claimed = true;
@@ -243,7 +243,7 @@ async function startAgentSession(id, headless) {
     if (s.code !== 0) {
         /* already in_progress is a normal pickup, not a stop */
         vscode.window.showWarningMessage(
-            `Codify: spec start ${id}: ${firstLine(s.stderr || s.stdout)}`);
+            `Hyperfide: spec start ${id}: ${firstLine(s.stderr || s.stdout)}`);
     }
     const promptfile = await promptFileFor(id);
     if (!promptfile) {
@@ -251,7 +251,7 @@ async function startAgentSession(id, headless) {
         /* do not leak the lease we just took */
         if (claimed) await deps.cg(['spec', 'release', id, '--agent', agent]);
         vscode.window.showErrorMessage(
-            `Codify: no agent session started on ${id} — could not seed its ` +
+            `Hyperfide: no agent session started on ${id} — could not seed its ` +
             `prompt${claimed ? '; claim released' : ''}.`);
         deps.refresh();
         return;
@@ -304,9 +304,9 @@ async function cmdHandoff(arg) {
     const r = await deps.cg(args);
     if (r.code !== 0) {
         vscode.window.showErrorMessage(
-            `Codify: cg handoff failed — ${firstLine(r.stderr || r.stdout)}`);
+            `Hyperfide: hyperfide handoff failed — ${firstLine(r.stderr || r.stdout)}`);
     } else {
-        vscode.window.showInformationMessage(`Codify: handoff recorded for ${id}.`);
+        vscode.window.showInformationMessage(`Hyperfide: handoff recorded for ${id}.`);
     }
     deps.refresh();
 }
@@ -318,7 +318,7 @@ async function cmdResume(arg) {
     if (!id) return;
     if (sessions.has(id)) {
         vscode.window.showInformationMessage(
-            `Codify: a tracked agent session already exists for ${id}.`);
+            `Hyperfide: a tracked agent session already exists for ${id}.`);
         return;
     }
     const agent = `vscode-${++seq}`;
@@ -334,13 +334,14 @@ async function cmdResume(arg) {
 
 async function cmdRunWave() {
     if (!deps.workspaceRoot()) return;
+    const executable = deps.binary();
     const n = config().get('agent.parallelism') || 2;
     const term = vscode.window.createTerminal({
-        name: 'codify: spec run', cwd: deps.workspaceRoot(),
+        name: 'hyperfide: spec run', cwd: deps.workspaceRoot(),
     });
     sessions.set(`wave:${++seq}`, { terminal: term, wave: true });
     term.show();
-    term.sendText(`${deps.binary()} spec run -n ${n} ` +
+    term.sendText(`${executable} spec run -n ${n} ` +
         `--driver ${driverName()}`, true);
     ensurePolling();
 }
@@ -349,12 +350,12 @@ async function cmdStop(arg) {
     let id = taskIdFrom(arg);
     if (!id || !sessions.has(id)) {
         const items = [...sessions.entries()].map(([key, s]) => ({
-            label: s.terminal ? s.terminal.name : `codify: headless ${key}`,
+            label: s.terminal ? s.terminal.name : `hyperfide: headless ${key}`,
             description: s.wave ? 'wave runner' : `task ${key}`,
             id: key,
         }));
         if (!items.length) {
-            vscode.window.showInformationMessage('Codify: no tracked agent sessions.');
+            vscode.window.showInformationMessage('Hyperfide: no tracked agent sessions.');
             return;
         }
         const pick = await vscode.window.showQuickPick(items,
@@ -420,7 +421,7 @@ function register(ctx, d) {
         const status = await taskStatus(id);
         if (status === 'done' || status === 'implemented') {
             vscode.window.showInformationMessage(
-                `Codify: headless agent finished ${id} (${status}).`);
+                `Hyperfide: headless agent finished ${id} (${status}).`);
         } else {
             offerRelease(id, s && s.agent, e.exitCode);
         }
@@ -773,7 +774,7 @@ function approvalCard(ev) {
         detail: `${p.by ? `asked by ${p.by}. ` : ''}Approve lets it go ahead once; reject stops it and the agent reports to its parent.`,
         options: p.state === 'pending' ? [
             { label: 'Approve', action: 'approve' }, { label: 'Reject', action: 'reject' }] : [],
-        commands: [`cg fleet approve ${p.id}`, `cg fleet approve ${p.id} --reject`],
+        commands: [`hyperfide fleet approve ${p.id}`, `hyperfide fleet approve ${p.id} --reject`],
     };
 }
 
