@@ -220,13 +220,14 @@ export function registerQualificationInputReader(ctx:ComponentContext):()=>void 
    assertInvocation(i);
    const scope={organisation_id:i.principal.organisation_id,run_id:i.principal.run_id};
    await assuranceBarrier(tx,scope,'SHARED');await i.guard(tx);
-   if(!['OPERATOR','COORDINATOR'].includes(i.principal.role))
+   if(!['OPERATOR','COORDINATOR','VERIFIER'].includes(i.principal.role))
     fail('QUALIFICATION_ROLE_DENIED','Result preparation admission requires its actual coordinator');
    const row=(await tx.query("SELECT p.*,j.state AS job_state,j.lease_generation::text AS current_generation "
     +"FROM hyperfide.assurance_preparation_intents p JOIN hyperfide.qualification_jobs j ON j.organisation_id=p.organisation_id AND j.run_id=p.run_id AND j.id=p.job_id "
     +"WHERE p.organisation_id=$1 AND p.run_id=$2 AND p.operation_id=$3 FOR SHARE OF p,j",
     [scope.organisation_id,scope.run_id,uuid(plan.operation_id)])).rows[0];
    if(!row)return null;
+   if(i.principal.role==='VERIFIER'&&i.principal.actor_id!==row.session_id)fail('QUALIFICATION_ROLE_DENIED','Only the intended independent verifier may prepare this result');
    const supplied={...plan,staging:plan.staging.filter(reference=>reference.role!=='readiness-context')};
    if(row.job_state!=='PENDING'||String(row.job_lease_generation)!==row.current_generation||
     row.plan.job_binding.namespace!=='QUALIFICATION'||canonical(row.plan)!==canonical(supplied))
@@ -281,7 +282,7 @@ export async function retainResultPreparationControls(ctx:ComponentContext,conte
  const stored=await retainArtifactBytes(ctx,scope,control.bytes);
  return {input_manifest_artifact_id:stored.artifact_id,input_manifest_digest:control.raw_control_digest,
   semantic_input_manifest_digest:control.semantic_input_manifest_digest,
-  staging:[reference('parent-manifest',parent),reference('input-manifest',stored)],
+  staging:[reference('parent-manifest',parent)],
   derived_profile_id,authority:'NONE',physical_readiness:'NOT_EVALUATED'};
 }
 
@@ -369,7 +370,7 @@ export async function planResultPreparation(ctx:ComponentContext,raw:unknown):Pr
   if(!job)fail('QUALIFICATION_NOT_FOUND','Preparation job disappeared');
   // Preparation binds the current job snapshot, including generation 0 before
   // its first verifier claim. Readiness must precede that execution lease.
-  const plan={operation_id:v.request_id,session_id:v.session_id,reservation_id:v.reservation_id,repository_id:context.result.repository_id,
+  const plan={target_binding_id:allocation.allocation_id,operation_id:v.request_id,session_id:v.session_id,reservation_id:v.reservation_id,repository_id:context.result.repository_id,
    timeout_ms:v.timeout_ms,recipe_id:'environment.prepare.v1',
    input_manifest_artifact_id:controls.input_manifest_artifact_id,input_manifest_digest:controls.input_manifest_digest,
    job_binding:{namespace:'QUALIFICATION',job_id:v.job_id,lease_generation:String(job.lease_generation),reservation_id:v.reservation_id,

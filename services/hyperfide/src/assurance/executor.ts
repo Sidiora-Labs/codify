@@ -1,3 +1,4 @@
+import {resultInputProducer} from './result_inputs.js';
 import {randomUUID} from 'node:crypto';
 import {inspectEffectiveResultInputs,registerQualificationInputReader,planResultPreparation,inspectResultPreparation} from './preparation.js';
 import type pg from 'pg';
@@ -231,7 +232,11 @@ export function qualificationOutcome(required:readonly string[],results:readonly
 /** Policy or inputs that changed after admission make the run stale; its gate result is never recorded. */
 export function assertSnapshotCurrent(admitted:{policy:unknown;inputs:unknown},current:{policy:unknown;inputs:unknown}):void{
  if(hash(current.policy)!==hash(admitted.policy))fail('QUALIFICATION_POLICY_STALE','Accepted proof registry changed during execution');
- if(canonical(current.inputs)!==canonical(admitted.inputs))fail('QUALIFICATION_INPUT_STALE','Inputs changed while independent verification ran');
+ if(canonical(current.inputs)!==canonical(admitted.inputs)){
+  const before=admitted.inputs as Data,after=current.inputs as Data;
+  const changed=[...new Set([...Object.keys(before??{}),...Object.keys(after??{})])].filter(key=>before?.[key]!==after?.[key]);
+  fail('QUALIFICATION_INPUT_STALE','Inputs changed while independent verification ran: '+changed.join(','));
+ }
 }
 /** Orchestrates actual remote sessions. No command or Git checkout runs on control. */
 export async function runRegisteredChecks(ctx:ComponentContext,job:Data,snapshot:Data):Promise<Data>{
@@ -476,8 +481,10 @@ async function inspectHistory(ctx:ComponentContext,raw:unknown):Promise<Data>{
 }
 export function createComponent(ctx:ComponentContext):Component & {capabilities:Record<string,unknown>}{
  const unregister=ctx.dependencies?registerQualificationInputReader(ctx):undefined;
- return {apiVersion:1,close:async()=>{unregister?.();},capabilities:{'assurance.execution.v1':Object.freeze({inspectExecutionReceipt})},actions:{
+ const producer=ctx.dependencies?resultInputProducer(ctx):undefined;
+ return {apiVersion:1,close:async()=>{unregister?.();producer?.close();},capabilities:{'assurance.execution.v1':Object.freeze({inspectExecutionReceipt})},actions:{
   'qualification.execution.inspect':(raw,requestContext)=>inspectExecution(requestContext,raw),
+  'qualification.preparation.execute':(raw,requestContext)=>producer!.execute(requestContext,raw),
   'qualification.preparation.plan':(raw,requestContext)=>planResultPreparation(requestContext,raw),
   'qualification.preparation.inspect':(raw,requestContext)=>inspectResultPreparation(requestContext,raw),
   'qualification.job.assign':(raw,requestContext)=>assignJob(requestContext,raw),

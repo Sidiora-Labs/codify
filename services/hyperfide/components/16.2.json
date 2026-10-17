@@ -16,13 +16,15 @@
     "qualification.preparation.plan",
     "qualification.preparation.inspect",
     "qualification.execution.inspect",
-    "qualification.history.inspect"
+    "qualification.history.inspect",
+    "qualification.preparation.execute"
   ],
   "requires": [
     "16.1",
     "12.1",
     "5.1",
     "12.4",
-    "15.2"
+    "15.2",
+    "8.2"
   ]
 }
