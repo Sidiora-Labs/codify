@@ -288,7 +288,7 @@ def main():
    h.check("observability.notifications.stale-replay-denied",stale_replay)
    def malformed_isolated():
     before=state();rows=f.ok("23.4","fleet.notifications.inspect",{"target_session_id":h.LEADER})["rows"]
-    refused(raw_send(b"{not json"),"INVALID_REQUEST","PROTOCOL_INVALID","AUTH_INVALID","INPUT_INVALID")
+    refused(raw_send(b"{not json"),"INVALID_JSON")
     h.expect(f.ok("23.4","fleet.notifications.enqueue",first)["replayed"],"Unrelated notice lost after malformed input")
     refused(raw_send(b'{"protocol_version":1,"payload_b64":"'+b"A"*(1024*1024+64)+b'"}'),"REQUEST_TOO_LARGE","CONNECTION_REFUSED_BY_SERVER")
     for value in [[first],"notice",dict(first,severity={"$ne":None}),dict(first,code="X"*4096),dict(first,target_session_id="../../"+h.LEADER)]:
