@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "variant": "task:24.1",
+  "task": "24.1",
+  "scope": "task-component",
+  "cases": [
+    "V-008",
+    "V-043"
+  ],
+  "assertion_ids": [
+    "recovery.control.real-registered-process",
+    "recovery.control.failover-requires-qualified-standby",
+    "recovery.control.supervisor-capability-absent-reported",
+    "recovery.control.rebind-equal-epoch-refused",
+    "recovery.control.rebind-outside-trusted-topology-refused",
+    "recovery.control.committed-global-epoch-without-physical-completion-refused",
+    "recovery.control.consistent-snapshot",
+    "recovery.control.no-duplicate-dispatch",
+    "recovery.control.event-state-same-primary",
+    "recovery.control.custody-independent",
+    "recovery.control.supervision-limit",
+    "recovery.control.stale-epoch",
+    "recovery.control.cross-organisation",
+    "recovery.offline.bounded-local",
+    "recovery.offline.reject-claim",
+    "recovery.offline.reject-renew",
+    "recovery.offline.reject-submit",
+    "recovery.offline.reject-publish",
+    "recovery.offline.reject-provision",
+    "recovery.offline.reject-qualify",
+    "recovery.offline.trusted-budget-ceiling",
+    "recovery.offline.safe-pause",
+    "recovery.offline.expired-budget",
+    "recovery.offline.malformed-time",
+    "recovery.offline.unknown-field",
+    "recovery.control.restart-control-process-lost",
+    "recovery.control.restart-reconstructs-durable-state",
+    "recovery.control.restart-pending-messages-reconstructed",
+    "recovery.control.restart-no-duplicate-dispatch",
+    "recovery.offline.restart-policy-unchanged",
+    "recovery.control.restart-supervision-limit",
+    "recovery.control.leader-manager-loss-keeps-healthy-work",
+    "recovery.control.adopt-unproven-supervisor",
+    "recovery.control.recorded-pid-not-progress",
+    "recovery.control.dead-pipe-not-progress",
+    "recovery.control.dead-pipe-adoption-refused",
+    "recovery.control.reused-pid-not-live",
+    "recovery.control.reused-pid-adoption-refused",
+    "recovery.control.native-resume-consistent-checkpoint",
+    "recovery.control.inconsistent-source-starts-fresh-session",
+    "recovery.control.native-resume-limitation-reported",
+    "recovery.control.active-run-cannot-resume",
+    "recovery.control.task-pointer-fences-adoption",
+    "recovery.control.cancellation-is-terminal",
+    "recovery.control.schema-drift-refusal"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/24_1.py"
+  ],
+  "timeout_seconds": 600,
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
+  "fixtures": [
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/transport/protocol.js",
+    "services/hyperfide/dist/recovery/control.js",
+    "services/hyperfide/dist/recovery/fencing.js",
+    "services/hyperfide/dist/storage/runtime.js",
+    "services/hyperfide/dist/storage/authority_journal.js",
+    "services/hyperfide/dist/storage/durability.js"
+  ],
+  "resources": [
+    {
+      "id": "hf-task-24.1-database",
+      "kind": "postgresql-database",
+      "scope": "task24.1-disposable"
+    }
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/24_1.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "required_artifacts": [
+    "recovery/database-absence.json",
+    "recovery/fixture.json"
+  ],
+  "source_files": [
+    "services/hyperfide/components/24.1.json",
+    "services/hyperfide/migrations/0024-recovery.sql",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/package.json",
+    "services/hyperfide/src/recovery/control.ts",
+    "services/hyperfide/tsconfig.json",
+    "tests/hyperfide/cases/tasks/24_1.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/registrations/24.1.json",
+    "tests/hyperfide/support/identity_fixture.py"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "https.fixture.listen"
+  ]
+}
