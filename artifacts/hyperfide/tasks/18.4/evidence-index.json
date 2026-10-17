@@ -1,0 +1,18 @@
+{
+  "task": "18.4",
+  "commit": "e0af734a70f876fc049297a904f57194834b5cdb",
+  "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-032 --manifest tests/hyperfide/manifests/tasks/18.4.json && python3 tests/hyperfide/qualify.py --case V-034 --manifest tests/hyperfide/manifests/tasks/18.4.json",
+  "exit_code": 1,
+  "stdout_tail": "$ V-032 (exit 1)\n{\"status\": \"FAIL\", \"receipt_id\": \"4004b4eb-d990-405a-b409-b646bf9f23eb\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/18.4/campaigns/73003584eaf18267e28c355a488d09cc49f0292bc5911f59e112e7bfb4ef48c0\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": [\"one or more behavioural assertions failed\", \"probe failed, was unavailable, or timed out\"]}\n$ V-034 run separately for evidence (exit 1; verify_cmd itself short-circuits after V-032)\n{\"status\": \"FAIL\", \"receipt_id\": \"8b807f5f-45ea-4762-8e62-63554f1e9e7b\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/18.4/campaigns/73003584eaf18267e28c355a488d09cc49f0292bc5911f59e112e7bfb4ef48c0\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": [\"one or more behavioural assertions failed\", \"probe failed, was unavailable, or timed out\"]}",
+  "ran_at": "2026-10-17T09:32:31Z",
+  "assertions": {
+    "registered": 31,
+    "passed": 28,
+    "failed": [
+      "findings.repair.genuine-execution-start-observed",
+      "findings.repair.genuine-independent-resolution",
+      "findings.repair.reopen-after-relevant-change"
+    ]
+  },
+  "unmet": "Failing assertions are deliberate producer gates: no integrated observed START receipt (12/13) or independent qualified repair proof (16/17) is reachable in the component fixture, and nothing is seeded. Reopen-after-relevant-change depends on that genuine resolution."
+}
