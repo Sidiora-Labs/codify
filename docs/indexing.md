@@ -28,7 +28,7 @@ flowchart LR
 Every registered adapter is listed below with the parser identity it
 records. `hyperfide info --json` and `hyperfide status --json` report that
 identity per branch under `index_health.parsers` (name and file count, for
-the files the index holds), and query answers repeat it per contributing
+the files the index holds, at most 32 entries ordered by file count), and query answers repeat it per contributing
 file in `index_health.source_validation.files[].parser`.
 
 | Source family | Indexing mode | Parser identity | Boundary |
@@ -37,7 +37,7 @@ file in `index_health.source_validation.files[].parser`.
 | C, C++, Objective-C, Go, Rust | Native syntax grammar | `tree-sitter:c`, `tree-sitter:cpp`, `tree-sitter:objc`, `tree-sitter:go`, `tree-sitter:rust` | Macro expansion, dynamic dispatch and unknown function-pointer targets remain boundaries. |
 | Python, Ruby, PHP | Native syntax grammar | `tree-sitter:python`, `tree-sitter:ruby`, `tree-sitter:php` | Runtime attribute assignment, reflection and dynamic imports cannot be inferred from syntax alone. |
 | Java, Kotlin, Scala, C#, Swift, Dart | Native syntax grammar | `tree-sitter:java`, `tree-sitter:kotlin`, `tree-sitter:scala`, `tree-sitter:csharp`, `tree-sitter:swift`, `tree-sitter:dart` | Overloads and ownership are recorded; dispatch without sufficient receiver or signature evidence stays unresolved. |
-| Lua, Luau, R, Erlang, Solidity, Terraform, Nix | Native syntax grammar | `tree-sitter/<language>/extended`, for example `tree-sitter/terraform/extended` (`.tf`, `.tfvars`, HCL grammar) | Structural facts are extracted; each language's supported relation kinds depend on the syntax evidence available. |
+| Lua, Luau, R, Erlang, Solidity, Terraform, Nix | Native syntax grammar | `tree-sitter/lua/extended`, `tree-sitter/luau/extended`, `tree-sitter/r/extended`, `tree-sitter/erlang/extended`, `tree-sitter/solidity/extended`, `tree-sitter/terraform/extended` (`.tf`, `.tfvars`, HCL grammar), `tree-sitter/nix/extended` | Structural facts are extracted; each language's supported relation kinds depend on the syntax evidence available. |
 | Pascal, COBOL, VB.NET, ArkTS | Native syntax grammar | `tree-sitter:pascal`, `tree-sitter:cobol`, `tree-sitter:vbnet`, `tree-sitter:arkts` | Error recovery can produce partial coverage; generated grammar facts do not imply runtime behavior. |
 | CFScript, CFQuery | Native syntax grammar, embedded | `tree-sitter:cfscript` for `.cfs` files; inside `.cfm` and `.cfc` files the CFML adapter parses `<cfscript>` and `<cfquery>` blocks with these grammars and the file records `declarative:cfml`; a script-syntax component (a file that begins with `component`) records `embedded:cfscript` | CFQuery has no file extension of its own; SQL identifiers are recorded as references, not as resolved database objects. |
 | CFML, Vue, Svelte, Astro, MyBatis XML | Embedded or declarative adapter | `declarative:cfml`, `declarative:vue`, `declarative:svelte`, `declarative:astro`, `declarative:xml` | Embedded facts retain source coordinates; only recognized script, template and mapping constructs receive relationships. |
@@ -50,9 +50,11 @@ source each (`src/ast_web.c`, `src/ast_systems.c`, `src/ast_dynamic.c`,
 `src/ast_managed.c`, `src/ast_extended.c`, `src/ast_mixed.c`); `src/ast.c`
 holds the shared runtime. The parser identity and status are stored per
 file. Native grammar support means that the file is parsed into syntax
-nodes; it does not mean that every language construct is modeled. If no
-adapter accepts a file, or parsing fails, the `src/lang.c` fallback records
-the parser as `heuristic`. Syntax recovery, excessive depth or node count,
+nodes; it does not mean that every language construct is modeled. If the
+syntax runtime cannot parse a file (source-size bound or parse timeout), the
+`src/lang.c` fallback records the parser as `heuristic`. A file whose
+extension has no language entry is tracked with parser `none`, status
+`skipped` and reason `unsupported_language`. Syntax recovery, excessive depth or node count,
 unreadable files, and unsupported input appear as partial, skipped, or
 failed coverage with reason codes. The scanner skips files above 8 MiB; the
 syntax runtime also bounds source size to 32 MiB, traversal to 500,000 nodes

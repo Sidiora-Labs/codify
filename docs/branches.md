@@ -185,7 +185,7 @@ rebuilt:
 |---|---|---|
 | `attempts` | `branch` | `hyperfide fleet begin` — the wave branch the work runs on |
 | `attempts` | `worktree` | `hyperfide fleet begin` — the checkout it runs in |
-| `attempts` | `parent` | the agent's `CG_PARENT` (alias `HYPERFIDE_PARENT`) |
+| `attempts` | `parent` | the agent's `HYPERFIDE_PARENT` (alias `CG_PARENT`) |
 | `memories` | `branch` | `hyperfide remember` — the branch the note was made on |
 | `memories` | `class` | `hyperfide memory classify` — Jev's class for the note |
 | `memories` | `confidence` | `hyperfide memory classify` — how sure it was |
@@ -193,7 +193,7 @@ rebuilt:
 `v18` widens the durable `agents` table the same way, for native sessions
 and subagents (`kind`, `host_kind`, `agent_id`, `agent_type`, `state`,
 `cwd`, `task`, `task_source`, `last_tool`, `tool_calls`, and more; see
-[events.md](events.md#native-agents-cg-hook-event)). The derived `files`
+[events.md](events.md#native-agents-hyperfide-hook-event)). The derived `files`
 table gained `base` (the last path segment) and `mtime_ns` within v18, also
 in place.
 

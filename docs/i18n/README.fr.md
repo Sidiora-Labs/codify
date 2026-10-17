@@ -18,7 +18,7 @@ La CLI locale est en C11 pur : un seul binaire, une seule base SQLite, aucune t�
 </div>
 <div align="center">
 
-[English](../../README.md)  [简体中文](README.zh-CN.md) · [Español](README.es.md) · [हिन्दी](README.hi.md) · [العربية](README.ar.md) · [Français](README.fr.md) · [Português (BR)](README.pt-BR.md)
+[English](../../README.md) · [简体中文](README.zh-CN.md) · [Español](README.es.md) · [हिन्दी](README.hi.md) · [العربية](README.ar.md) · [Français](README.fr.md) · [Português (BR)](README.pt-BR.md)
 </div>
 
 ---
@@ -314,7 +314,7 @@ Une mémoire classée porte sa classe partout où elle apparaît — `class skil
 | --- | --- |
 | `hyperfide mcp` | Tourne comme serveur MCP en stdio (il se présente comme `hyperfide`) : 67 outils, des ressources `hyperfide://` pour le workflow, chaque spec de fonctionnalité et le contexte d'agent (les URI héritées `codify://` sont encore lues), et les prompts `orient`, `start-work`, `review-change` et `close-task` |
 | `hyperfide lsp` | Tourne comme Language Server (stdio) — pour tous les éditeurs, pas seulement VS Code |
-| `hyperfide serve` | Une connexion JSON-RPC (stdio) pour un éditeur : chaque outil MCP, toute commande `hyperfide` (`exec`), `cancel` et abonnements aux événements poussés depuis un numéro de séquence. Inactif, il ne tient aucun verrou et ne lance aucune passe d'index. Voir [docs/events.md](../../docs/events.md#cg-serve) |
+| `hyperfide serve` | Une connexion JSON-RPC (stdio) pour un éditeur : chaque outil MCP, toute commande `hyperfide` (`exec`), `cancel` et abonnements aux événements poussés depuis un numéro de séquence. Inactif, il ne tient aucun verrou et ne lance aucune passe d'index. Voir [docs/events.md](../../docs/events.md#hyperfide-serve) |
 | `hyperfide tool list \| call <name> [json]` | Exécute un outil MCP depuis un shell, sans client MCP |
 | `hyperfide integrate detect\|plan\|apply\|doctor [--no-plugin]` | Configuration consciente des capacités pour Codex, Claude Code, Copilot/VS Code, Cursor, Gemini CLI, OpenCode, Zed, Windsurf, Cline et Continue ; `detect` est le défaut, la planification est en lecture seule, l'application est idempotente et sauvegardée par des copies `.codify.bak` |
 | `hyperfide mcp-install` | Alias de compatibilité pour `hyperfide integrate apply` |
@@ -534,7 +534,7 @@ Le flux complet, la supervision, les approbations, les briefings et un exemple d
 Une flotte travaille sur de nombreuses branches dans de nombreux worktrees d'un même dépôt, et Hyperfide les indexe toutes dans un seul `.codegraph/`. Un worktree lié se résout vers le projet partagé via le répertoire commun de git, donc `hyperfide init` y **rejoint** le projet au lieu d'exiger une seconde base :
 
 ```sh
-$ cd .codegraph/worktrees/wave-fleet-1 && cg init
+$ cd .codegraph/worktrees/wave-fleet-1 && hyperfide init
 joined /path/proj as worktree /path/proj/.codegraph/worktrees/wave-fleet-1 on branch wave/fleet/1
 
 $ hyperfide branches

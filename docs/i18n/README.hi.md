@@ -18,7 +18,7 @@
 </div>
 <div align="center">
 
-[English](../../README.md)  [简体中文](README.zh-CN.md) · [Español](README.es.md) · [हिन्दी](README.hi.md) · [العربية](README.ar.md) · [Français](README.fr.md) · [Português (BR)](README.pt-BR.md)
+[English](../../README.md) · [简体中文](README.zh-CN.md) · [Español](README.es.md) · [हिन्दी](README.hi.md) · [العربية](README.ar.md) · [Français](README.fr.md) · [Português (BR)](README.pt-BR.md)
 </div>
 
 ---
@@ -534,7 +534,7 @@ $ hyperfide fleet up --foreground --all -n 3 --max-fail 5
 Fleet एक रिपॉज़िटरी के कई worktrees में कई branches पर काम करता है, और Hyperfide उन सबको एक `.codegraph/` में इंडेक्स करता है। linked worktree git की common डायरेक्टरी के ज़रिए साझा प्रोजेक्ट तक पहुँचता है, इसलिए वहाँ `hyperfide init` दूसरा डेटाबेस माँगने के बजाय **जुड़ता** है:
 
 ```sh
-$ cd .codegraph/worktrees/wave-fleet-1 && cg init
+$ cd .codegraph/worktrees/wave-fleet-1 && hyperfide init
 joined /path/proj as worktree /path/proj/.codegraph/worktrees/wave-fleet-1 on branch wave/fleet/1
 
 $ hyperfide branches

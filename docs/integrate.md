@@ -34,7 +34,7 @@ entries start; its `initialize` answer names the server `hyperfide`.
 
 The skills and context directories come from `[paths]` in the project
 configuration (see [config.md](config.md)). Host entries use the absolute
-path of the running executable (`CG_BINARY`, or its alias `HYPERFIDE_BINARY`,
+path of the running executable (`HYPERFIDE_BINARY`, or its alias `CG_BINARY`,
 overrides it). The host config paths are those `detect` prints: Codex,
 Windsurf, Cline and Continue live under `$HOME`, the other six in the
 repository.
@@ -80,7 +80,7 @@ model.
 ## The Claude Code plugin
 
 The plugin is a one-plugin marketplace that `apply` renders from templates
-and the absolute path of the running executable (`CG_BINARY` overrides it).
+and the absolute path of the running executable (`HYPERFIDE_BINARY` overrides it).
 The plugin keeps its 1.x identity, `codify`:
 
 ```
@@ -126,7 +126,7 @@ follows `[hooks] shell_advice` (see [config.md](config.md)).
 
 ### Installing it
 
-When `claude` is on `PATH` (`CG_CLAUDE` or `HYPERFIDE_CLAUDE` names it
+When `claude` is on `PATH` (`HYPERFIDE_CLAUDE` or `CG_CLAUDE` names it
 outright), apply runs
 
 ```

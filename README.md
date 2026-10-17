@@ -314,7 +314,7 @@ A classified memory carries its class everywhere it appears — `class skill 0.8
 | --- | --- |
 | `hyperfide mcp` | Run as an MCP stdio server (it reports itself as `hyperfide`): 67 tools, `hyperfide://` resources for the workflow, each feature spec and the agent context (legacy `codify://` URIs are still read), and the prompts `orient`, `start-work`, `review-change` and `close-task` |
 | `hyperfide lsp` | Run as a Language Server (stdio) — every editor, not just VS Code |
-| `hyperfide serve` | One JSON-RPC connection (stdio) for an editor: every MCP tool, any `hyperfide` command (`exec`), `cancel`, and pushed event subscriptions from a sequence number. Idle, it holds no lock and runs no index pass. See [docs/events.md](docs/events.md#cg-serve) |
+| `hyperfide serve` | One JSON-RPC connection (stdio) for an editor: every MCP tool, any `hyperfide` command (`exec`), `cancel`, and pushed event subscriptions from a sequence number. Idle, it holds no lock and runs no index pass. See [docs/events.md](docs/events.md#hyperfide-serve) |
 | `hyperfide tool list \| call <name> [json]` | Run one MCP tool from a shell, without an MCP client |
 | `hyperfide integrate detect\|plan\|apply\|doctor [--no-plugin]` | Capability-aware setup for Codex, Claude Code, Copilot/VS Code, Cursor, Gemini CLI, OpenCode, Zed, Windsurf, Cline, and Continue; `detect` is the default, planning is read-only, apply is idempotent and backed up with `.codify.bak` copies |
 | `hyperfide mcp-install` | Compatibility alias for `hyperfide integrate apply` |

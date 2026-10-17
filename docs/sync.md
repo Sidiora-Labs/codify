@@ -72,7 +72,7 @@ The windows the built-in callers use:
 
 | Caller | Window | Lock wait |
 |---|---|---|
-| read-mostly CLI (`review`, `brief`, `agentmd`, `commit`) | 3000 ms | full `CG_BUSY_TIMEOUT_MS` |
+| read-mostly CLI (`review`, `brief`, `agentmd`, `commit`) | 3000 ms | full `HYPERFIDE_BUSY_TIMEOUT_MS` |
 | `hyperfide mcp` tool calls that sync first | 1500 ms | bounded |
 | `hyperfide lsp` | 3000 ms | short, never blocking |
 | `hyperfide spec` graph checks | none — always walks | full wait |
@@ -107,7 +107,7 @@ still runs. A hook or editor that calls `hyperfide sync` itself passes
 
 Freshness and coalescing bound one project. Slots bound the machine: a
 directory of lock files under `/tmp/codify-<uid>` (override with
-`CG_SLOT_DIR`), `cores_effective / 4` of them by default (`CG_INDEX_SLOTS`
+`HYPERFIDE_SLOT_DIR`), `cores_effective / 4` of them by default (`HYPERFIDE_INDEX_SLOTS`
 overrides, minimum 1).
 
 A pass that wants more than two parse threads must hold a slot. Without
@@ -117,7 +117,7 @@ therefore share the cores instead of each claiming all of them.
 The worker budget for one pass (`syncgate_worker_budget`), in order:
 
 1. The count asked for — the first of `--workers N` on `hyperfide index` or
-   `hyperfide sync`, `CG_INDEX_WORKERS`, `[index] workers` in the project
+   `hyperfide sync`, `HYPERFIDE_INDEX_WORKERS`, `[index] workers` in the project
    configuration (`hyperfide.kvx`, or a legacy `codify.kvx` when that is
    the only one)
    ([docs/config.md](config.md#index-workers)), and the machine's sized
@@ -227,9 +227,9 @@ pass` at the gate, `waiting 1.4s for the database write lock` between chunks
 — so a wait is never mistaken for a hang. The stall and busy messages are
 unchanged.
 
-Piped output prints nothing new. `CG_PROGRESS=plain` prints one plain line
+Piped output prints nothing new. `HYPERFIDE_PROGRESS=plain` prints one plain line
 (no escape codes) at each phase change and at most every two seconds;
-`CG_PROGRESS=0` turns progress off everywhere. `--json`, `--auto`,
+`HYPERFIDE_PROGRESS=0` turns progress off everywhere. `--json`, `--auto`,
 `--background`, the post-edit hook, the freshness pass before read
 commands, and the MCP, LSP, serve, watch, fleet, and editor refreshes never
 show it. The counts come from the consumer loop the pipeline already runs;
@@ -242,7 +242,7 @@ it, and resolving references. Each one scales with the size of the change,
 not with the size of the repository, wherever it can.
 
 - **The walk is parallel.** Directories go into a shared queue, and walk
-  threads read them (the parse budget, or `CG_WALK_THREADS`). The result is
+  threads read them (the parse budget, or `HYPERFIDE_WALK_THREADS`). The result is
   sorted, so the file list does not depend on the thread count. `.cgignore`,
   `.gitignore` and the size cap apply as before.
 - **Git can supply the candidates.** With `[index] walk = git`
@@ -318,12 +318,12 @@ Each variable also answers to its `HYPERFIDE_` name (`HYPERFIDE_INDEX_WORKERS`,
 
 | Variable | Effect |
 |---|---|
-| `CG_INDEX_WORKERS` | parse threads for any pass, 1–64: beats `[index] workers`, yields to `--workers` (`auto`/`0`/unusable: unset) |
-| `CG_INDEX_SLOTS` | machine-wide parse slots (default `cores/4`, minimum 1) |
-| `CG_SLOT_DIR` | where the slot files live (default `/tmp/codify-<uid>`) |
-| `CG_BUSY_TIMEOUT_MS` | how long a CLI write waits for the database lock (default 30000) |
-| `CG_PROGRESS` | `plain`: progress as plain lines even when piped; `0`: no progress |
-| `CG_WALK_THREADS` | walk threads for a whole-tree pass (default: the parse budget, 1–64) |
+| `HYPERFIDE_INDEX_WORKERS` | parse threads for any pass, 1–64: beats `[index] workers`, yields to `--workers` (`auto`/`0`/unusable: unset) |
+| `HYPERFIDE_INDEX_SLOTS` | machine-wide parse slots (default `cores/4`, minimum 1) |
+| `HYPERFIDE_SLOT_DIR` | where the slot files live (default `/tmp/codify-<uid>`) |
+| `HYPERFIDE_BUSY_TIMEOUT_MS` | how long a CLI write waits for the database lock (default 30000) |
+| `HYPERFIDE_PROGRESS` | `plain`: progress as plain lines even when piped; `0`: no progress |
+| `HYPERFIDE_WALK_THREADS` | walk threads for a whole-tree pass (default: the parse budget, 1–64) |
 
 ## The Hyperfide control plane
 

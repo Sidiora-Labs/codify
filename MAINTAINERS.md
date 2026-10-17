@@ -27,7 +27,7 @@ Day-to-day decisions are made in issues and pull requests by whoever is doing th
 - CLI flags and output formats, for both `hyperfide` and the deprecated `cg` compatibility alias, which must keep identical arguments, JSON and exit codes for the compatibility window of the approved release
 - The `--json` schemas
 - MCP tool names and shapes, and the `hyperfide://` and legacy `codify://` resource schemes
-- Configuration names: `codify.kvx` and its planned `hyperfide.kvx` successor, and the legacy `CG_*` and `CODIFY_*` environment aliases
+- Configuration names: `hyperfide.kvx` and the legacy `codify.kvx` it replaces, and the legacy `CG_*` and `CODIFY_*` aliases of the canonical `HYPERFIDE_*` environment variables
 - The kvx grammar and spec render output (locked to golden files)
 - The snapshot object format
 - The control-service protocol and PostgreSQL migrations under `services/hyperfide/migrations/`

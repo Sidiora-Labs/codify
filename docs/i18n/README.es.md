@@ -314,7 +314,7 @@ Una memoria clasificada lleva su clase allí donde aparece — `class skill 0.82
 | --- | --- |
 | `hyperfide mcp` | Se ejecuta como servidor MCP por stdio (se identifica como `hyperfide`): 67 herramientas, recursos `hyperfide://` para el flujo de trabajo, cada spec de funcionalidad y el contexto del agente (las URI heredadas `codify://` se siguen leyendo), y los prompts `orient`, `start-work`, `review-change` y `close-task` |
 | `hyperfide lsp` | Se ejecuta como Language Server (stdio) — para cualquier editor, no solo VS Code |
-| `hyperfide serve` | Una conexión JSON-RPC (stdio) para un editor: cada herramienta MCP, cualquier comando `hyperfide` (`exec`), `cancel` y suscripciones a eventos enviados desde un número de secuencia. Inactivo, no retiene ningún lock ni ejecuta pasadas de índice. Ver [docs/events.md](../../docs/events.md#cg-serve) |
+| `hyperfide serve` | Una conexión JSON-RPC (stdio) para un editor: cada herramienta MCP, cualquier comando `hyperfide` (`exec`), `cancel` y suscripciones a eventos enviados desde un número de secuencia. Inactivo, no retiene ningún lock ni ejecuta pasadas de índice. Ver [docs/events.md](../../docs/events.md#hyperfide-serve) |
 | `hyperfide tool list \| call <name> [json]` | Ejecuta una herramienta MCP desde la shell, sin cliente MCP |
 | `hyperfide integrate detect\|plan\|apply\|doctor [--no-plugin]` | Configuración consciente de capacidades para Codex, Claude Code, Copilot/VS Code, Cursor, Gemini CLI, OpenCode, Zed, Windsurf, Cline y Continue; `detect` es el valor por defecto, planificar es de solo lectura, aplicar es idempotente y con copias de seguridad `.codify.bak` |
 | `hyperfide mcp-install` | Alias de compatibilidad de `hyperfide integrate apply` |
@@ -534,7 +534,7 @@ El flujo completo, la supervisión, las aprobaciones, los briefings y un ejemplo
 Una flota trabaja en muchas ramas en muchos worktrees de un repositorio, y Hyperfide los indexa todos en un único `.codegraph/`. Un worktree enlazado se resuelve al proyecto compartido a través del directorio común de git, así que `hyperfide init` allí **se une** en lugar de exigir una segunda base de datos:
 
 ```sh
-$ cd .codegraph/worktrees/wave-fleet-1 && cg init
+$ cd .codegraph/worktrees/wave-fleet-1 && hyperfide init
 joined /path/proj as worktree /path/proj/.codegraph/worktrees/wave-fleet-1 on branch wave/fleet/1
 
 $ hyperfide branches

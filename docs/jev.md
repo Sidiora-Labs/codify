@@ -70,15 +70,15 @@ response body.
 | Variable | Default | Meaning |
 |---|---|---|
 | `OPENROUTER_API_KEY` | — | **mandatory**; no key, no call |
-| `CG_JEV_MODEL` | `typesafe/jev-1.13` | model id |
-| `CG_JEV_ENDPOINT` | `https://openrouter.ai/api/alpha/decisions` | decisions endpoint |
-| `CG_JEV_CURL` | `curl` | a path, or a name looked up on `PATH` |
-| `CG_JEV_TIMEOUT` | `30` | seconds per attempt (a many-question request through `jev_ask_at`, which `hyperfide recap` uses, gets `180` when unset) |
-| `CG_JEV_ATTEMPTS` | `4` | attempts including the first |
-| `CG_JEV_BACKOFF_MS` | `500` | first backoff; doubles per retry |
+| `HYPERFIDE_JEV_MODEL` | `typesafe/jev-1.13` | model id |
+| `HYPERFIDE_JEV_ENDPOINT` | `https://openrouter.ai/api/alpha/decisions` | decisions endpoint |
+| `HYPERFIDE_JEV_CURL` | `curl` | a path, or a name looked up on `PATH` |
+| `HYPERFIDE_JEV_TIMEOUT` | `30` | seconds per attempt (a many-question request through `jev_ask_at`, which `hyperfide recap` uses, gets `180` when unset) |
+| `HYPERFIDE_JEV_ATTEMPTS` | `4` | attempts including the first |
+| `HYPERFIDE_JEV_BACKOFF_MS` | `500` | first backoff; doubles per retry |
 
-Each `CG_JEV_*` variable is also read as `HYPERFIDE_JEV_*`
-(`HYPERFIDE_JEV_MODEL`, …). Set one name, or both to the same value: two
+Each `HYPERFIDE_JEV_*` variable is also read under its legacy alias `CG_JEV_*`
+(`CG_JEV_MODEL`, …). Set one name, or both to the same value: two
 different values make every command print `hyperfide: conflicting variable
 aliases for HYPERFIDE_JEV_MODEL (values redacted)` and exit 78.
 `OPENROUTER_API_KEY` has no alias.
@@ -346,7 +346,7 @@ noise on the protocol stream.
 
 ## Testing without the network
 
-`CG_JEV_CURL` points at any executable that speaks curl's `-K <config>`
+`HYPERFIDE_JEV_CURL` points at any executable that speaks curl's `-K <config>`
 interface. `tests/fixtures/jev/fake-curl.sh` reads the same config,
 records the body that would have been sent, and answers from
 `JEV_FAKE_MODE` — `ok`, `429-once`, `529-once`, `500`, `down`, `garbage`,

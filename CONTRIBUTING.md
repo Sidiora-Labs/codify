@@ -167,7 +167,7 @@ The changelog is generated from these subject lines, so the prefix matters. Star
 ./hyperfide changelog -o CHANGELOG.md
 ```
 
-With `CENTRA_API_KEY` (or `CG_CHANGELOG_KEY`) in your environment or in `.env` (which is gitignored), each release also gets a model-written `### Highlights` paragraph. Summaries are cached under `.codegraph/changelog-cache/`, so only new releases cost a call; `--no-summarize` keeps the model out. Without a key the file is the plain derived record. Review the highlights like any other prose: the model is told not to invent anything, but it is not checked.
+With `CENTRA_API_KEY` (or `HYPERFIDE_CHANGELOG_KEY`) in your environment or in `.env` (which is gitignored), each release also gets a model-written `### Highlights` paragraph. Summaries are cached under `.codegraph/changelog-cache/`, so only new releases cost a call; `--no-summarize` keeps the model out. Without a key the file is the plain derived record. Review the highlights like any other prose: the model is told not to invent anything, but it is not checked.
 
 `cliff.toml` at the repository root is the matching git-cliff configuration. git-cliff knows only tags, so it agrees with `hyperfide changelog` for a tags-only repository with no version file and no key; test `29_changelog.sh` checks the shared rules (groups, scopes, breaking marks, task references, links). If you change the groups or the bullet shape, change `cliff.toml` and the renderer together.
 

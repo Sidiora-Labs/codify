@@ -54,7 +54,7 @@ Three ways in, one table:
 | `memory.add`, `memory.import` | a memory was written; memories were imported (`hyperfide memory import`) |
 | `agent.activity` | a runtime event was ingested (`hyperfide event ingest`): source, kind, attempt, evidence delta |
 
-Retention is by count: 50000 events by default (`CG_EVENTS_KEEP`), pruned
+Retention is by count: 50000 events by default (`HYPERFIDE_EVENTS_KEEP`), pruned
 in batches. `seq` is `AUTOINCREMENT`, so a number is never reused after a
 prune, and `meta.events_pruned_through` tells a reader whose cursor fell
 behind the prune that it missed events.
@@ -195,7 +195,7 @@ worktree, branch, task, and task_source.
   the worktree and its branch on the agent (read from the repository's own
   files, no process spawned) and registers the branch in `hyperfide branches` with
   base the session's branch.
-- **Tasks**, in order, with `task_source`: `env` (`CG_TASK` in the hook's
+- **Tasks**, in order, with `task_source`: `env` (`HYPERFIDE_TASK` in the hook's
   environment), `attempt` (a live attempt whose session is this session),
   `prompt` (a task id of the active feature named in the spawn's
   description or prompt — a bare dotted id such as `2.1` or a

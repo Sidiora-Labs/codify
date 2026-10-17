@@ -528,7 +528,7 @@ $ hyperfide fleet up --foreground --all -n 3 --max-fail 5
 一支 fleet 在同一个仓库的许多 worktree 中、许多分支上工作,而 Hyperfide 把它们全部索引进同一个 `.codegraph/`。关联 worktree 通过 git 的公共目录解析到共享项目,因此在那里运行 `hyperfide init` 会**加入**共享图,而不是要求再建一个数据库:
 
 ```sh
-$ cd .codegraph/worktrees/wave-fleet-1 && cg init
+$ cd .codegraph/worktrees/wave-fleet-1 && hyperfide init
 joined /path/proj as worktree /path/proj/.codegraph/worktrees/wave-fleet-1 on branch wave/fleet/1
 
 $ hyperfide branches

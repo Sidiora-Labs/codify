@@ -18,7 +18,7 @@ A CLI local é C11 puro: um único binário, um único banco SQLite, nenhuma tel
 </div>
 <div align="center">
 
-[English](../../README.md)  [简体中文](README.zh-CN.md) · [Español](README.es.md) · [हिन्दी](README.hi.md) · [العربية](README.ar.md) · [Français](README.fr.md) · [Português (BR)](README.pt-BR.md)
+[English](../../README.md) · [简体中文](README.zh-CN.md) · [Español](README.es.md) · [हिन्दी](README.hi.md) · [العربية](README.ar.md) · [Français](README.fr.md) · [Português (BR)](README.pt-BR.md)
 </div>
 
 ---
@@ -536,7 +536,7 @@ O fluxo completo, a supervisão, as aprovações, os briefings e um exemplo trab
 Uma frota trabalha em muitas branches, em muitas worktrees de um repositório, e o Hyperfide indexa todas elas em um único `.codegraph/`. Uma worktree vinculada resolve para o projeto compartilhado pelo diretório comum do git, então `hyperfide init` ali **entra** no grafo em vez de exigir um segundo banco:
 
 ```sh
-$ cd .codegraph/worktrees/wave-fleet-1 && cg init
+$ cd .codegraph/worktrees/wave-fleet-1 && hyperfide init
 joined /path/proj as worktree /path/proj/.codegraph/worktrees/wave-fleet-1 on branch wave/fleet/1
 
 $ hyperfide branches

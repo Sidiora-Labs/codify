@@ -18,7 +18,7 @@
 </div>
 <div align="center">
 
-[English](../../README.md)  [简体中文](README.zh-CN.md) · [Español](README.es.md) · [हिन्दी](README.hi.md) · [العربية](README.ar.md) · [Français](README.fr.md) · [Português (BR)](README.pt-BR.md)
+[English](../../README.md) · [简体中文](README.zh-CN.md) · [Español](README.es.md) · [हिन्दी](README.hi.md) · [العربية](README.ar.md) · [Français](README.fr.md) · [Português (BR)](README.pt-BR.md)
 </div>
 
 ---
@@ -313,7 +313,7 @@ hyperfide codemap -o - --json      # the same map as structured data
 | --- | --- |
 | `hyperfide mcp` | يعمل كخادم MCP عبر stdio (يعرّف نفسه بالاسم `hyperfide`): 67 أداة، وموارد `hyperfide://` لسير العمل ولكل مواصفة ميزة ولسياق الوكيل (وما زالت عناوين `codify://` القديمة تُقرأ)، والقوالب `orient` و`start-work` و`review-change` و`close-task` |
 | `hyperfide lsp` | يعمل كخادم لغة (stdio) — لكل محرر، لا لـ VS Code وحده |
-| `hyperfide serve` | اتصال JSON-RPC واحد (stdio) للمحرر: كل أداة MCP، وأي أمر `hyperfide` (`exec`)، و`cancel`، واشتراكات أحداث مدفوعة من رقم تسلسلي. وهو خامل لا يمسك قفلًا ولا يشغّل تمريرة فهرسة. انظر [docs/events.md](../../docs/events.md#cg-serve) |
+| `hyperfide serve` | اتصال JSON-RPC واحد (stdio) للمحرر: كل أداة MCP، وأي أمر `hyperfide` (`exec`)، و`cancel`، واشتراكات أحداث مدفوعة من رقم تسلسلي. وهو خامل لا يمسك قفلًا ولا يشغّل تمريرة فهرسة. انظر [docs/events.md](../../docs/events.md#hyperfide-serve) |
 | `hyperfide tool list \| call <name> [json]` | يشغّل أداة MCP واحدة من الصدفة، دون عميل MCP |
 | `hyperfide integrate detect\|plan\|apply\|doctor [--no-plugin]` | إعداد واعٍ بالقدرات لـ Codex وClaude Code وCopilot/VS Code وCursor وGemini CLI وOpenCode وZed وWindsurf وCline وContinue؛ و`detect` هو الافتراضي، والتخطيط للقراءة فقط، والتطبيق متساوي الأثر ومدعوم بنسخ احتياطية `.codify.bak` |
 | `hyperfide mcp-install` | اسم بديل للتوافق لـ `hyperfide integrate apply` |
@@ -533,7 +533,7 @@ $ hyperfide fleet up --foreground --all -n 3 --max-fail 5
 يعمل الأسطول على فروع كثيرة في أشجار عمل كثيرة لمستودع واحد، ويفهرسها Hyperfide كلها في `.codegraph/` واحد. تُحل شجرة العمل المرتبطة إلى المشروع المشترك عبر مجلد git المشترك، فيكون `hyperfide init` فيها **انضمامًا** بدلًا من المطالبة بقاعدة بيانات ثانية:
 
 ```sh
-$ cd .codegraph/worktrees/wave-fleet-1 && cg init
+$ cd .codegraph/worktrees/wave-fleet-1 && hyperfide init
 joined /path/proj as worktree /path/proj/.codegraph/worktrees/wave-fleet-1 on branch wave/fleet/1
 
 $ hyperfide branches

@@ -2,8 +2,8 @@
 
 An agent finishing a task should not be derailed because an editor's
 `hyperfide lsp` happens to be re-indexing the tree. When a lifecycle write is still
-blocked after the lock wait (`CG_BUSY_TIMEOUT_MS`, alias
-`HYPERFIDE_BUSY_TIMEOUT_MS`, 30 s by default), `hyperfide` appends it to a journal under `.codegraph/journal/`. The command then exits 0
+blocked after the lock wait (`HYPERFIDE_BUSY_TIMEOUT_MS`, alias
+`CG_BUSY_TIMEOUT_MS`, 30 s by default), `hyperfide` appends it to a journal under `.codegraph/journal/`. The command then exits 0
 with its own result complete and says the write is queued. The next `hyperfide`
 process that gets the write lock applies the queue.
 

@@ -33,7 +33,7 @@ drift: 4 public symbol(s) changed but not declared: alpha (src/a.ts) beta (src/b
 drift: declare them in the task (touches/symbols) or keep the change inside its scope
 ```
 
-`--base` defaults to `CG_BASE` (alias `HYPERFIDE_BASE`) when the fleet set
+`--base` defaults to `HYPERFIDE_BASE` (alias `CG_BASE`) when the fleet set
 it, else `HEAD`. At `hyperfide spec done` a finding is advice and never a reason to refuse: the task still
 qualifies on its `verify_cmd` and graph checks. At `merge-up` it is advice
 too, unless a role lists `drift` in `approve` — then the merge waits for

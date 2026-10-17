@@ -61,7 +61,7 @@ hyperfide docs trace
 
 For shared workspaces, claim `@docs` first with `hyperfide spec claim @docs --agent docs --ttl 30 --json`. Retain the returned attempt ID and fence, and supply them with `--agent`, `--attempt`, and `--fence` to `hyperfide spec start @docs` and heartbeat calls. The claim/heartbeat `--ttl` is in minutes; the orchestrator's `[agents] ttl` setting is in seconds.
 
-For `hyperfide docs close`, an owned session passes `CG_AGENT`, `CG_TASK`, `CG_ATTEMPT`, and `CG_FENCE` in its environment (each is also read as `HYPERFIDE_AGENT`, `HYPERFIDE_TASK`, `HYPERFIDE_ATTEMPT`, `HYPERFIDE_FENCE`; setting both spellings to different values is refused). `CG_TASK` must be the exact `feature-name/@docs`. The orchestrator supplies these automatically. A live claim cannot be bypassed by omitting its credentials, and a stale fence cannot complete a replacement attempt.
+For `hyperfide docs close`, an owned session passes `HYPERFIDE_AGENT`, `HYPERFIDE_TASK`, `HYPERFIDE_ATTEMPT`, and `HYPERFIDE_FENCE` in its environment (each is also read under its legacy alias `CG_AGENT`, `CG_TASK`, `CG_ATTEMPT`, `CG_FENCE`; setting both spellings to different values is refused). `HYPERFIDE_TASK` must be the exact `feature-name/@docs`. The orchestrator supplies these automatically. A live claim cannot be bypassed by omitting its credentials, and a stale fence cannot complete a replacement attempt.
 
 Keep unrelated code changes out of the documentation run. Checks compare the working tree with Hyperfide's latest snapshot, not Git HEAD. Snapshot reviewed implementation work with `hyperfide commit` before documentation starts; do not commit away documentation edits just to hide a failing check. `hyperfide docs close` owns their final snapshot.
 

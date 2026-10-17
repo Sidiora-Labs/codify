@@ -282,7 +282,9 @@ escalation to the wave manager names the live finding on the conflicting
 path, if there is one. That is the conflict the projection predicted
 before the land.
 
-## Following the work {#live}
+<a id="live"></a>
+
+## Following the work
 
 Nobody has to run `hyperfide projection build`. Work marks the projection dirty
 (the note is `.codegraph/projection.dirty`), and the next trigger starts one

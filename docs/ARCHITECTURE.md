@@ -44,7 +44,7 @@ runtime dispatch knowledge.
   budgets derive from that, so the same binary behaves sanely on a
   16-core workstation and a 512 MB container. The machine's own worker
   pick stays at or under 16; a person may ask for more — `--workers N`,
-  `CG_INDEX_WORKERS` (or `HYPERFIDE_INDEX_WORKERS`), or `[index] workers` in
+  `HYPERFIDE_INDEX_WORKERS` (or `CG_INDEX_WORKERS`), or `[index] workers` in
   the project configuration file, in that order
   of precedence, up to `CG_MAX_WORKERS` (64) — and
   `syncgate_worker_request` is the one place that resolves the request
@@ -143,7 +143,7 @@ runtime dispatch knowledge.
   beneath it. `cg_find_project_at` returns both halves — the tree to
   operate on and the shared project that owns the database — which differ
   only inside a linked git worktree, where the shared project is found
-  through git's common directory. `CODIFY_ROOT` (alias `HYPERFIDE_ROOT`)
+  through git's common directory. `HYPERFIDE_ROOT` (alias `CODIFY_ROOT`)
   overrides the walk;
   `hyperfide root` prints the answer.
 - **`graph.c`** implements the query commands (`search`, `symbol`,
@@ -171,7 +171,7 @@ than to the tree wherever it can be.
 list: each walk thread takes one, reads it, queues its subdirectories and
 keeps the regular files it found, so a lopsided tree still spreads over
 the threads. The thread count is `walk_threads_default`: the parse budget,
-or `CG_WALK_THREADS` (1 to `CG_MAX_WORKERS`). The entry's `d_type` decides
+or `HYPERFIDE_WALK_THREADS` (1 to `CG_MAX_WORKERS`). The entry's `d_type` decides
 directory, link or file without a stat (only `DT_UNKNOWN` costs an
 `lstat`); a kept file costs one `fstatat` for the size and mtime the diff
 reads. The ignore rules apply to every entry as before, symbolic links are
@@ -330,7 +330,7 @@ bad argument. `help_route` runs before any flag is consumed, and
 `did you mean` in a tree without `.codegraph/` too, instead of
 `not inside a Codify project`. Text is wrapped
 to `COLUMNS`, then the tty width, default 80, floor 60; bold and dim are
-added only on a terminal without `NO_COLOR` or `TERM=dumb` (`CG_COLOR=0|1`
+added only on a terminal without `NO_COLOR` or `TERM=dumb` (`HYPERFIDE_COLOR=0|1`
 overrides). Module dispatchers that still print their own `usage:` line
 carry it byte for byte in their row. `tests/integration/43_help.sh` scans
 `main.c` and every subcommand switch and fails when a dispatched name has no
@@ -357,7 +357,7 @@ waits and for how long.
   `cg_begin_write`, so a writer either has the lock or knows it does not;
   a deferred `BEGIN` that upgrades mid-transaction would fail with
   `SQLITE_BUSY_SNAPSHOT` and lose the work.
-- CLI commands wait `CG_BUSY_TIMEOUT_MS` (default 30 s) for the lock. An
+- CLI commands wait `HYPERFIDE_BUSY_TIMEOUT_MS` (default 30 s) for the lock. An
   agent updating task state during an editor index therefore waits a
   moment and succeeds. Only after the whole wait does `cg_exec` print an
   actionable message — which process class holds the lock, that nothing
@@ -446,9 +446,9 @@ already holds, so the pipeline pays one clock read per popped file and
 nothing under its ring mutex. On a terminal the line is redrawn in place
 from 250 ms into the pass, at most every 100 ms, and erased by
 `progress_end` (and at exit) before the summary, so the finished output
-is byte for byte what it was. `CG_PROGRESS=plain` prints a plain line on
+is byte for byte what it was. `HYPERFIDE_PROGRESS=plain` prints a plain line on
 each phase change and at most every two seconds, terminal or not;
-`CG_PROGRESS=0`, or a pipe without it, prints nothing. See
+`HYPERFIDE_PROGRESS=0`, or a pipe without it, prints nothing. See
 [sync.md](sync.md#progress).
 
 ## Watcher (`watch.c`)
@@ -480,8 +480,8 @@ placeholders in the branch templates, and `fleet_plan` lays out the tree a
 feature would get. `hier_role_caps` resolves each role's capabilities (driver,
 model, args, max, wall, spend, retries, stall, approve) into a `RoleCaps`,
 reporting unusable values instead of dropping them.
-Identity comes from the environment (`CG_AGENT`, `CG_ROLE`, `CG_PARENT`,
-`CG_FEATURE`, `CG_WAVE`) and is recorded in the `agents` registry only when
+Identity comes from the environment (`HYPERFIDE_AGENT`, `HYPERFIDE_ROLE`, `HYPERFIDE_PARENT`,
+`HYPERFIDE_FEATURE`, `HYPERFIDE_WAVE`) and is recorded in the `agents` registry only when
 a role is set, so solo sessions leave no trace. The branch lifecycle —
 `fleet_worker_begin`, `fleet_merge_up`, `fleet_land`, `fleet_pr_open`,
 `fleet_checkpoint` — drives `git` and `gh` through the helpers in
@@ -492,7 +492,7 @@ ownership system. `begin <id>` creates the worker's branch from its base
 registers the branch; `merge-up <id>` merges the worker's branch into its
 base — the wave branch, by default — in that branch's worktree; `land` and
 `pr` take a wave number or a task id in the wave (`lifecycle_target`,
-defaulting to `CG_WAVE`, so a Wave Manager lands its own wave), and
+defaulting to `HYPERFIDE_WAVE`, so a Wave Manager lands its own wave), and
 `land <feature>` still lands the feature branch in the old shape
 (`fleet_feature_land` delegates to `fleet_land`). `merge-up` and `land` take the
 feature's merge lock (`fleet_merge_lock`, an `flock` on
@@ -503,7 +503,7 @@ pending row in `fleet_approvals` and returns `CG_EXIT_APPROVAL` (4) until
 `hyperfide fleet approve` decides it, and an approval is consumed by the one
 command it let through. `fleet_sync` (`hyperfide fleet sync`) is the worker's
 side of a forward merge: in a task worktree it merges the base branch
-(`--base`, else `CG_BASE`, else the `branches` registry) into the task
+(`--base`, else `HYPERFIDE_BASE`, else the `branches` registry) into the task
 branch, refusing while an uncommitted file there is also changed on the
 base, aborting a conflict with its paths named, and otherwise listing the
 commits and files that came in before a projection build; a `fleet.sync`
@@ -529,7 +529,7 @@ transitions, which live in `spec.kvx` rather than SQLite, and
 `events_emit` covers what has no row: merges, gates, pull requests,
 supervisor decisions, drift, agent output. `events_since` reads from a
 cursor with a kind filter (a trailing `.` or `*` is a prefix). Retention
-prunes by count (`CG_EVENTS_KEEP`, default 50000); `AUTOINCREMENT` keeps a
+prunes by count (`HYPERFIDE_EVENTS_KEEP`, default 50000); `AUTOINCREMENT` keeps a
 sequence number from ever being reused, and `meta.events_pruned_through`
 tells a lagging reader it missed events. Full contract:
 [events.md](events.md).
@@ -747,7 +747,7 @@ session. Subagent payloads carry the parent's session id, so the session
 row is created on first sight of any payload. A cwd inside a linked
 worktree of the project (`native_worktree`, read from git's files without
 spawning git) registers that branch with the session's branch as its base.
-`attribute_task` gives the agent a task from `CG_TASK`, else a live
+`attribute_task` gives the agent a task from `HYPERFIDE_TASK`, else a live
 attempt of the session, else a task id of the active feature named in the
 description or prompt, else the parent's, and records which source it
 used. Each step emits `agent.native.start`, `.spawn`, `.tool`, `.stop` or
@@ -824,7 +824,7 @@ search. The advice goes back as `additionalContext` in a `PreToolUse`
 `hookSpecificOutput` with no permission decision, so the command still
 runs; it is given once per session per command (a `meta` key on the
 session and a hash of the command), and is silent under
-`CG_SHELL_ADVICE=0` or `[hooks] shell_advice = false`. The hook always
+`HYPERFIDE_SHELL_ADVICE=0` or `[hooks] shell_advice = false`. The hook always
 exits 0.
 
 ## Agent control plane (`runtime.c`, `govern.c`)
@@ -894,7 +894,7 @@ memories) — exit 3, not an error, on an empty frontier. Leases have
 owners: claiming a task held live by someone else is refused, releasing
 one requires the owner's name or `--force`, and `done`/`implemented`
 auto-release on success. Agent identity comes from `--agent`, then
-`$CG_AGENT`, then `"agent"`, and in parallel mode "the current task"
+`$HYPERFIDE_AGENT`, then `"agent"`, and in parallel mode "the current task"
 means the one the agent holds a live lease on.
 
 ## Agent memory (`memory.c`)
@@ -944,7 +944,7 @@ MCP `sync_first` tools, the LSP, the watcher, fleet watch and integrate
 `[index] workers` sets the parse thread count: `config_index_workers`
 returns the count asked for (0 = the machine's), `config_parse_workers`
 reads a count as written anywhere — the configuration file,
-`CG_INDEX_WORKERS`,
+`HYPERFIDE_INDEX_WORKERS`,
 `--workers` — and `hyperfide info` prints which source won.
 Every key is a row of `CFG_KEYS` with a type — `CFG_BOOL`, `CFG_PATH`,
 `CFG_INT`, `CFG_STR`, `CFG_DUR` (a duration such as `24h`, read by
@@ -1010,10 +1010,10 @@ git-cliff configuration at the repository root; git-cliff is a
 reference, never a runtime dependency.
 
 Optionally a model adds prose. With `CENTRA_API_KEY` (or
-`CG_CHANGELOG_KEY`) in the environment or the project's `.env`, each
+`HYPERFIDE_CHANGELOG_KEY`) in the environment or the project's `.env`, each
 release gets a `### Highlights` block written from its grouped commits by
-an OpenAI-compatible endpoint (`CG_CHANGELOG_ENDPOINT`,
-`CG_CHANGELOG_MODEL`), called through `curl` with a private `0600` config
+an OpenAI-compatible endpoint (`HYPERFIDE_CHANGELOG_ENDPOINT`,
+`HYPERFIDE_CHANGELOG_MODEL`), called through `curl` with a private `0600` config
 file as Jev does. The bullets are never altered. Answers are cached under
 `.codegraph/changelog-cache/`, keyed by the release's commit range, the
 model, and the notes, so a rerun asks only about what is new; a failed
@@ -1183,7 +1183,7 @@ their branches, `--branch codify/projection` and `hyperfide projection
 findings`; `hyperfide spec start --ahead` and `hyperfide fleet begin --ahead` are the
 same path by hand, and `--force` no longer bypasses `requires` anywhere.
 `hyperfide spec done` stays strict: `task_unmet` lists the requirements not done
-in the tree it runs in, and inside a fleet run (`CG_RUN` or `CG_ROLE` set)
+in the tree it runs in, and inside a fleet run (`HYPERFIDE_RUN` or `HYPERFIDE_ROLE` set)
 `--force` does not get past them, so an ahead task qualifies only once
 its requirements have landed and come in through `hyperfide fleet sync`. After a
 land, `sup_forward_merge` merges main into every live wave branch in that
@@ -1419,8 +1419,8 @@ Fragments 12.1 and 25.3 are the components that need libcurl and libcrypto.
    pairs each `HYPERFIDE_*` variable with its legacy `CG_*` or `CODIFY_*`
    names. Examples are `HYPERFIDE_ROOT`/`CODIFY_ROOT`,
    `HYPERFIDE_INDEX_WORKERS`/`CG_INDEX_WORKERS` and `HYPERFIDE_MODE`/`CG_MODE`/
-   `CODIFY_MODE`. Whichever name is set is copied to the others, so the `CG_*`
-   names this document uses keep working. If two names in a group hold
+   `CODIFY_MODE`. Whichever name is set is copied to the others, so the legacy
+   `CG_*` and `CODIFY_*` names keep working. If two names in a group hold
    different values, the binary prints
    `hyperfide: conflicting variable aliases for <NAME> (values redacted)` and
    exits 78.
