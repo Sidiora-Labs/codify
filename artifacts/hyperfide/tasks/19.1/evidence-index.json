@@ -1,0 +1,10 @@
+{
+  "task": "19.1",
+  "commit": "aa626187bdd327e67178e9c434e357d5f2363726",
+  "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-030 --manifest tests/hyperfide/manifests/tasks/19.1.json && python3 tests/hyperfide/qualify.py --case V-034 --manifest tests/hyperfide/manifests/tasks/19.1.json",
+  "exit_code": 0,
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"5b06c2bd-9d91-4831-bbf0-531c1a1e3599\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/19.1/campaigns/0e2ada1a92f685a5e6c4c656c0cbd4962f3a5d6cec46c254671286a2a8b3fe24\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"5b769b73-d1ca-4880-b525-9749344e26ab\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/19.1/campaigns/0e2ada1a92f685a5e6c4c656c0cbd4962f3a5d6cec46c254671286a2a8b3fe24\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T09:25:03Z",
+  "run_as": "hf (repository owner; the trusted checker rejects root on a hf-owned checkout as dubious Git ownership)",
+  "notes": "Task-component variant only; full cases remain INCOMPLETE/UNRUN. Positive remote gate dispatch through runner.remote.v1 is UNVERIFIED in this sandbox (no live runner); the probe asserts the explicit INTEGRATION_REMOTE_RUNTIME_UNAVAILABLE refusal and uses recorded gate outcomes for rejection/staleness assertions."
+}

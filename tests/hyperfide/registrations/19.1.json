@@ -17,7 +17,15 @@
     "candidate.typed-generations",
     "candidate.immutable-request",
     "candidate.empty-targets-refused",
-    "candidate.authenticated-run-bound"
+    "candidate.authenticated-run-bound",
+    "candidate.remote-gates-required",
+    "candidate.combined-fail-rejected",
+    "candidate.successor-not-released",
+    "candidate.level-status-explicit",
+    "candidate.input-change-invalidates",
+    "candidate.history-intact",
+    "candidate.cleanup-reconciles",
+    "candidate.cleanup-idempotent"
   ],
   "argv": [
     "python3",
@@ -33,6 +41,7 @@
   "fixtures": [
     "services/hyperfide/dist/control.js",
     "services/hyperfide/dist/integration/candidates.js",
+    "services/hyperfide/dist/integration/cleanup.js",
     "services/hyperfide/dist/integration/publication.js",
     "services/hyperfide/dist/integration/github.js",
     "services/hyperfide/dist/integration/closure.js",
