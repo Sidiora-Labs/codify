@@ -1182,7 +1182,7 @@ static const struct {
       S_CLAIM, A_WRITE, "Claim a task", t_spec_claim, false },
     { "git_sync",
       "Ingest git history into the graph: commits, authors, and per-file "
-      "churn, which then rank search and context results.",
+      "churn for provenance. Search and context ranking do not use churn.",
       S_LIMIT, A_WRITE, "Ingest git history", t_git_sync, false },
     { "spec_ready",
       "Every eligible task across all waves, each with whether its declared "

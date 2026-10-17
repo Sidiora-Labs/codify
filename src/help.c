@@ -841,10 +841,8 @@ static const HelpCmd HELP[] = {
   .usage = "spec lint",
   .summary = "validate the plan (cycles, dead globs); exits 2" },
 { .group = "spec", .name = "spec mode", .args = "<prod|standard|parallel>",
-  .usage = "spec mode <prod|standard>",
+  .usage = "spec mode <prod|standard|parallel>",
   .summary = "configure implementation dependency semantics",
-  /* the usage line is spec.c's, byte for byte (43_help.sh); it predates
-   * parallel, so the accepted values are spelled out here */
   .detail = "Writes [mode] name in spec/workflow.kvx and re-renders. "
     "standard: a prerequisite counts once done. prod: implemented counts "
     "too. parallel: prod's rule with several tasks in flight at once, each "

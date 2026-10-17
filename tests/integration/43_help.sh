@@ -84,6 +84,33 @@ has "$d" "writes queued while the database was busy: list, apply, drop"
 has "$d" "drop <id>|--failed|--all"
 has "$("$CG" help --all)" "usage: $PROG fleet steer <agent> <message>"
 
+# Help must describe accepted options even when a dispatcher's error usage
+# still carries an older spelling or a shorter list of values.
+has "$("$CG" help spec mode)" "<prod|standard|parallel>"
+has "$("$CG" help config)" "every hyperfide.kvx setting"
+has "$("$CG" help integrate apply)" ".hyperfide-backups/"
+has "$("$CG" help fleet)" "[--wait SECONDS]"
+has "$("$CG" help docs)" "generate is the same command"
+for host in Codex "Claude Code" "Copilot/VS Code" Cursor "Gemini CLI" \
+            OpenCode Zed Windsurf Cline Continue; do
+    has "$(COLUMNS=200 "$CG" help mcp-install)" "$host"
+done
+has "$("$CG" help authority)" "mode"
+has "$("$CG" authority mode)" '"mode":"local"'
+all="$("$CG" help --all)"
+if printf '%s\n' "$all" | grep -E '\bcg\b' | grep -v 'canonical command.*deprecated'; then
+    fail "legacy command name in help examples or related lines"
+fi
+hasnt "$("$CG" help git-sync)" "which then rank"
+"$CG" tool list --json > "$TMP/tools.json"
+python3 - "$TMP/tools.json" <<'PY'
+import json, sys
+tools = json.load(open(sys.argv[1]))["tools"]
+description = next(t["description"] for t in tools if t["name"] == "git_sync")
+assert "which then rank" not in description, description
+assert "provenance" in description, description
+PY
+
 # ---- an unknown name suggests the closest and exits 1
 rc=0; err="$("$CG" help sepc 2>&1 >/dev/null)" || rc=$?
 [ "$rc" -eq 1 ] || fail "unknown help name should exit 1, got $rc"
@@ -137,6 +164,12 @@ for line in main.split("\n"):
     for m in re.finditer(r'strcmp\(argv\[2\], "([a-z-]+)"\)', line):
         want.add(f"{cur} {m.group(1)}")
 want.add("help")
+# Authority dispatch runs before main's legacy command switch.
+client = read("hyperfide/client.c")
+assert 'strcmp(argv[1],"authority")' in client
+want.add("authority")
+for sub in re.findall(r'strcmp\(argv\[2\],"([a-z-]+)"\)', client):
+    want.add(f"authority {sub}")
 # the subcommand switches, file -> (parent, the variable they switch on)
 subs = [("spec.c", "spec", "sub"), ("fleet.c", "fleet", "sub"),
         ("jev.c", "jev", "sub"), ("config.c", "config", "sub"),
@@ -170,10 +203,10 @@ readme = open(os.path.join(repo, "README.md")).read()
 named = set()
 tops = {n for n in names if " " not in n}
 for line in readme.split("\n"):
-    if not line.startswith("| `cg "):
+    if not re.match(r"\| `(?:cg|hyperfide) ", line):
         continue
     cell = re.split(r"(?<!\\)\|", line)[1]
-    spans = re.findall(r"`cg ([^`]*)`", cell)
+    spans = re.findall(r"`(?:cg|hyperfide) ([^`]*)`", cell)
     for sp in spans:
         top = sp.split()[0]
         assert top in tops, f"README names unknown command cg {top}: {line[:60]}"
@@ -184,7 +217,8 @@ for line in readme.split("\n"):
             c = next((x for x in d["commands"] if x["name"] == f"{top} {w}"
                       or f"{top} {w}" in x["aliases"]), None)
             named.add(c["name"])
-absent = sorted(n for n in names if n not in named)
+# Authority is dispatched by the native client and has no README table row.
+absent = sorted(n for n in names if n not in named and n.split()[0] != "authority")
 assert not absent, f"in cg help but not in the README command reference: {absent}"
 print(f"{len(names)} commands covered")
 PY
@@ -207,6 +241,9 @@ agree() {   # agree <table name> <cg args...>
     local want got; want="usage: $(usage_of "$name")"
     got="${line#usage: }"; got="${got#cg }"; got="${got#hyperfide }"
     want="${want#usage: }"; want="${want#cg }"; want="${want#hyperfide }"
+    if [ "$name" = "spec mode" ]; then
+        got="${got/<prod|standard>/<prod|standard|parallel>}"
+    fi
     [ "$got" = "$want" ] ||
         fail "cg $* printed '$line', table says 'usage: $(usage_of "$name")'"
 }
