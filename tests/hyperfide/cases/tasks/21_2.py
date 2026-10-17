@@ -111,6 +111,7 @@ def native_admission_probe():
    check("native21.repeat-new-checkpoint-identified",repeat_checkpoint)
    check("native21.foreign-reservation-refused",lambda:native.expect(f.inner.invoke("decision.recovery.packet",{**request,"reservation_id":native.uid()},component="21.2")[1].get("ok")is False,"foreign reservation became recovery authority"))
    check("native21.compute-authority-unchanged",lambda:native.expect(f.inner.sql("SELECT compute_authority,execution_state FROM hyperfide.attempts WHERE id=$1",[f.inner.ids["attempt"]])[0]=={"compute_authority":"CURRENT","execution_state":"RUNNING"},"advisory capture changed compute authority"))
+   check("native21.setup",lambda:None)
   except Exception as error:check("native21.setup",lambda:(_ for _ in()).throw(error))
   finally:
    if f:f.close(RESOURCE)
