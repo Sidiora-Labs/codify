@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "campaign_id": "hyperfide-task-7.4-authenticated-graph-v5-requal-12aa390190b3-requal-6a91b0130b1d",
+ "campaign_id": "hyperfide-task-7.4-authenticated-graph-v5-requal-12aa390190b3-requal-6a91b0130b1d-requal-6a91b0130b1d",
  "registered_variant": "task:7.4",
  "scope": "task-component",
  "case_ids": [
@@ -674,8 +674,8 @@
   },
   {
    "path": "tests/hyperfide/registrations/7.4.json",
-   "sha256": "f8203cb079ecda3528ae6dc94b84e46c20deaa564517808369cc8801bc92b77d",
-   "size": 5868
+   "sha256": "461b289569e96faecce833bb4745df84ced1d7af5a10c95ae72a72f8f8cebbc5",
+   "size": 5582
   },
   {
    "path": "tests/hyperfide/support/identity_fixture.py",
