@@ -1,0 +1,9 @@
+{
+  "task": "9.2",
+  "commit": "90c6143a85af33d29dfc440023e65aabc8d182e3",
+  "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-036 --manifest tests/hyperfide/manifests/tasks/9.2.json && python3 tests/hyperfide/qualify.py --case V-038 --manifest tests/hyperfide/manifests/tasks/9.2.json",
+  "exit_code": 0,
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"626c92e2-da43-4ded-8345-acb57b20c8e5\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/9.2/campaigns/0a631fb0bf90609f6e80b28f0d97c2f43805cbd0f01bb1559a365fd006c0d8d7\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"b2ce0f9a-2b4d-4b8f-a67f-a912dfda7b2c\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/9.2/campaigns/0a631fb0bf90609f6e80b28f0d97c2f43805cbd0f01bb1559a365fd006c0d8d7\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T09:12:25+00:00",
+  "execution_note": "run as repo owner uid hf (root-run git is rejected as dubious ownership by the checker's isolated git); HF_CREDENTIAL_CONFIG_FILE is a local empty fixture; provider_fixture simulated, not provider acceptance"
+}
