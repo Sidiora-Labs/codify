@@ -1,8 +1,9 @@
 {
   "task": "11.4",
-  "commit": "bbbdbcb29f5cb124139d13f04abd9cd1ff8052d4",
+  "commit": "12aa390190b3d3e360e079254378a381103fc236",
+  "requalified_on": "12aa390190b3d3e360e079254378a381103fc236",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-007 --manifest tests/hyperfide/manifests/tasks/11.4.json && python3 tests/hyperfide/qualify.py --case V-038 --manifest tests/hyperfide/manifests/tasks/11.4.json",
-  "exit_code": 0,
-  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"1de20e71-dbed-4b18-b83a-7b46b8c2fc0c\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/11.4/campaigns/6772c2b4a3aa3cdc6308c0c638442f52da2cf4321f49b8bc6b3ad0beb90fa1ba\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"1842b5f8-0248-473e-9940-d8c83601ac9a\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/11.4/campaigns/6772c2b4a3aa3cdc6308c0c638442f52da2cf4321f49b8bc6b3ad0beb90fa1ba\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
-  "ran_at": "2026-10-17T09:40:46Z"
+  "exit_code": 1,
+  "stdout_tail": "{\"status\": \"FAIL\", \"receipt_id\": \"04a1b684-2b1e-444c-92b8-bf3cbc5d93f7\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/11.4/campaigns/71f455544bfabdd68f1bf2898b659af2c987ea1a3d414b4d9d45c0ebac8b16b5\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": [\"one or more behavioural assertions failed\", \"probe failed, was unavailable, or timed out\", \"cleanup is incomplete\"]}\n",
+  "ran_at": "2026-10-17T14:08:35.778565+00:00"
 }
