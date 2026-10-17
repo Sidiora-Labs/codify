@@ -84,6 +84,24 @@ def unexecuted(reason):
 def canonical(value): return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
 def identity(value): return sha(canonical(value).encode())
 
+SLICE_SPEC_GENERATION = 3
+SLICE_CRITERION = "Workspace materialisation SHALL support packet-scoped slices that fall back to the full tree with a recorded reason."
+def accept_slice_spec(f, generation):
+    """Accepted immutable 11.5 spec revision in the same parsed-kvx envelope as the 3.2 packet fixture's `accept_spec`."""
+    i = f.ids; spec = uid(); rubric = packets.RUBRIC
+    source = ("[meta]\nslug = \"slice-fixture-g%d\"\n[req.11]\nac_5 = %s\n[acceptance.V-057]\nreq = \"11.5\"\n[proof]\nrubric_digest = %s\n"
+              "[proof.review.11.5]\nreviewers = %s\nrubric_digest = %s\n[task.slice]\nwave = 2\nreqs = [\"11.5\"]\nacceptance_ids = [\"V-057\"]\n"
+              % (generation, json.dumps(SLICE_CRITERION), json.dumps(rubric), json.dumps([i["watcher"]]), json.dumps(rubric)))
+    parsed = packets.parse_kvx(source)
+    intent = {"schema_version": 1, "revision_digest": sha(("slice-envelope-%d" % generation).encode()), "source_digest": sha(source.encode()),
+              "repositories": [{"repository_id": i["repository"], "source_object_id": f.source, "integration_ref": "refs/heads/main"}], "allowed_actions": f.actions,
+              "closure_policy": {"required_evidence": [], "required_review_roles": [], "publication": "AFTER_QUALIFICATION"}, "provenance": None, "parsed": parsed, "runtime_wave_offset": 0}
+    f.sql("INSERT INTO hyperfide.spec_revisions(organisation_id,project_id,id,source_digest,source_content,document,schema_version,revision_digest) VALUES($1,$2,$3,$4,$5,$6,1,$7)",
+          [i["organisation"], i["project"], spec, sha(source.encode()), source, json.dumps(intent), intent["revision_digest"]])
+    f.sql("INSERT INTO hyperfide.run_spec_revisions(organisation_id,run_id,spec_generation,spec_revision_id) VALUES($1,$2,$3,$4)", [i["organisation"], i["run"], generation, spec])
+    section = next(x for x in parsed["sections"] if x["name"] == "task.slice")
+    return spec, section, identity({"reqs": ["11.5"], "accepted_text": SLICE_CRITERION})
+
 def campaign():
     base = Path(os.environ.get("HYPERFIDE_CAMPAIGN_DIR") or (Path(tempfile.gettempdir()) / "hf-task-11.5-dev-campaign"))
     folder = base / "slices"; folder.mkdir(parents=True, exist_ok=True); return folder
@@ -166,19 +184,11 @@ class Probe:
             for n in range(1, 10):
                 slot = uid(); probe.slots[n] = slot
                 f.sql("INSERT INTO hyperfide.worker_slots(organisation_id,id,sandbox_id,slot_key,boot_generation,capacity_kind,state) VALUES($1,$2,$3,$4,1,'AGENT','READY')", [i["organisation"], slot, i["sandbox"], "slice-slot-" + str(n)])
-            # An accepted generation-2 spec whose parsed intent maps the slice clause, so real packet creation can load
-            # exact proof obligations (the base fixture's generation-1 document is empty).
-            probe.rubric = sha(b"slice-review-rubric"); probe.spec2 = uid()
-            document = {"parsed": {"sections": [
-                {"name": "req.11.5", "fields": {"ac_5": {"value": "Packet-scoped workspace slices"}}},
-                {"name": "acceptance.V-057", "fields": {"reqs": {"value": ["11.5.5"]}}},
-                {"name": "proof", "fields": {"rubric_digest": {"value": probe.rubric}}},
-                {"name": "proof.review.11.5.5", "fields": {"reviewers": {"value": [i["watcher"]]}, "rubric_digest": {"value": probe.rubric}}}]}}
-            source = "slice fixture accepted intent " + probe.spec2
-            f.sql("INSERT INTO hyperfide.spec_revisions(organisation_id,id,project_id,source_digest,source_content,document,schema_version) VALUES($1,$2,$3,$4,$5,$6,1)",
-                  [i["organisation"], probe.spec2, i["project"], sha(source.encode()), source, json.dumps(document)])
-            f.sql("INSERT INTO hyperfide.run_spec_revisions(organisation_id,run_id,spec_generation,spec_revision_id) VALUES($1,$2,2,$3)", [i["organisation"], i["run"], probe.spec2])
-            f.sql("UPDATE hyperfide.runs SET spec_generation=2,spec_revision_id=$3,state_version=state_version+1 WHERE organisation_id=$1 AND id=$2", [i["organisation"], i["run"], probe.spec2])
+            # An accepted generation-3 spec (the packet fixture already accepts generation 2) whose parsed intent maps the
+            # slice clause, so real packet creation loads exact 11.5/V-057 proof obligations through the 2.4 loader.
+            probe.spec2, probe.slice_section, probe.slice_criteria = accept_slice_spec(f, SLICE_SPEC_GENERATION)
+            probe.rubric = packets.RUBRIC
+            packets.move_run(f, SLICE_SPEC_GENERATION, probe.spec2, "RUNNING")
             probe.graph_config.write_text(canonical({"schema_version": 1, "execution_role": "REMOTE", "scratch_root": str(probe.scratch), "cg_binary": str(ROOT / "cg"),
                                                      "cg_digest": sha((ROOT / "cg").read_bytes()), "repositories": {i["repository"]: fx["repository"]}}))
         self.f = packets.PacketFixture(extra_components=("7.1", "7.2", "7.3", "11.5"), extra_setup=setup, seed_historical_runtime=False,
@@ -235,17 +245,12 @@ class Probe:
     # ------------------------------------------------------------------------------------------------ packets
     def task_packet(self, key, touches, graph_manifest, slot):
         f, i = self.f, self.f.ids
-        task = uid(); definition = copy.deepcopy(f.packet_definition); definition["touches"] = touches
-        definition["section"] = {"fields": {"reqs": {"value": ["11.5.5"]}}}
-        definition["graph_inputs"] = {"required": True, "manifest_id": graph_manifest, "reason": None} if graph_manifest else {"required": False, "manifest_id": None, "reason": "Slice baseline deliberately runs without a graph"}
-        criteria = sha(("slice-criteria-" + key).encode())
-        f.sql("INSERT INTO hyperfide.tasks(organisation_id,run_id,id,task_key,feature_package_id,spec_revision_id,spec_generation,criteria_digest,definition,wave) VALUES($1,$2,$3,$4,$5,$6,2,$7,$8,2)",
-              [i["organisation"], i["run"], task, "alpha.slice-" + key, i["package2"], self.spec2, criteria, json.dumps(definition)])
-        proof = copy.deepcopy(f.packet_proof)
-        proof.update(criteria_digest=criteria, spec_revision_id=self.spec2, spec_generation="2", rubric_digest=self.rubric,
-                     clauses=[{"id": "11.5.5", "mode": "REVIEW", "acceptance_ids": ["V-057"], "reviewers": [i["watcher"]], "rubric_digest": self.rubric}])
-        f.sql("INSERT INTO hyperfide.proof_registries(organisation_id,run_id,task_id,spec_generation,spec_revision_id,criteria_digest,registry_digest,policy) VALUES($1,$2,$3,2,$4,$5,$6,$7)",
-              [i["organisation"], i["run"], task, self.spec2, criteria, identity(proof), json.dumps(proof)])
+        graph = {"required": True, "manifest_id": graph_manifest, "reason": None} if graph_manifest else {"required": False, "manifest_id": None, "reason": "Slice baseline deliberately runs without a graph"}
+        definition = f.task_definition(section=self.slice_section, touches=touches, graph_inputs=graph)
+        task = f.insert_task("alpha.slice-" + key, definition, criteria=self.slice_criteria, generation=SLICE_SPEC_GENERATION, spec=self.spec2)
+        proof = f.proof_policy(self.slice_criteria, generation=SLICE_SPEC_GENERATION, spec=self.spec2)
+        proof["clauses"] = [{"id": "11.5", "mode": "REVIEW", "acceptance_ids": ["V-057"], "reviewers": [i["watcher"]], "rubric_digest": self.rubric}]
+        f.register_proof(task, proof)
         return f.ok("hierarchy.packet.create", f.packet_input(task_id=task, idempotency_key="slice-" + key, slot_id=slot), key="manager", component="3.2")
     def craft(self, base, *, commit, graph=None, submodules=None, slot=None):
         """Fault/variation injection: an immutable packet row whose pins differ from the run's current repository pin."""
