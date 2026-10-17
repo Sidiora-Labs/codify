@@ -12,7 +12,9 @@
     "agent.admission.reserve",
     "agent.admission.inspect",
     "agent.admission.report",
-    "agent.admission.recovery-context"
+    "agent.admission.recovery-context",
+    "agent.admission.observe",
+    "agent.admission.escalations"
   ],
   "requires": [
     "13.2",
