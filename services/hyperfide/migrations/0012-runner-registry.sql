@@ -27,6 +27,12 @@ CREATE TABLE hyperfide.runner_registry (
  FOREIGN KEY(organisation_id,repository_id) REFERENCES hyperfide.repositories(organisation_id,id),
  UNIQUE(organisation_id,run_id,sandbox_id,slot_id,boot_generation)
 );
+-- Retained launch observation relies on the original physical registration even
+-- after credential revocation. A new physical generation requires a fresh row.
+CREATE TRIGGER immutable_physical_binding BEFORE UPDATE ON hyperfide.runner_registry
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','session_id','sandbox_id','boot_generation','boot_id','slot_id','slot_generation','state_dir','runner_binary','runner_binary_digest','workspace_path','home_path','tmp_path','uid','gid','boot_preparation_digest','preparation_policy_digest','preparation_recipes');
+CREATE TRIGGER retain_runner_registry BEFORE DELETE ON hyperfide.runner_registry
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','session_id');
 CREATE TABLE hyperfide.runner_remote_jobs (
  organisation_id uuid NOT NULL,run_id uuid NOT NULL,operation_id uuid NOT NULL,session_id uuid NOT NULL,
  job_class text NOT NULL DEFAULT 'EXECUTION' CHECK(job_class IN('EXECUTION','PREPARATION')),
