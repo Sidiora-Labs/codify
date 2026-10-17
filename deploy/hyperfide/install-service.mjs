@@ -46,7 +46,7 @@ async function readManifest(filename){
  await protectedPath(filename,false);
  const h=await fs.open(filename,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);
  try{
- const st=await h.stat({bigint:true});if(!st.isFile()||st.uid!==0n||st.nlink!==1n||st.size<1n||st.size>1048576n)refuse('INSTALL_MANIFEST_BOUND');
+ const st=await h.stat({bigint:true});if(!st.isFile()||st.uid!==0n||st.nlink!==1n||st.size<1n||st.size>33554432n)refuse('INSTALL_MANIFEST_BOUND');
  const bytes=Buffer.alloc(Number(st.size));let offset=0;
  while(offset<bytes.length){const r=await h.read(bytes,offset,bytes.length-offset,offset);if(!r.bytesRead)refuse('INSTALL_SOURCE_CHANGED');offset+=r.bytesRead;}
  const extra=Buffer.alloc(1),after=await h.stat({bigint:true});
@@ -107,7 +107,7 @@ async function run(){
   const pending=path.join(options.destination,'.current-'+randomUUID());await fs.symlink(path.relative(options.destination,target),pending);
   try{await fs.rename(pending,current);pointerChanged=true;await syncDirectory(options.destination);}finally{await fs.unlink(pending).catch(()=>{});}
  }
- const receipt={schema_version:1,owner:'hyperfide-service-installer',manifest_digest:options.digest,release_directory:target,service_identity:{uid:options.uid,gid:options.gid},authentication:installed.authentication,promoted:promote,replayed,services_started:false,authority_activated:false,build_on_supervision_host:false};
+ const receipt={schema_version:1,owner:'hyperfide-service-installer',manifest_digest:options.digest,release_directory:target,service_identity:{uid:options.uid,gid:options.gid},authentication:installed.authentication,installable_units:installed.service_units.filter(u=>u.status==='INSTALLABLE').map(u=>u.unit),unqualified_units:installed.service_units.filter(u=>u.status!=='INSTALLABLE').map(u=>u.unit),promoted:promote,replayed,services_started:false,authority_activated:false,build_on_supervision_host:false};
  const receiptFile=path.join(options.destination,'.receipt-'+randomUUID());const h=await fs.open(receiptFile,'wx',0o600);try{await h.writeFile(JSON.stringify(receipt)+'\n');await h.sync();}finally{await h.close();}
  await fs.rename(receiptFile,path.join(options.destination,'service-installation.json'));await syncDirectory(options.destination);
  process.stdout.write(JSON.stringify({outcome:'SUCCEEDED',...receipt})+'\n');

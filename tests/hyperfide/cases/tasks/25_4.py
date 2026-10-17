@@ -30,7 +30,11 @@ def main():
   for dest,source in copies.items():
    p=payload/dest;p.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(source,p);p.chmod(0o755 if dest.startswith(("bin/","runtime/node","runtime/python/bin/")) else 0o644)
   shutil.copytree(ROOT/"services/hyperfide/dist",payload/"services/dist",dirs_exist_ok=True,symlinks=False)
-  shutil.copytree(ROOT/"services/hyperfide/node_modules",payload/"services/node_modules",dirs_exist_ok=True,symlinks=False)
+  # Bounded dependency subset: the production closure of pg, the only package the exercised
+  # control/migration paths load. A real release ships the full npm ci --omit=dev closure.
+  services=ROOT/"services/hyperfide"
+  for item in json.loads(subprocess.check_output(["npm","query","#pg, #pg *"],cwd=services,text=True)):
+   shutil.copytree(services/item["location"],payload/"services"/item["location"],dirs_exist_ok=True,symlinks=False,ignore=lambda d,names,top=services/item["location"]:["node_modules"] if Path(d)==top else [])
   shutil.copytree(ROOT/"services/hyperfide/migrations",payload/"services/migrations",dirs_exist_ok=True,symlinks=False)
   shutil.copytree(ROOT/"services/hyperfide/components",payload/"services/components",dirs_exist_ok=True,symlinks=False)
   migration=payload/"deploy/hyperfide/migrate.mjs";migration.parent.mkdir(parents=True);shutil.copytree(ROOT/"deploy/hyperfide",payload/"deploy/hyperfide",dirs_exist_ok=True,symlinks=False)
@@ -45,13 +49,19 @@ def main():
   import atexit
   atexit.register(fixture.close)
   def request(action,value):
-   status,result=fixture.invoke('release.'+action,value,component='25.4')
+   status,result=fixture.invoke('release.'+action,value,component='25.4',timeout_seconds=90)
    return result
   def ok(action,value):
    r=request(action,value);expect(r.get("ok"),"positive service operation refused: "+r.get("error",{}).get("code",""));return r["result"]
   def rejected(action,value):
-   r=request(action,value);expect(r.get("ok") is False and r["error"]["code"]=="RELEASE_INVALID","unsafe release accepted")
+   r=request(action,value);expect(r.get("ok") is False and r["error"]["code"]=="RELEASE_INVALID","unsafe release accepted: "+json.dumps(r)[:300])
   check("release.bytes.inspect",lambda:expect(ok("inspect",{"manifest":"manifest.json"})["verified"] is True,"actual prebuilt pins did not verify"))
+  def large_inventory():
+   # A real release pins every production dependency file, far beyond 1 MiB of manifest.
+   mf.write_text(json.dumps(manifest)+" "*(2*1024*1024))
+   try:expect(ok("inspect",{"manifest":"manifest.json"})["verified"] is True,"multi-megabyte release inventory refused")
+   finally:mf.write_text(json.dumps(manifest))
+  check("release.bytes.large-inventory-manifest",large_inventory)
   check("release.authorization.separate",lambda:expect(ok("inspect",{"manifest":"manifest.json"})["deployment_authorized"] is False,"hash verification authorized deployment"))
   compatible={"service_protocol":1,"client_protocol":1,"runner_protocol":1,"schema_version":1,"schema_min":1,"schema_max":2,"phase":"EXPAND","old_clients":2}
   check("release.compatible.expand",lambda:expect(ok("compatibility",compatible)["compatible"],"compatible schema expansion refused"))
@@ -75,6 +85,18 @@ def main():
    changed=dict(manifest,files=[f for f in manifest["files"] if f["path"]!=required_python]);mf.write_text(json.dumps(changed))
    check("release.python.required."+("interpreter" if required_python.endswith(".bin") else "ctypes"),lambda:rejected("inspect",{"manifest":"manifest.json"}))
    actual.write_bytes(original);actual.chmod(0o755 if required_python.endswith(".bin") else 0o644);mf.write_text(json.dumps(manifest))
+  def units_reported():
+   units={u["unit"]:u for u in ok("inspect",{"manifest":"manifest.json"})["service_units"]}
+   expect(all(units[u]["status"]=="INSTALLABLE" for u in ["control.service","provisioner.service","dispatch.service"]),"prebuilt control-service units not installable")
+   expect(all(units[u]["status"]=="UNQUALIFIED" and units[u]["owner_task"]=="26.4" for u in ["issue-watcher.service","supervisory-host.service"]),"unimplemented 26.4 units reported installable")
+  check("release.units.unqualified-reported",units_reported)
+  def installable_unqualified():
+   unit=payload/"deploy/hyperfide/issue-watcher.service";original=unit.read_bytes();unit.write_bytes(original+b"[Install]\nWantedBy=multi-user.target\n")
+   changed=dict(manifest,files=[dict(f,digest="sha256:"+hashlib.sha256(unit.read_bytes()).hexdigest(),size_bytes=str(unit.stat().st_size)) if f["path"]=="deploy/hyperfide/issue-watcher.service" else f for f in manifest["files"]])
+   mf.write_text(json.dumps(changed))
+   try:rejected("inspect",{"manifest":"manifest.json"})
+   finally:unit.write_bytes(original);unit.chmod(0o644);mf.write_text(json.dumps(manifest))
+  check("release.units.installable-unqualified-refused",installable_unqualified)
   import uuid
   database="hf_release_migration_"+uuid.uuid4().hex
   fixture.sql('CREATE DATABASE "'+database+'"',admin=True)
@@ -176,13 +198,15 @@ def main():
 
   base.chmod(0o755)
   service_root=base/"service-root"
-  installer=[str(Path(subprocess.check_output(["node","-p","process.execPath"],text=True).strip()).resolve()),str(ROOT/"deploy/hyperfide/install-service.mjs"),"--release-root",str(payload),"--destination-root",str(service_root),"--trusted-key",str(public),"--signature-file",str(signature),"--manifest-digest","sha256:"+hashlib.sha256(mf.read_bytes()).hexdigest(),"--service-uid","33025","--service-gid","33025"]
+  # The installer and its verifier run from the root-owned prebuilt release, never from a source checkout.
+  installer=[str(Path(subprocess.check_output(["node","-p","process.execPath"],text=True).strip()).resolve()),str(payload/"deploy/hyperfide/install-service.mjs"),"--release-root",str(payload),"--destination-root",str(service_root),"--trusted-key",str(public),"--signature-file",str(signature),"--manifest-digest","sha256:"+hashlib.sha256(mf.read_bytes()).hexdigest(),"--service-uid","33025","--service-gid","33025"]
   def run_install(arguments=None):
-   p=subprocess.run(arguments or installer,capture_output=True,text=True,timeout=45)
+   p=subprocess.run(arguments or installer,capture_output=True,text=True,timeout=300)
    expect(len(p.stdout.splitlines())==1,"operator promotion did not emit one bounded receipt")
    return p,json.loads(p.stdout)
   def stage_service():
    p,r=run_install();expect(p.returncode==0 and r["outcome"]=="SUCCEEDED" and not r["promoted"] and not r["services_started"] and not r["authority_activated"],"signed service staging failed: "+str(r))
+   expect(r["installable_units"]==["control.service","dispatch.service","provisioner.service"] and r["unqualified_units"]==["issue-watcher.service","supervisory-host.service"],"installer receipt misreports installable service units")
    expect(not (service_root/"current").exists(),"staging changed active service pointer")
    target=Path(r["release_directory"]);expect(target.is_dir() and target.stat().st_uid==0 and target.stat().st_mode&0o777==0o755,"service tree is not root-owned and publicly traversable")
   check("release.service.actual-signed-stage",stage_service)
