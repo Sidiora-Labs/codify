@@ -14,6 +14,13 @@ const c={clauses:['1.1','2.1','2.2'],
  mappings:[{id:'1.1',task_ids:['1.1'],acceptance_ids:['V-901'],chapters:['requirements.md']},{id:'2.1',task_ids:['2.1'],acceptance_ids:['V-902','V-903'],chapters:['requirements.md']},{id:'2.2',task_ids:['2.1'],acceptance_ids:['V-902','V-903'],chapters:['verification.md']}],
  source_pins:[]};
 for(const[k,v]of Object.entries(c.cases))v.full_assertion_ids=['synthetic.assertion.'+k];
+// Keep the controlled pack complete under the public traceability contract.
+c.source_pins=['requirements.md','verification.md','reviews/README.md'].map(name=>({path:'spec/hyperfide/'+name,sha256:contentDigest('synthetic-'+name),size:0}));
+c.review_states={
+ original_approval:{source:'spec/hyperfide/spec.kvx',implementation_authorized:true,task_status:{'1.1':'done','2.1':'done'},grants_product_qualification:false},
+ pack_review:{source:'spec/hyperfide/reviews/README.md',sha256:c.source_pins[2].sha256,scope:'DESIGN_AND_AUTHORING_ONLY',grants_implementation_approval:false,grants_product_qualification:false},
+ product_qualification:{source:'spec/hyperfide/spec.kvx',case_qualification:Object.fromEntries(Object.keys(c.cases).map(name=>[name,'UNRUN'])),qualified_case_ids:[],unresolved_case_ids:Object.keys(c.cases)}
+};
 c.contract_digest=contentDigest({fixture_only:true,contract:c});
 const revision='f'.repeat(40),source=contentDigest('synthetic-source-manifest');
 const e=new Map(),names=Object.keys(c.cases);
