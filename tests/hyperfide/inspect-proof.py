@@ -114,10 +114,13 @@ def canonical_check(campaign, receipt_id, relocation=None):
     pin = bounded_read(checker)
     # No caller-selected executable, checker, shell or argv is accepted.
     with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
-        argv = [str(Path(sys.executable).resolve()), "-I", str(checker), "--campaign", str(campaign), "--receipt", receipt_id]
+        argv = [str(Path(sys.executable).resolve()), "-I", "-B", str(checker), "--campaign", str(campaign), "--receipt", receipt_id]
         if relocation is not None:
             argv += ["--relocation", str(relocation)]
-        child = subprocess.Popen(argv, stdout=output, stderr=errors, start_new_session=True, env={"PATH": os.defpath, "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"})
+        # The signed runtime shim resolves to its sibling binary. Preserve only
+        # that interpreter's own library directory, never inherited loader input.
+        runtime_library = Path(sys.executable).resolve().parent.parent / "lib"
+        child = subprocess.Popen(argv, stdout=output, stderr=errors, start_new_session=True, env={"PATH": os.defpath, "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "LD_LIBRARY_PATH": str(runtime_library)})
         try:
             code = child.wait(timeout=120)
         finally:

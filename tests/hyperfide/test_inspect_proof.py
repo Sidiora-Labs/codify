@@ -234,6 +234,24 @@ class ProofInspectionTests(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout)["status"], "CHECKED_COMPONENT")
         self.assertIs(json.loads(result.stdout)["grants_authority"], False)
 
+    def test_portable_checker_preserves_immutable_assets(self):
+        import os
+        root, mapping = self.portable()
+        with tempfile.TemporaryDirectory(prefix="hyperfide-qualified-proof-assets-") as temporary:
+            assets = Path(temporary)
+            for name in ("inspect-proof.py", "check-evidence.py", "proof_relocation.py", "registry.json"):
+                shutil.copyfile(HERE / name, assets / name)
+            pins = {p.name: p.read_bytes() for p in assets.iterdir()}
+            environment = dict(os.environ, LD_LIBRARY_PATH=str(root / "untrusted-loader"))
+            result = subprocess.run([str(Path(sys.executable).resolve()), "-I", "-B",
+                str(assets / "inspect-proof.py"), "--evidence-root", str(root)],
+                input=json.dumps(self.request), text=True, capture_output=True, timeout=25, env=environment)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(json.loads(result.stdout)["status"], "CHECKED_COMPONENT")
+            self.assertFalse(list(assets.rglob("__pycache__")), "fixed checker created signed-asset bytecode")
+            self.assertFalse(list(assets.rglob("*.pyc")), "fixed checker mutated signed assets")
+            self.assertEqual({p.name: p.read_bytes() for p in assets.iterdir()}, pins)
+
     def test_portable_stage_permissions_and_exclusive_lock(self):
         import fcntl
         import os

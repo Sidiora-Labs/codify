@@ -58,6 +58,7 @@ ASSERTIONS = [
     "harness.proof.git-filter-no-execution",
     "harness.proof.external-campaign-closed-environment",
     "harness.proof.private-staging-lock",
+    "harness.proof.immutable-child-runtime-assets",
 ]
 
 PROBE = r"""import json
@@ -709,6 +710,9 @@ class HarnessTests(unittest.TestCase):
         self.proof_regression("test_portable_external_campaign_with_closed_environment")
     def test_67_proof_private_staging_lock(self):
         self.proof_regression("test_portable_stage_permissions_and_exclusive_lock")
+
+    def test_68_proof_immutable_child_runtime_assets(self):
+        self.proof_regression("test_portable_checker_preserves_immutable_assets")
 
 class InventoryResult(unittest.TextTestResult):
     def __init__(self, *args, **kwargs):

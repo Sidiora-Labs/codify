@@ -70,7 +70,8 @@
     "harness.proof.postcheck-bytes-are-rechecked",
     "harness.proof.git-filter-no-execution",
     "harness.proof.external-campaign-closed-environment",
-    "harness.proof.private-staging-lock"
+    "harness.proof.private-staging-lock",
+    "harness.proof.immutable-child-runtime-assets"
   ],
   "cases": [
     "V-056"
