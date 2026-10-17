@@ -8,6 +8,7 @@
     "V-039"
   ],
   "assertion_ids": [
+    "bootstrap.staging.qualification-unclaimed-generation",
     "bootstrap.source.exact-multi-repository",
     "bootstrap.source.partial-download",
     "bootstrap.submodule.actual-pinned-materialization",

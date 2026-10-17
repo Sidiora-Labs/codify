@@ -367,6 +367,8 @@ export async function planResultPreparation(ctx:ComponentContext,raw:unknown):Pr
   const job=(await tx.query('SELECT lease_generation::text FROM hyperfide.qualification_jobs WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE',
    [...s,v.job_id])).rows[0];
   if(!job)fail('QUALIFICATION_NOT_FOUND','Preparation job disappeared');
+  // Preparation binds the current job snapshot, including generation 0 before
+  // its first verifier claim. Readiness must precede that execution lease.
   const plan={operation_id:v.request_id,session_id:v.session_id,reservation_id:v.reservation_id,repository_id:context.result.repository_id,
    timeout_ms:v.timeout_ms,recipe_id:'environment.prepare.v1',
    input_manifest_artifact_id:controls.input_manifest_artifact_id,input_manifest_digest:controls.input_manifest_digest,

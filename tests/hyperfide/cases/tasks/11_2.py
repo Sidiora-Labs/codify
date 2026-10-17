@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """11.2: exact native Git bootstrap and bounded dependency execution."""
-import copy,hashlib,json,os,signal,subprocess,sys,tempfile,time
+import importlib.util,shutil,uuid,copy,hashlib,json,os,signal,subprocess,sys,tempfile,time
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[4]
 FAILED=[]
@@ -10,6 +10,93 @@ def check(identity,callback):
     try:callback();actual="observed"
     except Exception as error:actual=type(error).__name__+": "+str(error);FAILED.append(identity)
     print(json.dumps({"type":"assertion","id":"bootstrap."+identity,"expected":"observed","actual":actual}),flush=True)
+def preparation_generation_probe(binary, service_root):
+    from preparation_stage_fixture import StageService,sha
+    root=Path(service_root).resolve()
+    spec=importlib.util.spec_from_file_location("actual_stage_artifacts",root/"tests/hyperfide/cases/tasks/15_2.py")
+    objects=importlib.util.module_from_spec(spec);spec.loader.exec_module(objects)
+    owned=Path("/run")/("hf-stage-qualification-"+uuid.uuid4().hex)
+    owned.mkdir(mode=0o755);owned.chmod(0o755)
+    workspace=owned/"work";workspace.mkdir(mode=0o700);os.chown(workspace,65534,65534)
+    fixture=None;service=None;operations=[]
+    try:
+        fixture=objects.ObjectFixture()
+        service=StageService(root,objects,fixture,"hf_stage_"+uuid.uuid4().hex)
+        auth=service.auth;scope=service.scope
+        transport=owned/"transport.json"
+        transport.write_text(json.dumps({"origin":auth.origin,"ca_file":str(auth.ca),"key_path":str(auth.keys["operator"]["path"]),"credential_id":auth.ids["operator"],"timeout_ms":10000}))
+        transport.chmod(0o600)
+        recipe=owned/"recipe.js";recipe.write_text("// immutable qualification recipe; never executed\n");recipe.chmod(0o644)
+        executable=Path("/usr/bin/true").resolve()
+        pins={"node_path":str(executable),"node_digest":sha(executable.read_bytes()),
+              "recipe_path":str(recipe),"recipe_digest":sha(recipe.read_bytes()),
+              "native_path":str(executable),"native_digest":sha(executable.read_bytes()),
+              "base_root":str(owned),"max_stage_bytes":"1048576"}
+        config=owned/"config.json"
+        config.write_text(json.dumps({**scope,"transport_config":str(transport),"preparation_recipes":{"environment.prepare.v1":pins,"checkpoint.restore.v1":pins}}));config.chmod(0o600)
+        input_bytes=b'{"schema_version":1,"purpose":"native-staging-qualification"}'
+        input_result=service.put(input_bytes);input_ref=input_result["artifact"]
+        def claim():
+            op=str(uuid.uuid4());operations.append(op);reservation=str(uuid.uuid4())
+            argv=[pins["node_path"],pins["recipe_path"],"--job-context","/run/hyperfide-stage/"+op+"/context.json"]
+            value={"result":{"operation_id":op,"job_class":"PREPARATION","plan_digest":sha(b"bounded real staging claim"),
+                "plan":{"reservation_id":reservation,"argv":argv,"executable_digest":pins["node_digest"],"preparation":{
+                    "recipe_id":"environment.prepare.v1","job_binding":{"namespace":"QUALIFICATION","job_id":str(uuid.uuid4()),"lease_generation":"1","reservation_id":reservation,"input_packet_digest":sha(b"actual fixture packet identity"),"input_manifest_digest":sha(b"semantic job snapshot")},"input_manifest_artifact_id":input_ref["artifact_id"],"input_manifest_digest":sha(input_bytes),
+                    "source":{"repository_key":"fixture","source_object_id":"a"*40,"source_tree_id":"b"*40,"source_manifest_digest":sha(b"source")},
+                    "staging":[]}},
+                "binding":{**scope,"uid":65534,"gid":65534,"workspace_path":str(workspace/"candidate"),"sandbox_id":auth.ids["sandbox"],"boot_id":auth.ids["boot"],"boot_generation":"1","slot_id":str(uuid.uuid4()),"repository_id":str(uuid.uuid4()),"preparation_recipes":{"environment.prepare.v1":pins,"checkpoint.restore.v1":pins}}}}
+            b=value["result"]["binding"];p=value["result"]["plan"]["preparation"]
+            b.update(session_id=str(uuid.uuid4()),slot_generation="1",home_path=str(workspace),tmp_path=str(workspace))
+            p["target_binding"]={
+                "target_binding_id":str(uuid.uuid4()),"organisation_id":scope["organisation_id"],"run_id":scope["run_id"],
+                "preparation_operation_id":op,"task_id":str(uuid.uuid4()),"request_id":str(uuid.uuid4()),"reservation_id":reservation,
+                "allocation_id":str(uuid.uuid4()),"allocation_generation":"1","sandbox_id":b["sandbox_id"],"sandbox_boot_generation":b["boot_generation"],
+                "boot_id":b["boot_id"],"target_slot_id":b["slot_id"],"target_slot_generation":b["slot_generation"],
+                "target_runner_session_id":b["session_id"],"target_uid":str(b["uid"]),"target_gid":str(b["gid"]),
+                "assignee_session_id":auth.ids["operator"],"repository_id":b["repository_id"],"source_digest":sha(b"accepted source envelope"),
+                "source_object_id":p["source"]["source_object_id"],"source_tree_id":p["source"]["source_tree_id"],
+                "profile_id":str(uuid.uuid4()),"profile_digest":sha(b"actual profile binding"),"boot_preparation_digest":sha(b"actual boot preparation"),
+                "workspace_path":b["workspace_path"],"home_path":b["home_path"],"tmp_path":b["tmp_path"],
+                "generation":"1","state":"BOUND","execution_authority":False}
+            return value
+        def invoke(value):
+            path=owned/"claim.json";path.write_text(json.dumps(value));path.chmod(0o600)
+            request=json.dumps({"config_path":str(config),"claim_path":str(path)})
+            result=subprocess.run([str(binary),"--component","12.4","--action","runner.preparation.stage"],input=request,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=90)
+            expect(all(term not in stream for term in (str(auth.keys["operator"]["path"]),objects.SECRET) for stream in (result.stdout,result.stderr)),"native stage leaked transport credentials")
+            envelope=json.loads(result.stdout)
+            return result,({"ok":True,**envelope["result"]} if envelope.get("ok") else {"ok":False})
+        for namespace,generation,accepted in [
+            ("QUALIFICATION","0",True),("QUALIFICATION","1",True),
+            ("REPRODUCTION","0",True),("CANDIDATE","0",False),
+            ("PREWARM","0",False),("CHECKPOINT","0",False),
+            ("QUALIFICATION","00",False),("QUALIFICATION","",False),
+            ("QUALIFICATION","-1",False),("QUALIFICATION","1x",False),
+            ("QUALIFICATION","9223372036854775808",False),
+        ]:
+            value=claim()
+            binding=value["result"]["plan"]["preparation"]["job_binding"]
+            binding.update(namespace=namespace,lease_generation=generation)
+            if namespace=="CHECKPOINT":
+                value["result"]["plan"]["preparation"]["recipe_id"]="checkpoint.restore.v1"
+            result,reply=invoke(value)
+            expect((result.returncode==0 and reply["ok"]) if accepted else (result.returncode!=0 and not reply["ok"]),
+                   namespace+" generation "+generation+": "+result.stdout)
+            context=Path("/run/hyperfide-stage")/value["result"]["operation_id"]/"context.json"
+            if accepted:
+                staged=json.loads(context.read_text())
+                expect(staged["job_binding"]==binding,"job binding changed during staging")
+                expect(staged["target_binding"]["execution_authority"] is False,"staging granted execution authority")
+            else:
+                expect(not context.exists(),"refused plan published context")
+    finally:
+        if service is not None:service.close()
+        if fixture is not None:fixture.stop()
+        for operation in operations:
+            target=Path("/run/hyperfide-stage")/operation
+            if target.exists():shutil.rmtree(target)
+        shutil.rmtree(owned)
+
 def git(root,*args):
     result=subprocess.run(["git","-C",str(root),"-c","maintenance.auto=false","-c","gc.auto=0",*args],text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=True)
     return result.stdout.strip()
@@ -209,6 +296,8 @@ def main():
         def symlink(f):
             alternate=f.base/"alternate";alternate.mkdir();f.workspaces.rmdir();f.workspaces.symlink_to(alternate,target_is_directory=True);f.refused()
         case("workspace.symlink-root",symlink)
+    sys.path.insert(0,str(ROOT/"tests/hyperfide/support"))
+    check("staging.qualification-unclaimed-generation",lambda:preparation_generation_probe(ROOT/"build/hyperfide-native",ROOT))
     print(json.dumps({"type":"cleanup","resources":[],"complete":True}),flush=True)
     return int(bool(FAILED))
 if __name__=="__main__":sys.exit(main())
