@@ -330,9 +330,11 @@ async function submit(ctx:ComponentContext,raw:unknown):Promise<Data>{
    workspace.rows[0].base_commit!==preflight.workspace.base_commit||workspace.rows[0].state_version!==preflight.workspace.state_version)
    fail('QUALIFICATION_SOURCE_MISMATCH','Attributable workspace changed before admission');
   // Register only the actual independently read Git result; the accepted repository baseline remains unchanged.
-  await client.query("INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id,object_type) VALUES($1,$2,$3,'commit') ON CONFLICT DO NOTHING",[s[0],v.repository_id,v.source_object_id]);
-  const registered=await client.query('SELECT object_type FROM hyperfide.source_objects WHERE organisation_id=$1 AND repository_id=$2 AND object_id=$3',[s[0],v.repository_id,v.source_object_id]);
-  if(registered.rows[0]?.object_type!=='commit')fail('QUALIFICATION_SOURCE_MISMATCH','Actual result Git commit metadata conflicts');
+  for(const [objectId,objectType] of [[v.source_object_id,'commit'],[gitFacts.source_tree_id,'tree']]){
+   await client.query('INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id,object_type) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',[s[0],v.repository_id,objectId,objectType]);
+   const registered=await client.query('SELECT object_type FROM hyperfide.source_objects WHERE organisation_id=$1 AND repository_id=$2 AND object_id=$3',[s[0],v.repository_id,objectId]);
+   if(registered.rows[0]?.object_type!==objectType)fail('QUALIFICATION_SOURCE_MISMATCH','Actual result Git object metadata conflicts');
+  }
   await compute!.releaseCompute(client,token,{execution_state:'SUBMITTED'});
   const gen=await client.query('SELECT (coalesce(max(custody_generation),0)+1)::text AS generation FROM hyperfide.submission_custodies WHERE organisation_id=$1 AND run_id=$2 AND task_id=$3',[...s,v.task_id]);
   const custody=randomUUID(),job=randomUUID();
