@@ -190,8 +190,10 @@ def main():
  status=0
  try:
   status|=component_probe()!=0
-  status|=signed_probe()!=0
+  signed_status=signed_probe()
+  status|=signed_status!=0
   status|=native_probe()!=0
+  if signed_status==0:emit("signed21.setup",True,"")
  finally:
   # Identity fixtures are self-cleaned by close(); prove no owned database/role survives.
   after=owned_identities();leaked=sorted((after-before)|(owned&after))
