@@ -154,3 +154,8 @@ CREATE TABLE hyperfide.recovery_accepted_run_debts (
 );
 CREATE TRIGGER immutable_binding BEFORE UPDATE OR DELETE ON hyperfide.recovery_accepted_run_debts FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','recovery_operation_id','reference','source_epoch','target_epoch','created_at');
 CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.recovery_accepted_run_debts FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+-- Task24.4 (additive): measured drill reconciliation evidence gates any resumption of drill-scoped authority.
+ALTER TABLE hyperfide.recovery_drill_runs ADD COLUMN reconciliation jsonb CHECK(reconciliation IS NULL OR (jsonb_typeof(reconciliation)='object' AND octet_length(reconciliation::text)<=8192));
+ALTER TABLE hyperfide.recovery_drill_runs ADD COLUMN resume_state text NOT NULL DEFAULT 'BLOCKED' CHECK(resume_state IN ('BLOCKED','RECONCILED'));
+ALTER TABLE hyperfide.recovery_drill_runs ADD CONSTRAINT recovery_drill_resume_requires_measurement CHECK(resume_state<>'RECONCILED' OR (state='MEASURED' AND reconciliation IS NOT NULL));

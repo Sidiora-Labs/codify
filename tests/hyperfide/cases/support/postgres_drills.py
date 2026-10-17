@@ -79,6 +79,12 @@ try{
  let result;
  if(args.mode==='migrate')result=await new MigrationCoordinator(resources,args.migrations).apply({timeoutMs:30000});
  else if(args.mode==='rows')result=(await resources.observe({preferReplica:false},s=>s.query('SELECT organisation_id,run_id,id,payload,encode(payload_sha256,\'hex\') AS payload_sha256,acknowledged_at::text FROM hyperfide.drill_records ORDER BY id'))).value.rows;
+ else if(args.mode==='exec')result=await resources.gateway.withPrimaryTransaction({timeoutMs:15000},async tx=>(await tx.query(args.sql,args.values??[])).rows);
+ else if(args.mode==='worker'){
+  // A worker result is admitted only by the database-enforced active authority epoch fence.
+  try{result=await resources.gateway.withPrimaryTransaction({timeoutMs:15000,maxRetries:0},async tx=>(await tx.query('INSERT INTO hyperfide.drill_worker_results(deployment_id,id,worker_epoch,result_digest) VALUES($1,$2,$3,$4) RETURNING id',[args.deployment,args.record,args.worker_epoch,digest(args.record)])).rows[0]);result={accepted:true,worker_epoch:args.worker_epoch,id:result.id};}
+  catch(error){result={accepted:false,worker_epoch:args.worker_epoch,refusal:String(error?.message??error).slice(0,512)};}
+ }
  else if(args.mode==='write'){
   result=await resources.gateway.withPrimaryTransaction({timeoutMs:15000},async tx=>{
    const payload='owned-record:'+args.operation+':'+args.record;
@@ -127,6 +133,32 @@ def main():
   if mode in ['activate','restore']:events.append(json.loads(Path(args['evidence_file']).read_text()))
   return json.loads(p.stdout)
  invocations=[]
+ inventory_file=None
+ def inventory(update=None):
+  # Loopback provider inventory outside PostgreSQL: it survives database restore like a real external effect.
+  items=json.loads(inventory_file.read_text()) if inventory_file.exists() else {}
+  if update:items=update(items);inventory_file.write_text(json.dumps(items))
+  return items
+ def effect(url,intent,ref):
+  invoke('exec',url,sql="INSERT INTO hyperfide.drill_effects(id,kind,state) VALUES($1,'provider.create','PENDING')",values=[intent])
+  inventory(lambda items:{**items,ref:{'intent':intent,'created_by_epoch':epoch or fixture_source}})
+ def reconcile(url,current_epoch,stale_epochs):
+  pending={r['id']:r for r in invoke('exec',url,sql="SELECT id::text,state FROM hyperfide.drill_effects WHERE state='PENDING' ORDER BY id")}
+  observed=inventory();adopted=[];orphans=[]
+  for ref,item in sorted(observed.items()):
+   if item['intent'] in pending:
+    invoke('exec',url,sql="UPDATE hyperfide.drill_effects SET state='RECONCILED',provider_ref=$2 WHERE id=$1 AND state='PENDING'",values=[item['intent'],ref]);adopted.append(ref)
+   elif not invoke('exec',url,sql='SELECT id FROM hyperfide.drill_effects WHERE id=$1',values=[item['intent']]):
+    inventory(lambda items:{k:v for k,v in items.items() if k!=ref});orphans.append(ref)
+  remaining=invoke('exec',url,sql="SELECT count(*)::int AS n FROM hyperfide.drill_effects WHERE state='PENDING'")[0]['n']
+  unowned=[ref for ref,item in inventory().items() if not invoke('exec',url,sql="SELECT id FROM hyperfide.drill_effects WHERE id=$1 AND state='RECONCILED'",values=[item['intent']])]
+  workers=[invoke('worker',url,worker_epoch=e,record=str(uuid.uuid4())) for e in stale_epochs]
+  current=invoke('worker',url,worker_epoch=current_epoch,record=str(uuid.uuid4()))
+  value={'scope':'ISOLATED_POSTGRESQL_FIXTURE','mechanism':'PostgreSQL active-epoch trigger fence; loopback provider inventory file outside the restored database',
+   'stale_workers':{'presented':len(workers),'fenced':sum(1 for w in workers if w['accepted'] is False),'current_accepted':current['accepted'] is True,'observations':workers+[current]},
+   'external_effects':{'outstanding':len(pending)+len(orphans),'adopted':len(adopted),'orphans_removed':len(orphans),'unresolved':remaining+len(unowned)}}
+  save('reconciliation.json',value);return value
+ reconciliation=None
  try:
   cluster=PostgresCluster.__new__(PostgresCluster);cluster.__init__()
   journal=cluster.root/'external-journal';journal.mkdir(mode=0o700)
@@ -136,6 +168,18 @@ def main():
   for name in ['0001-authority.sql','0004-durability.sql']:shutil.copyfile(ROOT/'services/hyperfide/migrations'/name,migrations/name)
   (migrations/'9000-drill.sql').write_text("""CREATE TABLE hyperfide.drill_records(organisation_id uuid NOT NULL,run_id uuid NOT NULL,id uuid PRIMARY KEY,payload text NOT NULL,payload_sha256 bytea NOT NULL CHECK(octet_length(payload_sha256)=32),acknowledged_at timestamptz NOT NULL DEFAULT clock_timestamp());
 CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.drill_records FOR EACH STATEMENT EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TABLE hyperfide.drill_effects(id uuid PRIMARY KEY,kind text NOT NULL,state text NOT NULL CHECK(state IN ('PENDING','RECONCILED')),provider_ref text);
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.drill_effects FOR EACH STATEMENT EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TABLE hyperfide.drill_worker_results(deployment_id uuid NOT NULL,id uuid PRIMARY KEY,worker_epoch uuid NOT NULL,result_digest text NOT NULL,accepted_at timestamptz NOT NULL DEFAULT clock_timestamp());
+CREATE FUNCTION hyperfide.drill_fence_worker() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,hyperfide AS $f$
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM hyperfide.authority_epochs WHERE deployment_id=NEW.deployment_id AND epoch=NEW.worker_epoch AND state='ACTIVE') THEN
+  RAISE EXCEPTION 'worker authority epoch is not the active recovered epoch' USING ERRCODE='42501';
+ END IF;
+ RETURN NEW;
+END $f$;
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.drill_worker_results FOR EACH STATEMENT EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER fence_worker_epoch BEFORE INSERT OR UPDATE ON hyperfide.drill_worker_results FOR EACH ROW EXECUTE FUNCTION hyperfide.drill_fence_worker();
 """)
   invoke('migrate',cluster.url())
   initial=invoke('activate',cluster.url(),external_epoch=None)
@@ -143,6 +187,8 @@ CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hype
   cluster.replicate();cluster.synchronous(True)
   record=invoke('write',cluster.url(),synchronous=True,record=str(uuid.uuid4()),operation=request['operation_id'])
   acked=[record['id']]
+  inventory_file=cluster.root/'provider-inventory.json'
+  effect(cluster.url(),str(uuid.uuid4()),'loopback-sandbox-before-backup')
   primary=invoke('rows',cluster.url());standby=invoke('rows',cluster.url(True))
   replay_deadline=time.monotonic()+10
   while standby!=primary and time.monotonic()<replay_deadline:
@@ -151,6 +197,8 @@ CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hype
   backup=cluster.backup('drill-backup')
   backup_manifest=json.loads((backup/'backup_manifest').read_text())
   save('backup-manifest.json',backup_manifest)
+  # Acknowledged by the pre-restore authority after the recovery point: the restore must surface it.
+  effect(cluster.url(),str(uuid.uuid4()),'loopback-sandbox-after-backup')
   disruption_ns=time.monotonic_ns()
   cluster.stop(cluster.primary)
   old_absent=cluster.stopped(cluster.primary,cluster.socket)
@@ -160,6 +208,7 @@ CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hype
   rotation=invoke('activate',cluster.url(True),external_epoch=fixture_source,old_writer=str(cluster.primary),old_socket=str(cluster.socket/('.s.PGSQL.'+str(cluster.port))))
   epoch=rotation['epoch']
   recovered=promoted
+  if request['scenario']=='DATABASE':reconciliation=reconcile(cluster.url(True),epoch,[fixture_source])
   if request['scenario']=='RESTORE':
    cluster.stop(cluster.standby)
    if not cluster.stopped(cluster.standby,cluster.replica_socket):raise RuntimeError('Promoted predecessor remains reachable before restore')
@@ -177,6 +226,7 @@ CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hype
    final=invoke('restore',restored_url,external_epoch=epoch,database_epoch=fixture_source,old_writer=str(cluster.standby),old_socket=str(cluster.replica_socket/('.s.PGSQL.'+str(cluster.port))))
    epoch=final['epoch'];recovered=invoke('rows',restored_url)
    if restored_before!=primary or recovered!=primary:raise RuntimeError('Restored scoped acknowledged record bytes differ')
+   reconciliation=reconcile(restored_url,epoch,[fixture_source,rotation['epoch']])
   if recovered!=primary:raise RuntimeError('Recovery did not preserve exact acknowledged record bytes')
   recovered_ids=[r['id'] for r in recovered]
   if any(value not in recovered_ids for value in acked):raise RuntimeError('Acknowledged identity lost')
@@ -202,7 +252,7 @@ CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hype
     data=p.read_bytes();artifacts.append({'path':p.name,'sha256':hashlib.sha256(data).hexdigest(),'size':len(data)})
   proof={'schema_version':1,'scope':'ISOLATED_POSTGRESQL_FIXTURE','scenario':request['scenario'],'operation_id':request['operation_id'],'fixture_source_epoch':fixture_source,'fixture_recovery_epoch':epoch,'artifacts':artifacts,'cleanup':cleanup,'limits':LIMITS}
   save('evidence.json',proof);manifest=evidence/'evidence.json';data=manifest.read_bytes()
-  result={'status':status,'source_epoch':request['source_epoch'],'recovery_epoch':epoch,'fixture_source_epoch':fixture_source,'scope':'ISOLATED_POSTGRESQL_FIXTURE','acknowledged_ids':acked,'recovered_ids':[r['id'] for r in recovered],'evidence_digest':'sha256:'+hashlib.sha256(data).hexdigest(),'limits':LIMITS,'artifacts':artifacts+[{'path':manifest.name,'sha256':hashlib.sha256(data).hexdigest(),'size':len(data)}],'started_at':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime(started)),'completed_at':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'cleanup':cleanup}
+  result={'status':status,'source_epoch':request['source_epoch'],'recovery_epoch':epoch,'fixture_source_epoch':fixture_source,'scope':'ISOLATED_POSTGRESQL_FIXTURE','acknowledged_ids':acked,'recovered_ids':[r['id'] for r in recovered],'evidence_digest':'sha256:'+hashlib.sha256(data).hexdigest(),'limits':LIMITS,'reconciliation':reconciliation and {k:v for k,v in reconciliation.items() if k!='stale_workers'}|{'stale_workers':{k:v for k,v in reconciliation['stale_workers'].items() if k!='observations'}},'artifacts':artifacts+[{'path':manifest.name,'sha256':hashlib.sha256(data).hexdigest(),'size':len(data)}],'started_at':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime(started)),'completed_at':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'cleanup':cleanup}
   save('result.json',result)
  return 0 if cleanup['complete'] else 2
 if __name__=='__main__':sys.exit(main())
