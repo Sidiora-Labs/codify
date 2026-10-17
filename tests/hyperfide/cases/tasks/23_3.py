@@ -110,13 +110,30 @@ def main():
    during={}
    def pool_pressure():
     before=derive()["metrics"]["db_pool_wait"];total=before["pool_sampler"]["queued_samples_total"];limit=before["pool_at_request_entry"]["maxActive"]
-    holder=Holder()
+    holder=Holder();batches=[];probe=[]
+    blocked="FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND (query LIKE 'SELECT pg_advisory_xact_lock(%' OR query LIKE 'SELECT id FROM hyperfide.artifacts %')"
     try:
-     holder.run(lock_artifact);threads,results=concurrently([held_record(602,20200+i) for i in range(limit+4)]);time.sleep(1.0)
-     probe,probe_results=concurrently([lambda:(f.request("23.3","fleet.metrics.snapshot",{"server_derived":True}),f.calls[-1]["elapsed_ms"])]);time.sleep(1.2)
+     holder.run(lock_artifact);batches.append(concurrently([held_record(602,20200+i) for i in range(limit+4)]))
+     end=time.monotonic()+4
+     while int(h.sql("SELECT count(*) "+blocked).stdout.strip())<limit and time.monotonic()<end:time.sleep(0.05)
+     h.expect(int(h.sql("SELECT count(*) "+blocked).stdout.strip())>=limit,"writers did not exhaust the primary pool")
+     # Authentication uses this pool before component entry. Advance it without
+     # releasing the lock: commits would trigger SSI retries and lease-free backoff.
+     probe,probe_results=concurrently([lambda:(f.request("23.3","fleet.metrics.snapshot",{"server_derived":True}),f.calls[-1]["elapsed_ms"])])
+     end=time.monotonic()+8;replacement=limit+4;cancelled=0
+     while probe[0].is_alive() and time.monotonic()<end:
+      time.sleep(0.1)
+      out=h.sql("SELECT pg_cancel_backend(pid) "+blocked+" ORDER BY query_start,pid LIMIT 1").stdout.strip()
+      if out=="t":
+       cancelled+=1;batches.append(concurrently([held_record(602,20200+replacement)]));replacement+=1
+     h.expect(not probe[0].is_alive(),"probe did not progress while pressure was held")
+     h.expect(cancelled>0,"pressure driver did not advance a blocked writer")
      holder.run("COMMIT;")
-    finally:holder.close()
-    join(threads);join(probe)
+    finally:
+     holder.close()
+     for threads,_ in batches:join(threads)
+     join(probe)
+    results=[r for _,batch in batches for r in batch]
     during["probe"]=probe_results[0]
     after=derive()["metrics"]["db_pool_wait"];sampler=after["pool_sampler"]
     h.expect(sampler["queued_samples_total"]>total and sampler["window_max_active"]>=limit and sampler["window_max_queued"]>=1 and after["pressure_status"]=="EXHAUSTED","pool exhaustion not identified: "+json.dumps(after))
