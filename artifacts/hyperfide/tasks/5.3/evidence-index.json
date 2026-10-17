@@ -1,9 +1,9 @@
 {
   "task": "5.3",
-  "commit": "12aa390190b3d3e360e079254378a381103fc236",
-  "requalified_on": "12aa390190b3d3e360e079254378a381103fc236",
+  "commit": "6a91b0130b1d6a09407f5f786b975545dcdc937b",
+  "requalified_on": "6a91b0130b1d6a09407f5f786b975545dcdc937b",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-004 --manifest tests/hyperfide/manifests/tasks/5.3.json && python3 tests/hyperfide/qualify.py --case V-037 --manifest tests/hyperfide/manifests/tasks/5.3.json",
   "exit_code": 1,
-  "stdout_tail": "{\"status\": \"FAIL\", \"receipt_id\": \"ead94008-6a25-47de-b71c-14cbc09bbd0c\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/5.3/campaigns/cc5392b0d579d925e6b62aeea25271646eeb656fd270a4d34e7a182d903566b2\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": [\"executed assertion inventory differs from exact registration\", \"probe failed, was unavailable, or timed out\", \"required artifact missing or unsafe: scheduler/observations.json\"]}\n",
-  "ran_at": "2026-10-17T14:08:33.340Z"
+  "stdout_tail": "{\"status\": \"FAIL\", \"receipt_id\": \"1d1eb859-9342-4852-bca0-ef1bbf075710\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/5.3/campaigns/fb3559288a3b52e461cfb79d699606f45ad243c55bc9f5fe18e2f932d452ee59\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": [\"independent checker rejected candidate; inspect checks artifacts\"]}\n",
+  "ran_at": "2026-10-17T18:14:49.045239+00:00"
 }
