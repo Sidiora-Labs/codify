@@ -1,9 +1,9 @@
 {
   "task": "14.1",
-  "commit": "ff4632c9bc896057147975b600323af8f8b21f89",
-  "requalified_on": "ff4632c9bc896057147975b600323af8f8b21f89",
+  "commit": "a80cd7edbb1c3021b76c18c53fdc95d634a77a09",
+  "requalified_on": "a80cd7edbb1c3021b76c18c53fdc95d634a77a09",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-015 --manifest tests/hyperfide/manifests/tasks/14.1.json && python3 tests/hyperfide/qualify.py --case V-040 --manifest tests/hyperfide/manifests/tasks/14.1.json",
   "exit_code": 1,
-  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"db37ee97-a718-4d1a-b0d0-c472c600698d\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/14.1/campaigns/59d3fd634e30cbad8e8077b5815d0f87f440fb385a49859b03dd1d2b792bc391\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"FAIL\", \"receipt_id\": \"d5f1326b-d542-48a8-8dc2-cfd6fcafd48a\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/14.1/campaigns/59d3fd634e30cbad8e8077b5815d0f87f440fb385a49859b03dd1d2b792bc391\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": [\"one or more behavioural assertions failed\", \"probe failed, was unavailable, or timed out\"]}\n",
-  "ran_at": "2026-10-17T19:02:08.156Z"
+  "stdout_tail": "{\"status\": \"FAIL\", \"receipt_id\": \"36874732-d045-492a-b55a-72eba5588b6b\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/14.1/campaigns/0ef259cf6c5bec338ed8b800a1a9a59259eb2ab613abc1ff2ccf47683e52cb25\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": [\"independent checker rejected candidate; inspect checks artifacts\"]}",
+  "ran_at": "2026-10-17T19:18:48.357Z"
 }
