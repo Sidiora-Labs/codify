@@ -1,1 +1,9 @@
-{"task":"23.2","commit":"6a91b0130b1d6a09407f5f786b975545dcdc937b","requalified_on":"6a91b0130b1d6a09407f5f786b975545dcdc937b","verify_cmd":"python3 tests/hyperfide/qualify.py --case V-007 --manifest tests/hyperfide/manifests/tasks/23.2.json && python3 tests/hyperfide/qualify.py --case V-048 --manifest tests/hyperfide/manifests/tasks/23.2.json","exit_code":0,"stdout_tail":"{\"status\": \"PASS\", \"receipt_id\": \"be9ba1f5-7689-439f-80c9-e586a6f3ce16\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/23.2/campaigns/6e2b683d3c45c618f9ab60d3f3467d1f9e2edaa79a30670d20ad2a5a290d96cd\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"d49b0f6a-3334-471e-a5ed-4594b71678ed\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/23.2/campaigns/6e2b683d3c45c618f9ab60d3f3467d1f9e2edaa79a30670d20ad2a5a290d96cd\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n","ran_at":"2026-10-17T18:18:04.182Z"}
+{
+  "task": "23.2",
+  "commit": "a80cd7edbb1c3021b76c18c53fdc95d634a77a09",
+  "requalified_on": "a80cd7edbb1c3021b76c18c53fdc95d634a77a09",
+  "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-007 --manifest tests/hyperfide/manifests/tasks/23.2.json && python3 tests/hyperfide/qualify.py --case V-048 --manifest tests/hyperfide/manifests/tasks/23.2.json",
+  "exit_code": 0,
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"ce712645-6ee9-4bee-87e4-4560e2189b0b\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/23.2/campaigns/1e58f6f565800930e6a3189907c3ced3adf2fadc4d655011d731343aaa5ecd0b\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"bac3f665-2419-4c41-9b6e-ba67aedf9469\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/23.2/campaigns/1e58f6f565800930e6a3189907c3ced3adf2fadc4d655011d731343aaa5ecd0b\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T19:24:07.351Z"
+}
