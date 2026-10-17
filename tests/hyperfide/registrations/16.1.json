@@ -26,7 +26,18 @@
     "assurance.16.1.https.no-authority",
     "assurance.16.1.semantic.fresh",
     "assurance.16.1.semantic.cached",
-    "assurance.16.1.semantic.upgrade-refused"
+    "assurance.16.1.semantic.upgrade-refused",
+    "assurance.16.1.git.different-result-owned",
+    "assurance.16.1.git.outside-scope",
+    "assurance.16.1.git.rename-outside-scope",
+    "assurance.16.1.git.unrelated-history",
+    "assurance.16.1.git.postsubmit-head-amendment",
+    "assurance.16.1.git.prefix-escape",
+    "assurance.16.1.git.single-star-depth",
+    "assurance.16.1.git.double-star-depth",
+    "assurance.16.1.git.spaces-preserved",
+    "assurance.16.1.git.malformed-utf8-path",
+    "assurance.16.1.git.unchanged-source"
   ],
   "argv": [
     "python3",
@@ -63,6 +74,21 @@
       "id": "hf-task-16.1-signed-service",
       "kind": "https-service",
       "scope": "task16.1-signed-disposable"
+    },
+    {
+      "id": "hf-task-16.1-git",
+      "kind": "local-directory",
+      "scope": "task16.1-actual-git-disposable"
+    },
+    {
+      "id": "hf-task-16.1-signed-role",
+      "kind": "postgresql-role",
+      "scope": "task16.1-signed-disposable"
+    },
+    {
+      "id": "hf-task-16.1-signed-files",
+      "kind": "local-directory",
+      "scope": "task16.1-signed-disposable"
     }
   ],
   "cleanup_argv": [
@@ -74,7 +100,8 @@
   "required_artifacts": [
     "assurance/observations-16.1.json",
     "assurance/database-absence-16.1.json",
-    "assurance/signed-absence-16.1.json"
+    "assurance/signed-absence-16.1.json",
+    "assurance/git-absence-16.1.json"
   ],
   "source_files": [
     "services/hyperfide/src/assurance/submission.ts",
@@ -97,7 +124,9 @@
     "tests/hyperfide/check-evidence.py",
     "tests/hyperfide/manifest.schema.json",
     "tests/hyperfide/qualify.py",
-    "tests/hyperfide/support/identity_fixture.py"
+    "tests/hyperfide/support/identity_fixture.py",
+    "services/hyperfide/src/assurance/preparation.ts",
+    "tests/hyperfide/cases/tasks/11_1.py"
   ],
   "source_roots": [
     "services/hyperfide/src",
@@ -109,6 +138,10 @@
     "postgresql.fixture.create",
     "postgresql.fixture.drop",
     "https.fixture.start",
-    "https.fixture.stop"
+    "https.fixture.stop",
+    "postgresql.role.create",
+    "postgresql.role.drop",
+    "filesystem.fixture.create",
+    "filesystem.fixture.remove"
   ]
 }

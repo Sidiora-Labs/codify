@@ -50,6 +50,16 @@
       "id": "hf-task-16.3-signed-service",
       "kind": "https-service",
       "scope": "task16.3-signed-disposable"
+    },
+    {
+      "id": "hf-task-16.3-signed-role",
+      "kind": "postgresql-role",
+      "scope": "task16.3-signed-disposable"
+    },
+    {
+      "id": "hf-task-16.3-signed-files",
+      "kind": "local-directory",
+      "scope": "task16.3-signed-disposable"
     }
   ],
   "cleanup_argv": [
@@ -83,7 +93,9 @@
     "tests/hyperfide/check-evidence.py",
     "tests/hyperfide/manifest.schema.json",
     "tests/hyperfide/qualify.py",
-    "tests/hyperfide/support/identity_fixture.py"
+    "tests/hyperfide/support/identity_fixture.py",
+    "services/hyperfide/src/assurance/preparation.ts",
+    "tests/hyperfide/cases/tasks/11_1.py"
   ],
   "source_roots": [
     "services/hyperfide/src",
@@ -95,6 +107,10 @@
     "postgresql.fixture.create",
     "postgresql.fixture.drop",
     "https.fixture.start",
-    "https.fixture.stop"
+    "https.fixture.stop",
+    "postgresql.role.create",
+    "postgresql.role.drop",
+    "filesystem.fixture.create",
+    "filesystem.fixture.remove"
   ]
 }

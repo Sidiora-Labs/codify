@@ -2,9 +2,9 @@ import type pg from 'pg';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {artifact,canonical,currentCustody,custodyLock,decimal,digest,fail,fields,hash,scope,transaction,uuid,roles,loadPolicy,assuranceBarrier,executionGate} from './submission.js';
 import {verifyReceiptRecordArtifacts} from './executor.js';
-import type {Data} from './submission.js';
+import type {Data,PrimaryClient} from './submission.js';
 
-export type Queryable=Pick<pg.PoolClient,'query'>;
+export type Queryable=PrimaryClient;
 export interface CoverageScope{organisation_id:string;run_id:string}
 /** Runs on the caller's primary transaction; never substitutes a second pool snapshot. */
 export async function inspectCoverage(db:Queryable,s:CoverageScope,custodyId:string):Promise<Data>{

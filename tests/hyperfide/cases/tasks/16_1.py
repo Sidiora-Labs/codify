@@ -43,10 +43,14 @@ def authority_cases():
             criteria_digest=d, contract_digests=[]),
         "submission.revoke": dict(common, reason="bounded unauthenticated negative"),
         "submission.inspect": dict(scope, submission_id=u),
+        "qualification.preparation.plan": dict(scope,job_id=u,request_id=u,session_id=u,reservation_id=u,recipe_policy_artifact_id=u,
+            source_bundles=[{"repository_key":"fixture","artifact_id":u,"storage_kind":"object"}],timeout_ms=1000),
+        "qualification.preparation.inspect": dict(scope,operation_id=u),
         "qualification.job.assign": dict(scope, job_id=u, expected_state_version="1", verifier_id=u,
             sandbox_id=u, slot_id=u, sandbox_boot_generation="1", reservation_id=u, environment_digest=d),
         "qualification.job.claim": dict(scope, job_id=u, expected_state_version="1"),
         "qualification.execute": dict(scope, job_id=u, lease_generation="1"),
+        "qualification.execution.inspect": dict(scope, job_id=u, lease_generation="1"),
         "qualification.history.import": dict(scope, task_id=u, provenance="untrusted fixture claim", legacy_claim={"PASS":True}),
         "qualification.coverage.inspect": dict(scope, submission_id=u),
         "qualification.review.record": dict(common, clause_id="clause", rubric_digest=d,
@@ -58,7 +62,7 @@ def authority_cases():
     }
     actions = {
         "16.1": ("submission", ["submission.submit", "submission.revoke", "submission.inspect"]),
-        "16.2": ("executor", ["qualification.job.assign", "qualification.job.claim", "qualification.execute", "qualification.history.import"]),
+        "16.2": ("executor", ["qualification.job.assign", "qualification.job.claim", "qualification.execute", "qualification.history.import", "qualification.preparation.plan", "qualification.preparation.inspect", "qualification.execution.inspect"]),
         "16.3": ("coverage", ["qualification.coverage.inspect", "qualification.review.record", "qualification.accept"]),
         "16.4": ("validity", ["assurance.validity.inspect", "assurance.invalidate", "assurance.requalification.accept"]),
     }
@@ -103,6 +107,24 @@ console.log(JSON.stringify({code,accepted,queries}));
 """ % (module, json.dumps(scope), json.dumps(u), expression))
     emit("assurance."+TASK+".primary.unbranded-denied",
          results == [{"code":"QUALIFICATION_PRIMARY_REQUIRED","accepted":False,"queries":0}])
+    if TASK=="16.2":
+        results=node("""
+const m=await import('./services/hyperfide/dist/assurance/preparation.js');
+const scope=%s,id=%s;
+for(const [key,call,expected] of [
+ ['context',db=>m.loadResultPreparationContext(db,scope,{job_id:id}),'QUALIFICATION_PRIMARY_REQUIRED'],
+ ['effective-inputs',db=>m.inspectEffectiveResultInputs(db,scope,{job_id:id}),'TX_CLOSED'],
+ ['intent',db=>m.inspectResultPreparationIntent(db,scope,{operation_id:id}),'TX_CLOSED']
+]){
+ let queries=0,code=null,accepted=false;
+ const db={query(){queries++;throw new Error('No unbranded decision query');}};
+ try{await call(db);accepted=true;}catch(error){code=error.code??error.name;}
+ console.log(JSON.stringify({key,valid:!accepted&&queries===0&&code===expected}));
+}
+""" % (json.dumps(scope),json.dumps(u)))
+        if len(results)!=3:raise AssertionError("Incomplete preparation primary-capability negative inventory")
+        for row in results:emit("assurance.16.2.primary.preparation-"+row["key"],row["valid"])
+
 
 def sql(text, database=None, accept_error=False):
     result = subprocess.run(["psql","-X","-q","-A","-t","-v","ON_ERROR_STOP=1",
@@ -171,34 +193,44 @@ def signed_cases():
     state={"database":database,"pid":None,"start":None,"closed":False}
     record.write_text(json.dumps(state))
     def setup(fixture):
+        state.update(runtime_role=fixture.runtime_role,folder=str(fixture.path),port=fixture.port)
+        record.write_text(json.dumps(state))
         names=("0002-spec.sql","0003-hierarchy.sql","0004-durability.sql","0005-scheduling.sql","0007-graph.sql",
                "0008-provider-coordination.sql","0012-runner-registry.sql","0016-qualification.sql",
                "0032-execution-packets.sql","0034-child-sessions.sql","0202-spec-dependencies.sql")
         for name in names:
             path=ROOT/"services/hyperfide/migrations"/name
             version=int(path.name.split("-")[0])
-            data=path.read_bytes()
-            fixture.sql(data.decode())
-            fixture.sql("INSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES($1,$2,$3)",
-                        [version,path.stem,"sha256:"+hashlib.sha256(data).hexdigest()])
+            fixture.apply_migration(path.stem)
+    class OwnedFixture(IdentityFixture):
+        def __init__(self,**kwargs):
+            try:super().__init__(**kwargs)
+            finally:
+                for attribute,key in (("runtime_role","runtime_role"),("path","folder"),("port","port")):
+                    value=getattr(self,attribute,None)
+                    if value is not None:state[key]=str(value) if key=="folder" else value
+                child=getattr(self,"child",None)
+                if child is not None:
+                    state["pid"]=child.pid
+                    stat=Path("/proc/"+str(child.pid)+"/stat")
+                    if stat.exists():state["start"]=stat.read_text().split()[21]
+                record.write_text(json.dumps(state))
     fixture=None
     try:
-        fixture=IdentityFixture(extra_components=names,extra_setup=setup,extra_env={"HYPERFIDE_REQUIRE_SYNC_REPLICA":"0"},database=database)
+        fixture=OwnedFixture(extra_components=names,extra_setup=setup,extra_env={"HYPERFIDE_REQUIRE_SYNC_REPLICA":"0"},database=database)
         state["pid"]=fixture.child.pid
         state["start"]=Path("/proc/"+str(state["pid"])+"/stat").read_text().split()[21]
         record.write_text(json.dumps(state))
         org,run=fixture.ids["organisation"],fixture.ids["run"]
         u,d=str(uuid.uuid4()),"sha256:"+"b"*64
-        read={"16.1":"submission.inspect","16.2":"qualification.job.assign","16.3":"qualification.coverage.inspect","16.4":"assurance.validity.inspect"}[TASK]
+        read={"16.1":"submission.inspect","16.2":"qualification.execution.inspect","16.3":"qualification.coverage.inspect","16.4":"assurance.validity.inspect"}[TASK]
         value={"organisation_id":org,"run_id":run,"submission_id":u}
         if TASK=="16.2":
-            value={"organisation_id":org,"run_id":run,"job_id":u,"expected_state_version":"1",
-                   "verifier_id":u,"sandbox_id":u,"slot_id":u,"sandbox_boot_generation":"1",
-                   "reservation_id":u,"environment_digest":d}
+            value={"organisation_id":org,"run_id":run,"job_id":u,"lease_generation":"1"}
         def error(action,payload,key="operator"):
             status,response=fixture.invoke(action,payload,component=TASK,key=key)
             return status==200 and response.get("ok") is False and response.get("error",{}).get("code")
-        emit("assurance."+TASK+".https.signed-missing",error(read,value)=="QUALIFICATION_NOT_FOUND")
+        emit("assurance."+TASK+".https.signed-missing",error(read,value)==("QUALIFICATION_RECEIPT_INVALID" if TASK=="16.2" else "QUALIFICATION_NOT_FOUND"))
         emit("assurance."+TASK+".https.cross-scope",error(read,dict(value,organisation_id=str(uuid.uuid4()))) in ("AUTH_SCOPE_DENIED","QUALIFICATION_SCOPE_DENIED"))
         action,payload,key={
             "16.1":("submission.submit",{"organisation_id":org,"run_id":run,"task_id":u,"request_id":u,"attempt_id":u,"attempt_generation":"1",\
@@ -251,19 +283,42 @@ def cleanup_signed():
             time.sleep(0.1)
         if current():os.kill(pid,signal.SIGKILL)
     stopped=not current()
+    if state.get("port"):
+        import socket
+        with socket.socket() as observer:
+            observer.settimeout(0.5)
+            stopped=stopped and observer.connect_ex(("127.0.0.1",state["port"]))!=0
     name=state["database"]
     subprocess.run(["dropdb","--force","--if-exists",name],cwd=ROOT,check=True,capture_output=True,timeout=45)
     absent=sql("SELECT count(*) FROM pg_database WHERE datname='"+name+"';","postgres").stdout.strip()=="0"
+    role=state.get("runtime_role")
+    role_absent=role is not None
+    if role:
+        import re
+        if not re.fullmatch(r"hf_ir_[0-9a-f]{32}",role):raise ValueError("Unowned runtime role")
+        sql('DROP ROLE IF EXISTS "'+role+'"',"postgres")
+        role_absent=sql("SELECT count(*) FROM pg_roles WHERE rolname='"+role+"';","postgres").stdout.strip()=="0"
+    folder=state.get("folder")
+    files_absent=folder is not None
+    if folder:
+        import tempfile,shutil
+        location=Path(folder)
+        if location.parent!=Path(tempfile.gettempdir()) or not location.name.startswith("hyperfide-identity-") or location.is_symlink():
+            raise ValueError("Unowned identity fixture folder")
+        if stopped and location.exists():shutil.rmtree(location)
+        files_absent=not location.exists()
     artifact="assurance/signed-absence-"+TASK+".json"
     (directory()/("signed-absence-"+TASK+".json")).write_text(json.dumps({
-        "database":name,"database_observed_absent":absent,"service_observed_absent":stopped,
+        "database":name,"database_observed_absent":absent,"service_observed_absent":stopped,"runtime_role_observed_absent":role_absent,"fixture_files_observed_absent":files_absent,
         "observer":"PostgreSQL pg_database and exact service PID/start identity or scoped process enumeration"})+"\n")
     return [{"id":"hf-task-"+TASK+"-signed-database","status":"deleted" if absent else "unknown","observed_absent":absent,"evidence_artifact":artifact},
-            {"id":"hf-task-"+TASK+"-signed-service","status":"deleted" if stopped else "unknown","observed_absent":stopped,"evidence_artifact":artifact}]
+            {"id":"hf-task-"+TASK+"-signed-service","status":"deleted" if stopped else "unknown","observed_absent":stopped,"evidence_artifact":artifact},
+            {"id":"hf-task-"+TASK+"-signed-role","status":"deleted" if role_absent else "unknown","observed_absent":role_absent,"evidence_artifact":artifact},
+            {"id":"hf-task-"+TASK+"-signed-files","status":"deleted" if files_absent else "unknown","observed_absent":files_absent,"evidence_artifact":artifact}]
 
 def cleanup():
     global DATABASE, RESOURCE
-    signed_resources=cleanup_signed()
+    signed_resources=cleanup_signed()+cleanup_git()+cleanup_preparation()
     signed_absent=all(row['observed_absent'] for row in signed_resources)
     record = directory()/("resource-"+TASK+".json")
     if DATABASE is None and record.exists():
@@ -281,6 +336,181 @@ def cleanup():
         "status":"deleted" if absent else "unknown","observed_absent":absent,"evidence_artifact":artifact}]}),flush=True)
     return absent and signed_absent
 
+
+def git_cases():
+    """Measure actual immutable Git ancestry, branch head and accepted path ownership."""
+    import tempfile
+    import shutil
+    location=Path(tempfile.mkdtemp(prefix="hyperfide-assurance-git-"))
+    record=directory()/("git-resource-"+TASK+".json")
+    record.write_text(json.dumps({"path":str(location)}))
+    try:
+        def git(*args):
+            return subprocess.run(["git","-c","core.hooksPath=/dev/null",*args],cwd=location,
+                env=dict(os.environ,GIT_CONFIG_NOSYSTEM="1",GIT_CONFIG_GLOBAL="/dev/null"),
+                text=True,capture_output=True,check=True,timeout=15).stdout.strip()
+        git("init","-q");git("config","user.name","Bounded source test");git("config","user.email","fixture@example.invalid")
+        (location/"baseline").write_text("accepted baseline\n")
+        git("add","--all");git("commit","-qm","accepted baseline")
+        baseline=git("rev-parse","HEAD")
+        def commit(changes):
+            git("checkout","-q","--detach",baseline)
+            git("clean","-fdq")
+            for name,data in changes.items():
+                target=location/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_text(data)
+            git("add","--all");git("commit","-qm","actual result")
+            return git("rev-parse","HEAD")
+        result=commit({"src/allowed.ts":"actual result\n"})
+        outside=commit({"outside.ts":"outside\n"})
+        prefix=commit({"src-escape/allowed.ts":"outside prefix\n"})
+        nested=commit({"src/deep/allowed.ts":"nested\n"})
+        spaces=commit({"src/file with spaces.ts":"spaces\n"})
+        git("checkout","-q","--detach",result)
+        git("mv","src/allowed.ts","escaped.ts");git("commit","-qm","rename beyond scope")
+        renamed=git("rev-parse","HEAD")
+        git("checkout","-q","--orphan","unrelated")
+        git("rm","-rf","--ignore-unmatch",".")
+        (location/"unrelated").write_text("unrelated\n");git("add","--all");git("commit","-qm","unrelated history")
+        unrelated=git("rev-parse","HEAD")
+        git("checkout","-q","--detach",baseline)
+        invalid_path=os.fsencode(location)+b"/invalid-\xff"
+        descriptor=os.open(invalid_path,os.O_WRONLY|os.O_CREAT,0o600)
+        os.write(descriptor,b"invalid utf8\n");os.close(descriptor)
+        git("add","--all");git("commit","-qm","invalid path encoding")
+        invalid=git("rev-parse","HEAD")
+        cases=[
+            ("different-result-owned",result,baseline,["src"],None),
+            ("outside-scope",outside,baseline,["src"],"QUALIFICATION_SOURCE_SCOPE"),
+            ("rename-outside-scope",renamed,result,["src"],"QUALIFICATION_SOURCE_SCOPE"),
+            ("unrelated-history",unrelated,baseline,["."],"QUALIFICATION_SOURCE_MISMATCH"),
+            ("postsubmit-head-amendment",result,baseline,["src"],"QUALIFICATION_SOURCE_MISMATCH"),
+            ("prefix-escape",prefix,baseline,["src/*"],"QUALIFICATION_SOURCE_SCOPE"),
+            ("single-star-depth",nested,baseline,["src/*"],"QUALIFICATION_SOURCE_SCOPE"),
+            ("double-star-depth",nested,baseline,["src/**"],None),
+            ("spaces-preserved",spaces,baseline,["src/file with spaces.ts"],None),
+            ("malformed-utf8-path",invalid,baseline,["."],"QUALIFICATION_SOURCE_MISMATCH"),
+            ("unchanged-source",baseline,baseline,["src"],None),
+        ]
+        repo=str(uuid.uuid4())
+        prepared=[]
+        for key,head,base,scope,expected in cases:
+            branch="refs/heads/probe-"+key
+            git("update-ref",branch,baseline if key=="postsubmit-head-amendment" else head)
+            prepared.append(dict(key=key,head=head,base=base,scope=scope,expected=expected,branch=branch))
+        program="""
+const m=await import('./services/hyperfide/dist/assurance/submission.js');
+const cases=%s,repository=%s,repo=%s;
+const ctx={env:{HF_QUALIFICATION_REPOSITORIES:JSON.stringify({[repo]:repository})}};
+for(const c of cases){
+ let code=null,facts=null;
+ try{facts=await m.submittedGitFacts(ctx,{repository_id:repo,source_object_id:c.head},
+ {repository_id:repo,source_object_id:c.base},{branch_ref:c.branch},c.scope);}
+ catch(error){code=error.code??error.name;}
+ const valid=code===c.expected&&(code!==null||facts.source_object_id===c.head&&facts.baseline_source_object_id===c.base&&
+ /^([0-9a-f]{40}|[0-9a-f]{64})$/.test(facts.source_tree_id)&&facts.changed_path_count>=0&&facts.owned_scope_digest===m.hash(c.scope));
+ console.log(JSON.stringify({key:c.key,valid}));
+}
+""" % (json.dumps(prepared),json.dumps(str(location)),json.dumps(repo))
+        rows=node(program)
+        if len(rows)!=len(cases):raise AssertionError("Incomplete actual Git probe inventory")
+        for row in rows:emit("assurance.16.1.git."+row["key"],row["valid"])
+
+
+    finally:
+        shutil.rmtree(location)
+        (directory()/("git-absence-"+TASK+".json")).write_text(json.dumps({
+            "observed_absent":not location.exists(),"observer":"owned temporary Git directory after removal"})+"\n")
+
+
+def preparation_cases():
+    import tempfile
+    import shutil
+    location=Path(tempfile.mkdtemp(prefix="hyperfide-assurance-preparation-"))
+    (directory()/("preparation-resource-"+TASK+".json")).write_text(json.dumps({"path":str(location)}))
+    try:
+        def git(*args):
+            return subprocess.run(["git","-c","core.hooksPath=/dev/null",*args],cwd=location,
+                env=dict(os.environ,GIT_CONFIG_NOSYSTEM="1",GIT_CONFIG_GLOBAL="/dev/null"),
+                text=True,capture_output=True,check=True,timeout=15).stdout.strip()
+        git("init","-q");git("config","user.name","Bounded preparation test");git("config","user.email","fixture@example.invalid")
+        (location/"source").write_text("baseline\n");git("add","source");git("commit","-qm","baseline")
+        baseline=git("rev-parse","HEAD")
+        (location/"source").write_text("actual result\n");git("add","source");git("commit","-qm","result")
+        result=git("rev-parse","HEAD");repo=str(uuid.uuid4())
+        # Metadata-only pure transformation against real fixture file bytes.
+        # Random custody IDs here grant no primary or execution authority.
+        import importlib.util
+        spec=importlib.util.spec_from_file_location("preparation_fixture",ROOT/"tests/hyperfide/cases/tasks/11_1.py")
+        support=importlib.util.module_from_spec(spec);spec.loader.exec_module(support)
+        profile_base=location/"profile-data";profile_base.mkdir()
+        fixture=support.Fixture(profile_base)
+        profile=fixture.profile
+        profile["repositories"][0]["commit"]=baseline
+        files=[]
+        for file in sorted(fixture.candidate.rglob("*")):
+            if file.is_file():
+                files.append({"path":str(file.relative_to(fixture.candidate)),"mode":file.stat().st_mode&0o777,
+                    "size":str(file.stat().st_size),"digest":support.digest(file.read_bytes())})
+        manifest={"schema_version":1,"profile":profile,"files":files,"directories":[],"scan":{}}
+        manifest["digest"]=support.digest(support.canonical(manifest))
+        measurement={"repository_id":repo,"source_object_id":result,"source_tree_id":git("rev-parse",result+"^{tree}"),
+            "submodules":[],"file_pins":[profile["recipe"],*profile["preparation_evidence"],
+                *[pin for manager in profile["package_managers"] for pin in manager["locks"]]]}
+        measurement_bytes=support.canonical(measurement)+b"\n"
+        measured=dict(measurement,observation_artifact_digest=support.digest(measurement_bytes))
+        context={"parent_profile_id":str(uuid.uuid4()),"parent_preparation_manifest":manifest,
+            "result":{"custody_id":str(uuid.uuid4()),"custody_generation":"1","binding_digest":"sha256:"+"b"*64,
+                "source_manifest_artifact_id":str(uuid.uuid4()),"source_manifest_digest":"sha256:"+"c"*64,
+                "repository_id":repo,"source_object_id":result,"source_tree_id":measurement["source_tree_id"]},
+            "repository_binding":{"repository_id":repo,"repository_key":"fixture","repository_url":profile["repositories"][0]["url"]}}
+        program="""
+const m=await import('./services/hyperfide/dist/assurance/preparation.js');
+const context=%s,measured=%s,bytes=Buffer.from(%s,'base64'),derived=%s;
+const positive=m.rederiveResultProfile(context,measured,derived,bytes);
+console.log(JSON.stringify({key:'exact-retained-bytes',valid:positive.requires_preparation===true&&positive.readiness_granted===false&&
+ positive.profile.repositories[0].commit===context.result.source_object_id&&positive.lineage.parent_profile_id===context.parent_profile_id&&
+ positive.lineage.parent_profile_key===context.parent_preparation_manifest.profile.profile_id}));
+for(const [key,changed,raw] of [
+ ['missing-newline',measured,bytes.subarray(0,-1)],
+ ['field-relabel',{...measured,source_object_id:'f'.repeat(40)},bytes],
+ ['malformed-utf8',measured,Buffer.from([255])]
+]){
+ let code=null;try{m.rederiveResultProfile(context,changed,derived,raw);}catch(error){code=error.code??error.message;}
+ console.log(JSON.stringify({key,valid:code==='QUALIFICATION_MEASUREMENT_INTEGRITY'}));
+}
+""" % (json.dumps(context),json.dumps(measured),json.dumps(__import__("base64").b64encode(measurement_bytes).decode()),json.dumps(str(uuid.uuid4())))
+        rows=node(program)
+        if len(rows)!=4:raise AssertionError("Incomplete measurement readback inventory")
+        for row in rows:emit("assurance.16.2.preparation."+row["key"],row["valid"])
+    finally:
+        shutil.rmtree(location)
+        (directory()/("preparation-absence-"+TASK+".json")).write_text(json.dumps({
+            "observed_absent":not location.exists(),"observer":"owned pure preparation fixture after removal"})+"\n")
+
+def cleanup_preparation():
+    if TASK!="16.2":return []
+    record=directory()/("preparation-resource-"+TASK+".json")
+    if not record.exists():return []
+    location=Path(json.loads(record.read_text())["path"])
+    import tempfile
+    if location.parent!=Path(tempfile.gettempdir()) or not location.name.startswith("hyperfide-assurance-preparation-"):
+        raise ValueError("Unowned preparation fixture path")
+    absent=not location.exists()
+    return [{"id":"hf-task-16.2-preparation","status":"deleted" if absent else "unknown",
+        "observed_absent":absent,"evidence_artifact":"assurance/preparation-absence-16.2.json"}]
+
+def cleanup_git():
+    if TASK!="16.1":return []
+    record=directory()/("git-resource-"+TASK+".json")
+    if not record.exists():return []
+    location=Path(json.loads(record.read_text())["path"])
+    import tempfile
+    if location.parent!=Path(tempfile.gettempdir()) or not location.name.startswith("hyperfide-assurance-git-"):
+        raise ValueError("Unowned Git fixture path")
+    absent=not location.exists()
+    return [{"id":"hf-task-16.1-git","status":"deleted" if absent else "unknown",
+        "observed_absent":absent,"evidence_artifact":"assurance/git-absence-16.1.json"}]
+
 def schema_cases():
     global DATABASE, RESOURCE
     DATABASE="hf_16_bounded_"+uuid.uuid4().hex[:16]
@@ -289,7 +519,7 @@ def schema_cases():
     subprocess.run(["createdb",DATABASE],cwd=ROOT,check=True,capture_output=True,timeout=30)
     for name in ["0001-authority.sql","0004-durability.sql","0016-qualification.sql"]:
         sql((ROOT/"services/hyperfide/migrations"/name).read_text())
-    emit("assurance.16.1.schema.applied", sql("SELECT count(*) FROM information_schema.tables WHERE table_schema='hyperfide' AND table_name LIKE 'assurance_%';").stdout.strip()=="11")
+    emit("assurance.16.1.schema.applied", sql("SELECT count(*) FROM information_schema.tables WHERE table_schema='hyperfide' AND table_name LIKE 'assurance_%';").stdout.strip()=="13")
     ids=[str(uuid.uuid4()) for _ in range(7)]
     org,project,spec,run,epoch,package,task=ids
     import hashlib
@@ -336,6 +566,8 @@ def main(task="16.1"):
         if TASK=="16.1":
             schema_cases()
             semantic_cases()
+            git_cases()
+        if TASK=="16.2":preparation_cases()
         primary_cases()
         signed_cases()
         passed=True
