@@ -37,7 +37,8 @@
     "decision.capability.selfhost-default",
     "decision.capability.expanded-references",
     "decision.capability.profile-not-wire",
-    "decision.capability.question-id-context"
+    "decision.capability.question-id-context",
+    "decision.capability.output-price"
   ],
   "argv": [
     "python3",
