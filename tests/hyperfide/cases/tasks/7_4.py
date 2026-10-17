@@ -75,6 +75,25 @@ def cleanup():
     print(json.dumps({"type":"cleanup","complete":absent,"resources":[{"id":RESOURCE,"status":"deleted" if absent else "unknown","observed_absent":absent,"evidence_artifact":"graph/cluster-absence.json"}]}),flush=True)
     return 0 if absent else 1
 
+def mixed_load(h):
+    # Ten readers plus one writer exceed the default two active + eight queued.
+    # Size this no-refusal measurement for its producers, keeping pool reserves.
+    replicas.restart(h,HYPERFIDE_GRAPH_MAX_ACTIVE="2",HYPERFIDE_GRAPH_MAX_QUEUED="9")
+    def admission():return h.f.ok("7.2","graph.ingest.describe",{})["admission"]
+    def budget():
+        limits=admission()
+        h.expect(limits["max_active"]==2 and limits["max_queued"]==9 and limits["primary_pool_max"]>2,
+            "mixed-load admission must fit eleven producers below primary pool capacity: "+h.encoded(limits))
+        h.obs({"observation":"mixed-load-admission","producers":11,"admission":limits})
+    h.check("graph.query.mixed-load-admission-budget",budget)
+    replicas.mixed_load(h)
+    def drained():
+        limits=admission()
+        h.expect(limits["active"]==limits["queued"]==limits["refused"]==0,
+            "mixed-load admission refused work or leaked permits: "+h.encoded(limits))
+        h.obs({"observation":"mixed-load-admission-drained","admission":limits})
+    h.check("graph.query.mixed-load-admission-drained",drained)
+
 def main():
     cluster=None;fixture=None;item=None
     try:
@@ -88,7 +107,7 @@ def main():
             fixture=module.Fixture(Path(directory))
             h=Harness(fixture,cluster);replicas.attach(h)
             module.querying(fixture)
-            for phase in (contracts.run,projection.run,contracts.corpus,contracts.migration,replicas.run,replicas.mixed_load):phase(h)
+            for phase in (contracts.run,projection.run,contracts.corpus,contracts.migration,replicas.run,mixed_load):phase(h)
             module.artifact_root().mkdir(parents=True,exist_ok=True)
             (module.artifact_root()/"task-7.4-observations.json").write_text(module.encoded({"scope":"task-component","task":"7.4","source":fixture.manifest,
                 "observations":module.OBS,"assertion_count":len(module.IDS),"failures":module.FAILED,"full_campaigns":"NOT_CLAIMED",
