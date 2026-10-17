@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "campaign_id": "hyperfide-task-21.1-advisory-v5-requal-12aa390190b3-requal-6a91b0130b1d-requal-6a91b0130b1d",
+ "campaign_id": "hyperfide-task-21.1-advisory-v5-requal-12aa390190b3-requal-6a91b0130b1d-requal-6a91b0130b1d-requal-a80cd7edbb1c",
  "registered_variant": "task:21.1",
  "scope": "task-component",
  "case_ids": [
@@ -469,8 +469,8 @@
   },
   {
    "path": "tests/hyperfide/cases/tasks/4_1.py",
-   "sha256": "fff7328ce252c6ae67053f0d86b1f948ce455153c518d629af8dca3ef4f604aa",
-   "size": 36660
+   "sha256": "5d2d075e1fff50836b2b88f97bb47fc92593a1c546d185b2ebec932a06c1c6b5",
+   "size": 37608
   },
   {
    "path": "tests/hyperfide/check-evidence.py",
