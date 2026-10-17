@@ -62,6 +62,18 @@ def main():
         expect(p.returncode==0,'Actual authorization capability failed: '+p.stderr[:500]);proof=json.loads(p.stdout)
         check('authorization.actual-authenticated-capability-positive',lambda:expect(proof['actual'],'Real capability failed'))
         check('authorization.capability-rejects-forged-context',lambda:expect(proof['forged_denied'],'Structural fake principal accepted'))
+        def reject_mutable_policy():
+            f.stop();policy_file=f.path/'authorization.json';policy_file.chmod(0o666)
+            refused=False
+            try:
+                try:f.start()
+                except AssertionError as error:
+                    refused='operator-owned policy' in str(error)
+                    if f.child:f.child.communicate(timeout=8);f.child=None
+            finally:policy_file.chmod(0o600)
+            expect(refused,'Untrusted writable authorization policy reached readiness')
+            f.start()
+        check('authorization.policy.untrusted-write-permission-denied',reject_mutable_policy)
         # Revocation is absolute and takes precedence over policy lists.
         f.sql("UPDATE hyperfide.identity_principals SET state='REVOKED',credential_version=credential_version+1 WHERE credential_id=$1",[f.ids['provisioner']])
         check('authorization.revoked-credential-denied',lambda:expect(f.invoke('authorization.inspect',{},component='14.4',key='provisioner')[1].get('error',{}).get('code')=='AUTH_REVOKED','Revoked credential passed role policy'))

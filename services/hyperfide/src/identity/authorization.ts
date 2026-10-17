@@ -1,4 +1,6 @@
 import fs from 'node:fs/promises';
+import path from 'node:path';
+import {constants} from 'node:fs';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {object} from '../policy/programme.js';
 import {assertInvocation,canonicalOrigin,exact,fail,frozen,NAME,strictJSON,uuid} from '../transport/protocol.js';
@@ -10,7 +12,17 @@ export function isAuthorizationAuthority(v:unknown):v is AuthorizationAuthority{
 function list(v:unknown):string[]{if(!Array.isArray(v)||v.length>256||v.some(x=>typeof x!=='string'||!x.length||x.length>1024)||new Set(v).size!==v.length)fail('AUTHORIZATION_CONFIG','Explicit bounded unique policy lists required');return v as string[];}
 function gitRef(v:string):boolean{return v.startsWith('refs/')&&!/[\x00-\x20\x7f~^:?*\\[]/.test(v)&&!v.includes('..')&&!v.includes('@{')&&!v.endsWith('/')&&!v.endsWith('.')&&!v.split('/').some(p=>!p||p.startsWith('.')||p.endsWith('.lock'));}
 async function rules(ctx:ComponentContext):Promise<readonly Rule[]>{
- const file=ctx.env.HF_AUTHORIZATION_CONFIG_FILE;if(!file)fail('AUTHORIZATION_CONFIG','Trusted authorization policy file required');const st=await fs.lstat(file);if(!st.isFile()||st.isSymbolicLink()||st.size>1048576)fail('AUTHORIZATION_CONFIG','Bounded regular policy file required');const value=strictJSON(await fs.readFile(file));exact(value,['schema_version','rules']);if(value.schema_version!==1||!Array.isArray(value.rules)||!value.rules.length||value.rules.length>128)fail('AUTHORIZATION_CONFIG','Explicit versioned policy rules required');
+ const file=ctx.env.HF_AUTHORIZATION_CONFIG_FILE;if(!file||!path.isAbsolute(file)||file.includes('\0'))fail('AUTHORIZATION_CONFIG','Absolute trusted authorization policy file required');
+ let handle:Awaited<ReturnType<typeof fs.open>>|undefined;let bytes:Buffer;
+ try{
+  if(await fs.realpath(file)!==path.resolve(file))fail('AUTHORIZATION_CONFIG','Authorization policy cannot use symlinked paths');
+  handle=await fs.open(file,constants.O_RDONLY|constants.O_NOFOLLOW);
+  const st=await handle.stat(),named=await fs.lstat(file);
+  if(!st.isFile()||st.size<1||st.size>1048576||st.uid!==process.getuid?.()||(st.mode&0o022)!==0||st.dev!==named.dev||st.ino!==named.ino)fail('AUTHORIZATION_CONFIG','Bounded operator-owned policy without untrusted write permission required');
+  bytes=await handle.readFile();const after=await handle.stat();
+  if(after.size!==st.size||after.mtimeMs!==st.mtimeMs||after.ctimeMs!==st.ctimeMs)fail('AUTHORIZATION_CONFIG','Authorization policy changed during trusted load');
+ }finally{await handle?.close();}
+ const value=strictJSON(bytes);exact(value,['schema_version','rules']);if(value.schema_version!==1||!Array.isArray(value.rules)||!value.rules.length||value.rules.length>128)fail('AUTHORIZATION_CONFIG','Explicit versioned policy rules required');
  const result:Rule[]=[];for(const r of value.rules){exact(r,['role','actions','repositories','artifact_prefixes','git_refs','model_destinations','model_profiles']);if(typeof r.role!=='string'||!/^[A-Z_]{1,32}$/.test(r.role))fail('AUTHORIZATION_CONFIG','Invalid principal role');const rule:Rule={role:r.role,actions:list(r.actions),repositories:list(r.repositories),artifact_prefixes:list(r.artifact_prefixes),git_refs:list(r.git_refs),model_destinations:list(r.model_destinations),model_profiles:list(r.model_profiles)};
  if(rule.actions.some(x=>!NAME.test(x))||rule.repositories.some(x=>!uuid(x))||rule.git_refs.some(x=>!gitRef(x))||rule.artifact_prefixes.some(x=>x.startsWith('/')||x.includes('..')||x.includes('\\')||/[\x00-\x20]/.test(x)))fail('AUTHORIZATION_CONFIG','Invalid action/repository/artifact/Git scope');
  for(const endpoint of rule.model_destinations)canonicalOrigin(endpoint);result.push(frozen(rule));}return frozen(result);
