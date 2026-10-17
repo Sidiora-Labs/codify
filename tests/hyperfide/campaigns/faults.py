@@ -15,7 +15,10 @@ import uuid
 import deterministic as common
 from live import cleanup_result
 
-FAULTS = {"controller_loss", "database_failover", "sandbox_loss", "stale_worker", "unknown_create", "credential_expiry", "artifact_incomplete", "git_ack_lost", "stale_publisher", "restore_epoch"}
+FAULTS = {"controller_loss", "database_failover", "sandbox_loss", "stale_worker", "unknown_create", "credential_expiry", "artifact_incomplete", "git_ack_lost", "stale_publisher", "restore_epoch", "replica_lag", "reversed_commits", "duplicate_provision"}
+# Composites the requirement names explicitly: an approved schedule may add
+# pairs but can never omit these overlaps.
+MANDATORY_PAIRS = {tuple(sorted(pair)) for pair in (("database_failover", "replica_lag"), ("reversed_commits", "stale_worker"), ("duplicate_provision", "unknown_create"), ("git_ack_lost", "stale_publisher"))}
 RECOVERY_CASES = {"V-002", "V-003", "V-004", "V-005", "V-009", "V-010", "V-012", "V-015", "V-016", "V-017", "V-033", "V-037", "V-040", "V-049", "V-053", "V-054"}
 
 def required_pairs(manifest):
@@ -28,6 +31,7 @@ def required_pairs(manifest):
         common.require(key not in result, 'duplicate required composite pair')
         result.add(key)
     common.require({kind for pair in result for kind in pair} == FAULTS, 'all declared fault classes must participate in approved composites')
+    common.require(MANDATORY_PAIRS <= result, 'mandatory composite fault pairs missing from approved schedule')
     return result
 
 def overlapping_pairs(intervals):
