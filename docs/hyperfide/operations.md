@@ -28,22 +28,57 @@ The human interacts with the leader. Feature managers own their assigned package
 
 A source branch, successful compiler run, authoring check or task-component receipt does not qualify a full acceptance case. The canonical runner records the selected variant, exact input hashes, source inventory, process outcome, assertion inventory and cleanup. The independent checker revalidates those records.
 
-The current canonical case registry may contain empty full-case assertion inventories. Those cases are unregistered for full qualification and block release readiness. Do not fill missing evidence with component results, vendor benchmarks or unexecuted plan text. Provider, connector, restore, sustained-fleet and live-model measurements remain pending until their own exact-current receipts exist.
+The canonical case registry (tests/hyperfide/registry.json) currently holds 57 acceptance cases, V-001 to V-057, and every one has an empty full-case assertion inventory. Those cases are unregistered for full qualification and block release readiness. Do not fill missing evidence with component results, vendor benchmarks or unexecuted plan text. Provider, connector, restore, sustained-fleet and live-model measurements remain pending until their own exact-current receipts exist.
 
-Support state at the documented source revision (labels: **implemented** = source and component interface exist; **pending** = the owning task is not closed in the specification; **proposed** = planning text only):
+Support state at the documented source revision. Task status comes from spec/hyperfide/spec.kvx; component evidence comes from artifacts/hyperfide/tasks/<id>/evidence-index.json. Labels:
+
+- **done**: the specification marks the task done.
+- **implemented (component evidence)**: the source exists and the task's registered task-component variant passed. The task is still pending in the specification, and its full cases remain UNRUN.
+- **pending**: the task is not closed and this tree has no passing task-component evidence for it.
+- **proposed**: planning text only.
 
 | Area | State | Owning task(s) |
 | --- | --- | --- |
-| Control/provisioner/dispatch service entrypoints, policy-gated startup | implemented | 1.x, 4.x, 14.x |
-| Strict qualifier and independent receipt checker | implemented | 27.1 |
-| SQLite import, cutover/rollback, release planning components | implemented, task pending | 25.1–25.4 |
-| Hyperfide identity, canonical hyperfide entrypoint, cg compatibility, name/alias migration, generated guidance | implemented in part, tasks pending | 26.1–26.4 |
-| Deterministic schedule replay | pending | 27.2 |
-| Live Railway/Blaxel provider and native agent qualification, 48/72-hour fleet campaigns | pending: no measured limits exist | 27.3 |
-| Composite fault qualification | pending | 27.4 |
-| Documentation closure, release readiness, traceability retention | implemented, tasks pending | 28.2–28.4 |
+| Approval policy and dependency-enabled build boundaries | done | 1.4 |
+| Main-host placement, human programme interface, frontier assignment policy | implemented (component evidence) | 1.1–1.3 |
+| Control/provisioner/dispatch service entrypoints, policy-gated startup | done (policy, schema and gateway); implemented (component evidence) for the authenticated service | 1.4, 4.1, 4.2, 14.1 |
+| Pinned run specification import | pending: source in services/hyperfide/src/spec, no task-component evidence index in this tree | 2.1 |
+| Dependency graphs, versioned decomposition, proof obligations | implemented (component evidence) | 2.2–2.4 |
+| Agent hierarchy, scoped packets and views | implemented (component evidence) | 3.1–3.4 |
+| PostgreSQL authority schema, primary transaction gateway, migrations and old-primary fencing | done | 4.1, 4.2, 4.4 |
+| Replica-barrier packet assembly | implemented (component evidence) | 4.3 |
+| Claims, reservations, leases, dispatch reconciliation, resource admission | implemented (component evidence) | 5.1–5.4 |
+| Outbox, inbox, instructions, dispatch recovery | implemented (component evidence) | 6.1–6.4 |
+| Central graph extraction, staging, publication, query parity | implemented (component evidence) | 7.1–7.4 |
+| Provider interface and UNSUPPORTED outcomes | done | 8.1 |
+| Provider pools, intents/orphans, placement/relocation | implemented (component evidence) | 8.2–8.4 |
+| Railway adapter | implemented (component evidence) | 9.1–9.4 |
+| Blaxel coding images | done | 10.1 |
+| Blaxel lifetime, create-or-get, preview gating | implemented (component evidence) | 10.2–10.4 |
+| Content-derived environment profiles | done | 11.1 |
+| Source and cache materialisation, readiness probes, prewarming | implemented (component evidence) | 11.2–11.4 |
+| Packet-scoped workspace slices for very large repositories | pending: no source or evidence in this tree | 11.5 |
+| Sandbox supervisor and worker slots | implemented (component evidence) | 12.1–12.4 |
+| Claude Code and Codex connectors, session lineage | implemented (component evidence) | 13.1–13.4 |
+| Identity enrolment, scoped credentials, authenticated HTTPS service | implemented (component evidence) | 14.1–14.4 |
+| Attempt source, artifacts, checkpoints, retention | implemented (component evidence) | 15.1–15.4 |
+| Independent task qualification | implemented (component evidence) | 16.1–16.4 |
+| Commit and semantic assurance | implemented (component evidence) | 17.1–17.4 |
+| Findings, GitHub projection, routing | implemented (component evidence) | 18.1–18.3 |
+| Finding closure after fenced repair | implemented; component evidence fails (exit 1: 28 of 31 registered assertions pass, and the genuine-execution-start, independent-resolution and reopen assertions are unmet) | 18.4 |
+| Integration candidates, publication gateway, closure, release barrier | implemented (component evidence) | 19.1–19.4 |
+| Typed decision providers, bounded decision assistance, decision evaluation and promotion | implemented (component evidence) | 20.1–22.4 |
+| Observability, resource accounting, notifications | implemented (component evidence) | 23.1–23.4 |
+| Supervisory and sandbox recovery, stop/drain/cancel controllers, recovery drills | implemented (component evidence) | 24.1–24.4 |
+| SQLite import, cutover/rollback, authority-mode routing, release planning | implemented (component evidence) | 25.1–25.4 |
+| Hyperfide identity, canonical hyperfide entrypoint, cg compatibility, name/alias migration, generated guidance | implemented (component evidence) | 26.1–26.4 |
+| Strict qualifier and independent receipt checker | done | 27.1 |
+| Deterministic schedule replay | implemented (component evidence); full replay cases UNRUN | 27.2 |
+| Live Railway/Blaxel provider and native agent qualification, 48/72-hour fleet campaigns | pending: campaign driver source (tests/hyperfide/campaigns/live.py) but no task-component evidence index; no measured limits exist | 27.3 |
+| Composite fault qualification | implemented (component evidence, driver component only); full campaign blocked by O-06, O-09, destructive-execution approval, database failover topology and task 27.3 full receipts | 27.4 |
+| Operational documentation, documentation closure, release readiness, traceability retention | implemented (component evidence) | 28.1–28.4 |
 | Hundreds of agents / 100 concurrent sandboxes | proposed planning target | 27.3 |
-| Optional Span GPU self-hosting | proposed | — |
+| Optional Span GPU self-hosting | proposed; only the self-hosted promotion gate is implemented (component evidence) | 22.4 |
 
 ## Build and start
 
@@ -91,7 +126,7 @@ Authenticated startup, refusal of a request that claims its own approval, refusa
 
 ## Local CLI
 
-The local-first CLI is the hyperfide executable; cg is a byte-identical compatibility name at this revision (version prints 2.0.0-dev for both). The CLI is not a control-service client and grants no distributed authority. Commands relevant to operations, all listed by hyperfide help --all:
+The local-first CLI is the hyperfide executable. cg is a deprecated compatibility alias from the same executable, with identical arguments, JSON and exit codes; it is byte-identical at this revision, and version prints 2.0.0-dev for both. It stays for the compatibility window of the approved release (see hyperfide help, "command names"). The CLI is not a control-service client and grants no distributed authority. Commands relevant to operations, all listed by hyperfide help --all:
 
 | Command | Use |
 | --- | --- |
@@ -131,7 +166,7 @@ Provider capability differences implemented by the adapters (services/hyperfide/
 | Snapshots, network policy, copy, lifetime methods | — | UNSUPPORTED in the process adapter (lifetime policy is a separate ttl-idle/ttl-max-age/date delete policy) |
 | Account limits | Planning input only | account_limits_qualified must be declared; live limits pending 27.3 |
 
-Provider components: 8.2 provider.pools.*, 8.3 provider.intents.* and provider.orphans.list, 8.4 provider.placement.* and provider.relocation.* (provisioner role). Contract checks report authority NONE and live_qualification NOT_EVALUATED.
+Provider components: 8.2 provider.pools.*, 8.3 provider.intents.* and provider.orphans.list, 8.4 provider.placement.* and provider.relocation.*. All three components register in the provisioner role, and 8.2 and 8.3 also register in the control role. Contract checks report authority NONE and live_qualification NOT_EVALUATED.
 
 Remote work is prepared in a primary transaction, its intent is committed, then the opaque runner permit executes. No remote build occurs inside a PostgreSQL transaction. Unknown execution or cleanup remains unknown and retains capacity until reconciliation proves otherwise.
 
@@ -166,7 +201,7 @@ Controlled trials require exact-plan approval, independent randomised units, com
 
 ## Measured qualification limits
 
-No live provider, fleet, throughput, latency or restore limit has been measured: task 27.3 (live providers and native agents, 48/72-hour campaigns), 27.2 (schedule replay) and 27.4 (composite faults) are pending, and every referenced full acceptance case is UNRUN. The only figures in this guide are configured bounds enforced by code (protocol bytes, PostgreSQL pool and listener limits) and the local task-component observation recorded in artifacts/hyperfide/tasks/28.1/evidence-index.json: the twelve registered 28.1 assertions run against a local PostgreSQL fixture on Node 24.22.0. That observation is a task-component receipt only and cannot replace any full-case, provider, connector or campaign receipt.
+No live provider, fleet, throughput, latency or restore limit has been measured: tasks 27.2 (schedule replay), 27.3 (live providers and native agents, 48/72-hour campaigns) and 27.4 (composite faults) are pending in the specification. 27.2 and 27.4 have task-component evidence only, 27.3 has none, and every referenced full acceptance case is UNRUN. The only figures in this guide are configured bounds enforced by code (protocol bytes, PostgreSQL pool and listener limits) and the local task-component observation recorded in artifacts/hyperfide/tasks/28.1/evidence-index.json: the twelve registered 28.1 assertions run against a local PostgreSQL fixture on Node 24.22.0. That observation is a task-component receipt only and cannot replace any full-case, provider, connector or campaign receipt.
 
 ## Stop, recovery and retention
 
@@ -174,17 +209,17 @@ Stop the requested scope through its authorised control operation. Revocation/fe
 
 Recovery uses exact durable source/checkpoint manifests and current identity; a latest session name is not a safe resume instruction. Restore/rollback requires independent drills and verified artifact bytes. Retention follows admitted references, manifest-child dependencies and legal holds. Do not delete chunks while retained evidence still references their parent manifest.
 
-Control operations: recovery.stop.describe, recovery.stop.request, recovery.stop.finalize and recovery.stop.reconcile (recovery/stop.ts); recovery.drill.describe/plan/execute/inspect (24.4, recovery/drills.ts); artifact.retention.inspect/hold/release/policy/collect/reconcile (artifacts/retention.ts; immutable artifact_retention_events from migration 0029). Locally, hyperfide fleet down --drain stops a CLI-supervised run; it does not stop remote sandboxes.
+Control operations: recovery.stop.describe, recovery.stop.request, recovery.stop.finalize and recovery.stop.reconcile (24.3, recovery/stop.ts); recovery.drill.describe/plan/execute/inspect/reconcile (24.4, recovery/drills.ts); artifact.retention.inspect/hold/release/policy/collect/reconcile (15.4, artifacts/retention.ts; immutable artifact_retention_events from migration 0029). Locally, hyperfide fleet down --drain stops a CLI-supervised run; it does not stop remote sandboxes.
 
 ## Migration, identity and troubleshooting
 
-SQLite import preserves historical state and provenance separately from live authority. An old done flag is not current qualification. Offline/local core behavior cannot claim distributed ownership; stale projections cannot overwrite fresh central state. Canonical Hyperfide distribution and the cg compatibility entrypoint must be verified by the actual tasks 25/26 implementation before an installer is advertised.
+SQLite import preserves historical state and provenance separately from live authority. An old done flag is not current qualification. Offline/local core behavior cannot claim distributed ownership; stale projections cannot overwrite fresh central state. The canonical Hyperfide distribution and the cg compatibility entrypoint are implemented with task-component evidence for tasks 25.4 and 26.2. No installer is advertised until those tasks close in the specification.
 
-Migration and rebrand components (all control role; tasks pending, so these are implemented interfaces, not qualified guarantees):
+Migration and rebrand components, all in the control role. The tasks are pending in the specification and have task-component evidence only, so these are implemented interfaces, not qualified guarantees:
 
 - 25.1 migration.sqlite.describe/snapshot/inventory/archive/import/status: historical import with provenance.
 - 25.2 cutover.describe/inspect/prepare/validate/activate/rollback/recovery: single-authority cutover with separate rollback boundaries.
-- 25.4 release.inspect/compatibility/plan: upgrade order EXPAND_SCHEMA, drain dispatch, install control, provisioner, dispatch, update runners, canary, reconcile old clients, CONTRACT_SCHEMA. The plan returns deployment_authorized false and build_on_supervision_host false; a release whose bin/cg differs from bin/hyperfide is refused.
+- 25.4 release.inspect/compatibility/plan: upgrade order VERIFY_PREBUILT_ARTIFACTS, EXPAND_SCHEMA, drain dispatch, install control, provisioner, dispatch, update runners, canary, reconcile old clients, CONTRACT_SCHEMA. The plan returns deployment_authorized false and build_on_supervision_host false; a release whose bin/cg differs from bin/hyperfide is refused.
 - 26.3 migration.names.plan/apply/rollback/aliases: codify.kvx to hyperfide.kvx and .codify/agent-context.md to .hyperfide/context/agent-context.md with backups; legacy CG_* and CODIFY_* variables (for example CG_AUTHORITY_URL, CODIFY_ROOT) are aliases of their HYPERFIDE_* names, and differing values refuse with ALIAS_CONFLICT.
 - 26.4 migration.generated.inspect/run: regenerated owned guidance.
 
