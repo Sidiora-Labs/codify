@@ -76,7 +76,9 @@
     "graph.query.grouped-context-no-per-symbol-amplification",
     "graph.query.mixed-load-quiet-baseline",
     "graph.query.mixed-load-latency-distribution",
-    "graph.query.mixed-load-invariants-no-speedup-claim"
+    "graph.query.mixed-load-invariants-no-speedup-claim",
+    "graph.query.mixed-load-admission-budget",
+    "graph.query.mixed-load-admission-drained"
   ],
   "argv": [
     "python3",
