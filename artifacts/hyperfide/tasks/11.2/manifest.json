@@ -1,0 +1,143 @@
+{
+  "approval": {
+    "allowed_actions": [],
+    "approved": true
+  },
+  "campaign_id": "hyperfide-task-11.2-native-bootstrap-v1",
+  "case_ids": [
+    "V-038",
+    "V-039"
+  ],
+  "expected_assertion_ids": [
+    "bootstrap.source.exact-multi-repository",
+    "bootstrap.source.partial-download",
+    "bootstrap.submodule.actual-pinned-materialization",
+    "bootstrap.submodule.mismatched-pin",
+    "bootstrap.submodule.undeclared-module",
+    "bootstrap.submodule.unapproved-source",
+    "bootstrap.submodule.nested-pinned-graph",
+    "bootstrap.lfs.actual-object-materialization",
+    "bootstrap.lfs.corrupt-object-denied",
+    "bootstrap.dependency.actual-command",
+    "bootstrap.dependency.large-artifact-file",
+    "bootstrap.dependency.bounded-diagnostic-pipe",
+    "bootstrap.dependency.empty-and-multiline-arguments",
+    "bootstrap.dependency.nonzero-quarantine",
+    "bootstrap.source.dependency-hook-mutation",
+    "bootstrap.source.index-flag-mutation",
+    "bootstrap.dependency.timeout",
+    "bootstrap.input.workspace-traversal",
+    "bootstrap.input.workspace-absolute",
+    "bootstrap.input.unknown-field",
+    "bootstrap.input.boolean-schema",
+    "bootstrap.input.duplicate-repository",
+    "bootstrap.input.invalid-commit",
+    "bootstrap.input.missing-commit",
+    "bootstrap.input.stale-lock",
+    "bootstrap.input.host-supervisory",
+    "bootstrap.input.missing-root",
+    "bootstrap.input.outside-source",
+    "bootstrap.cache.actual-restore-and-command",
+    "bootstrap.cache.configuration-invalidation",
+    "bootstrap.cache.payload-corruption",
+    "bootstrap.cache.tracked-source-denied",
+    "bootstrap.cache.missing-payload",
+    "bootstrap.cache.credential-path-denied",
+    "bootstrap.input.escaped-duplicate",
+    "bootstrap.workspace.no-overwrite",
+    "bootstrap.workspace.symlink-root"
+  ],
+  "inputs": [
+    {
+      "path": "Makefile",
+      "sha256": "15a4ba0d37f9282fe0eb7b77de54de1f3c3bc5246cd283afe7fc54ad6d0f5e8b",
+      "size": 4205
+    },
+    {
+      "path": "build/hyperfide-native",
+      "sha256": "68ed77a8495917080fbdda2ff963e027426230cd01dce5797e66d5f2cf9d9193",
+      "size": 396368
+    },
+    {
+      "path": "build/hyperfide-native-registry.inc",
+      "sha256": "281b423c9b11c4dfa42b66a2634bd0159e423364d196f147c09f56d4d4eaafe1",
+      "size": 2838
+    },
+    {
+      "path": "scripts/hyperfide-native-components.py",
+      "sha256": "5eb01214a3a91430cf2b66b2f15b40b91d06db8a87a00d88a11aca90985a23c2",
+      "size": 9165
+    },
+    {
+      "path": "src/cg.h",
+      "sha256": "6c58363f66c65e4e7f91960845596626a41abbbf966ea75e0f70523c1635cb3d",
+      "size": 93626
+    },
+    {
+      "path": "src/hyperfide/bootstrap.c",
+      "sha256": "4796e62417f6cd27a18eb9ed21f414513568034f7f9572b64871c3f718a827ef",
+      "size": 41421
+    },
+    {
+      "path": "src/hyperfide/component_main.c",
+      "sha256": "cb3b9f726346ac2724ca0d61f44845180074f2347f33a7c22d53b723e476223b",
+      "size": 7574
+    },
+    {
+      "path": "src/hyperfide/components.h",
+      "sha256": "0c89648b865492dca5a15f7b17c5cd6609ce37efffcab780cad870e77dd3eac3",
+      "size": 538
+    },
+    {
+      "path": "src/hyperfide/components/11.2.kvx",
+      "sha256": "4ceaea25f04e64302c2e3ac34f10bfbf25a824f9f851e8f8eea8018137c220c1",
+      "size": 232
+    },
+    {
+      "path": "src/hyperfide/components/schema.kvx",
+      "sha256": "d93d9aa1d266794445bf1f236674319947f9f74437b5ce1528e83bbebfbf3fa1",
+      "size": 328
+    },
+    {
+      "path": "src/hyperfide/preparation_support.h",
+      "sha256": "2cefe682d6873e19a5502b861cb77a5fb06590e8b74a6a6019bacc0504f02706",
+      "size": 17402
+    },
+    {
+      "path": "src/sha256.c",
+      "sha256": "eb8d406b26fb5ebdd835a88ed4e9033e211ba37e6cd25c8cc725a01ab74a536e",
+      "size": 2917
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/11_2.py",
+      "sha256": "84430391effaec81e38f12dd25751a84fd06a18e80cb20728885109fa961f362",
+      "size": 16996
+    },
+    {
+      "path": "tests/hyperfide/check-evidence.py",
+      "sha256": "cc8de56fb25bea153490b4143a231f1ff6f4dac758baaea4bf90fb7d9ba236a0",
+      "size": 30633
+    },
+    {
+      "path": "tests/hyperfide/manifest.schema.json",
+      "sha256": "3407092d7e6e452bb288e996f840bd5bab22d6c0f494a49bf944cd73c18078b8",
+      "size": 3216
+    },
+    {
+      "path": "tests/hyperfide/qualify.py",
+      "sha256": "8aa17f5e2572c8557f15353f7267e98600547fb0f2693486c0e0f2fc1abce8c2",
+      "size": 37538
+    }
+  ],
+  "policy": {
+    "cloud_provisioning": false,
+    "component_only": true,
+    "execution": "remote-only",
+    "frontier_calls": false
+  },
+  "registered_variant": "task:11.2",
+  "resources": [],
+  "schema_version": 1,
+  "scope": "task-component",
+  "seed": 1
+}
