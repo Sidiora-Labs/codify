@@ -1,7 +1,7 @@
 -- Task 21.4: advisory data cannot stand in for operational authority.
 CREATE TABLE hyperfide.decision_packets (
  organisation_id uuid NOT NULL, run_id uuid NOT NULL, id uuid NOT NULL,
- purpose text NOT NULL CHECK(purpose IN ('spec_critique','recovery','ranking')),
+ purpose text NOT NULL CHECK(purpose IN ('spec_critique','recovery','ranking','legacy.guard','legacy.readiness','legacy.triage','legacy.memory','legacy.recap')),
  packet_hash hyperfide.digest NOT NULL, revision jsonb NOT NULL,
  content jsonb NOT NULL CHECK(jsonb_typeof(content)='object'),
  created_at timestamptz NOT NULL DEFAULT clock_timestamp(), expires_at timestamptz NOT NULL,
