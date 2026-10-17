@@ -28,6 +28,19 @@ export async function loadGraphSnapshot(tx:GraphTransaction,s:GraphScope,manifes
  const unresolved=(await tx.query<{n:string}>("SELECT count(*)::text AS n FROM hyperfide.graph_references WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3 AND resolution_state<>'RESOLVED'",[s.organisation_id,s.run_id,manifest.build_id])).rows[0]!.n;
  return {...manifest,file_coverage:coverage.rows,expected_sources_validated:true,unknown_semantic_edges:debt.rows,unprojected_semantic_edge_count:debt.count,semantic_projection_complete:debt.count==='0',unresolved_reference_count:unresolved};
 }
+// Unpublishable staging is reported as explicit debt beside the channel's retained generation.
+export async function stagingDebt(tx:GraphTransaction,s:GraphScope,id:string,channel:string):Promise<JsonObject>{
+ const p=[s.organisation_id,s.run_id,id],build=await getBuild(tx,s,id),coverage=await graphCoverage(tx,s,id);
+ const sources=await tx.query<{bundle_digest:string;manifest:BundleManifest}>('SELECT bundle_digest,manifest FROM hyperfide.graph_bundle_inputs WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3 ORDER BY bundle_digest',p);
+ const progress=(await tx.query<{phase:string}>('SELECT phase FROM hyperfide.graph_resolution_progress WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3',p)).rows[0];
+ const unresolved=(await tx.query<{n:string}>("SELECT count(*)::text AS n FROM hyperfide.graph_references WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3 AND resolution_state<>'RESOLVED'",p)).rows[0]!.n;
+ const semantic=await semanticProjectionDebt(tx,s,id),current=(await tx.query('SELECT manifest_id,publication_generation::text AS publication_generation FROM hyperfide.graph_channels WHERE organisation_id=$1 AND run_id=$2 AND name=$3',[s.organisation_id,s.run_id,channel])).rows[0];
+ const incomplete=sources.rows.filter(v=>!v.manifest.complete).map(v=>({bundle_digest:v.bundle_digest,coverage:v.manifest.coverage}));
+ const phase=progress?.phase??null,failed=Number(coverage.failed_files);
+ return {build_id:id,state:build.state,resolution_phase:phase,coverage,failed_files:failed,incomplete_sources:incomplete,unresolved_reference_count:unresolved,unprojected_semantic_edge_count:semantic.count,
+  publishable:(build.state==='READY'||build.state==='PUBLISHED')&&phase==='COMPLETE'&&failed===0&&sources.rows.length>0&&!incomplete.length,
+  channel,published_manifest_id:current?.manifest_id??null,published_generation:String(current?.publication_generation??'0')};
+}
 async function publish(input:unknown,ctx:ComponentContext):Promise<unknown>{
  const r=exact(input,['organisation_id','run_id','authority_epoch','operation_id','build_id','channel','expected_generation']),s=scopeInput(r,ctx),
  id=uuid(r.build_id),operation=uuid(r.operation_id),channel=text(r.channel,'graph channel',128),expected=decimal(r.expected_generation,true),requestDigest=digest(canonical(r));
@@ -83,6 +96,7 @@ export function createComponent(ctx:ComponentContext):Component{
   'graph.publish.describe':input=>{exact(input,[]);return {schema_version:1,atomic_manifest_and_channel:true,publication_requires:'COMPLETE_SOURCE_AND_RESOLUTION',unknown_references:'PRESERVED'};},
   'graph.publish.commit':async(input,context)=>{try{return await publish(input,context);}catch(e){if(e instanceof FoundationError)throw e;throw new FoundationError('GRAPH_PUBLICATION_UNKNOWN','Publication response uncertain; replay the same operation identity to reconcile');}},
   'graph.publish.snapshot':async(input,context)=>{const r=exact(input,['organisation_id','run_id','authority_epoch','manifest_id','expected_sources']),s=scopeInput(r,context);return graphTransaction(context,s,tx=>loadGraphSnapshot(tx,s,uuid(r.manifest_id),r.expected_sources),false);},
+  'graph.publish.debt':async(input,context)=>{const r=exact(input,['organisation_id','run_id','authority_epoch','build_id','channel']),s=scopeInput(r,context),channel=text(r.channel,'graph channel',128);return graphTransaction(context,s,tx=>stagingDebt(tx,s,uuid(r.build_id),channel),false);},
   'graph.publish.inspect':async(input,context)=>{const r=exact(input,['organisation_id','run_id','authority_epoch','manifest_id']),s=scopeInput(r,context);return graphTransaction(context,s,tx=>publishedGraph(tx,s,uuid(r.manifest_id)),false);}
  }};
 }
