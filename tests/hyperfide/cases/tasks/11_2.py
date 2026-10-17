@@ -65,6 +65,7 @@ def main():
             beta=f.sources/"beta";(beta/"payload.bin").write_bytes(os.urandom(1<<20));git(beta,"add","payload.bin");git(beta,"commit","-qm","payload")
             f.repositories[1]["commit"]=git(beta,"rev-parse","HEAD");git(beta,"gc","-q","--prune=now")
             packs=list((beta/".git/objects/pack").glob("*.pack"));expect(len(packs)==1 and not [p for p in (beta/".git/objects").glob("??/*")],"fixture objects not packed")
+            packs[0].chmod(0o644)
             with open(packs[0],"r+b") as pack:pack.truncate(pack.seek(0,2)//2)
             f.request["cache_paths"]=[{"repository":"alpha","path":"dependency.bin"}]
             f.request["commands"]=[{"repository":"alpha","argv":["/bin/sh","-c","printf cached > dependency.bin"],"timeout_seconds":5}]
